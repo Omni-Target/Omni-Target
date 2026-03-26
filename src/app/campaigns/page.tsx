@@ -4,9 +4,10 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { SignOutButton } from "@clerk/nextjs";
+import { SignOutButton, useUser } from "@clerk/nextjs";
+import { MediaValidationResult } from "@/lib/meta-specs";
 
-type CampaignState = "input" | "generating" | "review";
+type CampaignState = "media" | "input" | "generating" | "review";
 
 interface GeneratedCopy {
   headline: string;
@@ -19,9 +20,29 @@ interface GeneratedCopy {
 export default function CampaignsPage() {
   const router = useRouter();
   
+  const { user } = useUser();
+  const storeUrl = user?.publicMetadata?.shopifyStoreUrl as string || "";
+
+  // Extract clean domain for display:
+  const storeDomain = storeUrl
+    ? new URL(
+        storeUrl.startsWith("http") 
+          ? storeUrl 
+          : `https://${storeUrl}`
+      ).hostname.replace("www.", "")
+    : "yourstore.com";
+
   // Overall State
-  const [viewState, setViewState] = useState<CampaignState>("input");
+  const [viewState, setViewState] = useState<CampaignState>("media");
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Media State
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string>("");
+  const [mediaCloudUrl, setMediaCloudUrl] = useState<string>("");
+  const [mediaValidation, setMediaValidation] = useState<MediaValidationResult | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
 
   // Form State
   const [brandName, setBrandName] = useState(""); // TODO: Auto-fill from StoreContext
@@ -30,6 +51,7 @@ export default function CampaignsPage() {
   const [audience, setAudience] = useState("");
   const [goal, setGoal] = useState("Drive Website Sales");
   const [tone, setTone] = useState("Let AI decide (recommended)");
+  const [platform, setPlatform] = useState<string>("both");
 
   // API State
   const [generatedCopy, setGeneratedCopy] = useState<GeneratedCopy | null>(null);
@@ -37,6 +59,71 @@ export default function CampaignsPage() {
   // Review State Action
   const [isLaunching, setIsLaunching] = useState(false);
   const [showToast, setShowToast] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const handleCopy = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 1500);
+  };
+
+  const isVideo = mediaFile?.type.startsWith("video/") ?? false;
+
+  const handleMediaSelect = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setMediaFile(file);
+    setUploadError("");
+    setMediaValidation(null);
+    
+    // Show local preview immediately
+    const localUrl = URL.createObjectURL(file);
+    setMediaPreviewUrl(localUrl);
+    
+    // Upload to Cloudinary
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      
+      const res = await fetch("/api/media/upload", {
+        method: "POST",
+        body: formData,
+      });
+      
+      if (!res.ok) {
+        const err = await res.json();
+        setUploadError(err.error || "Upload failed. Please try again.");
+        setMediaFile(null);
+        setMediaPreviewUrl("");
+        return;
+      }
+      
+      const data = await res.json();
+      setMediaCloudUrl(data.url);
+      
+      // Validate against Meta specs
+      const { validateMetaAdMedia } = await import("@/lib/meta-specs");
+      const validation = validateMetaAdMedia({
+        width: data.width,
+        height: data.height,
+        duration: data.duration,
+        format: data.format,
+        resourceType: data.resourceType,
+      });
+      setMediaValidation(validation);
+      
+    } catch {
+      setUploadError("Upload failed. Please try again.");
+      setMediaFile(null);
+      setMediaPreviewUrl("");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleGenerate = async () => {
     // Basic frontend validation for required fields
@@ -59,6 +146,8 @@ export default function CampaignsPage() {
           targetAudience: audience,
           campaignGoal: goal,
           tonePreference: tone,
+          platform,
+          mediaUrl: mediaCloudUrl || null,
         }),
       });
 
@@ -83,6 +172,7 @@ export default function CampaignsPage() {
     setAudience("");
     setGoal("Drive Website Sales");
     setTone("Let AI decide (recommended)");
+    setPlatform("both");
     setGeneratedCopy(null);
     setErrorMsg("");
     setViewState("input");
@@ -145,10 +235,153 @@ export default function CampaignsPage() {
       <div className="fixed top-0 left-1/4 w-[500px] h-[500px] bg-brand-600/5 rounded-full blur-[120px] pointer-events-none" />
       <div className={`fixed bottom-0 right-1/4 w-[400px] h-[400px] rounded-full blur-[100px] pointer-events-none transition-colors duration-1000 ${viewState === 'review' ? 'bg-success-500/5' : 'bg-brand-400/5'}`} />
 
+      {/* -- STATE 0: MEDIA -- */}
+      {viewState === "media" && (
+        <main className="max-w-2xl mx-auto px-4 sm:px-6 py-10 relative flex-1">
+          <div className="mb-8 animate-fade-in-up">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-2">
+              Upload Ad Creative
+            </h1>
+            <p className="text-sm text-white/40">
+              Start by uploading your image or video. We'll automatically validate it against Meta's ad specs.
+            </p>
+          </div>
+
+          <div className="mb-8 animate-fade-in-up-delay-1">
+            <div className="relative rounded-2xl border-2 border-dashed border-border-subtle hover:border-brand-500/50 transition-colors bg-white/[0.02] overflow-hidden flex flex-col items-center justify-center min-h-[300px] text-center p-6">
+              <input 
+                type="file" 
+                accept="image/jpeg,image/png,video/mp4,video/quicktime"
+                onChange={handleMediaSelect}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                disabled={isUploading}
+              />
+              
+              {isUploading ? (
+                <div className="flex flex-col items-center gap-3">
+                  <svg className="animate-spin h-8 w-8 text-brand-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <p className="text-sm font-medium text-white/70">Uploading...</p>
+                </div>
+              ) : mediaPreviewUrl ? (
+                <div className="w-full h-full flex flex-col items-center">
+                  <div className="relative w-full max-w-sm aspect-[4/5] sm:aspect-square mb-4 bg-black/50 rounded-lg overflow-hidden flex items-center justify-center">
+                    {mediaFile?.type?.startsWith("video/") ? (
+                      <video src={mediaPreviewUrl} controls className="max-w-full max-h-full object-contain" />
+                    ) : (
+                      <img src={mediaPreviewUrl} alt="Preview" className="max-w-full max-h-full object-contain" />
+                    )}
+                  </div>
+                  <button className="text-xs font-semibold px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors relative z-20 pointer-events-auto cursor-pointer">
+                    Change Media
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center pointer-events-none">
+                  <div className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center mb-4 text-white/40">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                  </div>
+                  <p className="text-base font-semibold text-white/90 mb-1">
+                    Upload your ad creative
+                  </p>
+                  <p className="text-xs text-white/50">
+                    JPG, PNG, MP4 or MOV &middot; Images min 1080px &middot; Videos max 60s
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {uploadError && (
+              <div className="mt-4 p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-sm text-error-400 flex items-start gap-2">
+                <svg className="shrink-0 mt-0.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                {uploadError}
+              </div>
+            )}
+
+            {mediaValidation && (
+              <div className="mt-4 space-y-3">
+                {mediaValidation.errors.length === 0 && mediaValidation.warnings.length === 0 && (
+                  <div className="p-3 rounded-lg bg-success-500/10 border border-success-500/20 text-sm text-success-400 flex items-center gap-2">
+                    <svg className="shrink-0 mr-2" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Creative looks great for Meta
+                  </div>
+                )}
+                
+                {mediaValidation.errors.map((err, i) => (
+                  <div key={`err-${i}`} className="p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-sm text-error-400 flex items-start gap-2">
+                    <svg className="shrink-0 mt-0.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                    {err}
+                  </div>
+                ))}
+
+                {mediaValidation.warnings.map((warn, i) => (
+                  <div key={`warn-${i}`} className="p-3 rounded-lg bg-[#f59e0b]/10 border border-[#f59e0b]/20 text-sm text-[#f59e0b] flex items-start gap-2">
+                    <svg className="shrink-0 mt-0.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                    {warn}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-4 animate-fade-in-up-delay-2">
+            <button
+              onClick={() => setViewState("input")}
+              disabled={isUploading || !mediaCloudUrl || (mediaValidation ? !mediaValidation.isValid : false)}
+              className="group relative w-full py-4 px-6 rounded-xl font-semibold text-sm transition-all duration-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 z-0"
+            >
+              <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 transition-all duration-300 group-hover:from-brand-500 group-hover:to-brand-400 group-disabled:from-[var(--surface-raised)] group-disabled:to-[var(--surface-raised)]" />
+              <span className="relative flex items-center justify-center gap-2 text-white">
+                Continue to Ad Copy
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-200 group-disabled:translate-x-0 group-hover:translate-x-1">
+                  <path d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+              </span>
+            </button>
+
+            <button 
+              onClick={() => setViewState("input")}
+              className="text-xs text-center text-white/40 hover:text-white/70 transition-colors font-medium cursor-pointer bg-transparent border-none"
+            >
+              Skip for now — add creative later
+            </button>
+          </div>
+        </main>
+      )}
+
       {/* -- STATE 1: INPUT FORM -- */}
       {viewState === "input" && (
         <main className="max-w-2xl mx-auto px-4 sm:px-6 py-10 relative flex-1">
           <div className="mb-8 animate-fade-in-up">
+            <button 
+              onClick={() => setViewState("media")}
+              className="flex items-center gap-2 text-xs font-medium text-white/40 hover:text-white/80 transition-colors mb-6 cursor-pointer bg-transparent border-none p-0"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+              Back to Creative
+            </button>
+
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/20 mb-4">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400">
                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
@@ -222,6 +455,34 @@ export default function CampaignsPage() {
                 placeholder="e.g. Professional women aged 28–40 in Lagos"
                 className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-border-subtle text-sm text-white placeholder:text-white/20 outline-none transition-all duration-200 focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/20"
               />
+            </div>
+
+            {/* Ad Placement */}
+            <div>
+              <label className="block text-xs font-medium text-white/50 uppercase tracking-wider mb-2">
+                Ad Placement
+              </label>
+              <div className="flex flex-wrap gap-3">
+                {[
+                  { value: "facebook", label: "Facebook Feed" },
+                  { value: "instagram", label: "Instagram Feed" },
+                  { value: "both", label: "Both Feeds" },
+                  { value: "stories", label: "Stories & Reels" },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setPlatform(opt.value)}
+                    className={`py-2.5 px-4 rounded-full text-sm font-medium transition-all duration-200 cursor-pointer border ${
+                      platform === opt.value
+                        ? 'bg-brand-500 text-white border-brand-400 flex-[1_1_auto] sm:flex-none text-center shadow-lg shadow-brand-500/20'
+                        : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border-transparent flex-[1_1_auto] sm:flex-none text-center'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 relative z-10">
@@ -347,32 +608,168 @@ export default function CampaignsPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6 mb-10">
-            {/* Main Creative Card */}
-            <div className="md:col-span-8 animate-fade-in-up-delay-1">
-              <div className="rounded-2xl bg-surface-raised border border-border-subtle p-6 sm:p-8 shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-brand-500/50 to-brand-400/50" />
-                
-                <h2 className="text-3xl font-bold text-white mb-4 leading-tight">
-                  {generatedCopy.headline}
-                </h2>
-                
-                <div className="mb-6 bg-white/[0.02] border border-white/5 rounded-xl p-4">
-                  <p className="text-base text-white/80 leading-relaxed whitespace-pre-wrap">
-                    {generatedCopy.primaryText}
-                  </p>
-                </div>
-                
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-8 pt-6 border-t border-border-subtle">
-                  <div>
-                    <span className="text-[10px] uppercase tracking-wider text-white/30 font-semibold block mb-1">
-                      Link Description (Facebook Only)
-                    </span>
-                    <p className="text-sm text-white/50">{generatedCopy.description}</p>
+            {/* Main Creative Area */}
+            <div className="md:col-span-8 animate-fade-in-up-delay-1 space-y-6">
+              
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* PART A: Meta Mockup */}
+                <div className="flex justify-center">
+                  <div className="w-full max-w-[400px] h-fit bg-white rounded-xl shadow-xl overflow-hidden text-black/90 font-sans border border-black/10">
+                    {/* Header */}
+                    <div className="flex items-center justify-between p-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-500 uppercase overflow-hidden">
+                          {brandName.slice(0, 2) || "BR"}
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-sm font-semibold">{brandName || "Your Brand"}</span>
+                          <span className="text-[11px] text-black/50">Sponsored</span>
+                        </div>
+                      </div>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="text-black/40">
+                        <path d="M12 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm-7 0c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm14 0c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+                      </svg>
+                    </div>
+
+                    {/* Media Area */}
+                    <div className="w-full aspect-square bg-[#f0f2f5] flex items-center justify-center relative border-y border-black/5 overflow-hidden">
+                      {mediaCloudUrl ? (
+                        isVideo ? (
+                          <video 
+                            src={mediaCloudUrl}
+                            className="w-full aspect-square object-cover"
+                            muted
+                            playsInline
+                          />
+                        ) : (
+                          <img 
+                            src={mediaCloudUrl}
+                            alt="Ad creative"
+                            className="w-full aspect-square object-cover"
+                          />
+                        )
+                      ) : (
+                        <div className="w-full aspect-square bg-white/5 flex flex-col items-center justify-center gap-2">
+                          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-white/20">
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <polyline points="21 15 16 10 5 21" />
+                          </svg>
+                          <span className="text-xs text-white/30">
+                            No creative uploaded
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Content Area */}
+                    <div className="p-3">
+                      {/* Primary Text */}
+                      <div className="text-[13.5px] mb-3 leading-snug relative text-black overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>
+                        {generatedCopy.primaryText}
+                      </div>
+
+                      <div className="bg-[#f0f2f5] p-3 -mx-3 mb-1 border-t border-black/5">
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[11px] text-black/50 uppercase tracking-widest mb-1 truncate">
+                              {storeDomain.toUpperCase()}
+                            </p>
+                            <h4 className="text-[15px] font-semibold text-black leading-tight mb-0.5 truncate">
+                              {generatedCopy.headline}
+                            </h4>
+                            <p className="text-[13px] text-black/50 truncate">
+                              {generatedCopy.description}
+                            </p>
+                          </div>
+                          <div className="shrink-0">
+                            <span className="inline-block bg-black/10 px-4 py-1.5 rounded text-[13px] font-semibold text-black border border-black/5">
+                              {generatedCopy.cta}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Engagement */}
+                    <div className="px-3 pb-3 flex items-center justify-between border-t border-black/5 pt-3">
+                      <div className="flex items-center gap-4 text-black/60">
+                        <div className="flex items-center gap-1.5">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>
+                          <span className="text-sm font-medium">Like</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                          <span className="text-sm font-medium">Comment</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                          <span className="text-sm font-medium">Share</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <span className="inline-flex px-4 py-2 rounded-lg bg-white/10 text-xs font-bold text-white/90 uppercase tracking-wide border border-white/10 shadow-sm whitespace-nowrap">
-                      {generatedCopy.cta}
-                    </span>
+                </div>
+
+                {/* PART B: Copy Details Panel */}
+                <div className="flex flex-col gap-4">
+                  <div className="rounded-2xl bg-surface-raised border border-border-subtle p-5 relative overflow-hidden h-fit flex flex-col">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-brand-500/50 to-brand-400/50" />
+                    <h3 className="text-lg font-bold text-white mb-4">Ad Copy Details</h3>
+                    
+                    <div className="space-y-5 flex-1 w-full relative z-10">
+                      {/* Primary Text */}
+                      <div className="w-full">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] uppercase tracking-wider text-white/50 font-semibold">Primary Text</span>
+                          <button onClick={() => handleCopy(generatedCopy.primaryText, 'primaryText')} className="text-xs text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1 cursor-pointer bg-transparent border-none p-0">
+                            {copiedField === 'primaryText' ? (
+                              <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> Copied!</>
+                            ) : (
+                              <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg> Copy</>
+                            )}
+                          </button>
+                        </div>
+                        <div className="bg-white/[0.02] border border-white/5 rounded-xl p-3 w-full">
+                          <p className="text-sm text-white/80 leading-relaxed whitespace-pre-wrap break-words">{generatedCopy.primaryText}</p>
+                        </div>
+                      </div>
+
+                      {/* Headline */}
+                      <div className="w-full">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] uppercase tracking-wider text-white/50 font-semibold">Headline</span>
+                          <button onClick={() => handleCopy(generatedCopy.headline, 'headline')} className="text-xs text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1 cursor-pointer bg-transparent border-none p-0">
+                            {copiedField === 'headline' ? (
+                              <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> Copied!</>
+                            ) : (
+                              <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg> Copy</>
+                            )}
+                          </button>
+                        </div>
+                        <div className="bg-white/[0.02] border border-white/5 rounded-xl p-3 w-full">
+                          <p className="text-sm text-white/90 font-medium break-words">{generatedCopy.headline}</p>
+                        </div>
+                      </div>
+
+                      {/* Description */}
+                      <div className="w-full">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] uppercase tracking-wider text-white/50 font-semibold">Link Description</span>
+                          <button onClick={() => handleCopy(generatedCopy.description, 'description')} className="text-xs text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1 cursor-pointer bg-transparent border-none p-0">
+                            {copiedField === 'description' ? (
+                              <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> Copied!</>
+                            ) : (
+                              <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg> Copy</>
+                            )}
+                          </button>
+                        </div>
+                        <div className="bg-white/[0.02] border border-white/5 rounded-xl p-3 w-full">
+                          <p className="text-sm text-white/70 break-words">{generatedCopy.description}</p>
+                        </div>
+                      </div>
+                      
+                    </div>
                   </div>
                 </div>
               </div>
@@ -401,6 +798,18 @@ export default function CampaignsPage() {
                 <p className="text-xs text-white/40 mb-4 text-center">Not quite right?</p>
                 
                 <div className="space-y-3">
+                  <button
+                    onClick={() => setViewState("media")}
+                    className="w-full py-2.5 px-4 rounded-lg bg-white/[0.05] border border-white/10 text-sm font-medium text-white hover:bg-white/[0.08] transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                    Upload Different Creative
+                  </button>
+
                   <button
                     onClick={handleGenerate}
                     className="w-full py-2.5 px-4 rounded-lg bg-white/[0.05] border border-white/10 text-sm font-medium text-white hover:bg-white/[0.08] transition-colors flex items-center justify-center gap-2 cursor-pointer"

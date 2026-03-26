@@ -47,6 +47,14 @@ export default function ConnectShopifyPage() {
 
     setIsConnecting(true);
     try {
+      await fetch("/api/user/update-metadata", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          shopifyStoreUrl: storeUrl 
+        }),
+      });
+
       await advanceOnboardingStep("connect-meta");
       router.push("/onboarding/connect-meta");
     } catch {
