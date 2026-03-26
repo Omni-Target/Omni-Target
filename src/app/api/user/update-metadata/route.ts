@@ -4,15 +4,16 @@ export async function POST(request: Request) {
   const { userId } = await auth();
   if (!userId) {
     return Response.json(
-      { error: "Unauthorized" }, 
+      { error: "Unauthorized" },
       { status: 401 }
     );
   }
 
   const body = await request.json();
-  
-  await clerkClient.users.updateUserMetadata(
-    userId, 
+
+  const client = await clerkClient();  // ← await it as a function
+  await client.users.updateUserMetadata(
+    userId,
     { publicMetadata: body }
   );
 
