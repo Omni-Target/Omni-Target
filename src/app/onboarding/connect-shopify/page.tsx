@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { advanceOnboardingStep } from "../actions";
 
 // TODO: Replace with Shopify OAuth
@@ -31,36 +31,43 @@ function isValidStoreUrl(input: string): boolean {
 }
 
 
-export default function ConnectShopifyPage() {
-  const router = useRouter();
+function ConnectShopifyContent() {
+  const searchParams = useSearchParams();
   const [storeUrl, setStoreUrl] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
-  const [error, setError] = useState("");
+  const [localError, setLocalError] = useState("");
 
-  const handleConnect = async () => {
-    setError("");
+  const urlError = searchParams.get("error");
+  let error = localError;
+  if (!error && urlError === "failed") {
+    error = "Connection failed. Please try again.";
+  } else if (!error && urlError === "missing") {
+    error = "Please enter your store URL.";
+  }
 
-    if (!storeUrl.trim() || !isValidStoreUrl(storeUrl)) {
-      setError("Please enter a valid store URL (e.g. yourstore.com or yourstore.myshopify.com)");
+  const handleConnect = () => {
+    setLocalError("");
+    if (!storeUrl.trim()) {
+      setLocalError("Please enter your store URL.");
       return;
     }
-
+    
     setIsConnecting(true);
-    try {
-      await fetch("/api/user/update-metadata", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          shopifyStoreUrl: storeUrl 
-        }),
-      });
 
-      await advanceOnboardingStep("connect-meta");
-      router.push("/onboarding/connect-meta");
-    } catch {
-      setError("Something went wrong. Please try again.");
-      setIsConnecting(false);
-    }
+    // Normalize the store URL to just the 
+    // myshopify.com domain
+    let shopDomain = storeUrl.trim()
+      .replace("https://", "")
+      .replace("http://", "")
+      .replace("www.", "")
+      .split("/")[0];
+
+    // If they entered a custom domain, 
+    // we still need the myshopify URL
+    // For now redirect to OAuth with 
+    // whatever they entered
+    window.location.href = 
+      `/api/auth/shopify/connect?shop=${shopDomain}`;
   };
 
   return (
@@ -89,9 +96,12 @@ export default function ConnectShopifyPage() {
           type="text"
           value={storeUrl}
           onChange={(e) => setStoreUrl(e.target.value)}
-          placeholder="yourstore.com or yourstore.myshopify.com"
+          placeholder="yourstore.myshopify.com"
           className="w-full px-4 py-3.5 rounded-xl bg-white/[0.04] border border-border-subtle text-white placeholder:text-white/25 text-sm focus:outline-none focus:border-brand-500/50 focus:ring-1 focus:ring-brand-500/20 transition-all duration-200"
         />
+        <p className="mt-2 text-xs text-white/50 text-left">
+          Use your .myshopify.com URL, not your custom domain (e.g. yourstore.myshopify.com)
+        </p>
         {error && (
           <p className="mt-2 text-xs text-danger-400 text-left">{error}</p>
         )}
@@ -191,5 +201,13 @@ export default function ConnectShopifyPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ConnectShopifyPage() {
+  return (
+    <Suspense fallback={<div className="text-center text-white/50">Loading...</div>}>
+      <ConnectShopifyContent />
+    </Suspense>
   );
 }
