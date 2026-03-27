@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { advanceOnboardingStep } from "../actions";
 
 // TODO: Replace with Shopify OAuth
@@ -33,8 +33,11 @@ function isValidStoreUrl(input: string): boolean {
 
 function ConnectShopifyContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [storeUrl, setStoreUrl] = useState("");
-  const [isConnecting, setIsConnecting] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
+  const [resolvedDomain, setResolvedDomain] = useState("");
+  const [storeVerified, setStoreVerified] = useState(false);
   const [localError, setLocalError] = useState("");
 
   const urlError = searchParams.get("error");
@@ -45,29 +48,37 @@ function ConnectShopifyContent() {
     error = "Please enter your store URL.";
   }
 
-  const handleConnect = () => {
+  const handleConnect = async () => {
     setLocalError("");
     if (!storeUrl.trim()) {
       setLocalError("Please enter your store URL.");
       return;
     }
-    
-    setIsConnecting(true);
 
-    // Normalize the store URL to just the 
-    // myshopify.com domain
-    let shopDomain = storeUrl.trim()
-      .replace("https://", "")
-      .replace("http://", "")
-      .replace("www.", "")
-      .split("/")[0];
+    setIsResolving(true);
 
-    // If they entered a custom domain, 
-    // we still need the myshopify URL
-    // For now redirect to OAuth with 
-    // whatever they entered
-    window.location.href = 
-      `/api/auth/shopify/connect?shop=${shopDomain}`;
+    try {
+      const res = await fetch("/api/shopify/resolve-domain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domain: storeUrl }),
+      });
+      const data = await res.json();
+
+      if (!data.isShopify) {
+        setLocalError(data.error || "Could not verify store.");
+        setIsResolving(false);
+        return;
+      }
+
+      setResolvedDomain(data.myshopifyDomain);
+      setStoreVerified(true);
+
+      window.location.href = `/api/auth/shopify/connect?shop=${data.myshopifyDomain}`;
+    } catch (err) {
+      setLocalError("An error occurred while verifying the store.");
+      setIsResolving(false);
+    }
   };
 
   return (
@@ -96,11 +107,11 @@ function ConnectShopifyContent() {
           type="text"
           value={storeUrl}
           onChange={(e) => setStoreUrl(e.target.value)}
-          placeholder="yourstore.myshopify.com"
+          placeholder="yourstore.com or yourstore.myshopify.com"
           className="w-full px-4 py-3.5 rounded-xl bg-white/[0.04] border border-border-subtle text-white placeholder:text-white/25 text-sm focus:outline-none focus:border-brand-500/50 focus:ring-1 focus:ring-brand-500/20 transition-all duration-200"
         />
-        <p className="mt-2 text-xs text-white/50 text-left">
-          Use your .myshopify.com URL, not your custom domain (e.g. yourstore.myshopify.com)
+        <p className="text-xs text-white/30 mt-2">
+          Enter your store URL in any format — we'll handle the rest.
         </p>
         {error && (
           <p className="mt-2 text-xs text-danger-400 text-left">{error}</p>
@@ -111,7 +122,7 @@ function ConnectShopifyContent() {
       <button
         id="connect-shopify-btn"
         onClick={handleConnect}
-        disabled={isConnecting}
+        disabled={isResolving || storeVerified}
         className="group relative w-full py-4 px-6 rounded-xl font-semibold text-sm transition-all duration-300 animate-fade-in-up-delay-3 cursor-pointer disabled:cursor-not-allowed"
       >
         {/* Gradient background */}
@@ -122,7 +133,7 @@ function ConnectShopifyContent() {
 
         {/* Content */}
         <span className="relative flex items-center justify-center gap-2 text-white">
-          {isConnecting ? (
+          {isResolving || storeVerified ? (
             <>
               <svg
                 className="animate-spin h-5 w-5"
@@ -143,7 +154,7 @@ function ConnectShopifyContent() {
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                 />
               </svg>
-              <span>Connecting...</span>
+              <span>Verifying your store...</span>
             </>
           ) : (
             <>
@@ -164,6 +175,17 @@ function ConnectShopifyContent() {
             </>
           )}
         </span>
+      </button>
+
+      {/* Skip option */}
+      <button 
+        onClick={async () => {
+          await advanceOnboardingStep("connect-meta");
+          router.push("/onboarding/connect-meta");
+        }}
+        className="text-xs text-white/30 hover:text-white/50 transition-colors mt-4 underline underline-offset-2"
+      >
+        Skip for now — I'll connect my store later
       </button>
 
       {/* Trust indicators */}

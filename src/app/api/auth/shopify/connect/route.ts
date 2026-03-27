@@ -44,9 +44,12 @@ export async function GET(request: Request) {
     "read_inventory"
   ].join(",");
 
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "")
+    .replace(/\/$/, ""); 
+    // Remove trailing slash if present
+
   const redirectUri = 
-    `${process.env.NEXT_PUBLIC_APP_URL}` +
-    `/api/auth/shopify/callback`;
+    `${appUrl}/api/auth/shopify/callback`;
 
   const authUrl = 
     `https://${shop}/admin/oauth/authorize?` +

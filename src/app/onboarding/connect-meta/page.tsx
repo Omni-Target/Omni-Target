@@ -109,6 +109,17 @@ export default function ConnectMetaPage() {
         </span>
       </button>
 
+      {/* Skip option */}
+      <button 
+        onClick={async () => {
+          await advanceOnboardingStep("complete");
+          router.push("/dashboard");
+        }}
+        className="text-xs text-white/30 hover:text-white/50 transition-colors mt-4 underline underline-offset-2"
+      >
+        Skip for now — I'll connect Meta later
+      </button>
+
       {/* Trust indicators */}
       <div className="mt-8 flex items-center justify-center gap-6 text-white/25 animate-fade-in-up-delay-4">
         <div className="flex items-center gap-2">
