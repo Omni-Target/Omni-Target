@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { redirect } from "next/navigation";
+import { META_REDIRECT_URI } from "@/lib/meta-oauth";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -18,9 +19,11 @@ export async function GET(request: Request) {
   }
 
   try {
+    console.log("Using redirect URI:", META_REDIRECT_URI);
+
     // Exchange code for access token
     const tokenRes = await fetch(
-      `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${process.env.META_APP_ID}&client_secret=${process.env.META_APP_SECRET}&redirect_uri=${process.env.NEXT_PUBLIC_APP_URL}/api/auth/meta/callback&code=${code}`
+      `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${process.env.META_APP_ID}&client_secret=${process.env.META_APP_SECRET}&redirect_uri=${encodeURIComponent(META_REDIRECT_URI)}&code=${code}`
     );
 
     const tokenData = await tokenRes.json();

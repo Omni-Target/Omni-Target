@@ -1,6 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 
+import { META_REDIRECT_URI } from "@/lib/meta-oauth";
+
 export async function GET() {
   const { userId } = await auth();
   if (!userId) {
@@ -12,8 +14,7 @@ export async function GET() {
 
   const params = new URLSearchParams({
     client_id: process.env.META_APP_ID!,
-    redirect_uri: 
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/meta/callback`,
+    redirect_uri: META_REDIRECT_URI,
     scope: [
       "ads_management",
       "ads_read", 

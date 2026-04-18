@@ -4,30 +4,7 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { SignOutButton } from "@clerk/nextjs";
 
-const CAMPAIGNS = [
-  {
-    name: "Detty December — Broad Match",
-    status: "Active",
-    spend: "₦98,500",
-    purchases: 28,
-    revenue: "₦562,500",
-    roas: "5.7x",
-    roasColor: "text-success-400",
-    statusColor: "bg-success-500/10 border-success-500/20 text-success-400",
-    statusDot: "bg-success-400",
-  },
-  {
-    name: "New Year Collection — Lookalike",
-    status: "Active",
-    spend: "₦51,500",
-    purchases: 9,
-    revenue: "₦112,500",
-    roas: "2.2x",
-    roasColor: "text-warning-400",
-    statusColor: "bg-success-500/10 border-success-500/20 text-success-400",
-    statusDot: "bg-success-400",
-  },
-];
+
 
 export default function DashboardPage() {
   const [excludePending, setExcludePending] = useState(false);
@@ -223,8 +200,8 @@ export default function DashboardPage() {
         <div className="rounded-xl bg-surface-raised border border-border-subtle overflow-hidden animate-fade-in-up-delay-2">
           <div className="px-6 py-4 border-b border-border-subtle flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-white">Live Campaigns</h2>
-              <p className="text-xs text-white/30 mt-0.5">{CAMPAIGNS.length} campaigns running</p>
+              <h2 className="text-sm font-semibold text-white">Your Campaigns</h2>
+              <p className="text-xs text-white/30 mt-0.5">{stats?.activeCampaigns?.length || 0} campaigns managed</p>
             </div>
             <Link
               href="/campaigns"
@@ -234,96 +211,118 @@ export default function DashboardPage() {
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
-              Add Campaign
+              New Campaign
             </Link>
           </div>
 
-          {/* Table header */}
-          <div className="hidden sm:grid grid-cols-12 gap-4 px-6 py-3 text-xs text-white/30 font-medium uppercase tracking-wider border-b border-border-subtle bg-white/[0.01]">
-            <div className="col-span-3">Campaign</div>
-            <div className="col-span-1">Status</div>
-            <div className="col-span-2 text-right">Spend</div>
-            <div className="col-span-1 text-right">Purchases</div>
-            <div className="col-span-2 text-right">Revenue</div>
-            <div className="col-span-1 text-right">ROAS</div>
-            <div className="col-span-2 text-right">Actions</div>
+          <div className="divide-y divide-border-subtle">
+            {stats?.activeCampaigns?.length > 0 ? (
+              stats.activeCampaigns.map((campaign: any) => {
+                const metaMatch = stats?.campaigns?.find(
+                  (c: any) => c.campaign_id === campaign.meta_campaign_id
+                );
+                
+                const formatStatusBadge = (status: string) => {
+                  switch (status.toLowerCase()) {
+                    case "active":
+                      return <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium border bg-success-500/10 border-success-500/20 text-success-400"><span className="w-1.5 h-1.5 rounded-full bg-success-400 animate-pulse" />Active</span>;
+                    case "paused":
+                      return <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium border bg-amber-500/10 border-amber-500/20 text-amber-400"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" />Paused</span>;
+                    case "stopped":
+                      return <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium border bg-error-500/10 border-error-500/20 text-error-400"><span className="w-1.5 h-1.5 rounded-full bg-error-400" />Stopped</span>;
+                    default:
+                      return <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium border bg-white/5 border-white/10 text-white/50 capitalize">{status}</span>;
+                  }
+                };
+
+                const handleStatusChange = async (action: "pause" | "resume" | "stop") => {
+                  if (action === "stop") {
+                    if (!confirm("This will permanently stop the campaign in Meta. This cannot be undone. Continue?")) {
+                      return;
+                    }
+                  }
+                  try {
+                    const res = await fetch(`/api/campaigns/${campaign.id}/status`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ action })
+                    });
+                    if (res.ok) {
+                      const data = await fetch("/api/dashboard/stats").then(r => r.json());
+                      // Assuming functional state is set here dynamically without full reload,
+                      // normally we could just reload, but we'll try to rely on state updates if outside mapping.
+                      window.location.reload();
+                    }
+                  } catch (e) {
+                    console.error("Status update error", e);
+                  }
+                };
+
+                return (
+                  <div key={campaign.id} className="grid grid-cols-1 sm:grid-cols-12 gap-4 px-6 py-4 hover:bg-white/[0.02] transition-colors duration-150">
+                    <div className="sm:col-span-8 flex flex-col gap-2">
+                       <div className="flex items-center gap-3">
+                         <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-500/20 to-brand-700/20 border border-brand-500/10 flex items-center justify-center flex-shrink-0">
+                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400">
+                             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                           </svg>
+                         </div>
+                         <div className="min-w-0 flex flex-col">
+                           <div className="flex items-center gap-2">
+                             <p className="text-sm font-semibold text-white truncate">{campaign.brand_name} — {campaign.campaign_goal}</p>
+                           </div>
+                           <div className="flex items-center gap-2 mt-1">
+                             {formatStatusBadge(campaign.status)}
+                             <span className="text-white/20 text-xs">•</span>
+                             <span className="text-xs text-white/50">
+                               {metaMatch?.spend ? `Spend: ₦${Math.round(metaMatch.spend * (stats.summary?.fxRate || 1)).toLocaleString()}` : "Daily Budget: —"}
+                             </span>
+                             <span className="text-white/20 text-xs">•</span>
+                             <span className="text-xs text-white/50">
+                               Launched: {new Date(campaign.launched_at || campaign.created_at).toLocaleDateString()}
+                             </span>
+                           </div>
+                         </div>
+                       </div>
+                    </div>
+
+                    <div className="sm:col-span-4 flex items-center sm:justify-end gap-2 mt-2 sm:mt-0">
+                      {campaign.status === "active" && (
+                        <button
+                          onClick={() => handleStatusChange("pause")}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
+                        >
+                          Pause
+                        </button>
+                      )}
+                      
+                      {campaign.status === "paused" && (
+                        <button
+                          onClick={() => handleStatusChange("resume")}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-success-400 bg-success-500/10 border border-success-500/20 hover:bg-success-500/20 transition-colors"
+                        >
+                          Resume
+                        </button>
+                      )}
+
+                      {campaign.status !== "stopped" && (
+                        <button
+                          onClick={() => handleStatusChange("stop")}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-error-400 bg-transparent hover:bg-error-500/10 transition-colors"
+                        >
+                          Stop
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="p-8 text-center bg-white/[0.01]">
+                <p className="text-sm text-white/50">No campaigns launched yet.</p>
+              </div>
+            )}
           </div>
-
-          {/* Table rows */}
-          {CAMPAIGNS.map((campaign, index) => (
-            <div
-              key={index}
-              className="grid grid-cols-1 sm:grid-cols-12 gap-3 sm:gap-4 px-6 py-4 border-b border-border-subtle last:border-b-0 hover:bg-white/[0.02] transition-colors duration-150"
-            >
-              {/* Campaign name */}
-              <div className="sm:col-span-3 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-500/20 to-brand-700/20 border border-brand-500/10 flex items-center justify-center flex-shrink-0">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400">
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                  </svg>
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">{campaign.name}</p>
-                  <p className="text-[10px] text-white/25 sm:hidden">{campaign.status} · {campaign.spend} spent</p>
-                </div>
-              </div>
-
-              {/* Status */}
-              <div className="hidden sm:flex sm:col-span-1 items-center">
-                <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium border ${campaign.statusColor}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${campaign.statusDot} animate-pulse`} />
-                  {campaign.status}
-                </span>
-              </div>
-
-              {/* Spend */}
-              <div className="hidden sm:flex sm:col-span-2 items-center justify-end">
-                <span className="text-sm text-white/70 font-mono">{campaign.spend}</span>
-              </div>
-
-              {/* Purchases */}
-              <div className="hidden sm:flex sm:col-span-1 items-center justify-end">
-                <span className="text-sm text-white/70 font-mono">{campaign.purchases}</span>
-              </div>
-
-              {/* Revenue */}
-              <div className="hidden sm:flex sm:col-span-2 items-center justify-end">
-                <span className="text-sm text-white/70 font-mono">{campaign.revenue}</span>
-              </div>
-
-              {/* ROAS */}
-              <div className="hidden sm:flex sm:col-span-1 items-center justify-end">
-                <span className={`text-sm font-bold font-mono ${campaign.roasColor}`}>{campaign.roas}</span>
-              </div>
-
-              {/* Actions */}
-              <div className="sm:col-span-2 flex items-center justify-end">
-                <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white/50 bg-white/[0.04] border border-border-subtle hover:bg-white/[0.08] hover:text-white/80 transition-all duration-200 cursor-pointer">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                  View Insights
-                </button>
-              </div>
-
-              {/* Mobile stats */}
-              <div className="sm:hidden grid grid-cols-3 gap-2">
-                <div className="bg-white/[0.03] rounded-lg px-3 py-2 text-center">
-                  <p className="text-xs font-semibold text-white">{campaign.purchases}</p>
-                  <p className="text-[10px] text-white/30">Purchases</p>
-                </div>
-                <div className="bg-white/[0.03] rounded-lg px-3 py-2 text-center">
-                  <p className="text-xs font-semibold text-white">{campaign.revenue}</p>
-                  <p className="text-[10px] text-white/30">Revenue</p>
-                </div>
-                <div className="bg-white/[0.03] rounded-lg px-3 py-2 text-center">
-                  <p className={`text-xs font-bold ${campaign.roasColor}`}>{campaign.roas}</p>
-                  <p className="text-[10px] text-white/30">ROAS</p>
-                </div>
-              </div>
-            </div>
-          ))}
         </div>
 
         {/* Footer insight */}

@@ -72,15 +72,13 @@ export async function GET() {
   }
 
   // Get campaigns from Supabase too
-  const { data: campaigns } = await 
+  const { data: activeCampaigns } = await 
     supabaseAdmin
       .from("campaigns")
       .select("*")
       .eq("clerk_user_id", userId)
-      .order("created_at", { 
-        ascending: false 
-      })
-      .limit(10);
+      .in("status", ["active", "paused", "stopped"])
+      .order("launched_at", { ascending: false });
 
   // Calculate FX-adjusted totals
   const NGN_RATE = 1565;
@@ -141,6 +139,6 @@ export async function GET() {
       fxRate: NGN_RATE,
     },
     campaigns: insightsData.data || [],
-    savedCampaigns: campaigns || []
+    activeCampaigns: activeCampaigns || []
   });
 }

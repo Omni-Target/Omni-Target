@@ -167,8 +167,8 @@ export async function POST(request: Request) {
         body: JSON.stringify({
           name: `Omni-target | ${campaignGoal} | ${Date.now()}`,
           objective: objective,
-          status: "PAUSED",
-          // Start paused so founder can review before going live
+          status: "ACTIVE",
+          // Start active directly upon launch
           special_ad_categories: [],
           access_token: accessToken
         })
@@ -209,7 +209,7 @@ export async function POST(request: Request) {
       billing_event: "IMPRESSIONS",
       optimization_goal: targeting.optimization_goal,
       targeting: targeting.targeting,
-      status: "PAUSED",
+      status: "ACTIVE",
       start_time: startTime,
       access_token: accessToken
     };
@@ -262,7 +262,7 @@ export async function POST(request: Request) {
           name: `Omni-target Ad | ${Date.now()}`,
           adset_id: adSetId,
           creative: { creative_id: creativeId },
-          status: "PAUSED",
+          status: "ACTIVE",
           access_token: accessToken
         })
       }
@@ -286,7 +286,7 @@ export async function POST(request: Request) {
         meta_adset_id: adSetId,
         meta_ad_id: adData.id,
         meta_creative_id: creativeId,
-        status: "paused",
+        status: "active",
         launched_at: new Date().toISOString()
       })
       .eq("id", campaignId);
@@ -300,8 +300,8 @@ export async function POST(request: Request) {
       adSetId,
       adId: adData.id,
       creativeId,
-      status: "paused",
-      message: "Campaign created in Meta Ads Manager. It is currently paused — activate it from your Meta Ads Manager to go live.",
+      status: "active",
+      message: "Campaign created in Meta Ads Manager. It is currently active and running.",
       metaAdsManagerUrl: 
         `https://www.facebook.com/adsmanager/` +
         `manage/campaigns?act=${adAccountId.replace("act_", "")}`

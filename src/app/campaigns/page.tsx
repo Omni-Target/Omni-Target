@@ -1089,11 +1089,11 @@ export default function CampaignsPage() {
           </div>
 
           <h1 className="text-3xl font-bold text-white mb-3">
-            Campaign Created
+            Campaign Live on Meta
           </h1>
           
           <p className="text-white/50 mb-10 text-sm leading-relaxed">
-            Your campaign is live in Meta Ads Manager and currently paused. Review it there and activate when ready.
+            Your campaign has been successfully deployed and is now active.
           </p>
 
           <div className="rounded-xl bg-surface-raised border border-border-subtle p-6 text-left mb-6">
@@ -1118,28 +1118,27 @@ export default function CampaignsPage() {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-white/40">Status</span>
-                <span className="text-amber-400 font-medium">
-                  Paused — awaiting activation
+                <span className="text-success-400 font-medium flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-success-400 animate-pulse"></span>
+                  Active
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-4 mb-8 text-left">
-            <p className="text-sm text-amber-400">
-              ⚠️ Your campaign starts paused. Go to Meta Ads Manager to review targeting and creative before activating.
+          <div className="rounded-xl bg-success-500/10 border border-success-500/20 p-4 mb-8 text-left">
+            <p className="text-sm text-success-400">
+              ✓ Your campaign is now running on Facebook and Instagram. You can monitor performance on your dashboard.
             </p>
           </div>
 
           <div className="space-y-3">
-            <a
-              href={launchResult?.metaAdsManagerUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block w-full py-4 px-6 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 text-white font-semibold text-sm text-center"
+            <Link
+              href="/dashboard"
+              className="block w-full py-4 px-6 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 text-white font-semibold text-sm text-center transition-transform hover:scale-[1.02]"
             >
-              View in Meta Ads Manager →
-            </a>
+              View Campaign Performance →
+            </Link>
             <button
               onClick={() => {
                 setBrandName("");
