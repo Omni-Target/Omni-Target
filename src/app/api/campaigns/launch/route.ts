@@ -47,6 +47,7 @@ export async function POST(request: Request) {
           "meta_ad_account_id, " +
           "meta_pixel_id, " +
           "meta_page_id, " +
+          "meta_pages, " +
           "pixel_health"
         )
         .eq("clerk_user_id", userId)
@@ -66,16 +67,33 @@ export async function POST(request: Request) {
       meta_ad_account_id: adAccountId,
       meta_pixel_id: pixelId,
       meta_page_id: pageId,
+      meta_pages: metaPages,
       pixel_health
     } = integration;
 
     if (!pageId) {
       return Response.json({
         error: "No Facebook Page connected. " +
-        "Please make sure your Meta account " +
-        "has a Facebook Page and reconnect.",
+        "Go to Settings and reconnect " +
+        "your Meta account to select a page.",
       }, { status: 400 });
     }
+
+    // Get the page-specific access token
+    // This is required for ad creative creation
+    const pages = metaPages as Array<{
+      id: string;
+      name: string;
+      access_token: string;
+    }> | null;
+
+    const pageAccessToken = pages?.find(
+      (p) => p.id === pageId
+    )?.access_token || accessToken;
+    // Fall back to user token if page token not found
+
+    console.log("Using page token:", !!pageAccessToken);
+    console.log("Page ID:", pageId);
 
     /**
      * STEP 2 — Convert budget from Naira to cents
@@ -142,7 +160,7 @@ export async function POST(request: Request) {
               ...(mediaUrl && { picture: mediaUrl })
             }
           },
-          access_token: accessToken
+          access_token: pageAccessToken  // PAGE token for creative creation
         })
       }
     );

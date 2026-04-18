@@ -95,6 +95,7 @@ export async function GET(request: Request) {
       meta_pages: allPages,
       meta_page_id: firstPage?.id || null,
       meta_page_name: firstPage?.name || null,
+      meta_page_access_token: firstPage?.access_token || null,
       meta_connected_at: new Date().toISOString(),
       pixel_health: firstPixel ? "unknown" : "none",
     };

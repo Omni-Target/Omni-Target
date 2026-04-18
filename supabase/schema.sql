@@ -115,4 +115,5 @@ ADD COLUMN IF NOT EXISTS meta_page_id TEXT,
 ADD COLUMN IF NOT EXISTS meta_page_name TEXT,
 ADD COLUMN IF NOT EXISTS meta_ad_accounts JSONB,
 ADD COLUMN IF NOT EXISTS meta_selected_account_id TEXT,
-ADD COLUMN IF NOT EXISTS meta_pages JSONB;
+ADD COLUMN IF NOT EXISTS meta_pages JSONB,
+ADD COLUMN IF NOT EXISTS meta_page_access_token TEXT;
