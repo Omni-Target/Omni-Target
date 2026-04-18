@@ -110,4 +110,9 @@ CREATE TRIGGER update_campaigns_updated_at
 -- Add pixel health and metadata to user_integrations
 ALTER TABLE user_integrations
 ADD COLUMN IF NOT EXISTS pixel_health TEXT DEFAULT 'unknown',
-ADD COLUMN IF NOT EXISTS pixel_installed_at TIMESTAMPTZ;
+ADD COLUMN IF NOT EXISTS pixel_installed_at TIMESTAMPTZ,
+ADD COLUMN IF NOT EXISTS meta_page_id TEXT,
+ADD COLUMN IF NOT EXISTS meta_page_name TEXT,
+ADD COLUMN IF NOT EXISTS meta_ad_accounts JSONB,
+ADD COLUMN IF NOT EXISTS meta_selected_account_id TEXT,
+ADD COLUMN IF NOT EXISTS meta_pages JSONB;

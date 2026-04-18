@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { SignOutButton } from "@clerk/nextjs";
 
@@ -31,13 +31,20 @@ const CAMPAIGNS = [
 
 export default function DashboardPage() {
   const [excludePending, setExcludePending] = useState(false);
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [metaConnected, setMetaConnected] = useState(false);
 
-  const totalSpend = 150000;
-  const baseRevenue = 675000;
-  const pendingAmount = 67500;
-  const revenue = excludePending ? baseRevenue - pendingAmount : baseRevenue;
-  const roas = (revenue / totalSpend).toFixed(1);
-  const costPerPurchase = Math.round(totalSpend / 37);
+  useEffect(() => {
+    fetch("/api/dashboard/stats")
+      .then((res) => res.json())
+      .then((data) => {
+        setStats(data);
+        setMetaConnected(data.connected);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
 
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
@@ -93,111 +100,124 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {/* Total Ad Spend */}
-          <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 animate-fade-in-up">
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400">
-                  <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-                  <polyline points="17 6 23 6 23 12" />
-                </svg>
+        {/* Main State Logic */}
+        {loading ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="rounded-xl bg-surface-raised border border-border-subtle p-5 h-32 animate-pulse flex flex-col justify-between">
+                <div className="w-10 h-10 rounded-xl bg-white/5" />
+                <div className="space-y-2">
+                  <div className="h-6 w-24 bg-white/5 rounded" />
+                  <div className="h-4 w-32 bg-white/5 rounded" />
+                </div>
               </div>
-              <span className="text-[10px] text-white/25 bg-white/[0.03] px-2 py-1 rounded-md">7 days</span>
-            </div>
-            <p className="text-2xl font-bold text-white mb-1">₦{totalSpend.toLocaleString()}</p>
-            <p className="text-xs text-white/40">Total Ad Spend</p>
-            <div className="mt-3 flex items-center gap-1.5">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="text-brand-400">
-                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+            ))}
+          </div>
+        ) : !metaConnected ? (
+          <div className="text-center py-20 rounded-xl bg-surface-raised border border-border-subtle mb-8">
+            <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-4">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/40">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
               </svg>
-              <span className="text-[10px] text-brand-400 font-medium">+12% vs last week</span>
             </div>
+            <h2 className="text-xl font-semibold text-white mb-3">
+              Connect Meta to see your stats
+            </h2>
+            <p className="text-white/40 text-sm mb-6 max-w-md mx-auto">
+              Your ROAS, spend, and campaign performance will appear here once your Meta Ads account is connected.
+            </p>
+            <Link href="/settings" className="px-6 py-3 rounded-xl bg-brand-500 text-white text-sm font-medium transition-colors hover:bg-brand-400">
+              Connect Meta Ads →
+            </Link>
           </div>
+        ) : (
+          <>
+            {/* FX Alert */}
+            {stats?.summary?.fxRate > 1500 && (
+              <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                <p className="text-sm text-amber-400">
+                  ⚠️ Naira Alert: Meta is billing you at ₦{stats?.summary?.fxRate}/USD. Your actual ad spend in Naira is higher than Meta's dashboard shows.
+                </p>
+              </div>
+            )}
 
-          {/* Shopify Revenue */}
-          <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 animate-fade-in-up" style={{ animationDelay: "100ms" }}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-xl bg-success-500/10 flex items-center justify-center">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-success-400">
-                  <line x1="12" y1="1" x2="12" y2="23" />
-                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                </svg>
+            {/* Stats Grid */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+              {/* Total Ad Spend */}
+              <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 animate-fade-in-up">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400">
+                      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+                      <polyline points="17 6 23 6 23 12" />
+                    </svg>
+                  </div>
+                  <span className="text-[10px] text-white/25 bg-white/[0.03] px-2 py-1 rounded-md">Last 30 Days</span>
+                </div>
+                <p className="text-2xl font-bold text-white mb-1">
+                  ₦{stats?.summary?.totalSpendNGN?.toLocaleString() || "0"}
+                </p>
+                <p className="text-xs text-white/40">Total Ad Spend</p>
+                <div className="mt-3 flex items-center gap-1.5">
+                  <span className="text-[10px] text-white/40 font-medium">
+                    ${stats?.summary?.totalSpendUSD} USD at ₦{stats?.summary?.fxRate}/USD
+                  </span>
+                </div>
               </div>
-              {/* Toggle */}
-              <div className="flex items-center gap-2">
-                <button
-                  id="exclude-pending-toggle"
-                  onClick={() => setExcludePending(!excludePending)}
-                  className={`relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer ${
-                    excludePending ? "bg-brand-500" : "bg-white/10"
-                  }`}
-                  aria-label="Exclude Pending Bank Transfers"
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform duration-200 ${
-                      excludePending ? "translate-x-4" : ""
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
-            <p className="text-2xl font-bold text-white mb-1">₦{revenue.toLocaleString()}</p>
-            <p className="text-xs text-white/40">Shopify Revenue</p>
-            <div className="mt-3 flex items-center gap-1.5">
-              <span className="text-[10px] text-white/30 font-medium">
-                {excludePending ? "Excl. ₦67,500 pending" : "Exclude Pending Bank Transfers"}
-              </span>
-            </div>
-          </div>
 
-          {/* True ROAS */}
-          <div className="rounded-xl bg-surface-raised border border-success-500/20 p-5 animate-fade-in-up animate-glow-pulse" style={{ animationDelay: "200ms", boxShadow: "0 0 30px rgba(16, 185, 129, 0.05)" }}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-xl bg-success-500/15 flex items-center justify-center">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-success-400">
-                  <circle cx="12" cy="12" r="10" />
-                  <circle cx="12" cy="12" r="6" />
-                  <circle cx="12" cy="12" r="2" />
-                </svg>
+              {/* Total Purchases */}
+              <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 animate-fade-in-up" style={{ animationDelay: "100ms" }}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-success-500/10 flex items-center justify-center">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-success-400">
+                      <line x1="12" y1="1" x2="12" y2="23" />
+                      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                    </svg>
+                  </div>
+                </div>
+                <p className="text-2xl font-bold text-white mb-1">
+                  {stats?.summary?.totalPurchases?.toLocaleString() || 0}
+                </p>
+                <p className="text-xs text-white/40">Total Purchases</p>
               </div>
-              <span className="text-[10px] text-success-400 bg-success-500/10 px-2 py-1 rounded-md font-medium">★ Key Metric</span>
-            </div>
-            <p className="text-3xl font-bold text-success-400 mb-1">{roas}x</p>
-            <p className="text-xs text-white/40">True ROAS</p>
-            <div className="mt-3 flex items-center gap-1.5">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="text-success-400">
-                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-              </svg>
-              <span className="text-[10px] text-success-400 font-medium">
-                {excludePending ? "Cleared revenue only" : "Including all revenue"}
-              </span>
-            </div>
-          </div>
 
-          {/* Cost Per Purchase */}
-          <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 animate-fade-in-up" style={{ animationDelay: "300ms" }}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400">
-                  <circle cx="9" cy="21" r="1" />
-                  <circle cx="20" cy="21" r="1" />
-                  <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
-                </svg>
+              {/* Total Impressions */}
+              <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 animate-fade-in-up" style={{ animationDelay: "200ms" }}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-[#8b5cf6]/10 flex items-center justify-center">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#8b5cf6]">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  </div>
+                </div>
+                <p className="text-2xl font-bold text-white mb-1">
+                  {stats?.summary?.totalImpressions?.toLocaleString() || 0}
+                </p>
+                <p className="text-xs text-white/40">Total Impressions</p>
               </div>
-              <span className="text-[10px] text-white/25 bg-white/[0.03] px-2 py-1 rounded-md">37 purchases</span>
+
+              {/* Average CTR */}
+              <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 animate-fade-in-up" style={{ animationDelay: "300ms" }}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400">
+                      <line x1="12" y1="20" x2="12" y2="10" />
+                      <line x1="18" y1="20" x2="18" y2="4" />
+                      <line x1="6" y1="20" x2="6" y2="16" />
+                    </svg>
+                  </div>
+                </div>
+                <p className="text-2xl font-bold text-white mb-1">
+                  {stats?.summary?.averageCTR || "0.00"}%
+                </p>
+                <p className="text-xs text-white/40">Average CTR</p>
+              </div>
             </div>
-            <p className="text-2xl font-bold text-white mb-1">₦{costPerPurchase.toLocaleString()}</p>
-            <p className="text-xs text-white/40">Cost Per Purchase</p>
-            <div className="mt-3 flex items-center gap-1.5">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="text-success-400" style={{ transform: "rotate(180deg)" }}>
-                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-              </svg>
-              <span className="text-[10px] text-success-400 font-medium">-8% vs last week</span>
-            </div>
-          </div>
-        </div>
+          </>
+        )}
 
         {/* Live Campaigns Table */}
         <div className="rounded-xl bg-surface-raised border border-border-subtle overflow-hidden animate-fade-in-up-delay-2">

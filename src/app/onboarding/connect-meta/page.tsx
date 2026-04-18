@@ -18,14 +18,9 @@ export default function ConnectMetaPage() {
   const router = useRouter();
   const [isConnecting, setIsConnecting] = useState(false);
 
-  const handleConnect = async () => {
+  const handleConnect = () => {
     setIsConnecting(true);
-    try {
-      await advanceOnboardingStep("audit");
-      router.push("/onboarding/audit");
-    } catch {
-      setIsConnecting(false);
-    }
+    window.location.href = "/api/auth/meta/connect";
   };
 
   return (
@@ -119,6 +114,10 @@ export default function ConnectMetaPage() {
       >
         Skip for now — I'll connect Meta later
       </button>
+
+      <p className="text-xs text-white/40 mt-8 max-w-[280px] mx-auto animate-fade-in-up-delay-3 lg:max-w-xs">
+        We only request permissions needed to create and manage your ads. We never post on your behalf.
+      </p>
 
       {/* Trust indicators */}
       <div className="mt-8 flex items-center justify-center gap-6 text-white/25 animate-fade-in-up-delay-4">

@@ -8,7 +8,7 @@ import { SignOutButton, useUser } from "@clerk/nextjs";
 import { MediaValidationResult } from "@/lib/meta-specs";
 import { buildMetaTargeting } from "@/lib/meta-targeting";
 
-type CampaignState = "media" | "input" | "generating" | "review";
+type CampaignState = "media" | "input" | "generating" | "review" | "launched";
 
 interface GeneratedCopy {
   headline: string;
@@ -64,6 +64,8 @@ export default function CampaignsPage() {
   const [isLaunching, setIsLaunching] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<string>("");
+  const [launchResult, setLaunchResult] = useState<any>(null);
 
   const handleCopy = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
@@ -185,12 +187,90 @@ export default function CampaignsPage() {
     setViewState("input");
   };
 
-  const handleLaunch = () => {
+  const handleLaunch = async () => {
     setIsLaunching(true);
-    setShowToast(true);
-    setTimeout(() => {
-      router.push("/dashboard");
-    }, 2000);
+    setLaunchError("");
+
+    try {
+      // Step 1: Save campaign to Supabase
+      const saveRes = await fetch(
+        "/api/campaigns/save",
+        {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json" 
+          },
+          body: JSON.stringify({
+            brandName,
+            productName,
+            productDescription: description,
+            targetAudience: audience,
+            campaignGoal: goal,
+            tonePreference: tone,
+            platform,
+            mediaUrl: mediaCloudUrl || null,
+            headline: generatedCopy?.headline,
+            primaryText: generatedCopy?.primaryText,
+            description: generatedCopy?.description,
+            cta: generatedCopy?.cta,
+            copywriterNote: generatedCopy?.copywriterNote,
+          }),
+        }
+      );
+
+      const saveData = await saveRes.json();
+      if (!saveData.campaignId) {
+        throw new Error("Failed to save campaign");
+      }
+
+      // Step 2: Launch to Meta
+      const launchRes = await fetch(
+        "/api/campaigns/launch",
+        {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json" 
+          },
+          body: JSON.stringify({
+            campaignId: saveData.campaignId,
+            headline: generatedCopy?.headline,
+            primaryText: generatedCopy?.primaryText,
+            description: generatedCopy?.description,
+            cta: generatedCopy?.cta,
+            mediaUrl: mediaCloudUrl || null,
+            campaignGoal: goal,
+            platform,
+            dailyBudget: parseFloat(dailyBudget) || 5000,
+            duration,
+            locations,
+            audienceDescription: audience,
+            pixelHealth: (user?.publicMetadata?.pixelHealth as string) || "unknown"
+          }),
+        }
+      );
+
+      const launchData = await launchRes.json();
+
+      if (!launchData.success) {
+        throw new Error(
+          launchData.error || 
+          "Launch failed. Check that your Meta account is connected in Settings."
+        );
+      }
+
+      setLaunchResult(launchData);
+      setViewState("launched");
+
+    } catch (err) {
+      console.error("Launch error:", err);
+      setLaunchError(
+        err instanceof Error 
+          ? err.message 
+          : "Something went wrong. Please try again."
+      );
+    } finally {
+      setIsLaunching(false);
+    }
   };
 
   return (
@@ -953,6 +1033,15 @@ export default function CampaignsPage() {
               }
               return null;
             })()}
+
+            {launchError && (
+              <div className="mb-4 p-4 rounded-xl bg-error-500/10 border border-error-500/20">
+                <p className="text-sm text-error-400">
+                  {launchError}
+                </p>
+              </div>
+            )}
+
             <button
               onClick={handleLaunch}
               disabled={isLaunching}
@@ -986,6 +1075,96 @@ export default function CampaignsPage() {
             <p className="text-center text-xs text-white/20 mt-4">
               Your campaign connects directly to your authorized Meta Ads Manager
             </p>
+          </div>
+        </main>
+      )}
+
+      {/* -- STATE 4: LAUNCHED -- */}
+      {viewState === "launched" && (
+        <main className="max-w-2xl mx-auto px-4 py-20 text-center flex-1">
+          <div className="w-20 h-20 rounded-full bg-success-500/10 border border-success-500/20 flex items-center justify-center mx-auto mb-8">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-success-400">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </div>
+
+          <h1 className="text-3xl font-bold text-white mb-3">
+            Campaign Created
+          </h1>
+          
+          <p className="text-white/50 mb-10 text-sm leading-relaxed">
+            Your campaign is live in Meta Ads Manager and currently paused. Review it there and activate when ready.
+          </p>
+
+          <div className="rounded-xl bg-surface-raised border border-border-subtle p-6 text-left mb-6">
+            <div className="space-y-3">
+              <div className="flex justify-between text-sm">
+                <span className="text-white/40">Campaign ID</span>
+                <span className="text-white/80 font-mono text-xs">
+                  {launchResult?.metaCampaignId}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-white/40">Daily Budget</span>
+                <span className="text-white/80">
+                  ₦{parseFloat(dailyBudget).toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-white/40">Duration</span>
+                <span className="text-white/80">
+                  {duration === "0" ? "Ongoing" : `${duration} days`}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-white/40">Status</span>
+                <span className="text-amber-400 font-medium">
+                  Paused — awaiting activation
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-4 mb-8 text-left">
+            <p className="text-sm text-amber-400">
+              ⚠️ Your campaign starts paused. Go to Meta Ads Manager to review targeting and creative before activating.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <a
+              href={launchResult?.metaAdsManagerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full py-4 px-6 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 text-white font-semibold text-sm text-center"
+            >
+              View in Meta Ads Manager →
+            </a>
+            <button
+              onClick={() => {
+                setBrandName("");
+                setProductName("");
+                setDescription("");
+                setAudience("");
+                setGoal("Drive Website Sales");
+                setTone("Let AI decide (recommended)");
+                setPlatform("both");
+                setDailyBudget("");
+                setDuration("7");
+                setLocations(["Lagos"]);
+                setMediaFile(null);
+                setMediaPreviewUrl("");
+                setMediaCloudUrl("");
+                setMediaValidation(null);
+                setGeneratedCopy(null);
+                setLaunchResult(null);
+                setLaunchError("");
+                setViewState("media");
+              }}
+              className="block w-full py-4 px-6 rounded-xl border border-border-subtle text-white/60 font-medium text-sm hover:text-white hover:border-white/20 transition-colors"
+            >
+              Create Another Campaign
+            </button>
           </div>
         </main>
       )}
