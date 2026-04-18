@@ -19,7 +19,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    console.log("Using redirect URI:", META_REDIRECT_URI);
+    console.log("Redirect URI being sent:", META_REDIRECT_URI);
+    console.log("Encoded:", encodeURIComponent(META_REDIRECT_URI));
 
     // Exchange code for access token
     const tokenRes = await fetch(

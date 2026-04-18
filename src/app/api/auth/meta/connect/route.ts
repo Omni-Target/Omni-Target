@@ -12,23 +12,21 @@ export async function GET() {
     );
   }
 
-  const params = new URLSearchParams({
-    client_id: process.env.META_APP_ID!,
-    redirect_uri: META_REDIRECT_URI,
-    scope: [
-      "ads_management",
-      "ads_read", 
-      "business_management",
-      "pages_read_engagement"
-    ].join(","),
-    response_type: "code",
-    state: userId,
-    // state = userId for verification 
-    // in callback
-  });
+  const scope = [
+    "ads_management",
+    "ads_read", 
+    "business_management",
+    "pages_read_engagement"
+  ].join(",");
 
   const metaAuthUrl = 
-    `https://www.facebook.com/v19.0/dialog/oauth?${params.toString()}`;
+    `https://www.facebook.com/v19.0/` +
+    `dialog/oauth` +
+    `?client_id=${process.env.META_APP_ID}` +
+    `&redirect_uri=${encodeURIComponent(META_REDIRECT_URI)}` +
+    `&scope=${scope}` +
+    `&response_type=code` +
+    `&state=${userId}`;
 
   redirect(metaAuthUrl);
 }
