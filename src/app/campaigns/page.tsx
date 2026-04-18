@@ -66,6 +66,7 @@ export default function CampaignsPage() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [launchError, setLaunchError] = useState<string>("");
   const [launchResult, setLaunchResult] = useState<any>(null);
+  const [selectedCta, setSelectedCta] = useState<string>("");
 
   const handleCopy = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
@@ -132,9 +133,24 @@ export default function CampaignsPage() {
   };
 
   const handleGenerate = async () => {
-    // Basic frontend validation for required fields
-    if (!brandName || !productName || !description) {
-      setErrorMsg("Please fill in Brand Name, Product Name, and Product Description.");
+    // Thorough validation of required fields
+    const errors: string[] = [];
+
+    if (!brandName.trim()) {
+      errors.push("Brand name is required");
+    }
+    if (!productName.trim()) {
+      errors.push("Product name is required");
+    }
+    if (!description.trim()) {
+      errors.push("Product description is required");
+    }
+    if (!dailyBudget || parseFloat(dailyBudget) < 2000) {
+      errors.push("Daily budget must be at least ₦2,000");
+    }
+
+    if (errors.length > 0) {
+      setErrorMsg(errors.join(". "));
       return;
     }
 
@@ -166,6 +182,7 @@ export default function CampaignsPage() {
 
       const data: GeneratedCopy = await res.json();
       setGeneratedCopy(data);
+      setSelectedCta(data.cta);
       setViewState("review");
     } catch (err) {
       console.error(err);
@@ -236,7 +253,7 @@ export default function CampaignsPage() {
             headline: generatedCopy?.headline,
             primaryText: generatedCopy?.primaryText,
             description: generatedCopy?.description,
-            cta: generatedCopy?.cta,
+            cta: selectedCta || generatedCopy?.cta,
             mediaUrl: mediaCloudUrl || null,
             campaignGoal: goal,
             platform,
@@ -850,7 +867,7 @@ export default function CampaignsPage() {
                           </div>
                           <div className="shrink-0">
                             <span className="inline-block bg-black/10 px-4 py-1.5 rounded text-[13px] font-semibold text-black border border-black/5">
-                              {generatedCopy.cta}
+                              {selectedCta || generatedCopy.cta}
                             </span>
                           </div>
                         </div>
@@ -935,6 +952,34 @@ export default function CampaignsPage() {
                         </div>
                       </div>
                       
+                    </div>
+
+                    {/* CTA Selector */}
+                    <div>
+                      <span className="text-xs text-white/40 uppercase tracking-wider">Call to Action Button</span>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {[
+                          "Shop Now",
+                          "Learn More",
+                          "See Collection",
+                          "Get Offer",
+                          "Sign Up",
+                          "Book Now",
+                          "Contact Us"
+                        ].map((cta) => (
+                          <button
+                            key={cta}
+                            onClick={() => setSelectedCta(cta)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+                              selectedCta === cta
+                                ? "bg-brand-500/20 border-brand-500/40 text-brand-400"
+                                : "bg-white/5 border-white/10 text-white/50 hover:text-white/80"
+                            }`}
+                          >
+                            {cta}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>

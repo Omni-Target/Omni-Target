@@ -46,21 +46,31 @@ export async function GET(request: Request) {
     console.log("Token exchange success. Has token:", !!accessToken);
 
     // Fetch the user's ad accounts, pixels, and status
+    // Include user_tasks to check for ADVERTISE permission
     const adAccountsRes = await fetch(
       `https://graph.facebook.com/v19.0/` +
       `me/adaccounts?fields=id,name,` +
-      `account_id,account_status,currency,adspixels{id,name,code}` +
+      `account_id,account_status,currency,` +
+      `user_tasks,adspixels{id,name,code}` +
       `&access_token=${accessToken}`
     );
 
     const adAccountsData = await adAccountsRes.json();
     const allAccounts = adAccountsData.data || [];
-    console.log("Ad accounts found:", allAccounts.length);
+    console.log("Ad accounts found (total):", allAccounts.length);
 
-    // Pre-select the first active account
-    const activeAccount = allAccounts.find(
-      (a: any) => a.account_status === 1
-    ) || allAccounts[0];
+    // Filter to only writable accounts: active + ADVERTISE permission
+    const writableAccounts = allAccounts.filter(
+      (a: any) =>
+        a.account_status === 1 &&
+        a.user_tasks?.includes("ADVERTISE")
+    );
+    console.log("Writable ad accounts:", writableAccounts.length);
+
+    // Pre-select the first writable account, fallback to any active
+    const activeAccount = writableAccounts[0] ||
+      allAccounts.find((a: any) => a.account_status === 1) ||
+      allAccounts[0];
 
     const firstPixel = activeAccount?.adspixels?.data?.[0];
 
@@ -75,10 +85,10 @@ export async function GET(request: Request) {
     const firstPage = allPages[0];
     console.log("Pages found:", allPages.length);
 
-    // Meta data payload
+    // Meta data payload — store only writable accounts
     const metaData = {
       meta_access_token: accessToken,
-      meta_ad_accounts: allAccounts,
+      meta_ad_accounts: writableAccounts,
       meta_ad_account_id: activeAccount?.id || null,
       meta_selected_account_id: activeAccount?.id || null,
       meta_pixel_id: firstPixel?.id || null,

@@ -111,14 +111,24 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
-            {/* FX Alert */}
-            {stats?.summary?.fxRate > 1500 && (
-              <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                <p className="text-sm text-amber-400">
-                  ⚠️ Naira Alert: Meta is billing you at ₦{stats?.summary?.fxRate}/USD. Your actual ad spend in Naira is higher than Meta's dashboard shows.
-                </p>
-              </div>
-            )}
+            {/* FX Alert - Only show when Meta connected, has spend, and FX rate moved >5% from baseline */}
+            {(() => {
+              const baselineRate = 1500;
+              const currentRate = stats?.summary?.fxRate || 0;
+              const hasSpend = (stats?.summary?.totalSpendNGN || 0) > 0;
+              const rateMovedSignificantly = Math.abs(currentRate - baselineRate) / baselineRate > 0.05;
+              
+              if (hasSpend && rateMovedSignificantly) {
+                return (
+                  <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                    <p className="text-sm text-amber-400">
+                      ⚠️ Naira Alert: Meta is billing you at ₦{currentRate}/USD. Your actual ad spend in Naira is higher than Meta&apos;s dashboard shows.
+                    </p>
+                  </div>
+                );
+              }
+              return null;
+            })()}
 
             {/* Stats Grid */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -325,22 +335,78 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Footer insight */}
-        <div className="mt-6 rounded-xl bg-brand-500/5 border border-brand-500/10 p-5 animate-fade-in-up-delay-3">
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded-lg bg-brand-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-              </svg>
+        {/* Dynamic AI Insights — only show when Meta is connected */}
+        {metaConnected && stats && (() => {
+          const insights: { icon: string; text: string; type: "warning" | "success" | "info" }[] = [];
+
+          const totalSpendNGN = stats?.summary?.totalSpendNGN || 0;
+          const totalPurchases = stats?.summary?.totalPurchases || 0;
+          const averageCTR = parseFloat(stats?.summary?.averageCTR || "0");
+
+          if (totalSpendNGN > 0 && totalPurchases === 0) {
+            insights.push({
+              icon: "⚠️",
+              text: "Your ads are spending but not recording purchases. Your pixel may need attention.",
+              type: "warning"
+            });
+          }
+
+          if (averageCTR > 0 && averageCTR < 1) {
+            insights.push({
+              icon: "📊",
+              text: "Your click-through rate is below average. Consider refreshing your ad creative.",
+              type: "info"
+            });
+          }
+
+          if (totalPurchases > 0) {
+            insights.push({
+              icon: "✓",
+              text: "Your campaigns are driving confirmed purchases.",
+              type: "success"
+            });
+          }
+
+          if (insights.length === 0) return null;
+
+          return (
+            <div className="mt-6 space-y-3 animate-fade-in-up-delay-3">
+              {insights.map((insight, i) => (
+                <div key={i} className={`rounded-xl p-5 border ${
+                  insight.type === "warning" ? "bg-amber-500/5 border-amber-500/10" :
+                  insight.type === "success" ? "bg-success-500/5 border-success-500/10" :
+                  "bg-brand-500/5 border-brand-500/10"
+                }`}>
+                  <div className="flex items-start gap-3">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                      insight.type === "warning" ? "bg-amber-500/10" :
+                      insight.type === "success" ? "bg-success-500/10" :
+                      "bg-brand-500/10"
+                    }`}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${
+                        insight.type === "warning" ? "text-amber-400" :
+                        insight.type === "success" ? "text-success-400" :
+                        "text-brand-400"
+                      }`}>
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-white mb-1">AI Insight</p>
+                      <p className={`text-xs leading-relaxed ${
+                        insight.type === "warning" ? "text-amber-400/70" :
+                        insight.type === "success" ? "text-success-400/70" :
+                        "text-white/40"
+                      }`}>
+                        {insight.icon} {insight.text}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div>
-              <p className="text-sm font-semibold text-white mb-1">AI Insight</p>
-              <p className="text-xs text-white/40 leading-relaxed">
-                Your &quot;Detty December&quot; campaign is outperforming by 2.6x. Consider increasing its daily budget by 30% to scale while ROAS remains above 5x. Your cost-per-purchase dropped 8% this week — a sign of strong audience learning.
-              </p>
-            </div>
-          </div>
-        </div>
+          );
+        })()}
       </main>
     </div>
   );

@@ -103,7 +103,11 @@ export async function POST(request: Request) {
       "Grow Instagram Following": "OUTCOME_ENGAGEMENT"
     };
 
-    const objective = objectiveMap[campaignGoal] || "OUTCOME_SALES";
+    const objective = pixelId && pixel_health === "healthy"
+      ? objectiveMap[campaignGoal] || "OUTCOME_SALES"
+      : campaignGoal === "Drive Website Sales"
+        ? "OUTCOME_TRAFFIC"
+        : objectiveMap[campaignGoal] || "OUTCOME_TRAFFIC";
 
     /**
      * STEP 4 — API Call 1: Create Ad Creative
@@ -144,6 +148,7 @@ export async function POST(request: Request) {
     );
 
     const creativeData = await creativeRes.json();
+    console.error("Creative error full:", JSON.stringify(creativeData, null, 2));
     if (!creativeData.id) {
       throw creativeData;
     }
@@ -176,6 +181,7 @@ export async function POST(request: Request) {
     );
 
     const campaignData = await campaignRes.json();
+    console.error("Campaign error full:", JSON.stringify(campaignData, null, 2));
     if (!campaignData.id) {
       throw campaignData;
     }
@@ -218,8 +224,8 @@ export async function POST(request: Request) {
       adSetBody.end_time = endTime;
     }
 
-    // Add pixel for conversion tracking if healthy
-    if (pixelId && integration.pixel_health === "healthy") {
+    // Add pixel for conversion tracking only if pixel exists and is verified
+    if (pixelId && pixel_health !== "none" && pixel_health !== "unknown") {
       adSetBody.promoted_object = {
         pixel_id: pixelId,
         custom_event_type: "PURCHASE"
@@ -239,6 +245,7 @@ export async function POST(request: Request) {
     );
 
     const adSetData = await adSetRes.json();
+    console.error("AdSet error full:", JSON.stringify(adSetData, null, 2));
     if (!adSetData.id) {
       throw adSetData;
     }
@@ -269,6 +276,7 @@ export async function POST(request: Request) {
     );
 
     const adData = await adRes.json();
+    console.error("Ad error full:", JSON.stringify(adData, null, 2));
     if (!adData.id) {
       throw adData;
     }
