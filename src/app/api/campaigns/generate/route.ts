@@ -15,6 +15,9 @@ interface GenerateRequest {
   tonePreference?: string;
   mediaUrl?: string | null; // TODO: Pass to preview step
   platform?: string; // TODO: Adjust copy length and format based on platform selection
+  dailyBudget?: string;
+  duration?: string;
+  locations?: string[];
 }
 
 /**

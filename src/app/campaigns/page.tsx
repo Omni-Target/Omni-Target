@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { SignOutButton, useUser } from "@clerk/nextjs";
 import { MediaValidationResult } from "@/lib/meta-specs";
+import { buildMetaTargeting } from "@/lib/meta-targeting";
 
 type CampaignState = "media" | "input" | "generating" | "review";
 
@@ -52,6 +53,9 @@ export default function CampaignsPage() {
   const [goal, setGoal] = useState("Drive Website Sales");
   const [tone, setTone] = useState("Let AI decide (recommended)");
   const [platform, setPlatform] = useState<string>("both");
+  const [dailyBudget, setDailyBudget] = useState<string>("");
+  const [duration, setDuration] = useState<string>("7");
+  const [locations, setLocations] = useState<string[]>(["Lagos"]);
 
   // API State
   const [generatedCopy, setGeneratedCopy] = useState<GeneratedCopy | null>(null);
@@ -148,6 +152,9 @@ export default function CampaignsPage() {
           tonePreference: tone,
           platform,
           mediaUrl: mediaCloudUrl || null,
+          dailyBudget,
+          duration,
+          locations,
         }),
       });
 
@@ -538,6 +545,85 @@ export default function CampaignsPage() {
                 </div>
               </div>
             </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 relative z-10">
+              {/* Daily Budget */}
+              <div className="relative">
+                <label htmlFor="dailyBudget" className="block text-xs font-medium text-white/50 uppercase tracking-wider mb-2">
+                  DAILY BUDGET
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none text-white/50 font-medium">
+                    ₦
+                  </div>
+                  <input
+                    id="dailyBudget"
+                    type="number"
+                    value={dailyBudget}
+                    onChange={(e) => setDailyBudget(e.target.value)}
+                    placeholder="5000"
+                    className="w-full pl-8 pr-4 py-3 rounded-xl bg-white/[0.03] border border-border-subtle text-sm text-white placeholder:text-white/20 outline-none transition-all duration-200 focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/20"
+                  />
+                </div>
+                <p className="mt-2 text-[11px] text-white/40">
+                  Minimum ₦2,000/day. We recommend ₦5,000–₦10,000 to test.
+                </p>
+              </div>
+
+              {/* Campaign Duration */}
+              <div className="relative">
+                <label htmlFor="duration" className="block text-xs font-medium text-white/50 uppercase tracking-wider mb-2">
+                  CAMPAIGN DURATION
+                </label>
+                <div className="relative">
+                  <select
+                    id="duration"
+                    value={duration}
+                    onChange={(e) => setDuration(e.target.value)}
+                    className="appearance-none w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-border-subtle text-sm text-white outline-none transition-all duration-200 focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/20 cursor-pointer"
+                  >
+                    <option value="7" className="bg-[#09090f] text-white">7 days — recommended for testing</option>
+                    <option value="14" className="bg-[#09090f] text-white">14 days</option>
+                    <option value="30" className="bg-[#09090f] text-white">30 days</option>
+                    <option value="0" className="bg-[#09090f] text-white">Ongoing</option>
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-white/40">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Target Location */}
+            <div>
+              <label className="block text-xs font-medium text-white/50 uppercase tracking-wider mb-2">
+                TARGET LOCATION
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {["Lagos", "Abuja", "Port Harcourt", "All Nigeria", "UK Diaspora", "US Diaspora", "Global"].map((loc) => (
+                  <button
+                    key={loc}
+                    type="button"
+                    onClick={() => {
+                      if (locations.includes(loc)) {
+                        setLocations(locations.filter(l => l !== loc));
+                      } else {
+                        setLocations([...locations, loc]);
+                      }
+                    }}
+                    className={`py-1.5 px-4 rounded-full text-[13px] font-medium transition-all duration-200 cursor-pointer border ${
+                      locations.includes(loc)
+                        ? 'bg-brand-500 text-white border-brand-400 shadow-lg shadow-brand-500/20'
+                        : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border-transparent'
+                    }`}
+                  >
+                    {loc}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           {errorMsg && (
@@ -837,6 +923,36 @@ export default function CampaignsPage() {
           </div>
 
           <div className="max-w-3xl mx-auto animate-fade-in-up-delay-3 pb-20">
+            {(() => {
+              const targeting = buildMetaTargeting({
+                audienceDescription: audience,
+                campaignGoal: goal,
+                locations: locations,
+                platform: platform,
+                pixelHealth: (user?.publicMetadata?.pixelHealth as "unknown" | "none" | "broken" | "healthy") || "unknown",
+              });
+              
+              if (targeting.warnings && targeting.warnings.length > 0) {
+                return (
+                  <div className="mb-6 p-4 rounded-xl bg-[#f59e0b]/10 border border-[#f59e0b]/20 flex items-start gap-3">
+                    <svg className="shrink-0 mt-0.5 text-[#f59e0b]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                    <div>
+                      <h4 className="text-sm font-semibold text-[#f59e0b] mb-1">⚠️ Interest Targeting Active</h4>
+                      {targeting.warnings.map((w, i) => (
+                        <p key={`warn-${i}`} className="text-xs text-[#f59e0b]/90 leading-relaxed whitespace-pre-line">
+                          {w}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
             <button
               onClick={handleLaunch}
               disabled={isLaunching}

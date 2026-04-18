@@ -106,3 +106,8 @@ CREATE TRIGGER update_campaigns_updated_at
   BEFORE UPDATE ON campaigns
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
+
+-- Add pixel health and metadata to user_integrations
+ALTER TABLE user_integrations
+ADD COLUMN IF NOT EXISTS pixel_health TEXT DEFAULT 'unknown',
+ADD COLUMN IF NOT EXISTS pixel_installed_at TIMESTAMPTZ;
