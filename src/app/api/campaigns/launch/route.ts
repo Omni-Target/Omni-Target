@@ -39,7 +39,7 @@ export async function POST(request: Request) {
      * to know where to create the assets, and the pixel information to set up
      * the proper conversion tracking for the campaign.
      */
-    const { data: integration, error: integrationError } = await 
+    const { data, error: integrationError } = await 
       supabaseAdmin
         .from("user_integrations")
         .select(
@@ -51,6 +51,8 @@ export async function POST(request: Request) {
         )
         .eq("clerk_user_id", userId)
         .single();
+
+    const integration: any = data;
 
     if (integrationError || !integration?.meta_access_token) {
       return Response.json(

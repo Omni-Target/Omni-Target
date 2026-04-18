@@ -20,6 +20,7 @@ export interface MetaTargetingSpec {
     age_min?: number;
     age_max?: number;
   };
+  warnings?: string[];
 }
 
 export function buildMetaTargeting(params: {
@@ -27,13 +28,15 @@ export function buildMetaTargeting(params: {
   campaignGoal: string;
   locations: string[];
   platform: string;
+  pixelHealth?: string;
 }): MetaTargetingSpec {
-  const { audienceDescription, campaignGoal, locations, platform } = params;
+  const { audienceDescription, campaignGoal, locations, platform, pixelHealth = "unknown" } = params;
 
   // Initial Spec Structure
   const spec: MetaTargetingSpec = {
     optimization_goal: "OFFSITE_CONVERSIONS",
     billing_event: "IMPRESSIONS",
+    warnings: [],
     targeting: {
       geo_locations: {
         cities: [],
@@ -135,6 +138,9 @@ export function buildMetaTargeting(params: {
       spec.targeting.custom_audiences = [
         { id: "PIXEL_WEBSITE_VISITORS_PLACEHOLDER", name: "Website Visitors" }
       ];
+      if (pixelHealth === "broken" || pixelHealth === "none") {
+        spec.warnings?.push("Your Meta Pixel is not connected or verified. Retargeting will not perform accurately until pixel issues are resolved.");
+      }
       break;
     
     case "Grow Instagram Following":
