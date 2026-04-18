@@ -68,16 +68,40 @@ export async function GET(request: Request) {
       throw new Error("No access token returned");
     }
 
-    // Store in Supabase
-    await supabaseAdmin
+    console.log("Shopify token exchange success. Shop:", shop);
+
+    // Shopify data payload
+    const shopifyData = {
+      shopify_store_url: shop,
+      shopify_access_token: accessToken,
+    };
+
+    // Check if a row already exists for this user
+    const { data: existing } = await supabaseAdmin
       .from("user_integrations")
-      .upsert({
-        clerk_user_id: userId,
-        shopify_store_url: shop,
-        shopify_access_token: accessToken,
-      }, {
-        onConflict: "clerk_user_id"
-      });
+      .select("id")
+      .eq("clerk_user_id", userId)
+      .single();
+
+    console.log("Existing row found:", !!existing);
+
+    if (existing) {
+      const { error: updateError } = await supabaseAdmin
+        .from("user_integrations")
+        .update(shopifyData)
+        .eq("clerk_user_id", userId);
+
+      console.log("Shopify update error:", updateError);
+    } else {
+      const { error: insertError } = await supabaseAdmin
+        .from("user_integrations")
+        .insert({
+          clerk_user_id: userId,
+          ...shopifyData,
+        });
+
+      console.log("Shopify insert error:", insertError);
+    }
 
     // Update Clerk metadata
     await fetch(

@@ -5,6 +5,9 @@ import Link from "next/link";
 import { MetaDisconnectButton } from "@/components/MetaDisconnectButton";
 import { MetaSelectors } from "@/components/MetaSelectors";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function SettingsPage({
   searchParams,
 }: {
@@ -20,6 +23,8 @@ export default async function SettingsPage({
       .select("*")
       .eq("clerk_user_id", userId)
       .single();
+
+  console.log("Integration data:", JSON.stringify(integration));
 
   const metaConnected = 
     !!integration?.meta_access_token;

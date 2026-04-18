@@ -5,6 +5,7 @@ import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { META_REDIRECT_URI } from "@/lib/meta-oauth";
 
 export async function GET(request: Request) {
+  const { userId } = await auth();
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const state = searchParams.get("state");
@@ -19,6 +20,12 @@ export async function GET(request: Request) {
     redirect("/settings?meta=error");
   }
 
+  // Use auth() userId first, fall back to state param
+  const clerkUserId = userId || state;
+
+  console.log("Meta callback - clerkUserId:", clerkUserId);
+  console.log("Meta callback - state param:", state);
+
   try {
     console.log("Redirect URI being sent:", META_REDIRECT_URI);
     console.log("Encoded:", encodeURIComponent(META_REDIRECT_URI));
@@ -31,12 +38,12 @@ export async function GET(request: Request) {
     const tokenData = await tokenRes.json();
 
     if (!tokenData.access_token) {
-      console.error("Token exchange failed:", 
-        tokenData);
+      console.error("Token exchange failed:", tokenData);
       redirect("/settings?meta=error");
     }
 
     const accessToken = tokenData.access_token;
+    console.log("Token exchange success. Has token:", !!accessToken);
 
     // Fetch the user's ad accounts, pixels, and status
     const adAccountsRes = await fetch(
@@ -48,9 +55,9 @@ export async function GET(request: Request) {
 
     const adAccountsData = await adAccountsRes.json();
     const allAccounts = adAccountsData.data || [];
+    console.log("Ad accounts found:", allAccounts.length);
 
-    // Store ALL accounts as JSON array
-    // Pre-select the first active one
+    // Pre-select the first active account
     const activeAccount = allAccounts.find(
       (a: any) => a.account_status === 1
     ) || allAccounts[0];
@@ -66,26 +73,50 @@ export async function GET(request: Request) {
     const pagesData = await pagesRes.json();
     const allPages = pagesData.data || [];
     const firstPage = allPages[0];
+    console.log("Pages found:", allPages.length);
 
-    // Update Supabase with pixel and account info
-    await supabaseAdmin
+    // Meta data payload
+    const metaData = {
+      meta_access_token: accessToken,
+      meta_ad_accounts: allAccounts,
+      meta_ad_account_id: activeAccount?.id || null,
+      meta_selected_account_id: activeAccount?.id || null,
+      meta_pixel_id: firstPixel?.id || null,
+      meta_pages: allPages,
+      meta_page_id: firstPage?.id || null,
+      meta_page_name: firstPage?.name || null,
+      meta_connected_at: new Date().toISOString(),
+      pixel_health: firstPixel ? "unknown" : "none",
+    };
+
+    // Check if a row already exists for this user
+    const { data: existing } = await supabaseAdmin
       .from("user_integrations")
-      .upsert({
-        clerk_user_id: state,
-        meta_access_token: accessToken,
-        meta_ad_accounts: allAccounts,
-        meta_ad_account_id: activeAccount?.id || null,
-        meta_selected_account_id: activeAccount?.id || null,
-        meta_pixel_id: firstPixel?.id || null,
-        meta_pages: allPages,
-        meta_page_id: firstPage?.id || null,
-        meta_page_name: firstPage?.name || null,
-        meta_connected_at: new Date().toISOString(),
-        // Set pixel health based on whether pixel exists
-        pixel_health: firstPixel ? "unknown" : "none",
-      }, {
-        onConflict: "clerk_user_id"
-      });
+      .select("id")
+      .eq("clerk_user_id", clerkUserId)
+      .single();
+
+    console.log("Existing row found:", !!existing);
+
+    if (existing) {
+      // Update the existing row
+      const { error: updateError } = await supabaseAdmin
+        .from("user_integrations")
+        .update(metaData)
+        .eq("clerk_user_id", clerkUserId);
+
+      console.log("Update error:", updateError);
+    } else {
+      // Insert a new row
+      const { error: insertError } = await supabaseAdmin
+        .from("user_integrations")
+        .insert({
+          clerk_user_id: clerkUserId,
+          ...metaData,
+        });
+
+      console.log("Insert error:", insertError);
+    }
 
     redirect("/settings?meta=connected");
 

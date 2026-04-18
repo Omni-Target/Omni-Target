@@ -1,6 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const { userId } = await auth();
   if (!userId) {
@@ -11,7 +13,7 @@ export async function GET() {
   }
 
   // Get user's Meta credentials
-  const { data: integration } = await 
+  const { data: integration, error: dbError } = await 
     supabaseAdmin
       .from("user_integrations")
       .select(
@@ -19,6 +21,11 @@ export async function GET() {
       )
       .eq("clerk_user_id", userId)
       .single();
+
+  console.log("Dashboard stats - userId:", userId);
+  console.log("Integration found:", !!integration);
+  console.log("Has token:", !!integration?.meta_access_token);
+  console.log("DB error:", dbError);
 
   if (!integration?.meta_access_token) {
     return Response.json({ 

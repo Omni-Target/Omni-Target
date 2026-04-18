@@ -13,7 +13,7 @@ export default function DashboardPage() {
   const [metaConnected, setMetaConnected] = useState(false);
 
   useEffect(() => {
-    fetch("/api/dashboard/stats")
+    fetch("/api/dashboard/stats", { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => {
         setStats(data);
