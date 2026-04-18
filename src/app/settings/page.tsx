@@ -119,8 +119,9 @@ export default async function SettingsPage({
                       )}
                     </div>
                   </div>
-                  <div className="flex flex-col sm:items-end gap-3 shrink-0 self-start">
-                    <Link 
+                </div>
+                <div className="flex flex-col sm:items-end gap-3 shrink-0 self-start">
+                  <Link 
                       href="/onboarding/audit"
                       className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-500 rounded-xl transition-colors"
                     >
