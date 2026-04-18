@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { redirect } from "next/navigation";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { META_REDIRECT_URI } from "@/lib/meta-oauth";
 
 export async function GET(request: Request) {
@@ -89,6 +90,10 @@ export async function GET(request: Request) {
     redirect("/settings?meta=connected");
 
   } catch (err) {
+    // Re-throw Next.js redirect errors so they are handled correctly
+    if (isRedirectError(err)) {
+      throw err;
+    }
     console.error("Meta OAuth error:", err);
     redirect("/settings?meta=error");
   }
