@@ -48,6 +48,9 @@ export async function POST(request: Request) {
           "meta_pixel_id, " +
           "meta_page_id, " +
           "meta_pages, " +
+          "meta_page_access_token, " +
+          "shopify_store_url, " +
+          "shopify_custom_domain, " +
           "pixel_health"
         )
         .eq("clerk_user_id", userId)
@@ -94,6 +97,28 @@ export async function POST(request: Request) {
 
     console.log("Using page token:", !!pageAccessToken);
     console.log("Page ID:", pageId);
+
+    // Prefer custom domain for clean ad display — 
+    // myshopify URLs redirect automatically but look unprofessional
+    const rawDomain =
+      integration.shopify_custom_domain ||
+      integration.shopify_store_url || "";
+
+    const storeLink = rawDomain
+      ? rawDomain.startsWith("http")
+        ? rawDomain
+        : `https://${rawDomain}`
+      : "";
+
+    console.log("Store link for ad:", storeLink);
+
+    if (!storeLink) {
+      return Response.json({
+        error: "Store URL not found. " +
+        "Please reconnect your Shopify " +
+        "store in Settings."
+      }, { status: 400 });
+    }
 
     /**
      * STEP 2 — Convert budget from Naira to cents
@@ -148,13 +173,13 @@ export async function POST(request: Request) {
             page_id: pageId,
             link_data: {
               message: primaryText,
-              link: process.env.NEXT_PUBLIC_STORE_URL,
+              link: storeLink,
               name: headline,
               description: description,
               call_to_action: {
                 type: cta.toUpperCase().replace(/ /g, "_"),
                 value: { 
-                  link: process.env.NEXT_PUBLIC_STORE_URL 
+                  link: storeLink 
                 }
               },
               ...(mediaUrl && { picture: mediaUrl })

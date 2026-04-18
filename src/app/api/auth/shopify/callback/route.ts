@@ -70,9 +70,27 @@ export async function GET(request: Request) {
 
     console.log("Shopify token exchange success. Shop:", shop);
 
-    // Shopify data payload
+    // Fetch shop details to get the primary custom domain
+    const shopDetailsRes = await fetch(
+      `https://${shop}/admin/api/2024-01/shop.json`,
+      {
+        headers: {
+          "X-Shopify-Access-Token": accessToken
+        }
+      }
+    );
+
+    const shopDetails = await shopDetailsRes.json();
+    const customDomain = shopDetails.shop?.domain || null;
+    const myshopifyUrl = shopDetails.shop?.myshopify_domain || shop;
+
+    console.log("Shopify custom domain:", customDomain);
+    console.log("Shopify myshopify URL:", myshopifyUrl);
+
+    // Shopify data payload — store both domains
     const shopifyData = {
-      shopify_store_url: shop,
+      shopify_store_url: myshopifyUrl,
+      shopify_custom_domain: customDomain,
       shopify_access_token: accessToken,
     };
 
