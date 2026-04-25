@@ -121,6 +121,48 @@ export async function GET(request: Request) {
       console.log("Shopify insert error:", insertError);
     }
 
+    // Register the orders/paid webhook so confirmed purchases
+    // are forwarded to Meta CAPI for attribution
+    const webhookUrl =
+      `${process.env.NEXT_PUBLIC_APP_URL}` +
+      `/api/shopify/webhook`;
+
+    const webhookRes = await fetch(
+      `https://${shop}/admin/api/2026-01/webhooks.json`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({
+          webhook: {
+            topic: "orders/paid",
+            address: webhookUrl,
+            format: "json",
+          },
+        }),
+      }
+    );
+
+    const webhookData = await webhookRes.json();
+
+    console.log("Webhook registration:", {
+      success: !!webhookData.webhook?.id,
+      webhookId: webhookData.webhook?.id,
+      error: webhookData.errors || null,
+    });
+
+    // Store the webhook ID so we can delete it if the user disconnects
+    if (webhookData.webhook?.id) {
+      await supabaseAdmin
+        .from("user_integrations")
+        .update({
+          shopify_webhook_id: String(webhookData.webhook.id),
+        })
+        .eq("clerk_user_id", userId);
+    }
+
     // Update Clerk metadata
     await fetch(
       `${process.env.NEXT_PUBLIC_APP_URL}` +

@@ -4,24 +4,81 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { SignOutButton } from "@clerk/nextjs";
 
-
+interface StoreDataResponse {
+  connected: boolean;
+  data?: any;
+  message?: string;
+}
 
 export default function DashboardPage() {
-  const [excludePending, setExcludePending] = useState(false);
-  const [stats, setStats] = useState<any>(null);
+  const [storeData, setStoreData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [metaConnected, setMetaConnected] = useState(false);
+  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    fetch("/api/dashboard/stats", { cache: "no-store" })
+    fetch("/api/store/data", { cache: "no-store" })
       .then((res) => res.json())
-      .then((data) => {
-        setStats(data);
-        setMetaConnected(data.connected);
+      .then((data: StoreDataResponse) => {
+        setConnected(data.connected);
+        if (data.connected && data.data) {
+          setStoreData(data.data);
+        }
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, []);
+
+  // Compute health scores client-side from store data
+  const computeHealth = () => {
+    if (!storeData) return { score: 0, breakdown: [] };
+
+    const products = storeData.products || [];
+    const orders30 = storeData.orders?.orders_last_30_days || 0;
+    const repeatRate = storeData.orders?.repeat_customer_rate || 0;
+    const inStockPct = products.length > 0
+      ? products.filter((p: any) => p.in_stock).length / products.length
+      : 0;
+
+    const b = [
+      {
+        label: "Active Products",
+        score: products.length >= 10 ? 25 : products.length >= 5 ? 15 : products.length >= 1 ? 5 : 0,
+        max: 25,
+        status: products.length >= 10 ? "good" : products.length >= 5 ? "warning" : "bad",
+      },
+      {
+        label: "Recent Orders",
+        score: orders30 >= 20 ? 25 : orders30 >= 5 ? 15 : orders30 >= 1 ? 5 : 0,
+        max: 25,
+        status: orders30 >= 20 ? "good" : orders30 >= 5 ? "warning" : "bad",
+      },
+      {
+        label: "Customer Retention",
+        score: repeatRate > 0.3 ? 25 : repeatRate > 0.1 ? 15 : repeatRate > 0.01 ? 5 : 0,
+        max: 25,
+        status: repeatRate > 0.3 ? "good" : repeatRate > 0.1 ? "warning" : "bad",
+      },
+      {
+        label: "Product Availability",
+        score: inStockPct > 0.8 ? 25 : inStockPct > 0.5 ? 15 : inStockPct > 0.2 ? 5 : 0,
+        max: 25,
+        status: inStockPct > 0.8 ? "good" : inStockPct > 0.5 ? "warning" : "bad",
+      },
+    ];
+
+    return {
+      score: b.reduce((s, i) => s + i.score, 0),
+      breakdown: b,
+    };
+  };
+
+  const health = computeHealth();
+
+  const statusColor = (s: string) =>
+    s === "good" ? "bg-success-400" : s === "warning" ? "bg-amber-400" : "bg-error-400";
+
+  const statusText = (s: string) =>
+    s === "good" ? "text-success-400" : s === "warning" ? "text-amber-400" : "text-error-400";
 
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
@@ -70,16 +127,18 @@ export default function DashboardPage() {
         {/* Header */}
         <div className="mb-8 animate-fade-in-up">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-1">
-            Performance Dashboard
+            Store Intelligence
           </h1>
           <p className="text-sm text-white/40">
-            Real-time truth engine for your Meta Ads · Last synced 2 min ago
+            {storeData
+              ? `${storeData.store?.name || "Your Store"} · Last synced ${new Date(storeData.generated_at).toLocaleString()}`
+              : "Connect your Shopify store to unlock insights"}
           </p>
         </div>
 
-        {/* Main State Logic */}
+        {/* Loading State */}
         {loading ? (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             {[1, 2, 3, 4].map((i) => (
               <div key={i} className="rounded-xl bg-surface-raised border border-border-subtle p-5 h-32 animate-pulse flex flex-col justify-between">
                 <div className="w-10 h-10 rounded-xl bg-white/5" />
@@ -90,323 +149,230 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
-        ) : !metaConnected ? (
-          <div className="text-center py-20 rounded-xl bg-surface-raised border border-border-subtle mb-8">
-            <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-4">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/40">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                <line x1="8" y1="21" x2="16" y2="21" />
-                <line x1="12" y1="17" x2="12" y2="21" />
+        ) : !connected ? (
+          /* Not Connected State */
+          <div className="text-center py-20 rounded-xl bg-surface-raised border border-border-subtle mb-8 animate-fade-in-up">
+            <div className="w-16 h-16 rounded-full bg-brand-500/10 flex items-center justify-center mx-auto mb-4">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-brand-400">
+                <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <path d="M16 10a4 4 0 0 1-8 0" />
               </svg>
             </div>
             <h2 className="text-xl font-semibold text-white mb-3">
-              Connect Meta to see your stats
+              Connect Your Shopify Store
             </h2>
             <p className="text-white/40 text-sm mb-6 max-w-md mx-auto">
-              Your ROAS, spend, and campaign performance will appear here once your Meta Ads account is connected.
+              We&apos;ll read your store data to generate personalised campaign briefs, audience insights, and product recommendations.
             </p>
-            <Link href="/settings" className="px-6 py-3 rounded-xl bg-brand-500 text-white text-sm font-medium transition-colors hover:bg-brand-400">
-              Connect Meta Ads →
+            <Link
+              href="/onboarding/connect-shopify"
+              className="inline-flex px-6 py-3 rounded-xl bg-brand-500 text-white text-sm font-medium transition-colors hover:bg-brand-400 no-underline"
+            >
+              Connect Shopify Store →
             </Link>
           </div>
         ) : (
           <>
-            {/* FX Alert - Only show when Meta connected, has spend, and FX rate moved >5% from baseline */}
-            {(() => {
-              const baselineRate = 1500;
-              const currentRate = stats?.summary?.fxRate || 0;
-              const hasSpend = (stats?.summary?.totalSpendNGN || 0) > 0;
-              const rateMovedSignificantly = Math.abs(currentRate - baselineRate) / baselineRate > 0.05;
-              
-              if (hasSpend && rateMovedSignificantly) {
-                return (
-                  <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                    <p className="text-sm text-amber-400">
-                      ⚠️ Naira Alert: Meta is billing you at ₦{currentRate}/USD. Your actual ad spend in Naira is higher than Meta&apos;s dashboard shows.
+            {/* SECTION 1: Store Health Score */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8 animate-fade-in-up">
+              <div className="rounded-xl bg-surface-raised border border-border-subtle p-6 flex flex-col items-center justify-center text-center">
+                <p className="text-xs text-white/40 uppercase tracking-widest mb-3 font-semibold">Store Health</p>
+                <p className={`text-5xl font-black mb-1 ${health.score >= 75 ? "text-success-400" : health.score >= 50 ? "text-amber-400" : "text-error-400"}`}>
+                  {health.score}
+                </p>
+                <p className="text-sm text-white/30">out of 100</p>
+              </div>
+
+              <div className="lg:col-span-2 rounded-xl bg-surface-raised border border-border-subtle p-6">
+                <p className="text-xs text-white/40 uppercase tracking-widest mb-4 font-semibold">Breakdown</p>
+                <div className="space-y-3">
+                  {health.breakdown.map((item: any) => (
+                    <div key={item.label} className="flex items-center gap-3">
+                      <span className="text-xs text-white/60 w-36 shrink-0">{item.label}</span>
+                      <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-700 ${statusColor(item.status)}`}
+                          style={{ width: `${(item.score / item.max) * 100}%` }}
+                        />
+                      </div>
+                      <span className={`text-xs font-semibold w-10 text-right ${statusText(item.status)}`}>
+                        {item.score}/{item.max}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 2: Audience Intelligence */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <div className="rounded-xl bg-surface-raised border border-border-subtle p-6 animate-fade-in-up-delay-1">
+                <p className="text-xs text-white/40 uppercase tracking-widest mb-4 font-semibold">Top Buying Locations</p>
+                {storeData.orders?.top_locations?.length > 0 ? (
+                  <div className="space-y-3">
+                    {storeData.orders.top_locations.map((loc: any, i: number) => (
+                      <div key={i} className="flex items-center gap-3">
+                        <span className="text-xs text-white/70 w-28 truncate shrink-0">{loc.city}</span>
+                        <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+                          <div className="h-full bg-brand-400 rounded-full transition-all duration-700" style={{ width: `${loc.percentage}%` }} />
+                        </div>
+                        <span className="text-xs text-white/50 w-10 text-right">{loc.percentage}%</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-white/30 italic">No order data yet</p>
+                )}
+              </div>
+
+              <div className="rounded-xl bg-surface-raised border border-border-subtle p-6 animate-fade-in-up-delay-1">
+                <p className="text-xs text-white/40 uppercase tracking-widest mb-4 font-semibold">Key Metrics</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-2xl font-bold text-white">
+                      ₦{Math.round(storeData.orders?.average_order_value || 0).toLocaleString()}
                     </p>
+                    <p className="text-xs text-white/40 mt-1">Avg Order Value</p>
                   </div>
-                );
-              }
-              return null;
-            })()}
-
-            {/* Stats Grid */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-              {/* Total Ad Spend */}
-              <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 animate-fade-in-up">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400">
-                      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-                      <polyline points="17 6 23 6 23 12" />
-                    </svg>
+                  <div>
+                    <p className="text-2xl font-bold text-white">
+                      {Math.round((storeData.orders?.repeat_customer_rate || 0) * 100)}%
+                    </p>
+                    <p className="text-xs text-white/40 mt-1">Repeat Rate</p>
                   </div>
-                  <span className="text-[10px] text-white/25 bg-white/[0.03] px-2 py-1 rounded-md">Last 30 Days</span>
-                </div>
-                <p className="text-2xl font-bold text-white mb-1">
-                  ₦{stats?.summary?.totalSpendNGN?.toLocaleString() || "0"}
-                </p>
-                <p className="text-xs text-white/40">Total Ad Spend</p>
-                <div className="mt-3 flex items-center gap-1.5">
-                  <span className="text-[10px] text-white/40 font-medium">
-                    ${stats?.summary?.totalSpendUSD} USD at ₦{stats?.summary?.fxRate}/USD
-                  </span>
+                  <div>
+                    <p className="text-2xl font-bold text-white">
+                      {storeData.orders?.orders_last_30_days || 0}
+                    </p>
+                    <p className="text-xs text-white/40 mt-1">Orders (30d)</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-white/70 mt-1">
+                      {storeData.orders?.peak_days?.length > 0
+                        ? storeData.orders.peak_days.join(", ")
+                        : "—"}
+                    </p>
+                    <p className="text-xs text-white/40 mt-1">Peak Days</p>
+                  </div>
                 </div>
               </div>
+            </div>
 
-              {/* Total Purchases */}
-              <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 animate-fade-in-up" style={{ animationDelay: "100ms" }}>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-10 h-10 rounded-xl bg-success-500/10 flex items-center justify-center">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-success-400">
-                      <line x1="12" y1="1" x2="12" y2="23" />
-                      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                    </svg>
-                  </div>
-                </div>
-                <p className="text-2xl font-bold text-white mb-1">
-                  {stats?.summary?.totalPurchases?.toLocaleString() || 0}
-                </p>
-                <p className="text-xs text-white/40">Total Purchases</p>
-              </div>
+            {/* SECTION 3: What to Advertise Now */}
+            <div className="mb-8 animate-fade-in-up-delay-2">
+              <p className="text-xs text-white/40 uppercase tracking-widest mb-4 font-semibold">What to Advertise Now</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {(storeData.products || [])
+                  .sort((a: any, b: any) => b.revenue - a.revenue)
+                  .slice(0, 6)
+                  .map((product: any) => (
+                    <div
+                      key={product.id}
+                      className={`rounded-xl border p-4 transition-colors ${
+                        product.should_advertise
+                          ? "bg-surface-raised border-border-subtle hover:border-brand-500/30"
+                          : "bg-surface-raised/50 border-border-subtle opacity-60"
+                      }`}
+                    >
+                      <div className="flex items-start gap-3 mb-3">
+                        {product.image_url ? (
+                          <img
+                            src={product.image_url}
+                            alt={product.name}
+                            className="w-12 h-12 rounded-lg object-cover shrink-0"
+                          />
+                        ) : (
+                          <div className="w-12 h-12 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/20">
+                              <rect x="3" y="3" width="18" height="18" rx="2" />
+                              <circle cx="8.5" cy="8.5" r="1.5" />
+                              <polyline points="21 15 16 10 5 21" />
+                            </svg>
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-white truncate">{product.name}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                              product.in_stock
+                                ? "bg-success-500/10 text-success-400"
+                                : "bg-error-500/10 text-error-400"
+                            }`}>
+                              <span className={`w-1 h-1 rounded-full ${product.in_stock ? "bg-success-400" : "bg-error-400"}`} />
+                              {product.in_stock ? "In stock" : "Out of stock"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
 
-              {/* Total Impressions */}
-              <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 animate-fade-in-up" style={{ animationDelay: "200ms" }}>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-10 h-10 rounded-xl bg-[#8b5cf6]/10 flex items-center justify-center">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#8b5cf6]">
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                      <circle cx="12" cy="12" r="3" />
-                    </svg>
-                  </div>
-                </div>
-                <p className="text-2xl font-bold text-white mb-1">
-                  {stats?.summary?.totalImpressions?.toLocaleString() || 0}
-                </p>
-                <p className="text-xs text-white/40">Total Impressions</p>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-white/40">
+                          {product.units_sold} sold · ₦{Math.round(product.revenue).toLocaleString()}
+                        </span>
+                        {product.should_advertise ? (
+                          <Link
+                            href={`/campaigns?product=${encodeURIComponent(product.name)}`}
+                            className="text-brand-400 hover:text-brand-300 font-medium transition-colors no-underline"
+                          >
+                            Use in Campaign →
+                          </Link>
+                        ) : (
+                          <span className="text-error-400/70 text-[10px]">Don&apos;t advertise</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
               </div>
+            </div>
 
-              {/* Average CTR */}
-              <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 animate-fade-in-up" style={{ animationDelay: "300ms" }}>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400">
-                      <line x1="12" y1="20" x2="12" y2="10" />
-                      <line x1="18" y1="20" x2="18" y2="4" />
-                      <line x1="6" y1="20" x2="6" y2="16" />
-                    </svg>
-                  </div>
+            {/* SECTION 4: Quick Actions */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 animate-fade-in-up-delay-3">
+              <Link
+                href="/campaigns"
+                className="rounded-xl bg-surface-raised border border-border-subtle p-5 hover:border-brand-500/30 transition-colors group no-underline"
+              >
+                <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center mb-3 group-hover:bg-brand-500/20 transition-colors">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                  </svg>
                 </div>
-                <p className="text-2xl font-bold text-white mb-1">
-                  {stats?.summary?.averageCTR || "0.00"}%
-                </p>
-                <p className="text-xs text-white/40">Average CTR</p>
-              </div>
+                <p className="text-sm font-semibold text-white">Create New Campaign</p>
+                <p className="text-xs text-white/40 mt-1">Generate a campaign brief with AI</p>
+              </Link>
+
+              <Link
+                href="/onboarding/audit"
+                className="rounded-xl bg-surface-raised border border-border-subtle p-5 hover:border-brand-500/30 transition-colors group no-underline"
+              >
+                <div className="w-10 h-10 rounded-xl bg-[#8b5cf6]/10 flex items-center justify-center mb-3 group-hover:bg-[#8b5cf6]/20 transition-colors">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#8b5cf6]">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                  </svg>
+                </div>
+                <p className="text-sm font-semibold text-white">Run Store Audit</p>
+                <p className="text-xs text-white/40 mt-1">Check your store readiness</p>
+              </Link>
+
+              <Link
+                href="/settings"
+                className="rounded-xl bg-surface-raised border border-border-subtle p-5 hover:border-brand-500/30 transition-colors group no-underline"
+              >
+                <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center mb-3 group-hover:bg-white/10 transition-colors">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/50">
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                  </svg>
+                </div>
+                <p className="text-sm font-semibold text-white">Settings</p>
+                <p className="text-xs text-white/40 mt-1">Manage integrations</p>
+              </Link>
             </div>
           </>
         )}
-
-        {/* Live Campaigns Table */}
-        <div className="rounded-xl bg-surface-raised border border-border-subtle overflow-hidden animate-fade-in-up-delay-2">
-          <div className="px-6 py-4 border-b border-border-subtle flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-white">Your Campaigns</h2>
-              <p className="text-xs text-white/30 mt-0.5">{stats?.activeCampaigns?.length || 0} campaigns managed</p>
-            </div>
-            <Link
-              href="/campaigns"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-brand-400 bg-brand-500/10 border border-brand-500/20 hover:bg-brand-500/20 transition-colors no-underline"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              New Campaign
-            </Link>
-          </div>
-
-          <div className="divide-y divide-border-subtle">
-            {stats?.activeCampaigns?.length > 0 ? (
-              stats.activeCampaigns.map((campaign: any) => {
-                const metaMatch = stats?.campaigns?.find(
-                  (c: any) => c.campaign_id === campaign.meta_campaign_id
-                );
-                
-                const formatStatusBadge = (status: string) => {
-                  switch (status.toLowerCase()) {
-                    case "active":
-                      return <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium border bg-success-500/10 border-success-500/20 text-success-400"><span className="w-1.5 h-1.5 rounded-full bg-success-400 animate-pulse" />Active</span>;
-                    case "paused":
-                      return <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium border bg-amber-500/10 border-amber-500/20 text-amber-400"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" />Paused</span>;
-                    case "stopped":
-                      return <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium border bg-error-500/10 border-error-500/20 text-error-400"><span className="w-1.5 h-1.5 rounded-full bg-error-400" />Stopped</span>;
-                    default:
-                      return <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium border bg-white/5 border-white/10 text-white/50 capitalize">{status}</span>;
-                  }
-                };
-
-                const handleStatusChange = async (action: "pause" | "resume" | "stop") => {
-                  if (action === "stop") {
-                    if (!confirm("This will permanently stop the campaign in Meta. This cannot be undone. Continue?")) {
-                      return;
-                    }
-                  }
-                  try {
-                    const res = await fetch(`/api/campaigns/${campaign.id}/status`, {
-                      method: "PATCH",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ action })
-                    });
-                    if (res.ok) {
-                      const data = await fetch("/api/dashboard/stats").then(r => r.json());
-                      // Assuming functional state is set here dynamically without full reload,
-                      // normally we could just reload, but we'll try to rely on state updates if outside mapping.
-                      window.location.reload();
-                    }
-                  } catch (e) {
-                    console.error("Status update error", e);
-                  }
-                };
-
-                return (
-                  <div key={campaign.id} className="grid grid-cols-1 sm:grid-cols-12 gap-4 px-6 py-4 hover:bg-white/[0.02] transition-colors duration-150">
-                    <div className="sm:col-span-8 flex flex-col gap-2">
-                       <div className="flex items-center gap-3">
-                         <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-500/20 to-brand-700/20 border border-brand-500/10 flex items-center justify-center flex-shrink-0">
-                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400">
-                             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                           </svg>
-                         </div>
-                         <div className="min-w-0 flex flex-col">
-                           <div className="flex items-center gap-2">
-                             <p className="text-sm font-semibold text-white truncate">{campaign.brand_name} — {campaign.campaign_goal}</p>
-                           </div>
-                           <div className="flex items-center gap-2 mt-1">
-                             {formatStatusBadge(campaign.status)}
-                             <span className="text-white/20 text-xs">•</span>
-                             <span className="text-xs text-white/50">
-                               {metaMatch?.spend ? `Spend: ₦${Math.round(metaMatch.spend * (stats.summary?.fxRate || 1)).toLocaleString()}` : "Daily Budget: —"}
-                             </span>
-                             <span className="text-white/20 text-xs">•</span>
-                             <span className="text-xs text-white/50">
-                               Launched: {new Date(campaign.launched_at || campaign.created_at).toLocaleDateString()}
-                             </span>
-                           </div>
-                         </div>
-                       </div>
-                    </div>
-
-                    <div className="sm:col-span-4 flex items-center sm:justify-end gap-2 mt-2 sm:mt-0">
-                      {campaign.status === "active" && (
-                        <button
-                          onClick={() => handleStatusChange("pause")}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
-                        >
-                          Pause
-                        </button>
-                      )}
-                      
-                      {campaign.status === "paused" && (
-                        <button
-                          onClick={() => handleStatusChange("resume")}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-success-400 bg-success-500/10 border border-success-500/20 hover:bg-success-500/20 transition-colors"
-                        >
-                          Resume
-                        </button>
-                      )}
-
-                      {campaign.status !== "stopped" && (
-                        <button
-                          onClick={() => handleStatusChange("stop")}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-error-400 bg-transparent hover:bg-error-500/10 transition-colors"
-                        >
-                          Stop
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="p-8 text-center bg-white/[0.01]">
-                <p className="text-sm text-white/50">No campaigns launched yet.</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Dynamic AI Insights — only show when Meta is connected */}
-        {metaConnected && stats && (() => {
-          const insights: { icon: string; text: string; type: "warning" | "success" | "info" }[] = [];
-
-          const totalSpendNGN = stats?.summary?.totalSpendNGN || 0;
-          const totalPurchases = stats?.summary?.totalPurchases || 0;
-          const averageCTR = parseFloat(stats?.summary?.averageCTR || "0");
-
-          if (totalSpendNGN > 0 && totalPurchases === 0) {
-            insights.push({
-              icon: "⚠️",
-              text: "Your ads are spending but not recording purchases. Your pixel may need attention.",
-              type: "warning"
-            });
-          }
-
-          if (averageCTR > 0 && averageCTR < 1) {
-            insights.push({
-              icon: "📊",
-              text: "Your click-through rate is below average. Consider refreshing your ad creative.",
-              type: "info"
-            });
-          }
-
-          if (totalPurchases > 0) {
-            insights.push({
-              icon: "✓",
-              text: "Your campaigns are driving confirmed purchases.",
-              type: "success"
-            });
-          }
-
-          if (insights.length === 0) return null;
-
-          return (
-            <div className="mt-6 space-y-3 animate-fade-in-up-delay-3">
-              {insights.map((insight, i) => (
-                <div key={i} className={`rounded-xl p-5 border ${
-                  insight.type === "warning" ? "bg-amber-500/5 border-amber-500/10" :
-                  insight.type === "success" ? "bg-success-500/5 border-success-500/10" :
-                  "bg-brand-500/5 border-brand-500/10"
-                }`}>
-                  <div className="flex items-start gap-3">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                      insight.type === "warning" ? "bg-amber-500/10" :
-                      insight.type === "success" ? "bg-success-500/10" :
-                      "bg-brand-500/10"
-                    }`}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${
-                        insight.type === "warning" ? "text-amber-400" :
-                        insight.type === "success" ? "text-success-400" :
-                        "text-brand-400"
-                      }`}>
-                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-white mb-1">AI Insight</p>
-                      <p className={`text-xs leading-relaxed ${
-                        insight.type === "warning" ? "text-amber-400/70" :
-                        insight.type === "success" ? "text-success-400/70" :
-                        "text-white/40"
-                      }`}>
-                        {insight.icon} {insight.text}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          );
-        })()}
       </main>
     </div>
   );

@@ -1,14 +1,13 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { SignOutButton, useUser } from "@clerk/nextjs";
 import { MediaValidationResult } from "@/lib/meta-specs";
-import { buildMetaTargeting } from "@/lib/meta-targeting";
 
-type CampaignState = "media" | "input" | "generating" | "review" | "launched";
+type CampaignState = "media" | "input" | "generating" | "review" | "brief";
 
 interface GeneratedCopy {
   headline: string;
@@ -60,13 +59,26 @@ export default function CampaignsPage() {
   // API State
   const [generatedCopy, setGeneratedCopy] = useState<GeneratedCopy | null>(null);
 
-  // Review State Action
-  const [isLaunching, setIsLaunching] = useState(false);
-  const [showToast, setShowToast] = useState(false);
+  // Review State
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [launchError, setLaunchError] = useState<string>("");
-  const [launchResult, setLaunchResult] = useState<any>(null);
   const [selectedCta, setSelectedCta] = useState<string>("");
+
+  // Store Insights for Brief
+  const [storeInsights, setStoreInsights] = useState<any>(null);
+  const [loadingInsights, setLoadingInsights] = useState(false);
+
+  useEffect(() => {
+    setLoadingInsights(true);
+    fetch("/api/store/data", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.connected && data.data) {
+          setStoreInsights(data.data);
+        }
+        setLoadingInsights(false);
+      })
+      .catch(() => setLoadingInsights(false));
+  }, []);
 
   const handleCopy = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
@@ -204,92 +216,6 @@ export default function CampaignsPage() {
     setViewState("input");
   };
 
-  const handleLaunch = async () => {
-    setIsLaunching(true);
-    setLaunchError("");
-
-    try {
-      // Step 1: Save campaign to Supabase
-      const saveRes = await fetch(
-        "/api/campaigns/save",
-        {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json" 
-          },
-          body: JSON.stringify({
-            brandName,
-            productName,
-            productDescription: description,
-            targetAudience: audience,
-            campaignGoal: goal,
-            tonePreference: tone,
-            platform,
-            mediaUrl: mediaCloudUrl || null,
-            headline: generatedCopy?.headline,
-            primaryText: generatedCopy?.primaryText,
-            description: generatedCopy?.description,
-            cta: generatedCopy?.cta,
-            copywriterNote: generatedCopy?.copywriterNote,
-          }),
-        }
-      );
-
-      const saveData = await saveRes.json();
-      if (!saveData.campaignId) {
-        throw new Error("Failed to save campaign");
-      }
-
-      // Step 2: Launch to Meta
-      const launchRes = await fetch(
-        "/api/campaigns/launch",
-        {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json" 
-          },
-          body: JSON.stringify({
-            campaignId: saveData.campaignId,
-            headline: generatedCopy?.headline,
-            primaryText: generatedCopy?.primaryText,
-            description: generatedCopy?.description,
-            cta: selectedCta || generatedCopy?.cta,
-            mediaUrl: mediaCloudUrl || null,
-            campaignGoal: goal,
-            platform,
-            dailyBudget: parseFloat(dailyBudget) || 5000,
-            duration,
-            locations,
-            audienceDescription: audience,
-            pixelHealth: (user?.publicMetadata?.pixelHealth as string) || "unknown"
-          }),
-        }
-      );
-
-      const launchData = await launchRes.json();
-
-      if (!launchData.success) {
-        throw new Error(
-          launchData.error || 
-          "Launch failed. Check that your Meta account is connected in Settings."
-        );
-      }
-
-      setLaunchResult(launchData);
-      setViewState("launched");
-
-    } catch (err) {
-      console.error("Launch error:", err);
-      setLaunchError(
-        err instanceof Error 
-          ? err.message 
-          : "Something went wrong. Please try again."
-      );
-    } finally {
-      setIsLaunching(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] relative overflow-hidden flex flex-col">
       {/* Top nav bar */}
@@ -315,7 +241,7 @@ export default function CampaignsPage() {
                 Sign Out
               </button>
             </SignOutButton>
-            {viewState === "review" ? (
+            {viewState === "review" || viewState === "brief" ? (
               <button 
                 onClick={() => setViewState("input")} 
                 className="text-white/40 hover:text-white/60 transition-colors flex items-center gap-1.5 cursor-pointer bg-transparent border-none p-0"
@@ -325,12 +251,12 @@ export default function CampaignsPage() {
                 </svg>
                 Edit Campaign
               </button>
-            ) : (
+            ) : storeInsights ? (
               <div className="flex items-center gap-2 text-xs text-white/40">
                 <div className="w-2 h-2 rounded-full bg-success-400 animate-pulse" />
-                Meta Connected
+                Store Connected
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </nav>
@@ -1048,183 +974,259 @@ export default function CampaignsPage() {
           </div>
 
           <div className="max-w-3xl mx-auto animate-fade-in-up-delay-3 pb-20">
-            {(() => {
-              const targeting = buildMetaTargeting({
-                audienceDescription: audience,
-                campaignGoal: goal,
-                locations: locations,
-                platform: platform,
-                pixelHealth: (user?.publicMetadata?.pixelHealth as "unknown" | "none" | "broken" | "healthy") || "unknown",
-              });
-              
-              if (targeting.warnings && targeting.warnings.length > 0) {
-                return (
-                  <div className="mb-6 p-4 rounded-xl bg-[#f59e0b]/10 border border-[#f59e0b]/20 flex items-start gap-3">
-                    <svg className="shrink-0 mt-0.5 text-[#f59e0b]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                      <line x1="12" y1="9" x2="12" y2="13" />
-                      <line x1="12" y1="17" x2="12.01" y2="17" />
-                    </svg>
-                    <div>
-                      <h4 className="text-sm font-semibold text-[#f59e0b] mb-1">⚠️ Interest Targeting Active</h4>
-                      {targeting.warnings.map((w, i) => (
-                        <p key={`warn-${i}`} className="text-xs text-[#f59e0b]/90 leading-relaxed whitespace-pre-line">
-                          {w}
-                        </p>
-                      ))}
-                    </div>
-                  </div>
-                );
-              }
-              return null;
-            })()}
-
-            {launchError && (
-              <div className="mb-4 p-4 rounded-xl bg-error-500/10 border border-error-500/20">
-                <p className="text-sm text-error-400">
-                  {launchError}
-                </p>
-              </div>
-            )}
-
             <button
-              onClick={handleLaunch}
-              disabled={isLaunching}
-              className="group relative w-full py-5 px-8 rounded-2xl font-bold text-base transition-all duration-300 cursor-pointer disabled:cursor-not-allowed"
+              onClick={() => setViewState("brief")}
+              className="group relative w-full py-5 px-8 rounded-2xl font-bold text-base transition-all duration-300 cursor-pointer"
             >
-              <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-success-600 via-success-500 to-success-400 transition-all duration-300 group-hover:from-success-500 group-hover:via-success-400 group-hover:to-success-300 group-disabled:opacity-70" />
-              <div className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-success-500/20 blur-2xl" />
+              <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-brand-600 to-brand-500 transition-all duration-300 group-hover:from-brand-500 group-hover:to-brand-400" />
+              <div className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-brand-500/20 blur-2xl" />
               <span className="relative flex items-center justify-center gap-3 text-white shadow-sm">
-                {isLaunching ? (
-                  <>
-                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Deploying to Meta Ads...
-                  </>
-                ) : (
-                  <>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M22 2L11 13" />
-                      <path d="M22 2l-7 20-4-9-9-4 20-7z" />
-                    </svg>
-                    Launch Campaign to Meta
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-200 group-hover:translate-x-0.5">
-                      <path d="M5 12h14M12 5l7 7-7 7" />
-                    </svg>
-                  </>
-                )}
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                </svg>
+                Generate Campaign Brief →
               </span>
             </button>
-            <p className="text-center text-xs text-white/20 mt-4">
-              Your campaign connects directly to your authorized Meta Ads Manager
-            </p>
-          </div>
-        </main>
-      )}
 
-      {/* -- STATE 4: LAUNCHED -- */}
-      {viewState === "launched" && (
-        <main className="max-w-2xl mx-auto px-4 py-20 text-center flex-1">
-          <div className="w-20 h-20 rounded-full bg-success-500/10 border border-success-500/20 flex items-center justify-center mx-auto mb-8">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-success-400">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          </div>
-
-          <h1 className="text-3xl font-bold text-white mb-3">
-            Campaign Live on Meta
-          </h1>
-          
-          <p className="text-white/50 mb-10 text-sm leading-relaxed">
-            Your campaign has been successfully deployed and is now active.
-          </p>
-
-          <div className="rounded-xl bg-surface-raised border border-border-subtle p-6 text-left mb-6">
-            <div className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-white/40">Campaign ID</span>
-                <span className="text-white/80 font-mono text-xs">
-                  {launchResult?.metaCampaignId}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-white/40">Daily Budget</span>
-                <span className="text-white/80">
-                  ₦{parseFloat(dailyBudget).toLocaleString()}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-white/40">Duration</span>
-                <span className="text-white/80">
-                  {duration === "0" ? "Ongoing" : `${duration} days`}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-white/40">Status</span>
-                <span className="text-success-400 font-medium flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-success-400 animate-pulse"></span>
-                  Active
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl bg-success-500/10 border border-success-500/20 p-4 mb-8 text-left">
-            <p className="text-sm text-success-400">
-              ✓ Your campaign is now running on Facebook and Instagram. You can monitor performance on your dashboard.
-            </p>
-          </div>
-
-          <div className="space-y-3">
-            <Link
-              href="/dashboard"
-              className="block w-full py-4 px-6 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 text-white font-semibold text-sm text-center transition-transform hover:scale-[1.02]"
-            >
-              View Campaign Performance →
-            </Link>
             <button
-              onClick={() => {
-                setBrandName("");
-                setProductName("");
-                setDescription("");
-                setAudience("");
-                setGoal("Drive Website Sales");
-                setTone("Let AI decide (recommended)");
-                setPlatform("both");
-                setDailyBudget("");
-                setDuration("7");
-                setLocations(["Lagos"]);
-                setMediaFile(null);
-                setMediaPreviewUrl("");
-                setMediaCloudUrl("");
-                setMediaValidation(null);
-                setGeneratedCopy(null);
-                setLaunchResult(null);
-                setLaunchError("");
-                setViewState("media");
-              }}
-              className="block w-full py-4 px-6 rounded-xl border border-border-subtle text-white/60 font-medium text-sm hover:text-white hover:border-white/20 transition-colors"
+              onClick={handleGenerate}
+              className="w-full mt-3 py-3 px-6 rounded-xl border border-border-subtle text-white/60 font-medium text-sm hover:text-white hover:border-white/20 transition-colors cursor-pointer bg-transparent flex items-center justify-center gap-2"
             >
-              Create Another Campaign
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="1 4 1 10 7 10" />
+                <polyline points="23 20 23 14 17 14" />
+                <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
+              </svg>
+              Generate Another Variation
             </button>
+
+            <p className="text-center text-xs text-white/20 mt-4">
+              Your brief will contain everything you need to set up this campaign in Meta Ads Manager
+            </p>
           </div>
         </main>
       )}
 
-      {/* Toast */}
-      {showToast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in-up">
-          <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-surface-raised border border-success-500/30 shadow-2xl shadow-black/50">
-            <div className="w-6 h-6 rounded-full bg-success-500/20 flex items-center justify-center">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-success-400">
+      {/* -- STATE 4: BRIEF -- */}
+      {viewState === "brief" && generatedCopy && (
+        <main className="max-w-3xl mx-auto px-4 sm:px-6 py-10 relative flex-1 w-full">
+          {/* Brief Header */}
+          <div className="text-center mb-10 animate-fade-in-up">
+            <div className="w-16 h-16 rounded-full bg-success-500/10 border border-success-500/20 flex items-center justify-center mx-auto mb-6">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-success-400">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
-            <span className="text-sm text-white font-medium">Deploying campaign to Meta Ads...</span>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-2">
+              Your Campaign Brief is Ready
+            </h1>
+            <p className="text-sm text-white/40">
+              Take this into Meta Ads Manager to set up your campaign
+            </p>
           </div>
-        </div>
+
+          <div className="space-y-6 animate-fade-in-up-delay-1">
+            {/* SECTION: Ad Copy */}
+            <div className="rounded-2xl bg-surface-raised border border-border-subtle p-6 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-brand-500/50 to-brand-400/50" />
+              <h3 className="text-sm font-bold text-white/50 uppercase tracking-widest mb-5">Ad Copy</h3>
+              <div className="space-y-4">
+                {[
+                  { label: "Headline", value: generatedCopy.headline, key: "brief-headline" },
+                  { label: "Primary Text", value: generatedCopy.primaryText, key: "brief-primary" },
+                  { label: "Description", value: generatedCopy.description, key: "brief-desc" },
+                  { label: "Call to Action", value: selectedCta || generatedCopy.cta, key: "brief-cta" },
+                ].map((item) => (
+                  <div key={item.key}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] uppercase tracking-wider text-white/50 font-semibold">{item.label}</span>
+                      <button
+                        onClick={() => handleCopy(item.value, item.key)}
+                        className="text-xs text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
+                      >
+                        {copiedField === item.key ? (
+                          <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> Copied!</>
+                        ) : (
+                          <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg> Copy</>
+                        )}
+                      </button>
+                    </div>
+                    <div className="bg-white/[0.02] border border-white/5 rounded-xl p-3">
+                      <p className="text-sm text-white/80 leading-relaxed whitespace-pre-wrap break-words">{item.value}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* SECTION: Targeting */}
+            <div className="rounded-2xl bg-surface-raised border border-border-subtle p-6">
+              <h3 className="text-sm font-bold text-white/50 uppercase tracking-widest mb-5">Targeting Settings</h3>
+
+              {storeInsights ? (
+                <div className="space-y-5">
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Locations</span>
+                    <p className="text-sm text-white/80 mt-1">
+                      {storeInsights.orders?.top_locations?.length > 0
+                        ? storeInsights.orders.top_locations.map((l: any) => `${l.city}, ${l.country}`).join(" · ")
+                        : "No order data yet — add locations manually based on your target market"}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Age Range</span>
+                      <p className="text-sm text-white/80 mt-1">Check Meta audience insights</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Gender</span>
+                      <p className="text-sm text-white/80 mt-1">All</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Interests to Add in Meta</span>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {(storeInsights._interests || []).length > 0
+                        ? storeInsights._interests.map((interest: string, i: number) => (
+                            <span key={i} className="px-3 py-1 rounded-full text-xs font-medium bg-brand-500/10 border border-brand-500/20 text-brand-400">{interest}</span>
+                          ))
+                        : <span className="text-xs text-white/40 italic">Connect your Shopify store for AI-inferred interests</span>
+                      }
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Behaviours to Add</span>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {["Engaged Shoppers", "Online Shoppers"].map((b) => (
+                        <span key={b} className="px-3 py-1 rounded-full text-xs font-medium bg-success-500/10 border border-success-500/20 text-success-400">{b}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl bg-brand-500/5 border border-brand-500/20 p-4">
+                  <p className="text-sm text-brand-400">
+                    Connect your Shopify store in Settings for personalised targeting based on your actual customers.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* SECTION: Budget */}
+            <div className="rounded-2xl bg-surface-raised border border-border-subtle p-6">
+              <h3 className="text-sm font-bold text-white/50 uppercase tracking-widest mb-5">Budget</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Recommended Daily Budget</span>
+                  <p className="text-2xl font-bold text-white mt-1">
+                    ₦{dailyBudget ? parseFloat(dailyBudget).toLocaleString() : "5,000"}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Campaign Duration</span>
+                  <p className="text-2xl font-bold text-white mt-1">
+                    {duration === "0" ? "Ongoing" : `${duration} days`}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION: Timing */}
+            {storeInsights?.orders?.peak_days?.length > 0 && (
+              <div className="rounded-2xl bg-surface-raised border border-border-subtle p-6">
+                <h3 className="text-sm font-bold text-white/50 uppercase tracking-widest mb-5">Timing</h3>
+                <div>
+                  <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Best Days to Run</span>
+                  <p className="text-sm text-white/80 mt-1">{storeInsights.orders.peak_days.join(", ")}</p>
+                </div>
+              </div>
+            )}
+
+            {/* SECTION: Actions */}
+            <div className="space-y-3 pt-4 pb-10">
+              <button
+                onClick={() => {
+                  const briefText = [
+                    "═══ CAMPAIGN BRIEF ═══",
+                    "",
+                    "HEADLINE:",
+                    generatedCopy.headline,
+                    "",
+                    "PRIMARY TEXT:",
+                    generatedCopy.primaryText,
+                    "",
+                    "DESCRIPTION:",
+                    generatedCopy.description,
+                    "",
+                    "CTA: " + (selectedCta || generatedCopy.cta),
+                    "",
+                    "── TARGETING ──",
+                    storeInsights
+                      ? `Locations: ${storeInsights.orders?.top_locations?.map((l: any) => `${l.city}, ${l.country}`).join(", ") || "Set manually"}`
+                      : "Locations: Set manually",
+                    "Gender: All",
+                    "Behaviours: Engaged Shoppers, Online Shoppers",
+                    "",
+                    "── BUDGET ──",
+                    `Daily: ₦${dailyBudget ? parseFloat(dailyBudget).toLocaleString() : "5,000"}`,
+                    `Duration: ${duration === "0" ? "Ongoing" : duration + " days"}`,
+                    "",
+                    "── TIMING ──",
+                    storeInsights?.orders?.peak_days?.length > 0
+                      ? `Best days: ${storeInsights.orders.peak_days.join(", ")}`
+                      : "No timing data yet",
+                    "",
+                    "Generated by omni-target"
+                  ].join("\n");
+                  navigator.clipboard.writeText(briefText);
+                  setCopiedField("full-brief");
+                  setTimeout(() => setCopiedField(null), 2000);
+                }}
+                className="group relative w-full py-4 px-6 rounded-xl font-semibold text-sm transition-all duration-300 cursor-pointer"
+              >
+                <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 transition-all duration-300 group-hover:from-brand-500 group-hover:to-brand-400" />
+                <span className="relative flex items-center justify-center gap-2 text-white">
+                  {copiedField === "full-brief" ? (
+                    <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> Brief Copied to Clipboard!</>
+                  ) : (
+                    <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg> Copy Full Brief</>
+                  )}
+                </span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setBrandName("");
+                  setProductName("");
+                  setDescription("");
+                  setAudience("");
+                  setGoal("Drive Website Sales");
+                  setTone("Let AI decide (recommended)");
+                  setPlatform("both");
+                  setDailyBudget("");
+                  setDuration("7");
+                  setLocations(["Lagos"]);
+                  setMediaFile(null);
+                  setMediaPreviewUrl("");
+                  setMediaCloudUrl("");
+                  setMediaValidation(null);
+                  setGeneratedCopy(null);
+                  setSelectedCta("");
+                  setViewState("media");
+                }}
+                className="w-full py-4 px-6 rounded-xl border border-border-subtle text-white/60 font-medium text-sm hover:text-white hover:border-white/20 transition-colors cursor-pointer bg-transparent"
+              >
+                Create New Campaign
+              </button>
+            </div>
+          </div>
+        </main>
       )}
     </div>
   );
