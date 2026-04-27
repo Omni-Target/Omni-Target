@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -18,7 +18,7 @@ interface GeneratedCopy {
   copywriterNote: string;
 }
 
-export default function CampaignsPage() {
+function CampaignsContent() {
   const router = useRouter();
   
   const { user } = useUser();
@@ -1168,5 +1168,17 @@ export default function CampaignsPage() {
         </main>
       )}
     </div>
+  );
+}
+
+export default function CampaignsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full border-2 border-brand-500/20 border-t-brand-500 animate-spin" />
+      </div>
+    }>
+      <CampaignsContent />
+    </Suspense>
   );
 }
