@@ -15,6 +15,9 @@ export interface StoreProduct {
   image_url: string;
   should_advertise: boolean;
   reason?: string;
+  description: string;
+  tags: string[];
+  product_type: string;
 }
 
 export interface StoreData {

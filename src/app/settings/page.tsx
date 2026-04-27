@@ -74,8 +74,13 @@ export default async function SettingsPage({
           </div>
 
           {/* Card 2 — Meta Ads Integration */}
-          <div className="p-6 rounded-2xl bg-white/[0.04] border border-border-subtle backdrop-blur-sm">
-            <h2 className="text-lg font-semibold text-white mb-4">Meta Ads Account</h2>
+          <div className="p-6 rounded-2xl bg-white/[0.02] border border-border-subtle backdrop-blur-sm">
+            <div className="mb-6">
+              <h2 className="text-base font-semibold text-white/80 mb-1">Optional — Connect Meta Ads</h2>
+              <p className="text-sm text-white/40">
+                Connect your Meta account to enable pixel health tracking. Not required to generate campaign briefs.
+              </p>
+            </div>
             {metaConnected ? (
               !integration.meta_page_id ? (
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

@@ -49,6 +49,35 @@ export default function CampaignsPage() {
   const searchParams = useSearchParams();
   const [autoFilledFromStore, setAutoFilledFromStore] = useState(false);
 
+  const paramProductName = searchParams.get("product_name") || "";
+  const paramDescription = searchParams.get("product_description") || "";
+  const paramImage = searchParams.get("product_image") || "";
+  const paramPrice = searchParams.get("product_price") || "";
+  const paramTags = searchParams.get("product_tags") || "";
+  const paramType = searchParams.get("product_type") || "";
+
+  // Handle URL params for auto-fill
+  useEffect(() => {
+    if (paramProductName) {
+      setProductName(paramProductName);
+      setAutoFilledFromStore(true);
+      
+      // Build a rich description from 
+      // available data
+      if (paramDescription) {
+        setDescription(paramDescription);
+      }
+      
+      // Pre-fill media from product image
+      if (paramImage) {
+        setMediaPreviewUrl(paramImage);
+        setMediaCloudUrl(paramImage);
+        // Skip media upload step
+        setViewState("input");
+      }
+    }
+  }, [paramProductName, paramDescription, paramImage]);
+
   // Form State
   const [brandName, setBrandName] = useState("");
   const [productName, setProductName] = useState("");
@@ -67,24 +96,6 @@ export default function CampaignsPage() {
   const [storeInsights, setStoreInsights] = useState<any>(null);
   const [loadingInsights, setLoadingInsights] = useState(false);
 
-  // Handle URL params for auto-fill
-  useEffect(() => {
-    const paramProduct = searchParams.get("product_name");
-    const paramDesc = searchParams.get("product_description");
-    const paramImage = searchParams.get("product_image");
-
-    if (paramProduct || paramDesc || paramImage) {
-      if (paramProduct) setProductName(paramProduct);
-      if (paramDesc) setDescription(paramDesc);
-      if (paramImage) {
-        setMediaPreviewUrl(paramImage);
-        // Skip media upload step — go straight to input
-        setViewState("input");
-      }
-      setAutoFilledFromStore(true);
-    }
-  }, [searchParams]);
-
   useEffect(() => {
     setLoadingInsights(true);
     fetch("/api/store/data", { cache: "no-store" })
@@ -92,6 +103,9 @@ export default function CampaignsPage() {
       .then((data) => {
         if (data.connected && data.data) {
           setStoreInsights(data.data);
+          if (data.data.store?.name) {
+            setBrandName(data.data.store.name);
+          }
         }
         setLoadingInsights(false);
       })
@@ -434,11 +448,24 @@ export default function CampaignsPage() {
 
           {/* Auto-fill banner */}
           {autoFilledFromStore && (
-            <div className="mb-6 flex items-center gap-3 px-4 py-3 rounded-xl bg-success-500/10 border border-success-500/20 text-sm text-success-400 animate-fade-in-up">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              <span>Product loaded from your store. Review the details below.</span>
+            <div className="mb-6 flex flex-col gap-2 px-4 py-3 rounded-xl bg-success-500/10 border border-success-500/20 animate-fade-in-up">
+              <div className="flex items-center gap-3 text-sm text-success-400">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>Product loaded from your store. Review the details below.</span>
+              </div>
+              <div className="flex gap-4 text-sm text-white/60 mt-2">
+                {paramPrice && (
+                  <span>Price: ₦{parseFloat(paramPrice).toLocaleString()}</span>
+                )}
+                {paramType && (
+                  <span>Type: {paramType}</span>
+                )}
+                {paramTags && (
+                  <span>Tags: {paramTags.split(",").slice(0,3).join(", ")}</span>
+                )}
+              </div>
             </div>
           )}
 

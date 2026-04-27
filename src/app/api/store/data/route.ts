@@ -16,7 +16,7 @@ export async function GET() {
   const { data: integration } = await supabaseAdmin
     .from("user_integrations")
     .select(
-      "shopify_store_url, shopify_access_token, shopify_custom_domain"
+      "shopify_store_url, shopify_access_token, shopify_custom_domain, store_snapshot, store_snapshot_at"
     )
     .eq("clerk_user_id", userId)
     .single();
@@ -28,6 +28,23 @@ export async function GET() {
     });
   }
 
+  // Check if cache is fresh (< 6 hours)
+  const cacheAge = integration?.store_snapshot_at
+    ? Date.now() - new Date(integration.store_snapshot_at).getTime()
+    : Infinity;
+
+  const SIX_HOURS = 6 * 60 * 60 * 1000;
+
+  if (integration?.store_snapshot && cacheAge < SIX_HOURS) {
+    console.log("Returning cached store data");
+    return Response.json({
+      connected: true,
+      data: integration.store_snapshot,
+      cached: true
+    });
+  }
+
+
   try {
     const storeData = await fetchShopifyStoreData(
       integration.shopify_store_url,
@@ -35,13 +52,17 @@ export async function GET() {
     );
 
     // Cache in Supabase for 24 hours
-    await supabaseAdmin
+    const { error: cacheError } = await supabaseAdmin
       .from("user_integrations")
       .update({
         store_snapshot: storeData,
         store_snapshot_at: new Date().toISOString(),
       })
       .eq("clerk_user_id", userId);
+
+    if (cacheError) {
+      console.error("Cache save error:", cacheError);
+    }
 
     return Response.json({
       connected: true,

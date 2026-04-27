@@ -23,6 +23,8 @@ interface ShopifyOrder {
 interface ShopifyProduct {
   id: number;
   title: string;
+  body_html: string;
+  tags: string;
   product_type: string;
   vendor: string;
   variants: {
@@ -93,7 +95,7 @@ export async function fetchShopifyStoreData(
   const productsData = await shopifyGet<{ products: ShopifyProduct[] }>(
     shopDomain,
     accessToken,
-    "products.json?limit=50&status=active&fields=id,title,variants,images,product_type,vendor"
+    "products.json?limit=50&status=active&fields=id,title,body_html,variants,images,product_type,vendor,tags,collections"
   );
 
   const rawProducts = productsData?.products || [];
@@ -209,6 +211,16 @@ export async function fetchShopifyStoreData(
       image_url: product.images[0]?.src || "",
       should_advertise: !allOutOfStock,
       reason: allOutOfStock ? "Out of stock" : undefined,
+      description: product.body_html
+        ?.replace(/<[^>]*>/g, " ")
+        ?.replace(/\\s+/g, " ")
+        ?.trim()
+        ?.slice(0, 300) || "",
+      tags: product.tags 
+        ? product.tags.split(",")
+          .map((t: string) => t.trim())
+        : [],
+      product_type: product.product_type || "",
     };
   });
 

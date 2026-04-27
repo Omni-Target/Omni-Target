@@ -2,7 +2,6 @@ import { clerkClient } from "@clerk/nextjs/server";
 
 export type OnboardingStep =
   | "connect-shopify"
-  | "connect-meta"
   | "audit"
   | "complete";
 
@@ -20,7 +19,6 @@ export async function getOnboardingStep(
 
   if (
     step === "connect-shopify" ||
-    step === "connect-meta" ||
     step === "audit" ||
     step === "complete"
   ) {

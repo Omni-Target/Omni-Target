@@ -174,7 +174,7 @@ export async function GET(request: Request) {
         },
         body: JSON.stringify({ 
           shopifyStoreUrl: shop,
-          onboardingStep: "connect-meta"
+          onboardingStep: "audit"
         }),
       }
     );
@@ -182,7 +182,7 @@ export async function GET(request: Request) {
     // Redirect to next onboarding step
     return Response.redirect(
       `${process.env.NEXT_PUBLIC_APP_URL}` +
-      `/onboarding/connect-meta`
+      `/onboarding/audit`
     );
 
   } catch (err) {

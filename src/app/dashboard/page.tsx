@@ -312,7 +312,14 @@ export default function DashboardPage() {
                         </span>
                         {product.should_advertise ? (
                           <Link
-                            href={`/campaigns?product_name=${encodeURIComponent(product.name)}&product_description=${encodeURIComponent(`${product.name} — \u20a6${product.price.toLocaleString()}. ${product.units_sold} units sold.`)}&product_image=${encodeURIComponent(product.image_url || "")}`}
+                            href={`/campaigns?` +
+                              `product_name=${encodeURIComponent(product.name)}&` +
+                              `product_description=${encodeURIComponent(product.description || product.name)}&` +
+                              `product_type=${encodeURIComponent(product.product_type || "")}&` +
+                              `product_tags=${encodeURIComponent(product.tags?.join(",") || "")}&` +
+                              `product_price=${product.price}&` +
+                              `product_image=${encodeURIComponent(product.image_url || "")}`
+                            }
                             className="text-brand-400 hover:text-brand-300 font-medium transition-colors no-underline"
                           >
                             Use in Campaign →

@@ -103,6 +103,7 @@ function ConnectShopifyContent() {
       {/* Input */}
       <div className="mb-4 animate-fade-in-up-delay-2">
         <input
+          suppressHydrationWarning
           id="shopify-url-input"
           type="text"
           value={storeUrl}
@@ -180,8 +181,8 @@ function ConnectShopifyContent() {
       {/* Skip option */}
       <button 
         onClick={async () => {
-          await advanceOnboardingStep("connect-meta");
-          router.push("/onboarding/connect-meta");
+          await advanceOnboardingStep("audit");
+          router.push("/onboarding/audit");
         }}
         className="text-xs text-white/30 hover:text-white/50 transition-colors mt-4 underline underline-offset-2"
       >
