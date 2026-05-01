@@ -1,10 +1,19 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server"
 import { NextResponse } from "next/server"
 
+// Map old step values to new ones
+const STEP_MAP: Record<string, string> = {
+  "connect-shopify": "connect-shopify",
+  "connect-meta": "audit", // legacy → new
+  "audit": "audit",
+  "complete": "complete",
+};
+
 const isPublicRoute = createRouteMatcher([
   '/login(.*)',
   '/signup(.*)',
-  '/forgot-password(.*)'
+  '/forgot-password(.*)',
+  '/onboarding/connect-meta', // legacy route — serves a redirect page
 ])
 
 const isOnboardingRoute = createRouteMatcher([
@@ -21,17 +30,13 @@ export default clerkMiddleware(async (auth, request) => {
     // Only enforce onboarding on standard page routes
     if (userId && !request.nextUrl.pathname.startsWith('/api/') && !request.nextUrl.pathname.startsWith('/_next/')) {
       const metadata = (session.sessionClaims?.publicMetadata || session.sessionClaims?.metadata || {}) as any;
-      let step = metadata.onboardingStep || "connect-shopify";
-
-      // If user's step is "connect-meta" (old data), treat it as "audit"
-      if (step === "connect-meta") {
-        step = "audit";
-      }
+      const rawStep = (metadata.onboardingStep as string) || "connect-shopify";
+      const currentStep = STEP_MAP[rawStep] || "connect-shopify";
 
       const currentPath = request.nextUrl.pathname;
 
-      if (step !== "complete") {
-        const expectedRoute = `/onboarding/${step}`;
+      if (currentStep !== "complete") {
+        const expectedRoute = `/onboarding/${currentStep}`;
         
         // If not on expected route, redirect
         if (currentPath !== expectedRoute) {

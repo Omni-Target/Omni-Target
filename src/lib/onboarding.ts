@@ -17,12 +17,12 @@ export async function getOnboardingStep(
   const step = (user.publicMetadata as { onboardingStep?: string })
     ?.onboardingStep;
 
-  if (
-    step === "connect-shopify" ||
-    step === "audit" ||
-    step === "complete"
-  ) {
-    return step as OnboardingStep;
+  // Handle legacy "connect-meta" step
+  if (step === "connect-meta" || step === "audit") {
+    return "audit";
+  }
+  if (step === "complete") {
+    return "complete";
   }
 
   return "connect-shopify";
