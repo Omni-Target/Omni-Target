@@ -78,6 +78,7 @@ export default function AuditPage() {
   const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
   const [auditError, setAuditError] = useState("");
   const [scanning, setScanning] = useState(true);
+  const [completing, setCompleting] = useState(false);
 
   useEffect(() => {
     const stepInterval = setInterval(() => {
@@ -111,8 +112,22 @@ export default function AuditPage() {
   }, []);
 
   const handleContinue = async () => {
-    await advanceOnboardingStep("complete");
-    router.push("/dashboard");
+    setCompleting(true);
+    try {
+      await fetch("/api/user/update-metadata", {
+        method: "POST", 
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          onboardingStep: "complete"
+        }),
+      });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      window.location.href = "/dashboard";
+    }
   };
 
   const scoreColor = (score: number) => {
@@ -317,14 +332,17 @@ export default function AuditPage() {
           {/* Continue Button */}
           <button
             onClick={handleContinue}
-            className="group relative w-full py-4 px-6 rounded-xl font-semibold text-sm transition-all duration-300 cursor-pointer mt-4"
+            disabled={completing}
+            className="group relative w-full py-4 px-6 rounded-xl font-semibold text-sm transition-all duration-300 cursor-pointer mt-4 disabled:opacity-70 disabled:cursor-not-allowed"
           >
             <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 transition-all duration-300 group-hover:from-brand-500 group-hover:to-brand-400" />
             <span className="relative flex items-center justify-center gap-2 text-white">
-              Continue to Dashboard
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-200 group-hover:translate-x-1">
-                <path d="M5 12h14M12 5l7 7-7 7" />
-              </svg>
+              {completing ? "Taking you to your dashboard..." : "Continue to Dashboard"}
+              {!completing && (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-200 group-hover:translate-x-1">
+                  <path d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+              )}
             </span>
           </button>
         </div>
@@ -344,9 +362,10 @@ export default function AuditPage() {
           <p className="text-sm text-error-400 mb-6">{auditError}</p>
           <button
             onClick={handleContinue}
-            className="px-6 py-3 rounded-xl bg-brand-500 text-white text-sm font-medium transition-colors hover:bg-brand-400 cursor-pointer"
+            disabled={completing}
+            className="px-6 py-3 rounded-xl bg-brand-500 text-white text-sm font-medium transition-colors hover:bg-brand-400 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            Continue to Dashboard →
+            {completing ? "Taking you to your dashboard..." : "Continue to Dashboard →"}
           </button>
         </div>
       )}
