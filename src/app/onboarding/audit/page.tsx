@@ -7,7 +7,7 @@ import { advanceOnboardingStep } from "../actions";
 
 const STEPS = [
   {
-    text: "Authenticating Meta Business Manager...",
+    text: "Syncing Store Data...",
     icon: (
       <svg
         width="16"
@@ -25,7 +25,7 @@ const STEPS = [
     ),
   },
   {
-    text: "Scanning Ad Accounts...",
+    text: "Analyzing Performance Metrics...",
     icon: (
       <svg
         width="16"
@@ -43,7 +43,7 @@ const STEPS = [
     ),
   },
   {
-    text: "Checking for Active Purchase Pixels...",
+    text: "Generating Intelligence Report...",
     icon: (
       <svg
         width="16"
@@ -130,7 +130,7 @@ export default function AuditPage() {
     } catch (err) {
       console.error(err);
     } finally {
-      window.location.href = "/dashboard";
+      router.push("/dashboard");
     }
   };
 
