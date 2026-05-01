@@ -38,8 +38,10 @@ export default clerkMiddleware(async (auth, request) => {
       if (currentStep !== "complete") {
         const expectedRoute = `/onboarding/${currentStep}`;
         
-        // If not on expected route, redirect
-        if (currentPath !== expectedRoute) {
+        // Only enforce redirection if they are outside the onboarding flow.
+        // Within /onboarding, we allow free navigation to prevent redirect loops
+        // caused by stale JWT session claims after step updates.
+        if (!isOnboardingRoute(request)) {
           return NextResponse.redirect(new URL(expectedRoute, request.url));
         }
       } else {
