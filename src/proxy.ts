@@ -1,4 +1,4 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server"
+import { clerkMiddleware, createRouteMatcher, clerkClient } from "@clerk/nextjs/server"
 import { NextResponse } from "next/server"
 
 // Map old step values to new ones
@@ -29,18 +29,18 @@ export default clerkMiddleware(async (auth, request) => {
     
     // Only enforce onboarding on standard page routes
     if (userId && !request.nextUrl.pathname.startsWith('/api/') && !request.nextUrl.pathname.startsWith('/_next/')) {
-      const metadata = (session.sessionClaims?.publicMetadata || session.sessionClaims?.metadata || {}) as any;
-      const rawStep = (metadata.onboardingStep as string) || "connect-shopify";
+      // Fetch the REAL user metadata from Clerk's API.
+      // session.sessionClaims does NOT include publicMetadata by default,
+      // so we must fetch the user directly to get the actual onboarding step.
+      const client = await clerkClient()
+      const user = await client.users.getUser(userId)
+      const rawStep = (user.publicMetadata?.onboardingStep as string) || "connect-shopify";
       const currentStep = STEP_MAP[rawStep] || "connect-shopify";
-
-      const currentPath = request.nextUrl.pathname;
 
       if (currentStep !== "complete") {
         const expectedRoute = `/onboarding/${currentStep}`;
         
-        // Only enforce redirection if they are outside the onboarding flow.
-        // Within /onboarding, we allow free navigation to prevent redirect loops
-        // caused by stale JWT session claims after step updates.
+        // If user is outside the onboarding flow, redirect them in
         if (!isOnboardingRoute(request)) {
           return NextResponse.redirect(new URL(expectedRoute, request.url));
         }

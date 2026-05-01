@@ -125,13 +125,11 @@ export default function AuditPage() {
           onboardingStep: "complete"
         }),
       });
-      // Force Clerk to refresh the local JWT session claim
-      await user?.reload();
     } catch (err) {
-      console.error(err);
-    } finally {
-      router.push("/dashboard");
+      console.error("Failed to update onboarding step:", err);
     }
+    // Full page navigation so the middleware re-checks the fresh metadata
+    window.location.href = "/dashboard";
   };
 
   const scoreColor = (score: number) => {
