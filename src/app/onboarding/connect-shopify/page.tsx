@@ -86,7 +86,7 @@ function ConnectShopifyContent() {
       {/* Step indicator */}
       <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/20 mb-6 animate-fade-in-up">
         <span className="text-xs font-medium text-brand-400">
-          Step 1 of 3
+          Step 1 of 2
         </span>
       </div>
 

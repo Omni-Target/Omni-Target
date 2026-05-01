@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useUser } from "@clerk/nextjs";
 import { advanceOnboardingStep } from "../actions";
 
 const STEPS = [
@@ -74,6 +75,7 @@ interface AuditResult {
 
 export default function AuditPage() {
   const router = useRouter();
+  const { user } = useUser();
   const [currentStep, setCurrentStep] = useState(0);
   const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
   const [auditError, setAuditError] = useState("");
@@ -123,6 +125,8 @@ export default function AuditPage() {
           onboardingStep: "complete"
         }),
       });
+      // Force Clerk to refresh the local JWT session claim
+      await user?.reload();
     } catch (err) {
       console.error(err);
     } finally {
@@ -152,7 +156,7 @@ export default function AuditPage() {
       {/* Step indicator */}
       <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/20 mb-6 animate-fade-in-up">
         <span className="text-xs font-medium text-brand-400">
-          Step 3 of 3
+          Step 2 of 2
         </span>
       </div>
 
