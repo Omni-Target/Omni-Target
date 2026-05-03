@@ -1,81 +1,54 @@
 import { StoreData } from "./store-data";
 import Anthropic from "@anthropic-ai/sdk";
 
-// ─── FIX 1: City → State mapping ────────────────────────────────────────────
+// ─── FIX 1 & 2: Global Region & Currency Context ────────────────────────────
 
-const NIGERIA_CITY_TO_STATE: Record<string, string> = {
-  // Lagos areas
-  surulere: "Lagos",
-  ikoyi: "Lagos",
-  lekki: "Lagos",
-  yaba: "Lagos",
-  ikeja: "Lagos",
-  "victoria island": "Lagos",
-  ajah: "Lagos",
-  "lagos island": "Lagos",
-  festac: "Lagos",
-  "isale eko": "Lagos",
-  mushin: "Lagos",
-  ojodu: "Lagos",
-  magodo: "Lagos",
-  gbagada: "Lagos",
-  maryland: "Lagos",
-  // Abuja areas
-  garki: "Abuja",
-  wuse: "Abuja",
-  maitama: "Abuja",
-  asokoro: "Abuja",
-  gwarinpa: "Abuja",
-  abuja: "Abuja",
-  // Other states
-  "port harcourt": "Rivers",
-  ph: "Rivers",
-  enugu: "Enugu",
-  kano: "Kano",
-  ibadan: "Oyo",
-  benin: "Edo",
-  "benin city": "Edo",
-  warri: "Delta",
-  owerri: "Imo",
-  calabar: "Cross River",
+export const CURRENCY_TO_REGION: Record<string, string> = {
+  "NGN": "NG",
+  "GBP": "GB",
+  "EUR": "EU", 
+  "AED": "AE",
+  "USD": "US",
+  "CAD": "CA",
+  "AUD": "AU",
+  "GHS": "GH",
+  "KES": "KE",
+  "ZAR": "ZA",
 };
 
-const HIGH_PERFORMANCE_STATES = ["Lagos", "Abuja", "Rivers"];
-
-export interface LocationEntry {
+export interface LocationGroup {
   name: string;
+  count: number;
+  percentage: number;
   source: "from_data" | "recommended";
-  percentage?: number;
 }
 
-function buildLocations(
-  topLocations: StoreData["orders"]["top_locations"]
-): LocationEntry[] {
-  const stateMap = new Map<string, number>(); // state → max percentage
-
-  // Map each city to its state and accumulate percentages
-  for (const loc of topLocations) {
-    const key = loc.city.toLowerCase().trim();
-    const state = NIGERIA_CITY_TO_STATE[key] ?? loc.city;
-    const existing = stateMap.get(state) ?? 0;
-    stateMap.set(state, Math.max(existing, loc.percentage));
+function buildLocationTargeting(
+  storeData: StoreData
+): LocationGroup[] {
+  const locations: LocationGroup[] = [];
+  
+  if (storeData.orders.top_locations.length === 0) {
+    return [];
   }
 
-  const results: LocationEntry[] = [];
+  // Use actual order locations
+  // Group cities by deduplication
+  // Take top 5 by percentage
+  const topLocations = storeData.orders
+    .top_locations
+    .filter(l => l.percentage >= 5)
+    .slice(0, 5)
+    .map(l => ({
+      name: l.city,
+      count: 0,
+      percentage: l.percentage,
+      source: "from_data" as const
+    }));
 
-  // Add data-derived states
-  for (const [state, pct] of stateMap.entries()) {
-    results.push({ name: state, source: "from_data", percentage: pct });
-  }
+  locations.push(...topLocations);
 
-  // Add high-performance states not already present
-  for (const state of HIGH_PERFORMANCE_STATES) {
-    if (!stateMap.has(state)) {
-      results.push({ name: state, source: "recommended" });
-    }
-  }
-
-  return results;
+  return locations;
 }
 
 // ─── FIX 2: AI Age Range ─────────────────────────────────────────────────────
@@ -90,21 +63,33 @@ async function inferAgeRange(
   };
 
   try {
+    const currency = storeData.store.currency || "USD";
+    const storeRegion = CURRENCY_TO_REGION[currency] || "OTHER";
+
     const productSample = storeData.products
       .slice(0, 5)
-      .map((p) => `${p.name} — ₦${p.price.toLocaleString()}`)
+      .map((p) => `${p.name} — ${p.price.toLocaleString()} ${currency}`)
       .join("\n");
 
-    const agePrompt = `You are a consumer research analyst.
-Based on these products and their price points, estimate the most likely buyer age range that would convert for Meta ads.
+    const agePrompt = `
+You are a consumer research analyst.
+Based on these products and price points,
+estimate the most likely buyer age range
+for Meta ads in ${storeRegion} market.
 
 Products:
 ${productSample}
 
-Store AOV: ₦${Math.round(storeData.orders.average_order_value)}
+Store AOV: ${Math.round(
+  storeData.orders.average_order_value
+)} ${currency}
 
-Return ONLY a JSON object, no markdown:
-{"age_min": number, "age_max": number, "reasoning": "one sentence explanation"}`;
+Return ONLY valid JSON, no markdown:
+{
+  "age_min": number,
+  "age_max": number,
+  "reasoning": "one sentence"
+}`;
 
     const client = new Anthropic();
     const message = await client.messages.create({
@@ -138,9 +123,11 @@ Return ONLY a JSON object, no markdown:
 
 async function inferBehaviours(storeData: StoreData): Promise<string[]> {
   try {
+    const currency = storeData.store.currency || "USD";
+
     const productSample = storeData.products
       .slice(0, 5)
-      .map((p) => `${p.name} — ₦${p.price.toLocaleString()}`)
+      .map((p) => `${p.name} — ${p.price.toLocaleString()} ${currency}`)
       .join("\n");
 
     const behaviourPrompt = `You are a Meta Ads specialist.
@@ -150,7 +137,7 @@ Only suggest behaviours that actually exist in Meta Ads Manager audience targeti
 
 Products:
 ${productSample}
-Store AOV: ₦${Math.round(storeData.orders.average_order_value)}
+Store AOV: ${Math.round(storeData.orders.average_order_value)} ${currency}
 
 Always include:
 - "Engaged Shoppers"
@@ -201,21 +188,47 @@ async function inferInterests(
   );
 
   try {
-    const productList = storeData.products
+    const currency = storeData.store.currency || "USD";
+    const storeRegion = CURRENCY_TO_REGION[currency] || "OTHER";
+    
+    const productSample = storeData.products
       .slice(0, 10)
       .map((p) => p.name)
       .join(", ");
 
-    const prompt = `You are a Meta Ads specialist.
-Based on these product names from a Shopify store, suggest 5-8 relevant Facebook/Instagram interest categories to target. Only suggest interests that actually exist in Meta Ads Manager.
+    const prompt = `
+You are a Meta Ads specialist.
+Based on these products from a Shopify 
+store, suggest 5-8 relevant Facebook 
+and Instagram interest categories.
 
-Products: ${productList}
-Store revenue last 30 days: ${storeData.orders.revenue_last_30_days}
-Top customer locations: ${storeData.orders.top_locations.map((l) => l.city).join(", ")}
+Only suggest interests that actually 
+exist in Meta Ads Manager.
+
+Products: ${productSample}
+Store market: ${storeRegion}
+Store currency: ${currency}
+Store AOV: ${Math.round(
+  storeData.orders.average_order_value
+)} ${currency}
+
+Always include:
+- "Online shopping"
+- "Fashion"
+
+Add 3-6 more specific to these 
+products and this market.
+For ${storeRegion === "NG" 
+  ? "Nigerian market: consider African fashion, Afrobeats lifestyle, Lagos social scene where relevant" 
+  : storeRegion === "GB"
+    ? "UK market: consider sustainable fashion, British style, Vogue UK readers where relevant"
+    : storeRegion === "AE"
+      ? "Gulf market: consider luxury fashion, modest fashion where relevant, Dubai lifestyle"
+      : "global fashion audience"}
 
 Return ONLY a JSON array of strings.
 No explanation. No markdown.
-Example: ["Fashion", "Online shopping", "Luxury goods"]`;
+`;
 
     const client = new Anthropic();
     const message = await client.messages.create({
@@ -358,7 +371,7 @@ function buildTiming(
 
 export interface MetaRecommendations {
   targeting: {
-    locations: LocationEntry[];
+    locations: LocationGroup[];
     age_min: number;
     age_max: number;
     age_reasoning: string;
@@ -403,7 +416,7 @@ export async function generateRecommendations(
     ]);
 
   // --- TARGETING ---
-  const locations = buildLocations(storeData.orders.top_locations);
+  const locations = buildLocationTargeting(storeData);
   const gender: "all" | "female" | "male" = "all";
 
   // --- BUDGET ---
@@ -418,10 +431,11 @@ export async function generateRecommendations(
     budgetReasoning =
       "Starting budget for a new campaign with no historical data";
   } else {
+    const currency = storeData.store.currency || "USD";
     const tenPercent = monthlyRevenue * 0.1;
     const dailyFromRevenue = Math.round(tenPercent / 30);
     recommendedDaily = Math.min(Math.max(dailyFromRevenue, 3000), 50000);
-    budgetReasoning = `Based on ₦${Math.round(monthlyRevenue / 1000)}k revenue last 30 days. 10% of monthly revenue ÷ 30 days = ₦${recommendedDaily.toLocaleString()}/day test budget.`;
+    budgetReasoning = `Based on ${Math.round(monthlyRevenue / 1000)}k ${currency} revenue last 30 days. 10% of monthly revenue ÷ 30 days = ${recommendedDaily.toLocaleString()} ${currency}/day test budget.`;
   }
 
   // --- TIMING ---
@@ -506,8 +520,9 @@ export async function generateRecommendations(
     storeData.orders.average_order_value > 0 &&
     storeData.orders.average_order_value < 5000
   ) {
+    const currency = storeData.store.currency || "USD";
     warnings.push(
-      `Low average order value (₦${Math.round(storeData.orders.average_order_value).toLocaleString()}) — ad costs may exceed profit per sale`
+      `Low average order value (${Math.round(storeData.orders.average_order_value).toLocaleString()} ${currency}) — ad costs may exceed profit per sale`
     );
   }
 
@@ -515,16 +530,12 @@ export async function generateRecommendations(
   const opportunities: string[] = [];
   if (storeData.orders.repeat_customer_rate > 0.2) {
     opportunities.push(
-      "High repeat customer rate detected — consider creating a Lookalike Audience from your existing customers"
+      "Your repeat customer rate is strong — create a lookalike audience from your top buyers for lower acquisition costs"
     );
   }
-  const weekendDays = ["Saturday", "Sunday"];
-  const hasWeekendPeak = storeData.orders.peak_days.some((d) =>
-    weekendDays.includes(d)
-  );
-  if (hasWeekendPeak) {
+  if (storeData.orders.peak_days.length > 0) {
     opportunities.push(
-      "Peak weekend buying detected — consider launching campaigns on Thursday to build momentum"
+      `Peak buying detected on ${storeData.orders.peak_days.slice(0, 2).join(" and ")} — consider launching campaigns 1-2 days earlier to build momentum`
     );
   }
   if (storeData.orders.average_order_value > 20000) {
