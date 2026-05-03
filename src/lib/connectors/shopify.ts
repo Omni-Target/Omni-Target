@@ -213,9 +213,8 @@ export async function fetchShopifyStoreData(
       reason: allOutOfStock ? "Out of stock" : undefined,
       description: product.body_html
         ?.replace(/<[^>]*>/g, " ")
-        ?.replace(/\\s+/g, " ")
-        ?.trim()
-        ?.slice(0, 300) || "",
+        ?.replace(/\s+/g, " ")
+        ?.trim() || "",
       tags: product.tags 
         ? product.tags.split(",")
           .map((t: string) => t.trim())
