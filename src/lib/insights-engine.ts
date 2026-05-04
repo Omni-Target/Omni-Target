@@ -1,12 +1,14 @@
 import { StoreData } from "./store-data";
 import Anthropic from "@anthropic-ai/sdk";
 
+const anthropicClient = new Anthropic();
+
 // ─── FIX 1 & 2: Global Region & Currency Context ────────────────────────────
 
 export const CURRENCY_TO_REGION: Record<string, string> = {
   "NGN": "NG",
   "GBP": "GB",
-  "EUR": "EU", 
+  "EUR": "EU",
   "AED": "AE",
   "USD": "US",
   "CAD": "CA",
@@ -14,6 +16,19 @@ export const CURRENCY_TO_REGION: Record<string, string> = {
   "GHS": "GH",
   "KES": "KE",
   "ZAR": "ZA",
+};
+
+export const CURRENCY_MULTIPLIERS: Record<string, number> = {
+  "USD": 1,
+  "GBP": 0.8,
+  "EUR": 0.9,
+  "AED": 3.67,
+  "NGN": 1500,
+  "CAD": 1.4,
+  "AUD": 1.5,
+  "GHS": 15,
+  "KES": 130,
+  "ZAR": 19,
 };
 
 export interface LocationGroup {
@@ -27,7 +42,7 @@ function buildLocationTargeting(
   storeData: StoreData
 ): LocationGroup[] {
   const locations: LocationGroup[] = [];
-  
+
   if (storeData.orders.top_locations.length === 0) {
     return [];
   }
@@ -81,8 +96,8 @@ Products:
 ${productSample}
 
 Store AOV: ${Math.round(
-  storeData.orders.average_order_value
-)} ${currency}
+      storeData.orders.average_order_value
+    )} ${currency}
 
 Return ONLY valid JSON, no markdown:
 {
@@ -91,16 +106,16 @@ Return ONLY valid JSON, no markdown:
   "reasoning": "one sentence"
 }`;
 
-    const client = new Anthropic();
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
+    const message = await anthropicClient.messages.create({
+      model: "claude-4-5-sonnet",
       max_tokens: 128,
       messages: [{ role: "user", content: agePrompt }],
     });
 
     const text =
       message.content[0].type === "text" ? message.content[0].text.trim() : "";
-    const parsed = JSON.parse(text) as {
+    const cleanText = text.replace(/```json\n?|```/g, '').trim();
+    const parsed = JSON.parse(cleanText) as {
       age_min: number;
       age_max: number;
       reasoning: string;
@@ -139,25 +154,21 @@ Products:
 ${productSample}
 Store AOV: ${Math.round(storeData.orders.average_order_value)} ${currency}
 
-Always include:
-- "Engaged Shoppers"
-- "Online shoppers"
-
-Then add 2-4 more that fit this specific store type.
+Suggest 4-6 behaviors that fit this specific store type based purely on the product catalog.
 
 Return ONLY a JSON array of strings. No explanation. No markdown.
 Example: ["Engaged Shoppers", "Online shoppers", "Fashion enthusiasts"]`;
 
-    const client = new Anthropic();
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
+    const message = await anthropicClient.messages.create({
+      model: "claude-4-5-sonnet",
       max_tokens: 128,
       messages: [{ role: "user", content: behaviourPrompt }],
     });
 
     const text =
       message.content[0].type === "text" ? message.content[0].text.trim() : "";
-    const behaviours = JSON.parse(text) as string[];
+    const cleanText = text.replace(/```json\n?|```/g, '').trim();
+    const behaviours = JSON.parse(cleanText) as string[];
 
     if (Array.isArray(behaviours) && behaviours.length > 0) {
       return behaviours;
@@ -190,7 +201,7 @@ async function inferInterests(
   try {
     const currency = storeData.store.currency || "USD";
     const storeRegion = CURRENCY_TO_REGION[currency] || "OTHER";
-    
+
     const productSample = storeData.products
       .slice(0, 10)
       .map((p) => p.name)
@@ -209,8 +220,8 @@ Products: ${productSample}
 Store market: ${storeRegion}
 Store currency: ${currency}
 Store AOV: ${Math.round(
-  storeData.orders.average_order_value
-)} ${currency}
+      storeData.orders.average_order_value
+    )} ${currency}
 
 Always include:
 - "Online shopping"
@@ -218,30 +229,30 @@ Always include:
 
 Add 3-6 more specific to these 
 products and this market.
-For ${storeRegion === "NG" 
-  ? "Nigerian market: consider African fashion, Afrobeats lifestyle, Lagos social scene where relevant" 
-  : storeRegion === "GB"
-    ? "UK market: consider sustainable fashion, British style, Vogue UK readers where relevant"
-    : storeRegion === "AE"
-      ? "Gulf market: consider luxury fashion, modest fashion where relevant, Dubai lifestyle"
-      : "global fashion audience"}
+For ${storeRegion === "NG"
+        ? "African market: consider African fashion, Lagos social scene where relevant"
+        : storeRegion === "GB"
+          ? "UK market: consider sustainable fashion, British style, Vogue UK readers where relevant"
+          : storeRegion === "AE"
+            ? "Gulf market: consider luxury fashion, modest fashion where relevant, Dubai lifestyle"
+            : "global fashion audience"}
 
 Return ONLY a JSON array of strings.
 No explanation. No markdown.
 `;
 
-    const client = new Anthropic();
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
+    const message = await anthropicClient.messages.create({
+      model: "claude-4-5-sonnet",
       max_tokens: 256,
       messages: [{ role: "user", content: prompt }],
     });
 
     const text =
       message.content[0].type === "text" ? message.content[0].text.trim() : "";
-    const interests = JSON.parse(text) as string[];
+    const cleanText = text.replace(/```json\n?|```/g, '').trim();
+    const interests = JSON.parse(cleanText) as string[];
 
-    const reasoning = `Interests selected based on product catalogue: ${productList.slice(0, 80)}${productList.length > 80 ? "..." : ""}`;
+    const reasoning = `Interests selected based on product catalogue: ${productSample.slice(0, 80)}${productSample.length > 80 ? "..." : ""}`;
     return { interests, interest_reasoning: reasoning };
   } catch (error) {
     console.error("Interest inference error:", error);
@@ -381,9 +392,10 @@ export interface MetaRecommendations {
     interest_reasoning: string;
   };
   budget: {
-    recommended_daily_ngn: number;
+    recommended_daily: number;
     recommended_duration_days: number;
     reasoning: string;
+    currency: string;
   };
   timing: TimingOutput;
   placements: {
@@ -426,15 +438,19 @@ export async function generateRecommendations(
   let recommendedDaily: number;
   let budgetReasoning: string;
 
+  const currency = storeData.store.currency || "USD";
+  const multiplier = CURRENCY_MULTIPLIERS[currency] || 1;
+  const baseFloor = 5 * multiplier;
+  const baseCeiling = 100 * multiplier;
+
   if (orderCount === 0) {
-    recommendedDaily = 3000;
+    recommendedDaily = Math.round(baseFloor);
     budgetReasoning =
       "Starting budget for a new campaign with no historical data";
   } else {
-    const currency = storeData.store.currency || "USD";
     const tenPercent = monthlyRevenue * 0.1;
     const dailyFromRevenue = Math.round(tenPercent / 30);
-    recommendedDaily = Math.min(Math.max(dailyFromRevenue, 3000), 50000);
+    recommendedDaily = Math.min(Math.max(dailyFromRevenue, Math.round(baseFloor)), Math.round(baseCeiling));
     budgetReasoning = `Based on ${Math.round(monthlyRevenue / 1000)}k ${currency} revenue last 30 days. 10% of monthly revenue ÷ 30 days = ${recommendedDaily.toLocaleString()} ${currency}/day test budget.`;
   }
 
@@ -556,9 +572,10 @@ export async function generateRecommendations(
       interest_reasoning,
     },
     budget: {
-      recommended_daily_ngn: recommendedDaily,
+      recommended_daily: recommendedDaily,
       recommended_duration_days: 7,
       reasoning: budgetReasoning,
+      currency: storeData.store?.currency || "USD",
     },
     timing,
     placements: {

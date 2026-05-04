@@ -111,7 +111,7 @@ Before writing, silently analyze the provided Brand Name and Product Description
 
 MARKET AWARENESS:
 You will receive a store_region signal:
-- "NG" = Nigeria/West Africa
+- "NG" = African market
   Buyers respond to quality signals, cultural pride, and social occasion dressing. Reference local occasions naturally when the product fits.
   
 - "GB" = United Kingdom
@@ -155,7 +155,7 @@ TONE CALIBRATION:
 
 GOOD COPY EXAMPLES:
 
-Example 1 (Direct + Warm, Nigeria):
+Example 1 (Direct + Warm, Emerging Markets):
 Headline: "Your next talking-point outfit"
 Primary: "Wide-leg, high-waisted, finished with hand-beaded cowrie at the hem. The kind of piece people ask you about. See the full collection."
 
@@ -192,7 +192,7 @@ Store Currency: ${currency}`;
 
     // Call the Anthropic API
     const message = await client.messages.create({
-      model: "claude-sonnet-4-6",
+      model: "claude-4-5-sonnet",
       max_tokens: 1024,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],

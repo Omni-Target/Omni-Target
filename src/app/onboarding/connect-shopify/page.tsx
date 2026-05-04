@@ -97,7 +97,7 @@ function ConnectShopifyContent() {
         Shopify store
       </h1>
       <p className="text-sm text-white/50 leading-relaxed mb-8 max-w-xs mx-auto animate-fade-in-up-delay-2">
-        Paste your store URL below. We&apos;ll handle the rest.
+        Works with any Shopify store, anywhere in the world.
       </p>
 
       {/* Input */}

@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { SignOutButton } from "@clerk/nextjs";
+import { formatCurrency } from "@/lib/currency";
 
 interface StoreDataResponse {
   connected: boolean;
@@ -231,7 +232,7 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-2xl font-bold text-white">
-                      ₦{Math.round(storeData.orders?.average_order_value || 0).toLocaleString()}
+                      {formatCurrency(Math.round(storeData.orders?.average_order_value || 0), storeData.store?.currency || "USD")}
                     </p>
                     <p className="text-xs text-white/40 mt-1">Avg Order Value</p>
                   </div>
@@ -308,7 +309,7 @@ export default function DashboardPage() {
 
                       <div className="flex items-center justify-between text-xs">
                         <span className="text-white/40">
-                          {product.units_sold} sold · ₦{Math.round(product.revenue).toLocaleString()}
+                          {product.units_sold} sold · {formatCurrency(Math.round(product.revenue), storeData.store?.currency || "USD")}
                         </span>
                         {product.should_advertise ? (
                           <Link

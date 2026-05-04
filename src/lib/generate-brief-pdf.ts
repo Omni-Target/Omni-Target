@@ -1,4 +1,5 @@
 import jsPDF from "jspdf";
+import { formatCurrency } from "./currency";
 
 export interface BriefPDFParams {
   brandName: string;
@@ -22,9 +23,10 @@ export interface BriefPDFParams {
     interest_reasoning?: string;
   };
   budget: {
-    recommended_daily_ngn?: number;
+    recommended_daily?: number;
     recommended_duration_days?: number;
     reasoning?: string;
+    currency?: string;
   };
   timing: {
     peak_days?: string[];
@@ -163,12 +165,13 @@ export function generateBriefPDF(params: BriefPDFParams): void {
   // ── Budget ────────────────────────────────────────────────────────────────
 
   addSection("Budget Recommendation");
-  const daily = params.budget.recommended_daily_ngn;
+  const daily = params.budget.recommended_daily;
   const duration = params.budget.recommended_duration_days;
+  const currency = params.budget.currency || "USD";
   if (daily) {
-    addLine(`Daily Budget: \u20a6${daily.toLocaleString()}`, 12, true);
+    addLine(`Daily Budget: ${formatCurrency(daily, currency)}`, 12, true);
   } else {
-    addLine("Daily Budget: Set in Meta Ads Manager (₦5,000/day recommended)", 12, true);
+    addLine(`Daily Budget: Set in Meta Ads Manager (${formatCurrency(5000, currency)}/day recommended)`, 12, true);
   }
   if (duration) {
     addLine(`Duration: ${duration} days`);

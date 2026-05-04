@@ -7,6 +7,7 @@ import Link from "next/link";
 import { SignOutButton, useUser } from "@clerk/nextjs";
 import { MediaValidationResult } from "@/lib/meta-specs";
 import { generateBriefPDF } from "@/lib/generate-brief-pdf";
+import { formatCurrency, getCurrencySymbol } from "@/lib/currency";
 
 type CampaignState = "media" | "input" | "generating" | "review" | "brief";
 
@@ -457,7 +458,7 @@ function CampaignsContent() {
               </div>
               <div className="flex gap-4 text-sm text-white/60 mt-2">
                 {paramPrice && (
-                  <span>Price: ₦{parseFloat(paramPrice).toLocaleString()}</span>
+                  <span>Price: {formatCurrency(parseFloat(paramPrice), storeInsights?.store?.currency || "USD")}</span>
                 )}
                 {paramType && (
                   <span>Type: {paramType}</span>
@@ -1042,7 +1043,7 @@ function CampaignsContent() {
               <h3 className="text-sm font-bold text-white/50 uppercase tracking-widest mb-5">Budget</h3>
               <div className="rounded-xl bg-brand-500/5 border border-brand-500/20 p-4">
                 <p className="text-sm text-brand-400">
-                  Set your own daily budget and duration directly in Meta Ads Manager. We recommend starting with ₦5,000/day for 7 days to test performance.
+                  Set your own daily budget and duration directly in Meta Ads Manager. We recommend starting with {formatCurrency(5000, storeInsights?.store?.currency || "USD")}/day for 7 days to test performance.
                 </p>
               </div>
             </div>
@@ -1120,7 +1121,7 @@ function CampaignsContent() {
                     "Behaviours: Engaged Shoppers, Online Shoppers",
                     "",
                     "── BUDGET ──",
-                    "Recommended starting budget: ₦5,000/day for 7 days",
+                    `Recommended starting budget: ${formatCurrency(5000, storeInsights?.store?.currency || "USD")}/day for 7 days`,
                     "Set final budget in Meta Ads Manager",
                     "",
                     "── TIMING ──",
