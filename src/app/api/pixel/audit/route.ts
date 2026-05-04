@@ -15,122 +15,178 @@ export async function GET() {
     supabaseAdmin
       .from("user_integrations")
       .select(
-        "meta_access_token, " +
-        "meta_ad_account_id, " +
-        "meta_pixel_id, " +
-        "pixel_health"
+        "shopify_access_token, " +
+        "shopify_store_url, " +
+        "store_snapshot"
       )
       .eq("clerk_user_id", userId!)
       .single();
 
   const integration: any = data;
 
-  if (!integration?.meta_access_token) {
+  // If no Shopify connection
+  if (!integration?.shopify_access_token) {
     return Response.json({
-      pixelFound: false,
-      pixelHealth: "none",
       score: 0,
-      issues: ["Meta account not connected"],
-      message: "Connect your Meta account first"
-    });
-  }
-
-  // If no pixel ID stored
-  if (!integration.meta_pixel_id) {
-    // Update pixel health
-    await supabaseAdmin
-      .from("user_integrations")
-      .update({ pixel_health: "none" })
-      .eq("clerk_user_id", userId!);
-
-    return Response.json({
-      pixelFound: false,
-      pixelHealth: "none",
-      score: 10,
+      status: "not_connected",
       issues: [
-        "No Meta Pixel found on your account",
-        "Purchase events: not tracking",
-        "You are missing attribution on all sales"
+        "Shopify store not connected"
       ],
       recommendations: [
-        "Install Meta Pixel on your Shopify store",
-        "Enable server-side tracking via CAPI"
-      ]
+        "Connect your Shopify store to get started"
+      ],
+      positives: [],
+      breakdown: {
+        products: 0,
+        orders: 0,
+        retention: 0,
+        availability: 0
+      }
     });
   }
 
-  // Pixel exists — check event quality via Meta Graph API
-  const eventsRes = await fetch(
-    `https://graph.facebook.com/v19.0/` +
-    `${integration.meta_pixel_id}/` +
-    `stats?aggregation=event_name` +
-    `&access_token=${integration.meta_access_token}`
-  );
+  // Use cached snapshot if available
+  const snapshot = integration.store_snapshot;
 
-  const eventsData = await eventsRes.json();
-  const events = eventsData.data || [];
-
-  const hasPurchase = events.some(
-    (e: any) => e.event_name === "Purchase"
-  );
-  const hasPageView = events.some(
-    (e: any) => e.event_name === "PageView"
-  );
-  const hasAddToCart = events.some(
-    (e: any) => e.event_name === "AddToCart"
-  );
-
-  const score =
-    (hasPageView ? 30 : 0) +
-    (hasAddToCart ? 30 : 0) +
-    (hasPurchase ? 40 : 0);
-
-  const pixelHealth = score >= 70
-    ? "healthy"
-    : score >= 30
-      ? "broken"
-      : "none";
-
-  await supabaseAdmin
-    .from("user_integrations")
-    .update({ pixel_health: pixelHealth })
-    .eq("clerk_user_id", userId!);
-
-  const issues = [];
-  const recommendations = [];
-
-  if (!hasPageView) {
-    issues.push("PageView not firing");
-    recommendations.push(
-      "Reinstall your Meta Pixel"
-    );
+  if (!snapshot) {
+    return Response.json({
+      score: 30,
+      status: "syncing",
+      issues: [
+        "Store data is still syncing"
+      ],
+      recommendations: [
+        "Wait a moment and refresh"
+      ],
+      positives: [],
+      breakdown: {
+        products: 0,
+        orders: 0,
+        retention: 0,
+        availability: 0
+      }
+    });
   }
-  if (!hasAddToCart) {
-    issues.push("AddToCart not tracked");
-    recommendations.push(
-      "Enable standard events in Meta Pixel"
-    );
-  }
-  if (!hasPurchase) {
+
+  // Calculate real score from store data
+  const products = snapshot.products || [];
+  const orders = snapshot.orders || {};
+
+  const activeProducts =
+    products.filter((p: any) =>
+      p.in_stock
+    ).length;
+  const totalProducts = products.length;
+  const orders30d =
+    orders.orders_last_30_days || 0;
+  const repeatRate =
+    orders.repeat_customer_rate || 0;
+  const inStockRatio = totalProducts > 0
+    ? activeProducts / totalProducts
+    : 0;
+
+  // Score calculation
+  const productScore = Math.min(
+    totalProducts >= 10 ? 25 :
+    totalProducts >= 5 ? 18 :
+    totalProducts >= 1 ? 10 : 0,
+    25
+  );
+
+  const orderScore =
+    orders30d >= 20 ? 25 :
+    orders30d >= 10 ? 20 :
+    orders30d >= 5 ? 15 :
+    orders30d >= 1 ? 10 : 0;
+
+  const retentionScore =
+    Math.round(repeatRate * 25);
+
+  const availabilityScore =
+    Math.round(inStockRatio * 25);
+
+  const totalScore =
+    productScore + orderScore +
+    retentionScore + availabilityScore;
+
+  // Build issues and recommendations
+  const issues: string[] = [];
+  const recommendations: string[] = [];
+
+  if (totalProducts < 5) {
     issues.push(
-      "Purchase events: 0 in last 30 days"
+      "Low product count — fewer products to advertise"
     );
     recommendations.push(
-      "Your ROAS data is inaccurate — " +
-      "enable CAPI to fix this"
+      "Add more products to your Shopify store"
+    );
+  }
+
+  if (orders30d === 0) {
+    issues.push(
+      "No orders in the last 30 days"
+    );
+    recommendations.push(
+      "Make sure your store is live and accepting orders"
+    );
+  }
+
+  if (inStockRatio < 0.5) {
+    issues.push(
+      `${totalProducts - activeProducts} products are out of stock`
+    );
+    recommendations.push(
+      "Restock products before running ads — don't advertise out-of-stock items"
+    );
+  }
+
+  if (repeatRate < 0.1) {
+    issues.push(
+      "Low repeat customer rate (< 10%)"
+    );
+    recommendations.push(
+      "Focus first campaign on your best-selling product to build customer trust"
+    );
+  }
+
+  // Positive findings
+  const positives: string[] = [];
+  if (orders30d >= 10) {
+    positives.push(
+      `${orders30d} orders in the last 30 days`
+    );
+  }
+  if (totalProducts >= 10) {
+    positives.push(
+      `${totalProducts} active products`
+    );
+  }
+  if (repeatRate >= 0.2) {
+    positives.push(
+      `${Math.round(repeatRate * 100)}% repeat customer rate`
+    );
+  }
+  if (inStockRatio >= 0.8) {
+    positives.push(
+      `${Math.round(inStockRatio * 100)}% of products in stock`
     );
   }
 
   return Response.json({
-    pixelFound: true,
-    pixelId: integration.meta_pixel_id,
-    pixelHealth,
-    score,
+    score: totalScore,
+    status: totalScore >= 70
+      ? "healthy"
+      : totalScore >= 40
+        ? "moderate"
+        : "needs_attention",
     issues,
     recommendations,
-    events: events.map((e: any) => ({
-      name: e.event_name,
-      count: e.count
-    }))
+    positives,
+    breakdown: {
+      products: productScore,
+      orders: orderScore,
+      retention: retentionScore,
+      availability: availabilityScore
+    }
   });
 }

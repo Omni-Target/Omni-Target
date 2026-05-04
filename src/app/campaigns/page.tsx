@@ -96,6 +96,8 @@ function CampaignsContent() {
   // Store Insights for Brief
   const [storeInsights, setStoreInsights] = useState<any>(null);
   const [loadingInsights, setLoadingInsights] = useState(false);
+  const [aiInsights, setAiInsights] = useState<any>(null);
+  const [loadingAiInsights, setLoadingAiInsights] = useState(false);
 
   useEffect(() => {
     setLoadingInsights(true);
@@ -107,6 +109,17 @@ function CampaignsContent() {
           if (data.data.store?.name) {
             setBrandName(data.data.store.name);
           }
+          // Fetch AI insights once store data is confirmed
+          setLoadingAiInsights(true);
+          fetch("/api/store/insights", { cache: "no-store" })
+            .then((r) => r.json())
+            .then((insights) => {
+              if (!insights.error) {
+                setAiInsights(insights);
+              }
+              setLoadingAiInsights(false);
+            })
+            .catch(() => setLoadingAiInsights(false));
         }
         setLoadingInsights(false);
       })
@@ -991,39 +1004,58 @@ function CampaignsContent() {
                   <div>
                     <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Locations</span>
                     <p className="text-sm text-white/80 mt-1">
-                      {storeInsights.orders?.top_locations?.length > 0
-                        ? storeInsights.orders.top_locations.map((l: any) => `${l.city}, ${l.country}`).join(" · ")
-                        : "No order data yet — add locations manually based on your target market"}
+                      {aiInsights?.targeting?.locations?.length > 0
+                        ? aiInsights.targeting.locations.map((l: any) => l.name).join(" · ")
+                        : storeInsights.orders?.top_locations?.length > 0
+                          ? storeInsights.orders.top_locations.map((l: any) => `${l.city}`).join(" · ")
+                          : "No order data yet — add locations manually based on your target market"}
                     </p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Age Range</span>
-                      <p className="text-sm text-white/80 mt-1">Check Meta audience insights</p>
+                      <p className="text-sm text-white/80 mt-1">
+                        {aiInsights?.targeting?.age_min
+                          ? `${aiInsights.targeting.age_min} — ${aiInsights.targeting.age_max}`
+                          : loadingAiInsights ? "Analyzing..." : "25 — 44 (default)"}
+                      </p>
+                      {aiInsights?.targeting?.age_reasoning && (
+                        <p className="text-xs text-white/40 mt-1">{aiInsights.targeting.age_reasoning}</p>
+                      )}
                     </div>
                     <div>
                       <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Gender</span>
-                      <p className="text-sm text-white/80 mt-1">All</p>
+                      <p className="text-sm text-white/80 mt-1 capitalize">
+                        {aiInsights?.targeting?.gender || (loadingAiInsights ? "Analyzing..." : "All")}
+                      </p>
+                      {aiInsights?.targeting?.gender_reasoning && (
+                        <p className="text-xs text-white/40 mt-1">{aiInsights.targeting.gender_reasoning}</p>
+                      )}
                     </div>
                   </div>
 
                   <div>
                     <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Interests to Add in Meta</span>
                     <div className="flex flex-wrap gap-2 mt-2">
-                      {(storeInsights._interests || []).length > 0
-                        ? storeInsights._interests.map((interest: string, i: number) => (
+                      {aiInsights?.targeting?.interests?.length > 0
+                        ? aiInsights.targeting.interests.map((interest: string, i: number) => (
                             <span key={i} className="px-3 py-1 rounded-full text-xs font-medium bg-brand-500/10 border border-brand-500/20 text-brand-400">{interest}</span>
                           ))
-                        : <span className="text-xs text-white/40 italic">Connect your Shopify store for AI-inferred interests</span>
+                        : loadingAiInsights
+                          ? <span className="text-xs text-white/40 italic">Generating interests from your product catalogue...</span>
+                          : <span className="text-xs text-white/40 italic">Connect your Shopify store for AI-inferred interests</span>
                       }
                     </div>
+                    {aiInsights?.targeting?.interest_reasoning && (
+                      <p className="text-xs text-white/40 mt-2">{aiInsights.targeting.interest_reasoning}</p>
+                    )}
                   </div>
 
                   <div>
                     <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Behaviours to Add</span>
                     <div className="flex flex-wrap gap-2 mt-2">
-                      {["Engaged Shoppers", "Online Shoppers"].map((b) => (
+                      {(aiInsights?.targeting?.behaviours || ["Engaged Shoppers", "Online Shoppers"]).map((b: string) => (
                         <span key={b} className="px-3 py-1 rounded-full text-xs font-medium bg-success-500/10 border border-success-500/20 text-success-400">{b}</span>
                       ))}
                     </div>
@@ -1041,11 +1073,35 @@ function CampaignsContent() {
             {/* SECTION: Budget */}
             <div className="rounded-2xl bg-surface-raised border border-border-subtle p-6">
               <h3 className="text-sm font-bold text-white/50 uppercase tracking-widest mb-5">Budget</h3>
-              <div className="rounded-xl bg-brand-500/5 border border-brand-500/20 p-4">
-                <p className="text-sm text-brand-400">
-                  Set your own daily budget and duration directly in Meta Ads Manager. We recommend starting with {formatCurrency(5000, storeInsights?.store?.currency || "USD")}/day for 7 days to test performance.
-                </p>
-              </div>
+              {aiInsights?.budget ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Recommended Daily</span>
+                      <p className="text-lg font-bold text-white mt-1">
+                        {formatCurrency(aiInsights.budget.recommended_daily, aiInsights.budget.currency)}/day
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Test Duration</span>
+                      <p className="text-lg font-bold text-white mt-1">7 days</p>
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-brand-500/5 border border-brand-500/20 p-4">
+                    <p className="text-sm text-brand-400">
+                      {aiInsights.budget.reasoning}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl bg-brand-500/5 border border-brand-500/20 p-4">
+                  <p className="text-sm text-brand-400">
+                    {loadingAiInsights
+                      ? "Calculating optimal budget from your store data..."
+                      : `Set your own daily budget and duration directly in Meta Ads Manager. We recommend starting with ${formatCurrency(5000, storeInsights?.store?.currency || "USD")}/day for 7 days to test performance.`}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* SECTION: Timing */}
@@ -1075,10 +1131,10 @@ function CampaignsContent() {
                       cta: selectedCta || generatedCopy.cta,
                       copywriterNote: generatedCopy.copywriterNote,
                     },
-                    targeting: storeInsights?.targeting ?? {},
-                    budget: storeInsights?.budget ?? {},
-                    timing: storeInsights?.timing ?? {},
-                    warnings: storeInsights?.warnings ?? [],
+                    targeting: aiInsights?.targeting ?? {},
+                    budget: aiInsights?.budget ?? {},
+                    timing: aiInsights?.timing ?? {},
+                    warnings: aiInsights?.warnings ?? [],
                     generatedAt: new Date().toLocaleDateString("en-GB", {
                       day: "numeric",
                       month: "long",
@@ -1114,15 +1170,19 @@ function CampaignsContent() {
                     "CTA: " + (selectedCta || generatedCopy.cta),
                     "",
                     "── TARGETING ──",
-                    storeInsights
-                      ? `Locations: ${storeInsights.orders?.top_locations?.map((l: any) => `${l.city}, ${l.country}`).join(", ") || "Set manually"}`
+                    aiInsights?.targeting?.locations?.length > 0
+                      ? `Locations: ${aiInsights.targeting.locations.map((l: any) => l.name).join(", ")}`
                       : "Locations: Set manually",
-                    "Gender: All",
-                    "Behaviours: Engaged Shoppers, Online Shoppers",
+                    `Age: ${aiInsights?.targeting?.age_min || 25} — ${aiInsights?.targeting?.age_max || 44}`,
+                    `Gender: ${aiInsights?.targeting?.gender || "All"}`,
+                    `Interests: ${aiInsights?.targeting?.interests?.join(", ") || "Set manually"}`,
+                    `Behaviours: ${(aiInsights?.targeting?.behaviours || ["Engaged Shoppers", "Online Shoppers"]).join(", ")}`,
                     "",
                     "── BUDGET ──",
-                    `Recommended starting budget: ${formatCurrency(5000, storeInsights?.store?.currency || "USD")}/day for 7 days`,
-                    "Set final budget in Meta Ads Manager",
+                    aiInsights?.budget
+                      ? `Recommended: ${formatCurrency(aiInsights.budget.recommended_daily, aiInsights.budget.currency)}/day for 7 days`
+                      : `Recommended starting budget: ${formatCurrency(5000, storeInsights?.store?.currency || "USD")}/day for 7 days`,
+                    aiInsights?.budget?.reasoning || "Set final budget in Meta Ads Manager",
                     "",
                     "── TIMING ──",
                     storeInsights?.orders?.peak_days?.length > 0
