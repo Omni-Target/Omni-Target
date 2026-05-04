@@ -2,8 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { SignOutButton } from "@clerk/nextjs";
 import { supabaseAdmin } from "@/lib/supabase";
 import Link from "next/link";
-import { MetaDisconnectButton } from "@/components/MetaDisconnectButton";
-import { MetaSelectors } from "@/components/MetaSelectors";
+import { SyncButton } from "@/components/SyncButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -26,20 +25,26 @@ export default async function SettingsPage({
 
   console.log("Integration data:", JSON.stringify(integration));
 
-  const metaConnected = 
-    !!integration?.meta_access_token;
   const shopifyConnected = 
     !!integration?.shopify_access_token ||
     !!integration?.shopify_store_url;
-
-  const allAccounts = integration?.meta_ad_accounts || [];
-  const selectedAccountId = integration?.meta_selected_account_id || integration?.meta_ad_account_id;
-  const allPages = integration?.meta_pages || [];
-  const selectedPageId = integration?.meta_page_id;
+  const storeDomain = integration?.shopify_custom_domain || integration?.shopify_store_url || 'your store';
 
   return (
     <div className="min-h-screen bg-[var(--background)] px-4 py-12 sm:px-6 lg:px-8">
       <div className="max-w-2xl mx-auto">
+        <div className="mb-6">
+          <Link 
+            href="/dashboard"
+            className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 transition-colors w-fit"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 12H5M12 19l-7-7 7-7"/>
+            </svg>
+            Back to Dashboard
+          </Link>
+        </div>
+
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-8">
           Settings
         </h1>
@@ -73,110 +78,25 @@ export default async function SettingsPage({
             )}
           </div>
 
-          {/* Card 2 — Meta Ads Integration */}
-          <div className="p-6 rounded-2xl bg-white/[0.02] border border-border-subtle backdrop-blur-sm">
-            <div className="mb-6">
-              <h2 className="text-base font-semibold text-white/80 mb-1">Optional — Connect Meta Ads</h2>
-              <p className="text-sm text-white/40">
-                Connect your Meta account to enable pixel health tracking. Not required to generate campaign briefs.
-              </p>
+          {/* Card 2 — Store Intelligence */}
+          <div className="p-6 rounded-2xl bg-white/[0.04] border border-border-subtle backdrop-blur-sm">
+            <h2 className="text-lg font-semibold text-white mb-1">
+              Store Intelligence
+            </h2>
+            <p className="text-sm text-white/40 mb-4">
+              Your store data is automatically 
+              synced from Shopify. We use this 
+              to generate targeting recommendations 
+              and campaign briefs.
+            </p>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-success-400" />
+              <span className="text-sm text-white/70">
+                Auto-syncing from {storeDomain}
+              </span>
             </div>
-            {metaConnected ? (
-              !integration.meta_page_id ? (
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex-1 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm leading-relaxed">
-                    ⚠️ No Facebook Page found. 
-                    You need a Facebook Page to run ads. 
-                    Create one at facebook.com/pages/create 
-                    then reconnect your Meta account.
-                  </div>
-                  <div className="shrink-0 self-start sm:self-center">
-                    <MetaDisconnectButton />
-                  </div>
-                </div>
-              ) : (
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                  <div className="flex items-start sm:items-center gap-3">
-                    <div className="w-2.5 h-2.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)] mt-1.5 sm:mt-0 shrink-0"></div>
-                    <div>
-                      {integration.meta_pixel_id && (
-                        <p className="text-sm font-medium text-white">Pixel: {integration.meta_pixel_id}</p>
-                      )}
-                      <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-green-500/10 text-green-400 text-xs font-medium border border-green-500/20">
-                        Connected
-                      </span>
-                      {integration.pixel_health === "none" && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-red-500/10 text-red-400 text-xs font-medium border border-red-500/20">
-                          No Pixel
-                        </span>
-                      )}
-                      {integration.pixel_health === "unknown" && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 text-xs font-medium border border-amber-500/20">
-                          Pixel Unverified
-                        </span>
-                      )}
-                      {integration.pixel_health === "broken" && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-red-500/10 text-red-400 text-xs font-medium border border-red-500/20">
-                          Pixel Issues
-                        </span>
-                      )}
-                      {integration.pixel_health === "healthy" && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-green-500/10 text-green-400 text-xs font-medium border border-green-500/20">
-                          Pixel Healthy
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex flex-col sm:items-end gap-3 shrink-0 self-start">
-                  <Link 
-                      href="/onboarding/audit"
-                      className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-500 rounded-xl transition-colors"
-                    >
-                      Run Pixel Audit
-                    </Link>
-                    <MetaDisconnectButton />
-                  </div>
-                </div>
-
-                <div className="pl-5 border-t border-white/5 pt-4 mt-2">
-                  <MetaSelectors 
-                    allAccounts={allAccounts}
-                    selectedAccountId={selectedAccountId}
-                    allPages={allPages}
-                    selectedPageId={selectedPageId}
-                  />
-                </div>
-              </div>
-              )
-            ) : (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                 <p className="text-sm text-white/50">Connect your Meta Ads account to launch campaigns.</p>
-                 <Link 
-                  href="/api/auth/meta/connect"
-                  className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-500 rounded-xl transition-colors shrink-0 group"
-                >
-                  Connect Meta Ads
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="ml-2 transition-transform duration-200 group-hover:translate-x-0.5"
-                  >
-                    <path d="M5 12h14M12 5l7 7-7 7" />
-                  </svg>
-                </Link>
-              </div>
-            )}
+            <SyncButton />
           </div>
-          
           {/* Account Section (Danger Zone) */}
           <div className="p-6 rounded-2xl bg-white/[0.04] border border-border-subtle backdrop-blur-sm mt-8">
             <h2 className="text-lg font-semibold text-white mb-4">Account</h2>
@@ -204,32 +124,6 @@ export default async function SettingsPage({
         </div>
       </div>
 
-      {/* Toast Notification */}
-      {metaStatus && (
-        <div className="fixed bottom-6 right-6 animate-fade-in-up z-50">
-          <div className={`px-4 py-3 rounded-xl border shadow-lg backdrop-blur-md flex items-center gap-3 text-sm font-medium ${
-            metaStatus === "connected" ? "bg-green-500/10 border-green-500/20 text-green-400" :
-            metaStatus === "denied" ? "bg-amber-500/10 border-amber-500/20 text-amber-400" :
-            "bg-red-500/10 border-red-500/20 text-red-400"
-          }`}>
-            {metaStatus === "connected" && (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-            )}
-            {metaStatus === "denied" && (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-            )}
-            {metaStatus === "error" && (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
-            )}
-            
-            <span>
-              {metaStatus === "connected" && "Meta Ads connected successfully"}
-              {metaStatus === "denied" && "Meta connection was cancelled"}
-              {metaStatus === "error" && "Something went wrong. Please try again."}
-            </span>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

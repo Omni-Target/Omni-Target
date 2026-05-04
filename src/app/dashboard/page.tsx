@@ -67,9 +67,14 @@ export default function DashboardPage() {
       },
     ];
 
+    const breakdownWithPercentage = b.map(item => ({
+      ...item,
+      percentage: Math.round((item.score / item.max) * 100)
+    }));
+
     return {
       score: b.reduce((s, i) => s + i.score, 0),
-      breakdown: b,
+      breakdown: breakdownWithPercentage,
     };
   };
 
@@ -114,7 +119,7 @@ export default function DashboardPage() {
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
-              New Campaign
+              New Brief
             </Link>
           </div>
         </div>
@@ -198,7 +203,7 @@ export default function DashboardPage() {
                         />
                       </div>
                       <span className={`text-xs font-semibold w-10 text-right ${statusText(item.status)}`}>
-                        {item.score}/{item.max}
+                        {item.percentage}%
                       </span>
                     </div>
                   ))}
@@ -345,12 +350,12 @@ export default function DashboardPage() {
                     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
                   </svg>
                 </div>
-                <p className="text-sm font-semibold text-white">Create New Campaign</p>
+                <p className="text-sm font-semibold text-white">Create New Brief</p>
                 <p className="text-xs text-white/40 mt-1">Generate a campaign brief with AI</p>
               </Link>
 
               <Link
-                href="/onboarding/audit"
+                href="/onboarding/audit?from=dashboard"
                 className="rounded-xl bg-surface-raised border border-border-subtle p-5 hover:border-brand-500/30 transition-colors group no-underline"
               >
                 <div className="w-10 h-10 rounded-xl bg-[#8b5cf6]/10 flex items-center justify-center mb-3 group-hover:bg-[#8b5cf6]/20 transition-colors">

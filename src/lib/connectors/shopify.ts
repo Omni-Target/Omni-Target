@@ -37,6 +37,28 @@ interface ShopifyProduct {
 
 const API_VERSION = "2024-01";
 
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs = 8000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(), 
+    timeoutMs
+  );
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    return response;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function shopifyGet<T>(
   shopDomain: string,
   accessToken: string,
@@ -44,7 +66,7 @@ async function shopifyGet<T>(
 ): Promise<T | null> {
   try {
     const url = `https://${shopDomain}/admin/api/${API_VERSION}/${endpoint}`;
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       headers: {
         "X-Shopify-Access-Token": accessToken,
         "Content-Type": "application/json",
@@ -60,7 +82,7 @@ async function shopifyGet<T>(
 
     return (await res.json()) as T;
   } catch (error) {
-    console.error(`Shopify fetch error for ${endpoint}:`, error);
+    console.error(`Shopify fetch error (possibly timeout) for ${endpoint}:`, error);
     return null;
   }
 }

@@ -3,6 +3,8 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { fetchShopifyStoreData } from "@/lib/connectors/shopify";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+// Requires Vercel Pro — falls back to 10s on free tier
 
 export async function GET() {
   const { userId } = await auth();
@@ -12,6 +14,17 @@ export async function GET() {
       { status: 401 }
     );
   }
+
+  console.log("Fetching store data for userId:", userId);
+
+  // Verify we can write to the table
+  const { data: testRow } = await supabaseAdmin
+    .from("user_integrations")
+    .select("id, store_snapshot_at")
+    .eq("clerk_user_id", userId!)
+    .single();
+    
+  console.log("Existing row:", testRow);
 
   const { data: integration } = await supabaseAdmin
     .from("user_integrations")
@@ -28,7 +41,8 @@ export async function GET() {
     });
   }
 
-  // Check if cache is fresh (< 6 hours)
+  // TODO: Re-enable cache after confirming snapshot saves correctly
+  /*
   const cacheAge = integration?.store_snapshot_at
     ? Date.now() - new Date(integration.store_snapshot_at).getTime()
     : Infinity;
@@ -43,6 +57,7 @@ export async function GET() {
       cached: true
     });
   }
+  */
 
 
   try {
@@ -51,19 +66,34 @@ export async function GET() {
       integration.shopify_access_token
     );
 
-    // Cache in Supabase for 24 hours
-    const { error: cacheError } = await supabaseAdmin
-      .from("user_integrations")
-      .update({
-        store_snapshot: storeData,
-        store_snapshot_at: new Date().toISOString(),
+    console.log("Attempting to cache store data for userId:", userId);
+    console.log("Store data to cache:", 
+      JSON.stringify({
+        store: storeData.store,
+        orderCount: storeData.orders.orders_last_30_days,
+        productCount: storeData.products.length
       })
-      .eq("clerk_user_id", userId);
+    );
 
-    if (cacheError) {
-      console.error("Cache save error:", cacheError);
-    }
+    // Save to Supabase without awaiting
+    // This runs after the response is sent
+    supabaseAdmin
+      .from("user_integrations")
+      .update({ 
+        store_snapshot: storeData,
+        store_snapshot_at: new Date().toISOString()
+      })
+      .eq("clerk_user_id", userId!)
+      .then(({ error }) => {
+        if (error) {
+          console.error("Snapshot save failed:", error);
+        } else {
+          console.log("Snapshot saved successfully");
+        }
+      });
 
+    // Return immediately without waiting 
+    // for the save
     return Response.json({
       connected: true,
       data: storeData,

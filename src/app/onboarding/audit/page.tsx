@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
+import Link from "next/link";
 import { advanceOnboardingStep } from "../actions";
 
 const STEPS = [
@@ -81,8 +82,14 @@ export default function AuditPage() {
   const [auditError, setAuditError] = useState("");
   const [scanning, setScanning] = useState(true);
   const [completing, setCompleting] = useState(false);
+  const [fromDashboard, setFromDashboard] = useState(false);
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const searchParams = new URLSearchParams(window.location.search);
+      setFromDashboard(searchParams.get("from") === "dashboard");
+    }
+
     const stepInterval = setInterval(() => {
       setCurrentStep((prev) => {
         if (prev < STEPS.length - 1) return prev + 1;
@@ -115,18 +122,20 @@ export default function AuditPage() {
 
   const handleContinue = async () => {
     setCompleting(true);
-    try {
-      await fetch("/api/user/update-metadata", {
-        method: "POST", 
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          onboardingStep: "complete"
-        }),
-      });
-    } catch (err) {
-      console.error("Failed to update onboarding step:", err);
+    if (!fromDashboard) {
+      try {
+        await fetch("/api/user/update-metadata", {
+          method: "POST", 
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            onboardingStep: "complete"
+          }),
+        });
+      } catch (err) {
+        console.error("Failed to update onboarding step:", err);
+      }
     }
     // Full page navigation so the middleware re-checks the fresh metadata
     window.location.href = "/dashboard";
@@ -151,12 +160,28 @@ export default function AuditPage() {
 
   return (
     <div className="text-center">
+      {fromDashboard && (
+        <div className="mb-6 text-left animate-fade-in-up">
+          <Link 
+            href="/dashboard"
+            className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 transition-colors w-fit no-underline"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 12H5M12 19l-7-7 7-7"/>
+            </svg>
+            Back to Dashboard
+          </Link>
+        </div>
+      )}
+
       {/* Step indicator */}
-      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/20 mb-6 animate-fade-in-up">
-        <span className="text-xs font-medium text-brand-400">
-          Step 2 of 2
-        </span>
-      </div>
+      {!fromDashboard && (
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/20 mb-6 animate-fade-in-up">
+          <span className="text-xs font-medium text-brand-400">
+            Step 2 of 2
+          </span>
+        </div>
+      )}
 
       {/* Scanning Animation (shown while scanning) */}
       {scanning && (
@@ -339,7 +364,7 @@ export default function AuditPage() {
           >
             <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 transition-all duration-300 group-hover:from-brand-500 group-hover:to-brand-400" />
             <span className="relative flex items-center justify-center gap-2 text-white">
-              {completing ? "Taking you to your dashboard..." : "Continue to Dashboard"}
+              {completing ? "Taking you to your dashboard..." : fromDashboard ? "Return to Dashboard" : "Continue to Dashboard"}
               {!completing && (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-200 group-hover:translate-x-1">
                   <path d="M5 12h14M12 5l7 7-7 7" />
@@ -367,7 +392,7 @@ export default function AuditPage() {
             disabled={completing}
             className="px-6 py-3 rounded-xl bg-brand-500 text-white text-sm font-medium transition-colors hover:bg-brand-400 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            {completing ? "Taking you to your dashboard..." : "Continue to Dashboard →"}
+            {completing ? "Taking you to your dashboard..." : fromDashboard ? "Return to Dashboard →" : "Continue to Dashboard →"}
           </button>
         </div>
       )}
