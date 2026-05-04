@@ -15,6 +15,7 @@ export async function GET() {
     );
   }
 
+  console.log("Store data request from userId:", userId);
   console.log("Fetching store data for userId:", userId);
 
   // Verify we can write to the table

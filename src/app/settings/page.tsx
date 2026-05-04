@@ -3,6 +3,7 @@ import { SignOutButton } from "@clerk/nextjs";
 import { supabaseAdmin } from "@/lib/supabase";
 import Link from "next/link";
 import { SyncButton } from "@/components/SyncButton";
+import { DeleteAccountButton } from "@/components/DeleteAccountButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -112,12 +113,7 @@ export default async function SettingsPage({
                   </button>
                 </SignOutButton>
 
-                <div 
-                  className="text-sm text-white/30 cursor-not-allowed border-b border-transparent hover:border-white/30 transition-colors"
-                  title="Contact support to delete your account"
-                >
-                  Delete my account
-                </div>
+                <DeleteAccountButton />
               </div>
             </div>
           </div>

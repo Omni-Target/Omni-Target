@@ -94,6 +94,23 @@ export async function GET(request: Request) {
       shopify_access_token: accessToken,
     };
 
+    const { data: existingByStore } = await 
+      supabaseAdmin
+        .from("user_integrations")
+        .select("clerk_user_id")
+        .eq("shopify_store_url", shop)
+        .neq("clerk_user_id", userId!)
+        .single();
+
+    if (existingByStore) {
+      console.warn(
+        "Store already connected to different user:", 
+        existingByStore.clerk_user_id
+      );
+      // Merge the data to the current user
+      // by copying shopify credentials
+    }
+
     // Check if a row already exists for this user
     const { data: existing } = await supabaseAdmin
       .from("user_integrations")
