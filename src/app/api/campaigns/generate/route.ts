@@ -192,7 +192,7 @@ Store Currency: ${currency}`;
 
     // Call the Anthropic API
     const message = await client.messages.create({
-      model: "claude-4-5-sonnet",
+      model: "claude-sonnet-4-6",
       max_tokens: 1024,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],

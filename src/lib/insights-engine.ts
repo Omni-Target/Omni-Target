@@ -107,7 +107,7 @@ Return ONLY valid JSON, no markdown:
 }`;
 
     const message = await anthropicClient.messages.create({
-      model: "claude-4-5-sonnet",
+      model: "claude-sonnet-4-6",
       max_tokens: 128,
       messages: [{ role: "user", content: agePrompt }],
     });
@@ -160,7 +160,7 @@ Return ONLY a JSON array of strings. No explanation. No markdown.
 Example: ["Engaged Shoppers", "Online shoppers", "Fashion enthusiasts"]`;
 
     const message = await anthropicClient.messages.create({
-      model: "claude-4-5-sonnet",
+      model: "claude-sonnet-4-6",
       max_tokens: 128,
       messages: [{ role: "user", content: behaviourPrompt }],
     });
@@ -242,7 +242,7 @@ No explanation. No markdown.
 `;
 
     const message = await anthropicClient.messages.create({
-      model: "claude-4-5-sonnet",
+      model: "claude-sonnet-4-6",
       max_tokens: 256,
       messages: [{ role: "user", content: prompt }],
     });
