@@ -44,14 +44,10 @@ async function buildLocationTargeting(
 ): Promise<LocationResult[]> {
   const storeCurrency = storeData.store?.currency || "USD";
 
-  const rawLocationListMap = JSON.stringify(
-    Object.fromEntries(
-      storeData.orders.top_locations.map((l) => [
-        l.city,
-        Math.round((l.percentage / 100) * storeData.orders.order_count),
-      ])
-    )
-  );
+  const rawLocationList = storeData.orders
+    .top_locations
+    .map(l => `${l.city} (${l.percentage}%)`)
+    .join(", ");
 
   const locationPrompt = `
 You are a Meta Ads targeting specialist. 
@@ -79,6 +75,18 @@ Return ONLY a raw JSON object matching this exact schema. Do not include markdow
     {"location": "string", "reasoning": "string"}
   ]
 }
+`{
+      "primary_market": "string",
+      "locations": [
+        {
+          "name": "string",
+          "source": "from_data" | "recommended",
+            "percentage": number | null,
+              "note": "string | null"
+}
+  ],
+"excluded": ["list of cities removed and why in one word each"]
+}
 `;
 
   try {
@@ -90,28 +98,15 @@ Return ONLY a raw JSON object matching this exact schema. Do not include markdow
 
     const text =
       message.content[0].type === "text" ? message.content[0].text.trim() : "";
-    const cleanText = text.replace(/```json\n?|```/g, '').trim();
+    const cleanText = text.replace(/```json\n ?| ```/g, '').trim();
     const parsed = JSON.parse(cleanText) as {
-      primary_market_country: string;
-      final_targeting_locations: string[];
-      removed_locations: string[];
-      strategic_additions: { location: string; reasoning: string }[];
+      primary_market: string;
+      locations: LocationResult[];
+      excluded: string[];
     };
 
-    const results: LocationResult[] = [
-      ...(parsed.final_targeting_locations || []).map(loc => ({
-        name: loc,
-        source: "from_data" as const,
-      })),
-      ...(parsed.strategic_additions || []).map(add => ({
-        name: add.location,
-        source: "recommended" as const,
-        note: add.reasoning,
-      }))
-    ];
-
-    if (results.length > 0) {
-      return results;
+    if (Array.isArray(parsed.locations) && parsed.locations.length > 0) {
+      return parsed.locations;
     }
     throw new Error("Invalid locations array");
   } catch (error) {
@@ -134,25 +129,26 @@ Based on these fashion products and
 their descriptions, determine the 
 primary target gender for Meta ads.
 
-Products:
-${storeData.products.slice(0,8)
-  .map(p => `${p.name}: ${
-    p.description?.slice(0,100) || 
-    p.product_type || ""
-  }`)
-  .join("\n")}
+  Products:
+${
+  storeData.products.slice(0, 8)
+    .map(p => `${p.name}: ${p.description?.slice(0, 100) ||
+      p.product_type || ""
+      }`)
+    .join("\n")
+}
 
 Return ONLY valid JSON, no markdown:
 {
   "gender": "female" | "male" | "all",
-  "confidence": "high" | "medium" | "low",
-  "reasoning": "one sentence"
+    "confidence": "high" | "medium" | "low",
+      "reasoning": "one sentence"
 }
 
 If products are clearly women's fashion: return "female"
 If clearly men's: return "male"
 If mixed or accessories: return "all"
-`;
+  `;
     const message = await anthropicClient.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 128,
@@ -161,7 +157,7 @@ If mixed or accessories: return "all"
 
     const text =
       message.content[0].type === "text" ? message.content[0].text.trim() : "";
-    const cleanText = text.replace(/```json\n?|```/g, '').trim();
+    const cleanText = text.replace(/```json\n ?| ```/g, '').trim();
     const parsed = JSON.parse(cleanText) as {
       gender: "all" | "female" | "male";
       reasoning: string;
@@ -194,28 +190,30 @@ async function inferAgeRange(
 
     const productSample = storeData.products
       .slice(0, 5)
-      .map((p) => `${p.name} — ${p.price.toLocaleString()} ${currency}`)
+      .map((p) => `${ p.name } — ${ p.price.toLocaleString() } ${ currency } `)
       .join("\n");
 
     const agePrompt = `
 You are a consumer research analyst.
 Based on these products and price points,
-estimate the most likely buyer age range
-for Meta ads in ${storeRegion} market.
+  estimate the most likely buyer age range
+for Meta ads in ${ storeRegion } market.
 
-Products:
-${productSample}
+  Products:
+${ productSample }
 
-Store AOV: ${Math.round(
-      storeData.orders.average_order_value
-    )} ${currency}
+Store AOV: ${
+  Math.round(
+    storeData.orders.average_order_value
+  )
+} ${ currency }
 
 Return ONLY valid JSON, no markdown:
 {
   "age_min": number,
-  "age_max": number,
-  "reasoning": "one sentence"
-}`;
+    "age_max": number,
+      "reasoning": "one sentence"
+} `;
 
     const message = await anthropicClient.messages.create({
       model: "claude-sonnet-4-6",
@@ -225,7 +223,7 @@ Return ONLY valid JSON, no markdown:
 
     const text =
       message.content[0].type === "text" ? message.content[0].text.trim() : "";
-    const cleanText = text.replace(/```json\n?|```/g, '').trim();
+    const cleanText = text.replace(/```json\n ?| ```/g, '').trim();
     const parsed = JSON.parse(cleanText) as {
       age_min: number;
       age_max: number;
@@ -259,27 +257,27 @@ async function inferBehaviours(storeData: StoreData): Promise<string[]> {
 
     const behaviourPrompt = `
 You are a Meta Ads specialist.
-Suggest 4-6 Facebook audience behaviours 
+  Suggest 4 - 6 Facebook audience behaviours 
 to target for this store.
 
-Products: ${productSample}
-Store market: ${storeRegion}
-Store AOV: ${Math.round(storeData.orders.average_order_value)} ${currency}
+  Products: ${ productSample }
+Store market: ${ storeRegion }
+Store AOV: ${ Math.round(storeData.orders.average_order_value) } ${ currency }
 
 ALWAYS include:
 - "Engaged Shoppers"
-- "Online shoppers"
+  - "Online shoppers"
 
-Add 2-4 more that are relevant 
+Add 2 - 4 more that are relevant 
 to this specific store type.
 For fashion brands consider:
 fashion enthusiasts, style bloggers,
-luxury goods buyers, etc.
+  luxury goods buyers, etc.
 
 Return ONLY a JSON array of strings.
-No markdown. No explanation.
-Example: ["Engaged Shoppers", "Online shoppers", "Fashion enthusiasts", "Luxury goods"]
-`;
+No markdown.No explanation.
+  Example: ["Engaged Shoppers", "Online shoppers", "Fashion enthusiasts", "Luxury goods"]
+    `;
 
     const message = await anthropicClient.messages.create({
       model: "claude-sonnet-4-6",
@@ -289,7 +287,7 @@ Example: ["Engaged Shoppers", "Online shoppers", "Fashion enthusiasts", "Luxury 
 
     const text =
       message.content[0].type === "text" ? message.content[0].text.trim() : "";
-    const cleanText = text.replace(/```json\n?|```/g, '').trim();
+    const cleanText = text.replace(/```json\n ?| ```/g, '').trim();
     const behaviours = JSON.parse(cleanText) as string[];
 
     if (Array.isArray(behaviours) && behaviours.length > 0) {
@@ -333,36 +331,40 @@ async function inferInterests(
 
     const prompt = `
 You are a Meta Ads specialist.
-Based on these products from a Shopify 
-store, suggest 5-8 relevant Facebook 
+Based on these products from a Shopify
+store, suggest 5 - 8 relevant Facebook 
 and Instagram interest categories.
 
-Only suggest interests that actually 
+Only suggest interests that actually
 exist in Meta Ads Manager.
 
-Products: ${productSample}
-Store market: ${storeRegion}
-Store currency: ${currency}
-Store AOV: ${Math.round(
-      storeData.orders.average_order_value
-    )} ${currency}
+  Products: ${ productSample }
+Store market: ${ storeRegion }
+Store currency: ${ currency }
+Store AOV: ${
+  Math.round(
+    storeData.orders.average_order_value
+  )
+} ${ currency }
 
 Always include:
 - "Online shopping"
-- "Fashion"
+  - "Fashion"
 
-Add 3-6 more specific to these 
+Add 3 - 6 more specific to these 
 products and this market.
-For ${storeRegion === "NG"
-        ? "African market: consider African fashion, Lagos social scene where relevant"
-        : storeRegion === "GB"
-          ? "UK market: consider sustainable fashion, British style, Vogue UK readers where relevant"
-          : storeRegion === "AE"
-            ? "Gulf market: consider luxury fashion, modest fashion where relevant, Dubai lifestyle"
-            : "global fashion audience"}
+For ${
+  storeRegion === "NG"
+    ? "African market: consider African fashion, Lagos social scene where relevant"
+    : storeRegion === "GB"
+      ? "UK market: consider sustainable fashion, British style, Vogue UK readers where relevant"
+      : storeRegion === "AE"
+        ? "Gulf market: consider luxury fashion, modest fashion where relevant, Dubai lifestyle"
+        : "global fashion audience"
+}
 
 Return ONLY a JSON array of strings.
-No explanation. No markdown.
+No explanation.No markdown.
 `;
 
     const message = await anthropicClient.messages.create({
@@ -373,10 +375,10 @@ No explanation. No markdown.
 
     const text =
       message.content[0].type === "text" ? message.content[0].text.trim() : "";
-    const cleanText = text.replace(/```json\n?|```/g, '').trim();
+    const cleanText = text.replace(/```json\n ?| ```/g, '').trim();
     const interests = JSON.parse(cleanText) as string[];
 
-    const reasoning = `Interests selected based on product catalogue: ${productSample.slice(0, 80)}${productSample.length > 80 ? "..." : ""}`;
+    const reasoning = `Interests selected based on product catalogue: ${ productSample.slice(0, 80) }${ productSample.length > 80 ? "..." : "" } `;
     return { interests, interest_reasoning: reasoning };
   } catch (interestError) {
     console.error("Interest generation failed:", interestError);
@@ -497,7 +499,7 @@ function buildTiming(
   return {
     peak_days: peakDays,
     launch_recommendation,
-    reasoning: `Most orders happen on ${peakDays.join(", ")}${hoursLabel}`,
+    reasoning: `Most orders happen on ${ peakDays.join(", ") }${ hoursLabel } `,
   };
 }
 
@@ -567,7 +569,7 @@ export async function generateRecommendations(
     finalAgeMax = 44;
     finalAgeReasoning = "25 — 44 (AI estimated). Refine after your first campaign using Meta Audience Insights";
   } else {
-    finalAgeReasoning = `${finalAgeMin} — ${finalAgeMax} (AI estimated from your products). ` + finalAgeReasoning;
+    finalAgeReasoning = `${ finalAgeMin } — ${ finalAgeMax } (AI estimated from your products).` + finalAgeReasoning;
   }
 
   // --- BUDGET ---
@@ -598,176 +600,178 @@ export async function generateRecommendations(
     budgetTier = "Testing";
     budgetReasoning = 
       `Your store is in early growth stage. ` +
-      `8% of monthly revenue as ad spend ` +
-      `= ${formatCurrency(
-        recommendedDaily, storeCurrency
-      )}/day. Focus on learning which ` +
-      `products convert before scaling.`;
+      `8 % of monthly revenue as ad spend` +
+      `= ${
+  formatCurrency(
+    recommendedDaily, storeCurrency
+  )
+}/day. Focus on learning which ` +
+  `products convert before scaling.`;
       
   } else if (monthlyRevenue < 2000000) {
-    // Medium volume
-    recommendedDaily = Math.round(
-      monthlyRevenue * 0.10 / 30
-    );
-    budgetTier = "Growth";
-    budgetReasoning = 
-      `10% of monthly revenue as ad spend ` +
-      `= ${formatCurrency(
-        recommendedDaily, storeCurrency
-      )}/day. You have enough data to ` +
-      `optimise — test 2-3 products.`;
-      
-  } else {
-    // High volume
-    recommendedDaily = Math.round(
-      monthlyRevenue * 0.12 / 30
-    );
-    budgetTier = "Scale";
-    budgetReasoning = 
-      `12% of monthly revenue for an ` +
-      `established store = ${formatCurrency(
-        recommendedDaily, storeCurrency
-      )}/day. Prioritise your ` +
-      `top-performing products.`;
-  }
-
-  // --- TIMING ---
-  const timing = buildTiming(
-    storeData.orders.peak_days,
-    storeData.orders.peak_hours
+  // Medium volume
+  recommendedDaily = Math.round(
+    monthlyRevenue * 0.10 / 30
   );
+  budgetTier = "Growth";
+  budgetReasoning =
+    `10% of monthly revenue as ad spend ` +
+    `= ${formatCurrency(
+      recommendedDaily, storeCurrency
+    )}/day. You have enough data to ` +
+    `optimise — test 2-3 products.`;
 
-  // --- PLACEMENTS ---
-  const placements = [
-    "Facebook Feed",
-    "Instagram Feed",
-    "Instagram Stories",
-    "Instagram Reels",
-  ];
-
-  // --- PRODUCTS ---
-  const sortedProducts = [...storeData.products].sort(
-    (a, b) => b.revenue - a.revenue
+} else {
+  // High volume
+  recommendedDaily = Math.round(
+    monthlyRevenue * 0.12 / 30
   );
-  const topProducts = sortedProducts
-    .filter((p) => p.should_advertise)
-    .slice(0, 5)
-    .map((p) => p.name);
-  const productsToAvoid = storeData.products
-    .filter((p) => !p.should_advertise)
-    .map((p) => `${p.name}${p.reason ? ` (${p.reason})` : ""}`);
+  budgetTier = "Scale";
+  budgetReasoning =
+    `12% of monthly revenue for an ` +
+    `established store = ${formatCurrency(
+      recommendedDaily, storeCurrency
+    )}/day. Prioritise your ` +
+    `top-performing products.`;
+}
 
-  // --- STORE HEALTH (FIX 5: percentage-based) ---
-  const productScore = scoreProducts(storeData.products);
-  const orderScore = scoreOrders(storeData.orders.orders_last_30_days);
-  const retentionScore = scoreRetention(storeData.orders.repeat_customer_rate);
-  const availabilityScore = scoreAvailability(storeData.products);
+// --- TIMING ---
+const timing = buildTiming(
+  storeData.orders.peak_days,
+  storeData.orders.peak_hours
+);
 
-  const healthBreakdown = [
-    {
-      label: "Active Products",
-      score: productScore.score,
-      max: productScore.max,
-      status: productScore.status,
-      percentage: Math.round((productScore.score / productScore.max) * 100),
-    },
-    {
-      label: "Recent Orders",
-      score: orderScore.score,
-      max: orderScore.max,
-      status: orderScore.status,
-      percentage: Math.round((orderScore.score / orderScore.max) * 100),
-    },
-    {
-      label: "Customer Retention",
-      score: retentionScore.score,
-      max: retentionScore.max,
-      status: retentionScore.status,
-      percentage: Math.round((retentionScore.score / retentionScore.max) * 100),
-    },
-    {
-      label: "Product Availability",
-      score: availabilityScore.score,
-      max: availabilityScore.max,
-      status: availabilityScore.status,
-      percentage: Math.round((availabilityScore.score / availabilityScore.max) * 100),
-    },
-  ] as MetaRecommendations["health_breakdown"];
+// --- PLACEMENTS ---
+const placements = [
+  "Facebook Feed",
+  "Instagram Feed",
+  "Instagram Stories",
+  "Instagram Reels",
+];
 
-  const storeHealthScore =
-    productScore.score +
-    orderScore.score +
-    retentionScore.score +
-    availabilityScore.score;
+// --- PRODUCTS ---
+const sortedProducts = [...storeData.products].sort(
+  (a, b) => b.revenue - a.revenue
+);
+const topProducts = sortedProducts
+  .filter((p) => p.should_advertise)
+  .slice(0, 5)
+  .map((p) => p.name);
+const productsToAvoid = storeData.products
+  .filter((p) => !p.should_advertise)
+  .map((p) => `${p.name}${p.reason ? ` (${p.reason})` : ""}`);
 
-  // --- WARNINGS ---
-  const warnings: string[] = [];
-  const outOfStockCount = storeData.products.filter((p) => !p.in_stock).length;
-  if (outOfStockCount > 0) {
-    warnings.push(
-      `${outOfStockCount} product${outOfStockCount > 1 ? "s" : ""} out of stock — these won't be recommended for ads`
-    );
-  }
-  if (storeData.orders.orders_last_30_days === 0) {
-    warnings.push(
-      "No orders in last 30 days — targeting recommendations are limited without purchase data"
-    );
-  }
-  if (
-    storeData.orders.average_order_value > 0 &&
-    storeData.orders.average_order_value < 5000
-  ) {
-    const currency = storeData.store.currency || "USD";
-    warnings.push(
-      `Low average order value (${Math.round(storeData.orders.average_order_value).toLocaleString()} ${currency}) — ad costs may exceed profit per sale`
-    );
-  }
+// --- STORE HEALTH (FIX 5: percentage-based) ---
+const productScore = scoreProducts(storeData.products);
+const orderScore = scoreOrders(storeData.orders.orders_last_30_days);
+const retentionScore = scoreRetention(storeData.orders.repeat_customer_rate);
+const availabilityScore = scoreAvailability(storeData.products);
 
-  // --- OPPORTUNITIES ---
-  const opportunities: string[] = [];
-  if (storeData.orders.repeat_customer_rate > 0.2) {
-    opportunities.push(
-      "Your repeat customer rate is strong — create a lookalike audience from your top buyers for lower acquisition costs"
-    );
-  }
-  if (storeData.orders.peak_days.length > 0) {
-    opportunities.push(
-      `Peak buying detected on ${storeData.orders.peak_days.slice(0, 2).join(" and ")} — consider launching campaigns 1-2 days earlier to build momentum`
-    );
-  }
-  if (storeData.orders.average_order_value > 20000) {
-    opportunities.push(
-      "High average order value — consider premium interest targeting for higher-intent audiences"
-    );
-  }
+const healthBreakdown = [
+  {
+    label: "Active Products",
+    score: productScore.score,
+    max: productScore.max,
+    status: productScore.status,
+    percentage: Math.round((productScore.score / productScore.max) * 100),
+  },
+  {
+    label: "Recent Orders",
+    score: orderScore.score,
+    max: orderScore.max,
+    status: orderScore.status,
+    percentage: Math.round((orderScore.score / orderScore.max) * 100),
+  },
+  {
+    label: "Customer Retention",
+    score: retentionScore.score,
+    max: retentionScore.max,
+    status: retentionScore.status,
+    percentage: Math.round((retentionScore.score / retentionScore.max) * 100),
+  },
+  {
+    label: "Product Availability",
+    score: availabilityScore.score,
+    max: availabilityScore.max,
+    status: availabilityScore.status,
+    percentage: Math.round((availabilityScore.score / availabilityScore.max) * 100),
+  },
+] as MetaRecommendations["health_breakdown"];
 
-  return {
-    targeting: {
-      locations,
-      age_min: finalAgeMin,
-      age_max: finalAgeMax,
-      age_reasoning: finalAgeReasoning,
-      gender,
-      gender_reasoning,
-      interests,
-      behaviours,
-      interest_reasoning,
-    },
-    budget: {
-      recommended_daily: recommendedDaily,
-      recommended_duration_days: 7,
-      reasoning: budgetReasoning,
-      currency: storeData.store?.currency || "USD",
-    },
-    timing,
-    placements: {
-      recommended: placements,
-    },
-    top_products_to_advertise: topProducts,
-    products_to_avoid: productsToAvoid,
-    store_health_score: storeHealthScore,
-    health_breakdown: healthBreakdown,
-    warnings,
-    opportunities,
-  };
+const storeHealthScore =
+  productScore.score +
+  orderScore.score +
+  retentionScore.score +
+  availabilityScore.score;
+
+// --- WARNINGS ---
+const warnings: string[] = [];
+const outOfStockCount = storeData.products.filter((p) => !p.in_stock).length;
+if (outOfStockCount > 0) {
+  warnings.push(
+    `${outOfStockCount} product${outOfStockCount > 1 ? "s" : ""} out of stock — these won't be recommended for ads`
+  );
+}
+if (storeData.orders.orders_last_30_days === 0) {
+  warnings.push(
+    "No orders in last 30 days — targeting recommendations are limited without purchase data"
+  );
+}
+if (
+  storeData.orders.average_order_value > 0 &&
+  storeData.orders.average_order_value < 5000
+) {
+  const currency = storeData.store.currency || "USD";
+  warnings.push(
+    `Low average order value (${Math.round(storeData.orders.average_order_value).toLocaleString()} ${currency}) — ad costs may exceed profit per sale`
+  );
+}
+
+// --- OPPORTUNITIES ---
+const opportunities: string[] = [];
+if (storeData.orders.repeat_customer_rate > 0.2) {
+  opportunities.push(
+    "Your repeat customer rate is strong — create a lookalike audience from your top buyers for lower acquisition costs"
+  );
+}
+if (storeData.orders.peak_days.length > 0) {
+  opportunities.push(
+    `Peak buying detected on ${storeData.orders.peak_days.slice(0, 2).join(" and ")} — consider launching campaigns 1-2 days earlier to build momentum`
+  );
+}
+if (storeData.orders.average_order_value > 20000) {
+  opportunities.push(
+    "High average order value — consider premium interest targeting for higher-intent audiences"
+  );
+}
+
+return {
+  targeting: {
+    locations,
+    age_min: finalAgeMin,
+    age_max: finalAgeMax,
+    age_reasoning: finalAgeReasoning,
+    gender,
+    gender_reasoning,
+    interests,
+    behaviours,
+    interest_reasoning,
+  },
+  budget: {
+    recommended_daily: recommendedDaily,
+    recommended_duration_days: 7,
+    reasoning: budgetReasoning,
+    currency: storeData.store?.currency || "USD",
+  },
+  timing,
+  placements: {
+    recommended: placements,
+  },
+  top_products_to_advertise: topProducts,
+  products_to_avoid: productsToAvoid,
+  store_health_score: storeHealthScore,
+  health_breakdown: healthBreakdown,
+  warnings,
+  opportunities,
+};
 }
