@@ -75,18 +75,6 @@ Return ONLY a raw JSON object matching this exact schema. Do not include markdow
     {"location": "string", "reasoning": "string"}
   ]
 }
-`{
-      "primary_market": "string",
-      "locations": [
-        {
-          "name": "string",
-          "source": "from_data" | "recommended",
-            "percentage": number | null,
-              "note": "string | null"
-}
-  ],
-"excluded": ["list of cities removed and why in one word each"]
-}
 `;
 
   try {

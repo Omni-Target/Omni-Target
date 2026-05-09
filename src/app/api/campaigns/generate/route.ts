@@ -316,8 +316,8 @@ ${imageUrl ?
     });
 
     // Check if we received text content
-    const textContent = message.content.find((block) => block.type === "text");
-    if (!textContent || textContent.type !== "text") {
+    const responseBlock = message.content.find((block) => block.type === "text");
+    if (!responseBlock || responseBlock.type !== "text") {
       throw new Error("No text content returned from Claude");
     }
 
@@ -325,7 +325,7 @@ ${imageUrl ?
     try {
       // Strip markdown code fences if Claude
       // wraps the JSON in json ... 
-      const cleaned = textContent.text
+      const cleaned = responseBlock.text
         .replace(/^```json\s*/i, "")
         .replace(/^```\s*/i, "")
         .replace(/```\s*$/i, "")
