@@ -216,6 +216,8 @@ function CampaignsContent() {
           campaignGoal: goal,
           tonePreference: tone,
           mediaUrl: mediaCloudUrl || mediaPreviewUrl || null,
+          imageUrl: mediaCloudUrl || paramImage || null,
+          productPrice: paramPrice || null,
         }),
       });
 
@@ -546,7 +548,6 @@ function CampaignsContent() {
                     <option value="Grow Brand Awareness" className="bg-[#09090f] text-white">Grow Brand Awareness</option>
                     <option value="Promote a New Collection" className="bg-[#09090f] text-white">Promote a New Collection</option>
                     <option value="Retarget Past Visitors" className="bg-[#09090f] text-white">Retarget Past Visitors</option>
-                    <option value="Grow Instagram Following" className="bg-[#09090f] text-white">Grow Instagram Following</option>
                   </select>
                   <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-white/40">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
