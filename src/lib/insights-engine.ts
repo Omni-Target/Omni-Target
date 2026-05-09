@@ -44,10 +44,14 @@ async function buildLocationTargeting(
 ): Promise<LocationResult[]> {
   const storeCurrency = storeData.store?.currency || "USD";
 
-  const rawLocationList = storeData.orders
-    .top_locations
-    .map(l => `${l.city} (${l.percentage}%)`)
-    .join(", ");
+  const rawLocationListMap = JSON.stringify(
+    Object.fromEntries(
+      storeData.orders.top_locations.map((l) => [
+        l.city,
+        Math.round((l.percentage / 100) * storeData.orders.order_count),
+      ])
+    )
+  );
 
   const locationPrompt = `
 You are a Meta Ads targeting specialist. 
