@@ -1222,7 +1222,7 @@ function CampaignsContent() {
                 }}
                 className="w-full py-3 px-6 rounded-xl border border-border-subtle/50 text-white/30 font-medium text-sm hover:text-white/60 hover:border-white/10 transition-colors cursor-pointer bg-transparent"
               >
-                Create New Campaign
+                Create New Brief
               </button>
             </div>
           </div>

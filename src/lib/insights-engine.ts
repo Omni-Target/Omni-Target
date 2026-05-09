@@ -36,136 +36,93 @@ export interface LocationResult {
   name: string;
   source: "from_data" | "recommended";
   percentage?: number;
+  note?: string;
 }
 
-function buildLocationTargeting(
+async function buildLocationTargeting(
   storeData: StoreData
-): LocationResult[] {
-  const results: LocationResult[] = [];
-  
-  // Get store's primary country from 
-  // store info or first order location
-  const storeCurrency = 
-    storeData.store?.currency || "USD";
-  
-  // Map currency to primary market
-  const CURRENCY_TO_COUNTRY: 
-    Record<string, string> = {
-    NGN: "Nigeria",
-    GBP: "United Kingdom", 
-    EUR: "Europe",
-    AED: "United Arab Emirates",
-    USD: "United States",
-    CAD: "Canada",
-    AUD: "Australia",
-    GHS: "Ghana",
-    KES: "Kenya",
-    ZAR: "South Africa",
-  };
-  
-  const primaryMarket = 
-    CURRENCY_TO_COUNTRY[storeCurrency] 
-    || "Global";
-  
-  // For Nigerian stores: consolidate 
-  // Lagos areas to "Lagos" etc.
-  const NIGERIA_CONSOLIDATION: 
-    Record<string, string> = {
-    ikoyi: "Lagos",
-    lekki: "Lagos", 
-    surulere: "Lagos",
-    yaba: "Lagos",
-    ikeja: "Lagos",
-    "victoria island": "Lagos",
-    vi: "Lagos",
-    ajah: "Lagos",
-    "lagos island": "Lagos",
-    festac: "Lagos",
-    gbagada: "Lagos",
-    maryland: "Lagos",
-    mushin: "Lagos",
-    "garki": "Abuja",
-    "wuse": "Abuja",
-    "maitama": "Abuja",
-    "asokoro": "Abuja",
-    "gwarinpa": "Abuja",
-    "port harcourt": "Port Harcourt",
-    "ph": "Port Harcourt",
-    "enugu": "Enugu",
-    "ibadan": "Ibadan",
-    "kano": "Kano",
-    "benin": "Benin City",
-    "benin city": "Benin City",
-    "warri": "Warri",
-    "owerri": "Owerri",
-    "calabar": "Calabar",
-    "aba": "Aba",
-    "uyo": "Uyo",
-    "kaduna": "Kaduna",
-    "jos": "Jos",
-    "ilorin": "Ilorin",
-  };
+): Promise<LocationResult[]> {
+  const storeCurrency = storeData.store?.currency || "USD";
 
-  // Consolidate locations
-  const consolidatedMap: 
-    Record<string, number> = {};
-  
-  storeData.orders.top_locations
-    .forEach(loc => {
-      const cityLower = 
-        loc.city.toLowerCase().trim();
-      
-      // Try Nigerian consolidation first
-      const consolidated = 
-        storeCurrency === "NGN"
-          ? NIGERIA_CONSOLIDATION[cityLower] 
-            || loc.city
-          : loc.city;
-      
-      consolidatedMap[consolidated] = 
-        (consolidatedMap[consolidated] || 0) 
-        + loc.percentage;
-    });
-
-  // Sort and take top locations
-  const sortedLocations = 
-    Object.entries(consolidatedMap)
-      .sort(([,a], [,b]) => b - a)
-      .slice(0, 4);
-
-  sortedLocations.forEach(
-    ([name, percentage]) => {
-      results.push({
-        name,
-        source: "from_data",
-        percentage: Math.round(percentage)
-      });
-    }
+  const rawLocationListMap = JSON.stringify(
+    Object.fromEntries(
+      storeData.orders.top_locations.map((l) => [
+        l.city,
+        Math.round((l.percentage / 100) * storeData.orders.order_count),
+      ])
+    )
   );
 
-  // Add high-value recommendations 
-  // for Nigerian stores
-  if (storeCurrency === "NGN") {
-    const HIGH_VALUE_NG = [
-      "Lagos", "Abuja", "Port Harcourt"
-    ];
-    
-    HIGH_VALUE_NG.forEach(city => {
-      const alreadyIncluded = 
-        results.some(r => 
-          r.name.toLowerCase() === 
-          city.toLowerCase()
-        );
-      if (!alreadyIncluded) {
-        results.push({
-          name: city,
-          source: "recommended",
-        });
-      }
-    });
-  }
+  const locationPrompt = `
+You are a Meta Ads targeting specialist. 
 
-  return results;
+A Shopify store uses the currency: ${storeCurrency}
+Here is a frequency map of their customer locations (Location: Purchase Count):
+${rawLocationListMap} // Pass data like {"London": 450, "Ikoyi": 120}
+
+Your objective is to optimize this list for a Meta Ads location targeting setup. 
+Follow these logical rules strictly:
+
+1. PRIMARY MARKET: Identify the primary market based on the highest aggregate purchase volume. Currency is secondary context.
+2. PRESERVE PREMIUM POCKETS: Do NOT consolidate known high-net-worth districts (e.g., Ikoyi, Maitama, Beverly Hills) into their parent cities. Keep them isolated for premium targeting.
+3. CONSOLIDATE THE REST: Roll up low-volume, non-premium city districts into their parent city/region to avoid Meta's "Audience Too Narrow" errors.
+4. OUTLIER PRUNING: Remove international locations unless they constitute >10% of total purchase volume (indicating a strong diaspora or secondary market).
+5. STRATEGIC EXPANSION: Recommend 2 high-purchasing-power locations within the primary market that are absent from the data but share demographic similarities with the top buyers.
+
+OUTPUT FORMAT:
+Return ONLY a raw JSON object matching this exact schema. Do not include markdown formatting or backticks.
+{
+  "primary_market_country": "string",
+  "final_targeting_locations": ["string", "string"],
+  "removed_locations": ["string"],
+  "strategic_additions": [
+    {"location": "string", "reasoning": "string"}
+  ]
+}
+`;
+
+  try {
+    const message = await anthropicClient.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 500,
+      messages: [{ role: "user", content: locationPrompt }],
+    });
+
+    const text =
+      message.content[0].type === "text" ? message.content[0].text.trim() : "";
+    const cleanText = text.replace(/```json\n?|```/g, '').trim();
+    const parsed = JSON.parse(cleanText) as {
+      primary_market_country: string;
+      final_targeting_locations: string[];
+      removed_locations: string[];
+      strategic_additions: { location: string; reasoning: string }[];
+    };
+
+    const results: LocationResult[] = [
+      ...(parsed.final_targeting_locations || []).map(loc => ({
+        name: loc,
+        source: "from_data" as const,
+      })),
+      ...(parsed.strategic_additions || []).map(add => ({
+        name: add.location,
+        source: "recommended" as const,
+        note: add.reasoning,
+      }))
+    ];
+
+    if (results.length > 0) {
+      return results;
+    }
+    throw new Error("Invalid locations array");
+  } catch (error) {
+    console.error("Location targeting inference error:", error);
+    return storeData.orders.top_locations.slice(0, 5).map(l => ({
+      name: l.city,
+      source: "from_data",
+      percentage: l.percentage,
+      note: "Manual review recommended"
+    } as LocationResult));
+  }
 }
 
 // ─── FIX 2: AI Gender Range ───────────────────────────────────────────────────
@@ -588,16 +545,16 @@ export async function generateRecommendations(
   storeData: StoreData
 ): Promise<MetaRecommendations> {
   // Run AI calls in parallel for speed
-  const [{ interests, interest_reasoning }, ageRange, behaviours, genderRange] =
+  const [{ interests, interest_reasoning }, ageRange, behaviours, genderRange, locations] =
     await Promise.all([
       inferInterests(storeData),
       inferAgeRange(storeData),
       inferBehaviours(storeData),
       inferGender(storeData),
+      buildLocationTargeting(storeData),
     ]);
 
   // --- TARGETING ---
-  const locations = buildLocationTargeting(storeData);
   const gender = genderRange.gender;
   const gender_reasoning = genderRange.reasoning;
 
