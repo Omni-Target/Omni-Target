@@ -3,6 +3,8 @@ import { Anthropic } from "@anthropic-ai/sdk";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 
+// Credit-gating: check balance before generation
+
 // Global client removed in favor of explicit initialization per request
 
 /**
@@ -34,9 +36,25 @@ export async function POST(request: Request) {
 
   const { data: integration } = await supabaseAdmin
     .from("user_integrations")
-    .select("store_snapshot")
+    .select("store_snapshot, credits_balance, credits_unlimited_until")
     .eq("clerk_user_id", userId!)
     .single();
+
+  // Credit gate: check if user has credits or unlimited access
+  const hasUnlimited =
+    integration?.credits_unlimited_until &&
+    new Date(integration.credits_unlimited_until) > new Date();
+
+  const hasCredits =
+    (integration?.credits_balance || 0) > 0;
+
+  if (!hasUnlimited && !hasCredits) {
+    return NextResponse.json({
+      error: "no_credits",
+      message: "You have no credits remaining. Purchase a pack to continue.",
+      redirect: "/pricing"
+    }, { status: 402 });
+  }
 
   const currency = integration?.store_snapshot?.store?.currency || "USD";
 
@@ -337,6 +355,27 @@ ${imageUrl ?
         { error: "Copy generation failed. Try again." },
         { status: 500 }
       );
+    }
+
+    // Deduct credit after successful generation
+    if (!hasUnlimited) {
+      await supabaseAdmin
+        .from("user_integrations")
+        .update({
+          credits_balance: Math.max(
+            0,
+            (integration?.credits_balance || 0) - 1
+          )
+        })
+        .eq("clerk_user_id", userId!);
+
+      await supabaseAdmin
+        .from("credit_usage")
+        .insert({
+          clerk_user_id: userId!,
+          credits_used: 1,
+          action: "brief_generated",
+        });
     }
 
     // Return the successfully parsed JSON output

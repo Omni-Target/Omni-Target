@@ -98,6 +98,9 @@ function CampaignsContent() {
   const [loadingInsights, setLoadingInsights] = useState(false);
   const [aiInsights, setAiInsights] = useState<any>(null);
   const [loadingAiInsights, setLoadingAiInsights] = useState(false);
+  
+  const [credits, setCredits] = useState(0);
+  const [isUnlimited, setIsUnlimited] = useState(false);
 
   useEffect(() => {
     setLoadingInsights(true);
@@ -108,6 +111,13 @@ function CampaignsContent() {
           setStoreInsights(data.data);
           if (data.data.store?.name) {
             setBrandName(data.data.store.name);
+          }
+          setCredits(data.credits_balance || 0);
+          if (data.credits_unlimited_until) {
+            const unlimitedDate = new Date(data.credits_unlimited_until);
+            if (unlimitedDate > new Date()) {
+              setIsUnlimited(true);
+            }
           }
           // Fetch AI insights once store data is confirmed
           setLoadingAiInsights(true);
@@ -226,6 +236,12 @@ function CampaignsContent() {
       const data: GeneratedCopy = await res.json();
       setGeneratedCopy(data);
       setSelectedCta(data.cta);
+      
+      // Update local credits display
+      if (!isUnlimited) {
+        setCredits((prev) => Math.max(0, prev - 1));
+      }
+      
       setViewState("review");
     } catch (err) {
       console.error(err);
@@ -267,6 +283,17 @@ function CampaignsContent() {
           <div className="hidden sm:flex items-center justify-center gap-6 absolute left-1/2 -translate-x-1/2">
             <Link href="/dashboard" className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Dashboard</Link>
             <Link href="/campaigns" className="text-sm font-medium text-white/90 transition-colors">Campaigns</Link>
+            
+            {(credits > 0 || isUnlimited) && (
+              <span className="text-xs text-white/50">
+                {isUnlimited ? "Unlimited" : `${credits} briefs`}
+              </span>
+            )}
+            
+            {credits === 0 && !isUnlimited && (
+              <Link href="/pricing" className="text-sm font-medium text-brand-400 hover:text-brand-300 transition-colors">Buy Credits</Link>
+            )}
+            
             <Link href="/settings" className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Settings</Link>
           </div>
           <div className="flex items-center gap-6">

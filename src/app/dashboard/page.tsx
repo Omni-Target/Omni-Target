@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
 import { formatCurrency } from "@/lib/currency";
 
@@ -9,12 +10,21 @@ interface StoreDataResponse {
   connected: boolean;
   data?: any;
   message?: string;
+  credits_balance?: number;
+  credits_unlimited_until?: string | null;
 }
 
-export default function DashboardPage() {
+function DashboardContent() {
   const [storeData, setStoreData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
+  const [credits, setCredits] = useState(0);
+  const [isUnlimited, setIsUnlimited] = useState(false);
+  const [unlimitedUntil, setUnlimitedUntil] = useState<string | null>(null);
+
+  const searchParams = useSearchParams();
+  const paymentSuccess = searchParams.get("payment");
+  const packId = searchParams.get("pack");
 
   useEffect(() => {
     fetch("/api/store/data", { cache: "no-store" })
@@ -24,6 +34,16 @@ export default function DashboardPage() {
         if (data.connected && data.data) {
           setStoreData(data.data);
         }
+        setCredits(data.credits_balance || 0);
+        
+        if (data.credits_unlimited_until) {
+          const unlimitedDate = new Date(data.credits_unlimited_until);
+          if (unlimitedDate > new Date()) {
+            setIsUnlimited(true);
+            setUnlimitedUntil(data.credits_unlimited_until);
+          }
+        }
+        
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -103,6 +123,17 @@ export default function DashboardPage() {
           <div className="hidden sm:flex items-center justify-center gap-6 absolute left-1/2 -translate-x-1/2">
             <Link href="/dashboard" className="text-sm font-medium text-white/90 transition-colors">Dashboard</Link>
             <Link href="/campaigns" className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Campaigns</Link>
+            
+            {(credits > 0 || isUnlimited) && (
+              <span className="text-xs text-white/50">
+                {isUnlimited ? "Unlimited" : `${credits} briefs`}
+              </span>
+            )}
+            
+            {credits === 0 && !isUnlimited && (
+              <Link href="/pricing" className="text-sm font-medium text-brand-400 hover:text-brand-300 transition-colors">Buy Credits</Link>
+            )}
+            
             <Link href="/settings" className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Settings</Link>
           </div>
           <div className="flex items-center gap-6">
@@ -130,6 +161,16 @@ export default function DashboardPage() {
       <div className="fixed bottom-0 right-1/3 w-[400px] h-[400px] bg-success-500/3 rounded-full blur-[100px] pointer-events-none" />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 relative">
+        {/* Success Toast */}
+        {paymentSuccess === "success" && (
+          <div className="mb-6 px-4 py-3 rounded-xl bg-success-500/10 border border-success-500/20 text-sm text-success-400 flex items-center gap-2 animate-fade-in-up">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            Payment successful! Your credits have been added. Let&apos;s create your first brief.
+          </div>
+        )}
+
         {/* Header */}
         <div className="mb-8 animate-fade-in-up">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-1">
@@ -388,5 +429,13 @@ export default function DashboardPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[var(--background)] flex items-center justify-center text-white/50">Loading...</div>}>
+      <DashboardContent />
+    </Suspense>
   );
 }

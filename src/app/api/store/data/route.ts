@@ -30,7 +30,7 @@ export async function GET() {
   const { data: integration } = await supabaseAdmin
     .from("user_integrations")
     .select(
-      "shopify_store_url, shopify_access_token, shopify_custom_domain, store_snapshot, store_snapshot_at"
+      "shopify_store_url, shopify_access_token, shopify_custom_domain, store_snapshot, store_snapshot_at, credits_balance, credits_unlimited_until"
     )
     .eq("clerk_user_id", userId)
     .single();
@@ -39,6 +39,8 @@ export async function GET() {
     return Response.json({
       connected: false,
       message: "Shopify store not connected",
+      credits_balance: integration?.credits_balance || 0,
+      credits_unlimited_until: integration?.credits_unlimited_until || null,
     });
   }
 
@@ -93,11 +95,13 @@ export async function GET() {
         }
       });
 
-    // Return immediately without waiting 
+    // Return immediately without waiting
     // for the save
     return Response.json({
       connected: true,
       data: storeData,
+      credits_balance: integration.credits_balance || 0,
+      credits_unlimited_until: integration.credits_unlimited_until || null,
     });
   } catch (error) {
     console.error("Store data error:", error);
