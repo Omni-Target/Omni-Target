@@ -2,13 +2,13 @@ import Stripe from "stripe";
 import { getPackById } from "@/lib/credit-packs";
 import { grantCredits } from "@/lib/grant-credits";
 
-const stripe = new Stripe(
-  process.env.STRIPE_SECRET_KEY || ""
-);
-
 export async function POST(
   request: Request
 ) {
+  const stripe = new Stripe(
+    process.env.STRIPE_SECRET_KEY!
+  );
+
   const body = await request.text();
   const sig = request.headers
     .get("stripe-signature")!;
