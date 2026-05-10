@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { getPackById } from "@/lib/credit-packs";
 
 const stripe = new Stripe(
-  process.env.STRIPE_SECRET_KEY!
+  process.env.STRIPE_SECRET_KEY || ""
 );
 
 export async function POST(
