@@ -51,7 +51,7 @@ export async function POST(request: Request) {
   if (!hasUnlimited && !hasCredits) {
     return NextResponse.json({
       error: "no_credits",
-      message: "You have no credits remaining. Purchase a pack to continue.",
+      message: "You have no briefs remaining. Purchase a pack to continue.",
       redirect: "/pricing"
     }, { status: 402 });
   }

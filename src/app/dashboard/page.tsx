@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
 import { formatCurrency } from "@/lib/currency";
+import { useCredits } from "@/hooks/useCredits";
 
 interface StoreDataResponse {
   connected: boolean;
@@ -18,13 +19,23 @@ function DashboardContent() {
   const [storeData, setStoreData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
-  const [credits, setCredits] = useState(0);
-  const [isUnlimited, setIsUnlimited] = useState(false);
-  const [unlimitedUntil, setUnlimitedUntil] = useState<string | null>(null);
+  const [showPaymentToast, setShowPaymentToast] = useState(false);
+
+  const { credits, isUnlimited } = useCredits();
 
   const searchParams = useSearchParams();
   const paymentSuccess = searchParams.get("payment");
   const packId = searchParams.get("pack");
+
+  useEffect(() => {
+    if (paymentSuccess === "success") {
+      setShowPaymentToast(true);
+      setTimeout(() => {
+        setShowPaymentToast(false);
+        window.history.replaceState({}, "", "/dashboard");
+      }, 4000);
+    }
+  }, [paymentSuccess]);
 
   useEffect(() => {
     fetch("/api/store/data", { cache: "no-store" })
@@ -33,15 +44,6 @@ function DashboardContent() {
         setConnected(data.connected);
         if (data.connected && data.data) {
           setStoreData(data.data);
-        }
-        setCredits(data.credits_balance || 0);
-        
-        if (data.credits_unlimited_until) {
-          const unlimitedDate = new Date(data.credits_unlimited_until);
-          if (unlimitedDate > new Date()) {
-            setIsUnlimited(true);
-            setUnlimitedUntil(data.credits_unlimited_until);
-          }
         }
         
         setLoading(false);
@@ -124,14 +126,14 @@ function DashboardContent() {
             <Link href="/dashboard" className="text-sm font-medium text-white/90 transition-colors">Dashboard</Link>
             <Link href="/campaigns" className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Campaigns</Link>
             
-            {(credits > 0 || isUnlimited) && (
-              <span className="text-xs text-white/50">
-                {isUnlimited ? "Unlimited" : `${credits} briefs`}
+            {isUnlimited ? (
+              <span className="text-xs text-brand-400 font-medium">
+                Unlimited
               </span>
-            )}
-            
-            {credits === 0 && !isUnlimited && (
-              <Link href="/pricing" className="text-sm font-medium text-brand-400 hover:text-brand-300 transition-colors">Buy Credits</Link>
+            ) : credits !== null && (
+              <span className={`text-xs font-medium ${credits === 0 ? "text-error-400" : "text-white/50"}`}>
+                {credits === 0 ? <Link href="/pricing" className="text-brand-400 hover:underline">Buy briefs</Link> : `${credits} briefs left`}
+              </span>
             )}
             
             <Link href="/settings" className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Settings</Link>
@@ -162,12 +164,12 @@ function DashboardContent() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 relative">
         {/* Success Toast */}
-        {paymentSuccess === "success" && (
+        {showPaymentToast && (
           <div className="mb-6 px-4 py-3 rounded-xl bg-success-500/10 border border-success-500/20 text-sm text-success-400 flex items-center gap-2 animate-fade-in-up">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
               <polyline points="20 6 9 17 4 12" />
             </svg>
-            Payment successful! Your credits have been added. Let&apos;s create your first brief.
+            ✓ Payment successful! Your briefs have been added. Let&apos;s create your first campaign brief.
           </div>
         )}
 

@@ -8,6 +8,7 @@ import { SignOutButton, useUser } from "@clerk/nextjs";
 import { MediaValidationResult } from "@/lib/meta-specs";
 import { generateBriefPDF } from "@/lib/generate-brief-pdf";
 import { formatCurrency, getCurrencySymbol } from "@/lib/currency";
+import { useCredits } from "@/hooks/useCredits";
 
 type CampaignState = "media" | "input" | "generating" | "review" | "brief";
 
@@ -37,6 +38,7 @@ function CampaignsContent() {
   // Overall State
   const [viewState, setViewState] = useState<CampaignState>("media");
   const [errorMsg, setErrorMsg] = useState("");
+  const [showBuyCredits, setShowBuyCredits] = useState(false);
 
   // Media State
   const [mediaFile, setMediaFile] = useState<File | null>(null);
@@ -99,8 +101,7 @@ function CampaignsContent() {
   const [aiInsights, setAiInsights] = useState<any>(null);
   const [loadingAiInsights, setLoadingAiInsights] = useState(false);
   
-  const [credits, setCredits] = useState(0);
-  const [isUnlimited, setIsUnlimited] = useState(false);
+  const { credits, isUnlimited } = useCredits();
 
   useEffect(() => {
     setLoadingInsights(true);
@@ -111,13 +112,6 @@ function CampaignsContent() {
           setStoreInsights(data.data);
           if (data.data.store?.name) {
             setBrandName(data.data.store.name);
-          }
-          setCredits(data.credits_balance || 0);
-          if (data.credits_unlimited_until) {
-            const unlimitedDate = new Date(data.credits_unlimited_until);
-            if (unlimitedDate > new Date()) {
-              setIsUnlimited(true);
-            }
           }
           // Fetch AI insights once store data is confirmed
           setLoadingAiInsights(true);
@@ -214,6 +208,7 @@ function CampaignsContent() {
 
     setViewState("generating");
     setErrorMsg("");
+    setShowBuyCredits(false);
 
     try {
       const res = await fetch("/api/campaigns/generate", {
@@ -231,16 +226,20 @@ function CampaignsContent() {
         }),
       });
 
+      const data = await res.json();
+
+      if (res.status === 402 || data.error === "no_credits") {
+        setErrorMsg("You have no briefs remaining. Purchase a pack to continue.");
+        setShowBuyCredits(true);
+        setViewState("input");
+        return;
+      }
+
       if (!res.ok) throw new Error("API returned an error");
 
-      const data: GeneratedCopy = await res.json();
-      setGeneratedCopy(data);
-      setSelectedCta(data.cta);
-      
-      // Update local credits display
-      if (!isUnlimited) {
-        setCredits((prev) => Math.max(0, prev - 1));
-      }
+      const generatedCopyData: GeneratedCopy = data;
+      setGeneratedCopy(generatedCopyData);
+      setSelectedCta(generatedCopyData.cta);
       
       setViewState("review");
     } catch (err) {
@@ -258,6 +257,7 @@ function CampaignsContent() {
     setTone("Let AI decide (recommended)");
     setGeneratedCopy(null);
     setErrorMsg("");
+    setShowBuyCredits(false);
     setAutoFilledFromStore(false);
     setMediaPreviewUrl("");
     setMediaCloudUrl("");
@@ -284,14 +284,14 @@ function CampaignsContent() {
             <Link href="/dashboard" className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Dashboard</Link>
             <Link href="/campaigns" className="text-sm font-medium text-white/90 transition-colors">Campaigns</Link>
             
-            {(credits > 0 || isUnlimited) && (
-              <span className="text-xs text-white/50">
-                {isUnlimited ? "Unlimited" : `${credits} briefs`}
+            {isUnlimited ? (
+              <span className="text-xs text-brand-400 font-medium">
+                Unlimited
               </span>
-            )}
-            
-            {credits === 0 && !isUnlimited && (
-              <Link href="/pricing" className="text-sm font-medium text-brand-400 hover:text-brand-300 transition-colors">Buy Credits</Link>
+            ) : credits !== null && (
+              <span className={`text-xs font-medium ${credits === 0 ? "text-error-400" : "text-white/50"}`}>
+                {credits === 0 ? <Link href="/pricing" className="text-brand-400 hover:underline">Buy briefs</Link> : `${credits} briefs left`}
+              </span>
             )}
             
             <Link href="/settings" className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Settings</Link>
@@ -614,13 +614,25 @@ function CampaignsContent() {
           </div>
 
           {errorMsg && (
-            <div className="mb-4 p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-sm text-error-400 flex items-center gap-2 animate-fade-in-up">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              {errorMsg}
+            <div className="mb-4 animate-fade-in-up">
+              <div className="p-3 rounded-lg bg-error-500/10 border border-error-500/20 text-sm text-error-400 flex items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                {errorMsg}
+              </div>
+              {showBuyCredits && (
+                <div className="mt-4 text-center">
+                  <Link
+                    href="/pricing"
+                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-brand-500 text-white text-sm font-medium hover:bg-brand-400 transition-colors"
+                  >
+                    Buy Credits →
+                  </Link>
+                </div>
+              )}
             </div>
           )}
 
