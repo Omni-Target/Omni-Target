@@ -5,7 +5,9 @@ export interface CreditPack {
   description: string;
   credits: number;
   unlimited_days: number;
+  price_usd: number;
   price_ngn: number;
+  stripe_price_id?: string;
   highlight?: boolean;
   features: string[];
 }
@@ -18,6 +20,7 @@ export const CREDIT_PACKS: CreditPack[] = [
     description: "Perfect for testing your first campaigns",
     credits: 5,
     unlimited_days: 0,
+    price_usd: 29,
     price_ngn: 45000,
     features: [
       "5 campaign briefs",
@@ -34,6 +37,7 @@ export const CREDIT_PACKS: CreditPack[] = [
     description: "The most popular choice for active brands",
     credits: 20,
     unlimited_days: 0,
+    price_usd: 79,
     price_ngn: 122000,
     highlight: true,
     features: [
@@ -51,6 +55,7 @@ export const CREDIT_PACKS: CreditPack[] = [
     description: "For brands with multiple product lines",
     credits: 0,
     unlimited_days: 90,
+    price_usd: 149,
     price_ngn: 230000,
     features: [
       "Unlimited briefs for 90 days",
