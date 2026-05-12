@@ -22,6 +22,44 @@ export default function ProductsPage() {
   const inStockProducts = storeData?.products?.filter((p: any) => p.in_stock) || [];
   const outOfStockProducts = storeData?.products?.filter((p: any) => !p.in_stock) || [];
 
+  const sortedInStock = [...inStockProducts].sort((a, b) => {
+    if (b.units_sold !== a.units_sold) {
+      return b.units_sold - a.units_sold;
+    }
+    return b.revenue - a.revenue;
+  });
+
+  const maxSold = Math.max(
+    ...sortedInStock.map((p: any) => p.units_sold || 0)
+  );
+
+  const getProductLabel = (product: any) => {
+    const sold = product.units_sold || 0;
+    
+    if (sold === maxSold && sold > 0) {
+      return {
+        text: "🔥 Best seller",
+        color: "text-success-400"
+      };
+    }
+    if (sold >= 3) {
+      return {
+        text: `${sold} units sold`,
+        color: "text-brand-400"
+      };
+    }
+    if (sold > 0) {
+      return {
+        text: `${sold} unit${sold > 1 ? "s" : ""} sold`,
+        color: "text-white/40"
+      };
+    }
+    return {
+      text: "No sales yet — test with a small budget",
+      color: "text-white/30"
+    };
+  };
+
   return (
     <div className="min-h-screen bg-[var(--background)]">
       {/* Nav */}
@@ -62,7 +100,7 @@ export default function ProductsPage() {
                   Ready to Advertise
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {inStockProducts.map((product: any) => (
+                  {sortedInStock.map((product: any) => (
                     <div key={product.id} className="rounded-xl border border-border-subtle bg-surface p-4 flex flex-col gap-3">
                       
                       {/* Product image */}
@@ -81,21 +119,29 @@ export default function ProductsPage() {
                         <h3 className="text-sm font-semibold text-white mb-1">
                           {product.name}
                         </h3>
+                        {product.has_partial_stock && (
+                          <p className="text-xs text-amber-400 flex items-start gap-1 mt-1 mb-1">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mt-0.5 shrink-0">
+                              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                              <line x1="12" y1="9" x2="12" y2="13"/>
+                              <line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                            <span>{product.in_stock_variant_count} of {product.total_variant_count} variants in stock — brief will only show available sizes</span>
+                          </p>
+                        )}
                         <p className="text-xs text-white/40 mb-2">
                           ₦{product.price?.toLocaleString()}
                         </p>
                         
                         {/* AI context */}
-                        {product.units_sold > 0 && (
-                          <p className="text-xs text-brand-400 font-medium mb-3">
-                            {product.units_sold === Math.max(...inStockProducts.map((p: any) => p.units_sold))
-                              ? "🔥 Your top seller"
-                              : product.units_sold > 3
-                                ? `${product.units_sold} sold recently`
-                                : "New to your lineup"
-                            }
-                          </p>
-                        )}
+                        {(() => {
+                          const label = getProductLabel(product);
+                          return (
+                            <p className={`text-xs font-medium mb-3 ${label.color}`}>
+                              {label.text}
+                            </p>
+                          );
+                        })()}
 
                         {product.description && (
                           <p className="text-xs text-white/30 line-clamp-2 mb-3">

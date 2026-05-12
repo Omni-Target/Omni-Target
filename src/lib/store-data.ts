@@ -18,6 +18,9 @@ export interface StoreProduct {
   description: string;
   tags: string[];
   product_type: string;
+  has_partial_stock: boolean;
+  in_stock_variant_count: number;
+  total_variant_count: number;
 }
 
 export interface StoreData {

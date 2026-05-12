@@ -44,14 +44,69 @@ async function buildLocationTargeting(
 ): Promise<LocationResult[]> {
   const storeCurrency = storeData.store?.currency || "USD";
 
-  const rawLocationListMap = JSON.stringify(
-    Object.fromEntries(
-      storeData.orders.top_locations.map((l) => [
-        l.city,
-        Math.round((l.percentage / 100) * storeData.orders.order_count),
-      ])
-    )
+  // Pre-consolidate Nigerian areas 
+  // before sending to Claude
+  const LAGOS_AREAS = [
+    "ikoyi", "lekki", "victoria island",
+    "vi", "surulere", "yaba", "ikeja",
+    "ajah", "festac", "gbagada", 
+    "maryland", "mushin", "agege",
+    "isale eko", "lagos island",
+    "apapa", "magodo", "ojodu",
+    "ojota", "oshodi", "palmgrove"
+  ];
+
+  const ABUJA_AREAS = [
+    "maitama", "wuse", "garki", "asokoro",
+    "gwarinpa", "kubwa", "lugbe", "jabi",
+    "utako", "gudu", "life camp"
+  ];
+
+  const PH_AREAS = [
+    "gra port harcourt", "trans amadi",
+    "rumuola", "rumuokoro", "eleme"
+  ];
+
+  // Consolidate before sending to Claude
+  const preConsolidated: Record<string, number> = {};
+
+  storeData.orders.top_locations.forEach(
+    loc => {
+      const cityLower = 
+        loc.city.toLowerCase().trim();
+      
+      let consolidatedName = loc.city;
+      
+      if (LAGOS_AREAS.includes(cityLower) || 
+          cityLower === "lagos") {
+        consolidatedName = "Lagos";
+      } else if (
+        ABUJA_AREAS.includes(cityLower) || 
+        cityLower === "abuja"
+      ) {
+        consolidatedName = "Abuja";
+      } else if (
+        PH_AREAS.includes(cityLower) || 
+        cityLower.includes("port harcourt") ||
+        cityLower === "ph"
+      ) {
+        consolidatedName = "Port Harcourt";
+      }
+      
+      preConsolidated[consolidatedName] = 
+        (preConsolidated[consolidatedName] 
+          || 0) + loc.percentage;
+    }
   );
+
+  // Build consolidated list for Claude
+  const consolidatedList = 
+    Object.entries(preConsolidated)
+      .sort(([,a], [,b]) => b - a)
+      .map(([city, pct]) => 
+        `${city} (${Math.round(pct)}%)`
+      )
+      .join(", ");
 
   const locationPrompt = `
 You are a Meta Ads targeting specialist 
@@ -60,7 +115,7 @@ for a Shopify store.
 Store currency: ${storeCurrency}
 Orders from the last 90 days came 
 from these locations:
-${rawLocationListMap}
+${consolidatedList}
 
 Your task:
 1. Determine the store's primary market 
@@ -91,6 +146,36 @@ For Nigerian stores (NGN):
   Ibadan, Kano] if not present
 - Remove: US cities, European cities 
   unless > 20% of orders
+
+CRITICAL RULE: 
+A city and its neighbourhoods must 
+NEVER appear as separate entries.
+
+If "Lagos" appears in the data, 
+then "Ikoyi", "Lekki", "Victoria Island",
+"Surulere", "Yaba", "Ikeja" and ALL 
+other Lagos areas must be MERGED 
+into "Lagos" and removed as 
+separate entries.
+
+If "Abuja" appears, then "Maitama", 
+"Wuse", "Garki", "Asokoro", "Gwarinpa" 
+must be merged into "Abuja".
+
+If "Port Harcourt" appears, 
+"GRA Port Harcourt", "Trans Amadi" 
+must be merged into "Port Harcourt".
+
+Think of it this way: a Meta ad 
+targeting "Lagos" already reaches 
+everyone in Ikoyi, Lekki, Victoria Island
+and every other Lagos area. Listing 
+them separately adds zero value and 
+confuses the founder.
+
+The MAXIMUM output is 4 city-level 
+or country-level entries. Never 
+sub-city areas.
 
 Return ONLY valid JSON, no markdown:
 {

@@ -221,6 +221,14 @@ export async function fetchShopifyStoreData(
     const anyInStock = product.variants.some(
       (v) => v.inventory_quantity > 0
     );
+    const variants = product.variants || [];
+    const inStockVariants = variants.filter(
+      (v: any) => v.inventory_quantity > 0
+    );
+    const totalVariants = variants.length;
+    const hasPartialStock = 
+      inStockVariants.length > 0 && 
+      inStockVariants.length < totalVariants;
 
     return {
       id: product.id.toString(),
@@ -242,6 +250,9 @@ export async function fetchShopifyStoreData(
           .map((t: string) => t.trim())
         : [],
       product_type: product.product_type || "",
+      has_partial_stock: hasPartialStock,
+      in_stock_variant_count: inStockVariants.length,
+      total_variant_count: totalVariants,
     };
   });
 
