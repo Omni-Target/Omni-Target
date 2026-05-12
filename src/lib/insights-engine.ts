@@ -150,7 +150,11 @@ Return ONLY valid JSON, no markdown:
 
     const text =
       message.content[0].type === "text" ? message.content[0].text.trim() : "";
-    const cleanText = text.replace(/```json\n ?| ```/g, '').trim();
+    const cleanText = text
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
     const parsed = JSON.parse(cleanText) as {
       primary_market: string;
       locations: LocationResult[];
@@ -209,7 +213,11 @@ If mixed or accessories: return "all"
 
     const text =
       message.content[0].type === "text" ? message.content[0].text.trim() : "";
-    const cleanText = text.replace(/```json\n ?| ```/g, '').trim();
+    const cleanText = text
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
     const parsed = JSON.parse(cleanText) as {
       gender: "all" | "female" | "male";
       reasoning: string;
@@ -275,7 +283,11 @@ Return ONLY valid JSON, no markdown:
 
     const text =
       message.content[0].type === "text" ? message.content[0].text.trim() : "";
-    const cleanText = text.replace(/```json\n ?| ```/g, '').trim();
+    const cleanText = text
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
     const parsed = JSON.parse(cleanText) as {
       age_min: number;
       age_max: number;
@@ -339,7 +351,11 @@ No markdown.No explanation.
 
     const text =
       message.content[0].type === "text" ? message.content[0].text.trim() : "";
-    const cleanText = text.replace(/```json\n ?| ```/g, '').trim();
+    const cleanText = text
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
     const behaviours = JSON.parse(cleanText) as string[];
 
     if (Array.isArray(behaviours) && behaviours.length > 0) {
@@ -427,7 +443,11 @@ No explanation.No markdown.
 
     const text =
       message.content[0].type === "text" ? message.content[0].text.trim() : "";
-    const cleanText = text.replace(/```json\n ?| ```/g, '').trim();
+    const cleanText = text
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
     const interests = JSON.parse(cleanText) as string[];
 
     const reasoning = `Interests selected based on product catalogue: ${ productSample.slice(0, 80) }${ productSample.length > 80 ? "..." : "" } `;
