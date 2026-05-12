@@ -10,7 +10,7 @@ import { generateBriefPDF } from "@/lib/generate-brief-pdf";
 import { formatCurrency, getCurrencySymbol } from "@/lib/currency";
 import { useCredits } from "@/hooks/useCredits";
 
-type CampaignState = "media" | "input" | "generating" | "review" | "brief";
+type CampaignState = "selection" | "media" | "input" | "generating" | "review" | "brief";
 
 interface GeneratedCopy {
   headline: string;
@@ -36,7 +36,7 @@ function CampaignsContent() {
     : "yourstore.com";
 
   // Overall State
-  const [viewState, setViewState] = useState<CampaignState>("media");
+  const [viewState, setViewState] = useState<CampaignState>("selection");
   const [errorMsg, setErrorMsg] = useState("");
   const [showBuyCredits, setShowBuyCredits] = useState(false);
 
@@ -77,6 +77,9 @@ function CampaignsContent() {
         setMediaPreviewUrl(paramImage);
         setMediaCloudUrl(paramImage);
       }
+      
+      // Jump directly to input
+      setViewState("input");
     }
   }, [paramProductName, paramDescription, paramImage]);
 
@@ -370,7 +373,59 @@ function CampaignsContent() {
       <div className="fixed top-0 left-1/4 w-[500px] h-[500px] bg-brand-600/5 rounded-full blur-[120px] pointer-events-none" />
       <div className={`fixed bottom-0 right-1/4 w-[400px] h-[400px] rounded-full blur-[100px] pointer-events-none transition-colors duration-1000 ${viewState === 'review' ? 'bg-success-500/5' : 'bg-brand-400/5'}`} />
 
-      {/* -- STATE 0: MEDIA -- */}
+      {/* -- STATE 0: SELECTION -- */}
+      {viewState === "selection" && (
+        <main className="max-w-4xl mx-auto px-4 sm:px-6 py-10 sm:py-20 flex flex-col items-center justify-center flex-1 min-h-[60vh]">
+          <div className="mb-10 text-center animate-fade-in-up">
+            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-white mb-3">
+              How do you want to create your brief?
+            </h1>
+            <p className="text-base text-white/50 max-w-lg mx-auto">
+              Choose whether to auto-generate from an existing product in your store or start fresh with a custom ad creative.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 w-full max-w-2xl animate-fade-in-up-delay-1">
+            {/* Store Product Card */}
+            <button 
+              onClick={() => router.push("/products")}
+              className="group flex flex-col items-center text-center p-8 rounded-2xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] hover:border-brand-500/30 transition-all duration-300"
+            >
+              <div className="w-16 h-16 rounded-full bg-brand-500/10 flex items-center justify-center mb-6 text-brand-400 group-hover:scale-110 group-hover:bg-brand-500/20 transition-all duration-300">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+                  <line x1="3" y1="6" x2="21" y2="6" />
+                  <path d="M16 10a4 4 0 0 1-8 0" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">Use a Store Product</h3>
+              <p className="text-sm text-white/40">
+                Browse your Shopify catalog and automatically pull product data and images for the campaign.
+              </p>
+            </button>
+
+            {/* Custom Creative Card */}
+            <button 
+              onClick={() => setViewState("media")}
+              className="group flex flex-col items-center text-center p-8 rounded-2xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] hover:border-brand-500/30 transition-all duration-300"
+            >
+              <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-6 text-white/50 group-hover:scale-110 group-hover:text-white/80 transition-all duration-300">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <polyline points="21 15 16 10 5 21" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">Upload Custom Creative</h3>
+              <p className="text-sm text-white/40">
+                Upload your own image or video ad creative and manually enter the product details.
+              </p>
+            </button>
+          </div>
+        </main>
+      )}
+
+      {/* -- STATE 1: MEDIA -- */}
       {viewState === "media" && (
         <main className="max-w-2xl mx-auto px-4 sm:px-6 py-10 relative flex-1">
           <div className="mb-8 animate-fade-in-up">
