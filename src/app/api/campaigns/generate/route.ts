@@ -240,7 +240,18 @@ no markdown, no preamble:
     exact audience."
 }`;
 
-    const isVideo = imageUrl ? /\.(mp4|mov|webm)$/i.test(imageUrl) : false;
+    // Detect if the media is a video:
+    // 1. Check Cloudinary URL path for /video/upload/
+    // 2. Fallback to file extension check
+    const isVideo = imageUrl 
+      ? (imageUrl.includes("/video/upload/") || /\.(mp4|mov|webm)(\?|$)/i.test(imageUrl))
+      : false;
+    
+    console.log("Media analysis:", { 
+      imageUrl: imageUrl?.slice(0, 80), 
+      isVideo, 
+      hasUploadPath: imageUrl?.includes("/upload/") 
+    });
 
     const textContent = 
 `Generate Meta ad copy for:
@@ -298,10 +309,14 @@ ${productVariants ?
       storyboardFrames.forEach((percent) => {
         const uploadIdx = imageUrl.indexOf("/upload/");
         if (uploadIdx !== -1) {
-          const base = imageUrl.slice(0, uploadIdx + 8);
+          const base = imageUrl.slice(0, uploadIdx + 8); // includes "/upload/"
           const rest = imageUrl.slice(uploadIdx + 8);
-          // Insert Cloudinary transformations: start offset percent & force jpeg
-          const frameUrl = `${base}so_${percent}p,f_jpg/${rest}`;
+          // Replace video extension with .jpg for image output
+          const restAsJpg = rest.replace(/\.(mp4|mov|webm|avi)$/i, ".jpg");
+          // Insert Cloudinary transformation: start offset percent
+          const frameUrl = `${base}so_${percent}p/${restAsJpg}`;
+          
+          console.log(`Storyboard frame ${percent}%:`, frameUrl);
           
           messageContent.push({
             type: "image",

@@ -135,7 +135,8 @@ function CampaignsContent() {
     setTimeout(() => setCopiedField(null), 1500);
   };
 
-  const isVideo = mediaFile?.type.startsWith("video/") ?? false;
+  const isVideo = (mediaFile?.type.startsWith("video/") ?? false) 
+    || (mediaCloudUrl?.includes("/video/upload/") ?? false);
 
   const handleMediaSelect = async (
     e: React.ChangeEvent<HTMLInputElement>
