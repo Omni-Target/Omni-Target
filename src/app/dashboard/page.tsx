@@ -51,62 +51,131 @@ function DashboardContent() {
       .catch(() => setLoading(false));
   }, []);
 
-  // Compute health scores client-side from store data
-  const computeHealth = () => {
-    if (!storeData) return { score: 0, breakdown: [] };
+  // Analytics computation
+  const products = storeData?.products || [];
+  const orders = storeData?.orders || { orders_last_30_days: 0, average_order_value: 0, repeat_customer_rate: 0, top_locations: [], peak_days: [] };
+  
+  // Ad Readiness
+  const outOfStockRatio = products.length > 0
+    ? products.filter((p: any) => !p.in_stock).length / products.length
+    : 1;
+  const hasRecentOrders = orders.orders_last_30_days > 0;
+  const hasProducts = products.length > 0;
 
-    const products = storeData.products || [];
-    const orders30 = storeData.orders?.orders_last_30_days || 0;
-    const repeatRate = storeData.orders?.repeat_customer_rate || 0;
-    const inStockPct = products.length > 0
-      ? products.filter((p: any) => p.in_stock).length / products.length
-      : 0;
+  const adReadiness = 
+    !hasProducts ? "not_ready"
+    : outOfStockRatio > 0.8 ? "caution"
+    : !hasRecentOrders ? "caution"
+    : outOfStockRatio > 0.5 ? "ready_with_warnings"
+    : "ready";
 
-    const b = [
-      {
-        label: "Active Products",
-        score: products.length >= 10 ? 25 : products.length >= 5 ? 15 : products.length >= 1 ? 5 : 0,
-        max: 25,
-        status: products.length >= 10 ? "good" : products.length >= 5 ? "warning" : "bad",
-      },
-      {
-        label: "Recent Orders",
-        score: orders30 >= 20 ? 25 : orders30 >= 5 ? 15 : orders30 >= 1 ? 5 : 0,
-        max: 25,
-        status: orders30 >= 20 ? "good" : orders30 >= 5 ? "warning" : "bad",
-      },
-      {
-        label: "Customer Retention",
-        score: repeatRate > 0.3 ? 25 : repeatRate > 0.1 ? 15 : repeatRate > 0.01 ? 5 : 0,
-        max: 25,
-        status: repeatRate > 0.3 ? "good" : repeatRate > 0.1 ? "warning" : "bad",
-      },
-      {
-        label: "Product Availability",
-        score: inStockPct > 0.8 ? 25 : inStockPct > 0.5 ? 15 : inStockPct > 0.2 ? 5 : 0,
-        max: 25,
-        status: inStockPct > 0.8 ? "good" : inStockPct > 0.5 ? "warning" : "bad",
-      },
-    ];
+  const adReadinessDisplay = {
+    ready: {
+      color: "bg-success-500",
+      textColor: "text-success-400",
+      icon: "✓",
+      title: "Ready to advertise",
+      subtext: "Your store has active products and recent sales. Good time to run campaigns."
+    },
+    ready_with_warnings: {
+      color: "bg-amber-500",
+      textColor: "text-amber-400",
+      icon: "!",
+      title: "Ready — with caveats",
+      subtext: "Some products are out of stock. Stick to in-stock items when creating briefs."
+    },
+    caution: {
+      color: "bg-error-500",
+      textColor: "text-error-400",
+      icon: "×",
+      title: "Not ready to advertise",
+      subtext: !hasRecentOrders ? "No recent orders. Drive organic traffic first." : "High out of stock rate. Restock before advertising."
+    },
+    not_ready: {
+      color: "bg-white/20",
+      textColor: "text-white/60",
+      icon: "?",
+      title: "Connect your store first",
+      subtext: "We need data to assess readiness."
+    }
+  }[adReadiness];
 
-    const breakdownWithPercentage = b.map(item => ({
-      ...item,
-      percentage: Math.round((item.score / item.max) * 100)
-    }));
+  // Insights
+  const insights = [];
+  const aov = orders.average_order_value || 0;
+  const repeatRate = orders.repeat_customer_rate || 0;
+  const peakDays = orders.peak_days || [];
+  const orders30d = orders.orders_last_30_days || 0;
 
-    return {
-      score: b.reduce((s, i) => s + i.score, 0),
-      breakdown: breakdownWithPercentage,
-    };
+  if (aov > 100000) {
+    insights.push({
+      icon: "💡",
+      title: "Premium positioning works",
+      detail: `Your average order of ₦${Math.round(aov/1000)}k means buyers trust your pricing. Target 'Luxury goods' and 'Fashion enthusiasts' in Meta.`,
+      action: "Create a premium brief",
+      actionHref: "/campaigns"
+    });
+  }
+  
+  if (repeatRate > 0.2) {
+    insights.push({
+      icon: "🔄",
+      title: "Build a lookalike audience",
+      detail: `${Math.round(repeatRate*100)}% of your buyers return. Upload your customer list to Meta and create a lookalike — these are your best potential new customers.`,
+      action: null
+    });
+  }
+  
+  if (outOfStockRatio > 0.5) {
+    insights.push({
+      icon: "⚠️",
+      title: "Stock up before running ads",
+      detail: `${Math.round(outOfStockRatio * 100)}% of your products are out of stock. Running ads to unavailable products wastes budget and frustrates buyers.`,
+      action: "See in-stock products",
+      actionHref: "#advertise-now"
+    });
+  }
+  
+  if (peakDays.includes("Saturday") || peakDays.includes("Sunday")) {
+    insights.push({
+      icon: "📅",
+      title: "Time your campaigns right",
+      detail: `Your buyers are most active on ${peakDays.slice(0,2).join(" and ")}. Launch your Meta campaigns on Thursday evening to build momentum before the weekend.`,
+      action: null
+    });
+  }
+  
+  if (orders30d >= 10 && orders30d < 30) {
+    insights.push({
+      icon: "📈",
+      title: "Ready to scale",
+      detail: `${orders30d} orders last month without paid ads shows organic demand. A targeted Meta campaign could multiply this significantly.`,
+      action: "Create your first brief",
+      actionHref: "/campaigns"
+    });
+  }
+
+  const validLocations = (orders.top_locations || []).filter((loc: any) => {
+    const isNigeria = loc.country === 'Nigeria' || loc.country === 'NG' || !loc.country; 
+    return isNigeria || loc.percentage >= 15;
+  });
+  const locationText = validLocations.length > 0 
+    ? validLocations.map((l: any) => l.city).join(", ")
+    : "Order location data still building";
+
+  const refreshStoreData = () => {
+    setLoading(true);
+    fetch("/api/store/data?force=true", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data: StoreDataResponse) => {
+        setConnected(data.connected);
+        if (data.connected && data.data) {
+          setStoreData(data.data);
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   };
-
-  const health = computeHealth();
-
-  const statusColor = (s: string) =>
-    s === "good" ? "bg-success-400" : s === "warning" ? "bg-amber-400" : "bg-error-400";
-
-  const statusText = (s: string) =>
-    s === "good" ? "text-success-400" : s === "warning" ? "text-amber-400" : "text-error-400";
 
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
@@ -131,8 +200,8 @@ function DashboardContent() {
                 Unlimited
               </span>
             ) : credits !== null && (
-              <span className={`text-xs font-medium ${credits === 0 ? "text-error-400" : "text-white/50"}`}>
-                {credits === 0 ? <Link href="/pricing" className="text-brand-400 hover:underline">Buy briefs</Link> : `${credits} briefs left`}
+              <span className="text-xs font-medium text-white/50">
+                {credits} briefs left
               </span>
             )}
             
@@ -223,209 +292,174 @@ function DashboardContent() {
           </div>
         ) : (
           <>
-            {/* SECTION 1: Store Health Score */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8 animate-fade-in-up">
-              <div className="rounded-xl bg-surface-raised border border-border-subtle p-6 flex flex-col items-center justify-center text-center">
-                <p className="text-xs text-white/40 uppercase tracking-widest mb-3 font-semibold">Store Health</p>
-                <p className={`text-5xl font-black mb-1 ${health.score >= 75 ? "text-success-400" : health.score >= 50 ? "text-amber-400" : "text-error-400"}`}>
-                  {health.score}
-                </p>
-                <p className="text-sm text-white/30">out of 100</p>
+            {/* SECTION 1: Ad Readiness & Audience */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 animate-fade-in-up">
+              <div className="rounded-xl bg-surface-raised border border-border-subtle p-6 flex items-start gap-4">
+                <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${adReadinessDisplay.color} text-white font-bold text-xl`}>
+                  {adReadinessDisplay.icon}
+                </div>
+                <div>
+                  <p className="text-xs text-white/40 uppercase tracking-widest mb-1 font-semibold">Ad Readiness</p>
+                  <p className={`text-lg font-bold mb-1 ${adReadinessDisplay.textColor}`}>{adReadinessDisplay.title}</p>
+                  <p className="text-sm text-white/60">{adReadinessDisplay.subtext}</p>
+                </div>
               </div>
 
-              <div className="lg:col-span-2 rounded-xl bg-surface-raised border border-border-subtle p-6">
-                <p className="text-xs text-white/40 uppercase tracking-widest mb-4 font-semibold">Breakdown</p>
-                <div className="space-y-3">
-                  {health.breakdown.map((item: any) => (
-                    <div key={item.label} className="flex items-center gap-3">
-                      <span className="text-xs text-white/60 w-36 shrink-0">{item.label}</span>
-                      <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-700 ${statusColor(item.status)}`}
-                          style={{ width: `${(item.score / item.max) * 100}%` }}
-                        />
+              <div className="rounded-xl bg-surface-raised border border-border-subtle p-6">
+                <p className="text-xs text-white/40 uppercase tracking-widest mb-4 font-semibold">Your Buyers</p>
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs text-white/50 uppercase font-semibold mb-1">Where they buy from:</p>
+                    <p className="text-sm text-white">{locationText}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-white/50 uppercase font-semibold mb-1">When they buy:</p>
+                    <p className="text-sm text-white mb-0.5">Peak days: {peakDays.length > 0 ? peakDays.join(", ") : "—"}</p>
+                    {peakDays.length > 0 && (
+                      <p className="text-xs text-white/50">→ Launch campaigns on {peakDays[0] === 'Saturday' || peakDays[0] === 'Sunday' ? 'Friday evening' : 'the day before'} to catch your {peakDays[0]} buyers</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs text-white/50 uppercase font-semibold mb-1">How much they spend:</p>
+                    <p className="text-sm text-white mb-0.5">Average order: {formatCurrency(Math.round(aov), storeData.store?.currency || "NGN")}</p>
+                    <p className="text-xs text-white/50">
+                      {aov > 100000 ? "Premium buyers — target higher income audiences" :
+                       aov >= 30000 ? "Mid-market buyers — broad targeting works well" :
+                       "Value-conscious buyers — focus on deals and new arrivals"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-white/50 uppercase font-semibold mb-1">Loyalty:</p>
+                    <p className="text-sm text-white mb-0.5">{Math.round(repeatRate * 100)}% buy again</p>
+                    <p className="text-xs text-white/50">
+                      {repeatRate < 0.15 ? "Most buyers are new. Focus ads on acquisition." :
+                       repeatRate <= 0.30 ? "Healthy loyalty. Test retargeting campaigns." :
+                       "Strong loyalty. Create lookalike audiences from your best customers."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 2: Insights */}
+            {insights.length > 0 && (
+              <div className="mb-8 animate-fade-in-up-delay-1">
+                <p className="text-xs text-white/40 uppercase tracking-widest mb-4 font-semibold">What this means for your ads</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {insights.map((insight, i) => (
+                    <div key={i} className="rounded-xl bg-surface-raised border border-border-subtle p-5 flex flex-col justify-between">
+                      <div>
+                        <div className="text-2xl mb-3">{insight.icon}</div>
+                        <p className="text-sm font-bold text-white mb-2">{insight.title}</p>
+                        <p className="text-xs text-white/60 mb-4 leading-relaxed">{insight.detail}</p>
                       </div>
-                      <span className={`text-xs font-semibold w-10 text-right ${statusText(item.status)}`}>
-                        {item.percentage}%
-                      </span>
+                      {insight.action && insight.actionHref && (
+                        <Link href={insight.actionHref} className="text-xs font-medium text-brand-400 hover:text-brand-300 no-underline inline-block">
+                          {insight.action} →
+                        </Link>
+                      )}
                     </div>
                   ))}
                 </div>
               </div>
-            </div>
-
-            {/* SECTION 2: Audience Intelligence */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-              <div className="rounded-xl bg-surface-raised border border-border-subtle p-6 animate-fade-in-up-delay-1">
-                <p className="text-xs text-white/40 uppercase tracking-widest mb-4 font-semibold">Top Buying Locations</p>
-                {storeData.orders?.top_locations?.length > 0 ? (
-                  <div className="space-y-3">
-                    {storeData.orders.top_locations.map((loc: any, i: number) => (
-                      <div key={i} className="flex items-center gap-3">
-                        <span className="text-xs text-white/70 w-28 truncate shrink-0">{loc.city}</span>
-                        <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
-                          <div className="h-full bg-brand-400 rounded-full transition-all duration-700" style={{ width: `${loc.percentage}%` }} />
-                        </div>
-                        <span className="text-xs text-white/50 w-10 text-right">{loc.percentage}%</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-white/30 italic">No order data yet</p>
-                )}
-              </div>
-
-              <div className="rounded-xl bg-surface-raised border border-border-subtle p-6 animate-fade-in-up-delay-1">
-                <p className="text-xs text-white/40 uppercase tracking-widest mb-4 font-semibold">Key Metrics</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-2xl font-bold text-white">
-                      {formatCurrency(Math.round(storeData.orders?.average_order_value || 0), storeData.store?.currency || "USD")}
-                    </p>
-                    <p className="text-xs text-white/40 mt-1">Avg Order Value</p>
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-white">
-                      {Math.round((storeData.orders?.repeat_customer_rate || 0) * 100)}%
-                    </p>
-                    <p className="text-xs text-white/40 mt-1">Repeat Rate</p>
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-white">
-                      {storeData.orders?.orders_last_30_days || 0}
-                    </p>
-                    <p className="text-xs text-white/40 mt-1">Orders (30d)</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-white/70 mt-1">
-                      {storeData.orders?.peak_days?.length > 0
-                        ? storeData.orders.peak_days.join(", ")
-                        : "—"}
-                    </p>
-                    <p className="text-xs text-white/40 mt-1">Peak Days</p>
-                  </div>
-                </div>
-              </div>
-            </div>
+            )}
 
             {/* SECTION 3: What to Advertise Now */}
-            <div className="mb-8 animate-fade-in-up-delay-2">
-              <p className="text-xs text-white/40 uppercase tracking-widest mb-4 font-semibold">What to Advertise Now</p>
+            <div className="mb-8 animate-fade-in-up-delay-2" id="advertise-now">
+              <div className="mb-4">
+                <p className="text-xs text-white/40 uppercase tracking-widest font-semibold mb-1">What to Advertise Now</p>
+                <p className="text-sm text-white/60">Based on your sales data, these products are most likely to convert.</p>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {(storeData.products || [])
                   .sort((a: any, b: any) => b.revenue - a.revenue)
                   .slice(0, 6)
-                  .map((product: any) => (
-                    <div
-                      key={product.id}
-                      className={`rounded-xl border p-4 transition-colors ${
-                        product.should_advertise
-                          ? "bg-surface-raised border-border-subtle hover:border-brand-500/30"
-                          : "bg-surface-raised/50 border-border-subtle opacity-60"
-                      }`}
-                    >
-                      <div className="flex items-start gap-3 mb-3">
-                        {product.image_url ? (
-                          <img
-                            src={product.image_url}
-                            alt={product.name}
-                            className="w-12 h-12 rounded-lg object-cover shrink-0"
-                          />
-                        ) : (
-                          <div className="w-12 h-12 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/20">
-                              <rect x="3" y="3" width="18" height="18" rx="2" />
-                              <circle cx="8.5" cy="8.5" r="1.5" />
-                              <polyline points="21 15 16 10 5 21" />
-                            </svg>
-                          </div>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-white truncate">{product.name}</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                              product.in_stock
-                                ? "bg-success-500/10 text-success-400"
-                                : "bg-error-500/10 text-error-400"
-                            }`}>
-                              <span className={`w-1 h-1 rounded-full ${product.in_stock ? "bg-success-400" : "bg-error-400"}`} />
-                              {product.in_stock ? "In stock" : "Out of stock"}
-                            </span>
+                  .map((product: any, index: number) => {
+                    let subtext = "";
+                    if (!product.in_stock) {
+                      subtext = "Out of stock — restock before advertising";
+                    } else if (index === 0) {
+                      subtext = "Your #1 seller — proven demand";
+                    } else if (product.price > aov) {
+                      subtext = "Above your average order value";
+                    } else if (product.units_sold > 0) {
+                      subtext = "Sold recently — buyers are interested";
+                    }
+
+                    return (
+                      <div
+                        key={product.id}
+                        className={`rounded-xl border p-4 transition-colors ${
+                          product.in_stock && product.should_advertise
+                            ? "bg-surface-raised border-border-subtle hover:border-brand-500/30"
+                            : "bg-surface-raised/30 border-border-subtle/50 opacity-60 grayscale"
+                        }`}
+                      >
+                        <div className="flex items-start gap-3 mb-3">
+                          {product.image_url ? (
+                            <img
+                              src={product.image_url}
+                              alt={product.name}
+                              className="w-12 h-12 rounded-lg object-cover shrink-0"
+                            />
+                          ) : (
+                            <div className="w-12 h-12 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/20">
+                                <rect x="3" y="3" width="18" height="18" rx="2" />
+                                <circle cx="8.5" cy="8.5" r="1.5" />
+                                <polyline points="21 15 16 10 5 21" />
+                              </svg>
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-white truncate">{product.name}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                product.in_stock
+                                  ? "bg-success-500/10 text-success-400"
+                                  : "bg-error-500/10 text-error-400"
+                              }`}>
+                                <span className={`w-1 h-1 rounded-full ${product.in_stock ? "bg-success-400" : "bg-error-400"}`} />
+                                {product.in_stock ? "In stock" : "Out of stock"}
+                              </span>
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-white/40">
-                          {product.units_sold} sold · {formatCurrency(Math.round(product.revenue), storeData.store?.currency || "USD")}
-                        </span>
-                        {product.should_advertise ? (
-                          <Link
-                            href={`/campaigns?` +
-                              `product_name=${encodeURIComponent(product.name)}&` +
-                              `product_description=${encodeURIComponent(product.description || product.name)}&` +
-                              `product_type=${encodeURIComponent(product.product_type || "")}&` +
-                              `product_tags=${encodeURIComponent(product.tags?.join(",") || "")}&` +
-                              `product_price=${product.price}&` +
-                              `product_image=${encodeURIComponent(product.image_url || "")}`
-                            }
-                            className="text-brand-400 hover:text-brand-300 font-medium transition-colors no-underline"
-                          >
-                            Use in Campaign →
-                          </Link>
-                        ) : (
-                          <span className="text-error-400/70 text-[10px]">Don&apos;t advertise</span>
+                        {subtext && (
+                          <div className="mb-3 px-2 py-1.5 bg-white/5 rounded-md">
+                            <p className="text-[11px] text-white/70 italic">{subtext}</p>
+                          </div>
                         )}
+
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-white/40">
+                            {product.units_sold} sold · {formatCurrency(Math.round(product.revenue), storeData.store?.currency || "USD")}
+                          </span>
+                          {product.in_stock && product.should_advertise ? (
+                            <Link
+                              href={`/campaigns?` +
+                                `product_name=${encodeURIComponent(product.name)}&` +
+                                `product_description=${encodeURIComponent(product.description || product.name)}&` +
+                                `product_type=${encodeURIComponent(product.product_type || "")}&` +
+                                `product_tags=${encodeURIComponent(product.tags?.join(",") || "")}&` +
+                                `product_price=${product.price}&` +
+                                `product_image=${encodeURIComponent(product.image_url || "")}`
+                              }
+                              className="text-brand-400 hover:text-brand-300 font-medium transition-colors no-underline"
+                            >
+                              Use in Campaign →
+                            </Link>
+                          ) : !product.in_stock ? (
+                            <span className="text-error-400/70 text-[10px]">Cannot advertise</span>
+                          ) : (
+                            <span className="text-white/30 text-[10px]">Low conversion probability</span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
               </div>
-            </div>
-
-            {/* SECTION 4: Quick Actions */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 animate-fade-in-up-delay-3">
-              <Link
-                href="/campaigns"
-                className="rounded-xl bg-surface-raised border border-border-subtle p-5 hover:border-brand-500/30 transition-colors group no-underline"
-              >
-                <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center mb-3 group-hover:bg-brand-500/20 transition-colors">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400">
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                  </svg>
-                </div>
-                <p className="text-sm font-semibold text-white">Create New Brief</p>
-                <p className="text-xs text-white/40 mt-1">Generate a campaign brief with AI</p>
-              </Link>
-
-              <Link
-                href="/onboarding/audit?from=dashboard"
-                className="rounded-xl bg-surface-raised border border-border-subtle p-5 hover:border-brand-500/30 transition-colors group no-underline"
-              >
-                <div className="w-10 h-10 rounded-xl bg-[#8b5cf6]/10 flex items-center justify-center mb-3 group-hover:bg-[#8b5cf6]/20 transition-colors">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#8b5cf6]">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                    <line x1="16" y1="13" x2="8" y2="13" />
-                    <line x1="16" y1="17" x2="8" y2="17" />
-                  </svg>
-                </div>
-                <p className="text-sm font-semibold text-white">Run Store Audit</p>
-                <p className="text-xs text-white/40 mt-1">Check your store readiness</p>
-              </Link>
-
-              <Link
-                href="/settings"
-                className="rounded-xl bg-surface-raised border border-border-subtle p-5 hover:border-brand-500/30 transition-colors group no-underline"
-              >
-                <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center mb-3 group-hover:bg-white/10 transition-colors">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/50">
-                    <circle cx="12" cy="12" r="3" />
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                  </svg>
-                </div>
-                <p className="text-sm font-semibold text-white">Settings</p>
-                <p className="text-xs text-white/40 mt-1">Manage integrations</p>
-              </Link>
             </div>
           </>
         )}
