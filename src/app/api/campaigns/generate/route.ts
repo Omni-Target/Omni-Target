@@ -145,7 +145,10 @@ STEP 3 — WRITE LIKE A HUMAN, NOT A POET
 Write like someone who genuinely loves this product telling 
 a friend about it. 
 
-CRITICAL RULES FOR TONE:
+CRITICAL RULES FOR TONE & APPROACH:
+- DO NOT just creatively rewrite the product description! The description is merely background context so you understand what the product is.
+- Your job is to write an ad that sells the OUTCOME, the FEELING, or the UNIQUE VALUE. 
+- Pull only 1 or 2 striking details from the description if they help the hook. Ignore the rest of it.
 - NO POETRY. NO MELODRAMA.
 - Do NOT use abstract phrases like "There is a version of you...", 
   "Imagine a world...", "Step into...", or "Elevate your...".
@@ -200,6 +203,7 @@ Short sentences. Strong verbs. No hedging.
 A voice note from a friend with great taste.
 
 WHAT KILLS GOOD COPY (NEVER DO THESE):
+- Regurgitating the product description. Do NOT just paraphrase the features!
 - Melodramatic openings ("There's a version of you that...")
 - Starting with the brand or product name
 - "Introducing" or "Meet the new"
@@ -212,6 +216,7 @@ WHAT MAKES GREAT COPY:
 - A first sentence that immediately states a benefit or striking detail.
 - Grounding the copy in the physical reality of the product.
 - A natural, conversational rhythm.
+- Selling the outcome or the feeling, not the fabric.
 
 OUTPUT — respond only with valid JSON,
 no markdown, no preamble:
