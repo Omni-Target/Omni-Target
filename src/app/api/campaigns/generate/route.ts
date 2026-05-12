@@ -439,11 +439,11 @@ ${productVariants ?
 
     // Return the successfully parsed JSON output
     return NextResponse.json(parsedResponse, { status: 200 });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Campaign API Generation Error:", error);
-    // Generic fail-safe block according to spec
+    // Return the actual error message to the client for debugging
     return NextResponse.json(
-      { error: "Something went wrong", status: 500 },
+      { error: error?.message || "Something went wrong", status: 500 },
       { status: 500 }
     );
   }

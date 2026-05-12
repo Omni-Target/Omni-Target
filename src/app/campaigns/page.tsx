@@ -277,16 +277,18 @@ function CampaignsContent() {
         return;
       }
 
-      if (!res.ok) throw new Error("API returned an error");
+      if (!res.ok) {
+        throw new Error(data.error || "API returned an error");
+      }
 
       const generatedCopyData: GeneratedCopy = data;
       setGeneratedCopy(generatedCopyData);
       setSelectedCta(generatedCopyData.cta);
       
       setViewState("review");
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setErrorMsg("Something went wrong. Please try again.");
+      setErrorMsg(err.message || "Something went wrong. Please try again.");
       setViewState("input");
     }
   };
