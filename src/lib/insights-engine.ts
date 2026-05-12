@@ -143,7 +143,7 @@ Return ONLY valid JSON, no markdown:
 
   try {
     const message = await anthropicClient.messages.create({
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-4-6-20260217",
       max_tokens: 500,
       messages: [{ role: "user", content: locationPrompt }],
     });
@@ -202,7 +202,7 @@ If clearly men's: return "male"
 If mixed or accessories: return "all"
   `;
     const message = await anthropicClient.messages.create({
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-4-6-20260217",
       max_tokens: 128,
       messages: [{ role: "user", content: genderPrompt }],
     });
@@ -268,7 +268,7 @@ Return ONLY valid JSON, no markdown:
 } `;
 
     const message = await anthropicClient.messages.create({
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-4-6-20260217",
       max_tokens: 128,
       messages: [{ role: "user", content: agePrompt }],
     });
@@ -332,7 +332,7 @@ No markdown.No explanation.
     `;
 
     const message = await anthropicClient.messages.create({
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-4-6-20260217",
       max_tokens: 128,
       messages: [{ role: "user", content: behaviourPrompt }],
     });
@@ -420,7 +420,7 @@ No explanation.No markdown.
 `;
 
     const message = await anthropicClient.messages.create({
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-4-6-20260217",
       max_tokens: 256,
       messages: [{ role: "user", content: prompt }],
     });
