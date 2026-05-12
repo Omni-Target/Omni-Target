@@ -151,38 +151,79 @@ function CampaignsContent() {
     const localUrl = URL.createObjectURL(file);
     setMediaPreviewUrl(localUrl);
     
-    // Upload to Cloudinary
+    const isVideoFile = file.type.startsWith("video/");
+    
     setIsUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      
-      const res = await fetch("/api/media/upload", {
-        method: "POST",
-        body: formData,
-      });
-      
-      if (!res.ok) {
-        const err = await res.json();
-        setUploadError(err.error || "Upload failed. Please try again.");
-        setMediaFile(null);
-        setMediaPreviewUrl("");
-        return;
+      if (isVideoFile) {
+        // Upload videos DIRECTLY to Cloudinary from the browser
+        // This bypasses the Next.js API body size limit
+        const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+        
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("upload_preset", "omni_unsigned");
+        formData.append("folder", "omni-target/campaigns");
+        
+        const cloudRes = await fetch(
+          `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`,
+          { method: "POST", body: formData }
+        );
+        
+        if (!cloudRes.ok) {
+          const err = await cloudRes.json();
+          setUploadError(err?.error?.message || "Video upload failed. Please try again.");
+          setMediaFile(null);
+          setMediaPreviewUrl("");
+          return;
+        }
+        
+        const data = await cloudRes.json();
+        setMediaCloudUrl(data.secure_url);
+        
+        // Validate against Meta specs
+        const { validateMetaAdMedia } = await import("@/lib/meta-specs");
+        const validation = validateMetaAdMedia({
+          width: data.width,
+          height: data.height,
+          duration: data.duration,
+          format: data.format,
+          resourceType: "video",
+        });
+        setMediaValidation(validation);
+        
+      } else {
+        // Images go through the API route (small enough)
+        const formData = new FormData();
+        formData.append("file", file);
+        
+        const res = await fetch("/api/media/upload", {
+          method: "POST",
+          body: formData,
+        });
+        
+        if (!res.ok) {
+          const err = await res.json();
+          setUploadError(err.error || "Upload failed. Please try again.");
+          setMediaFile(null);
+          setMediaPreviewUrl("");
+          return;
+        }
+        
+        const data = await res.json();
+        setMediaCloudUrl(data.url);
+        
+        // Validate against Meta specs
+        const { validateMetaAdMedia } = await import("@/lib/meta-specs");
+        const validation = validateMetaAdMedia({
+          width: data.width,
+          height: data.height,
+          duration: data.duration,
+          format: data.format,
+          resourceType: data.resourceType,
+        });
+        setMediaValidation(validation);
       }
-      
-      const data = await res.json();
-      setMediaCloudUrl(data.url);
-      
-      // Validate against Meta specs
-      const { validateMetaAdMedia } = await import("@/lib/meta-specs");
-      const validation = validateMetaAdMedia({
-        width: data.width,
-        height: data.height,
-        duration: data.duration,
-        format: data.format,
-        resourceType: data.resourceType,
-      });
-      setMediaValidation(validation);
       
     } catch {
       setUploadError("Upload failed. Please try again.");
@@ -388,7 +429,7 @@ function CampaignsContent() {
                     Upload your ad creative
                   </p>
                   <p className="text-xs text-white/50">
-                    JPG, PNG, MP4 or MOV &middot; Images min 1080px &middot; Videos max 60s
+                    JPG, PNG, MP4 or MOV &middot; Images min 1080px &middot; Videos max 45s
                   </p>
                 </div>
               )}
