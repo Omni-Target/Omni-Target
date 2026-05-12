@@ -44,69 +44,10 @@ async function buildLocationTargeting(
 ): Promise<LocationResult[]> {
   const storeCurrency = storeData.store?.currency || "USD";
 
-  // Pre-consolidate Nigerian areas 
-  // before sending to Claude
-  const LAGOS_AREAS = [
-    "ikoyi", "lekki", "victoria island",
-    "vi", "surulere", "yaba", "ikeja",
-    "ajah", "festac", "gbagada", 
-    "maryland", "mushin", "agege",
-    "isale eko", "lagos island",
-    "apapa", "magodo", "ojodu",
-    "ojota", "oshodi", "palmgrove"
-  ];
-
-  const ABUJA_AREAS = [
-    "maitama", "wuse", "garki", "asokoro",
-    "gwarinpa", "kubwa", "lugbe", "jabi",
-    "utako", "gudu", "life camp"
-  ];
-
-  const PH_AREAS = [
-    "gra port harcourt", "trans amadi",
-    "rumuola", "rumuokoro", "eleme"
-  ];
-
-  // Consolidate before sending to Claude
-  const preConsolidated: Record<string, number> = {};
-
-  storeData.orders.top_locations.forEach(
-    loc => {
-      const cityLower = 
-        loc.city.toLowerCase().trim();
-      
-      let consolidatedName = loc.city;
-      
-      if (LAGOS_AREAS.includes(cityLower) || 
-          cityLower === "lagos") {
-        consolidatedName = "Lagos";
-      } else if (
-        ABUJA_AREAS.includes(cityLower) || 
-        cityLower === "abuja"
-      ) {
-        consolidatedName = "Abuja";
-      } else if (
-        PH_AREAS.includes(cityLower) || 
-        cityLower.includes("port harcourt") ||
-        cityLower === "ph"
-      ) {
-        consolidatedName = "Port Harcourt";
-      }
-      
-      preConsolidated[consolidatedName] = 
-        (preConsolidated[consolidatedName] 
-          || 0) + loc.percentage;
-    }
-  );
-
-  // Build consolidated list for Claude
-  const consolidatedList = 
-    Object.entries(preConsolidated)
-      .sort(([,a], [,b]) => b - a)
-      .map(([city, pct]) => 
-        `${city} (${Math.round(pct)}%)`
-      )
-      .join(", ");
+  // Locations are already consolidated by the Shopify connector
+  const consolidatedList = storeData.orders.top_locations
+    .map((l) => `${l.city} (${l.percentage}%)`)
+    .join(", ");
 
   const locationPrompt = `
 You are a Meta Ads targeting specialist 

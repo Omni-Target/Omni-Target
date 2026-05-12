@@ -1,4 +1,5 @@
 import { StoreData, StoreLocation, StoreProduct } from "../store-data";
+import { consolidateLocation } from "../locations";
 
 // Shopify API types (subset)
 interface ShopifyShop {
@@ -123,6 +124,19 @@ export async function fetchShopifyStoreData(
   const rawProducts = productsData?.products || [];
 
   // STEP 4 — Process orders into insights
+  const thirtyDaysAgoForMetrics = new Date();
+  thirtyDaysAgoForMetrics.setDate(thirtyDaysAgoForMetrics.getDate() - 30);
+  const thirtyDaysAgoMs = thirtyDaysAgoForMetrics.getTime();
+
+  const ordersLast30Days = orders.filter(
+    (o) => new Date(o.created_at).getTime() >= thirtyDaysAgoMs
+  );
+
+  const revenueLast30Days = ordersLast30Days.reduce(
+    (sum, o) => sum + parseFloat(o.total_price),
+    0
+  );
+
   const totalRevenue = orders.reduce(
     (sum, o) => sum + parseFloat(o.total_price),
     0
@@ -133,7 +147,8 @@ export async function fetchShopifyStoreData(
   // Location analysis
   const locationMap: Record<string, { count: number; country: string }> = {};
   orders.forEach((order) => {
-    const city = order.billing_address?.city || "Unknown";
+    const rawCity = order.billing_address?.city || "Unknown";
+    const city = consolidateLocation(rawCity);
     const country = order.billing_address?.country_code || "Unknown";
     if (!locationMap[city]) {
       locationMap[city] = { count: 0, country };
@@ -273,8 +288,8 @@ export async function fetchShopifyStoreData(
       peak_days: peakDays,
       peak_hours: peakHours,
       repeat_customer_rate: Math.round(repeatRate * 100) / 100,
-      revenue_last_30_days: totalRevenue,
-      orders_last_30_days: orders.length,
+      revenue_last_30_days: revenueLast30Days,
+      orders_last_30_days: ordersLast30Days.length,
     },
     products,
     customers: {
