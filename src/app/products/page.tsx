@@ -161,7 +161,7 @@ export default function ProductsPage() {
                         }
                         className="mt-auto w-full py-2 px-4 rounded-lg bg-brand-500/10 border border-brand-500/20 text-brand-400 text-xs font-medium text-center hover:bg-brand-500/20 transition-colors no-underline"
                       >
-                        Create a Campaign Brief →
+                        Create Ad Campaign →
                       </Link>
                     </div>
                   ))}

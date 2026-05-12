@@ -76,8 +76,6 @@ function CampaignsContent() {
       if (paramImage) {
         setMediaPreviewUrl(paramImage);
         setMediaCloudUrl(paramImage);
-        // Skip media upload step
-        setViewState("input");
       }
     }
   }, [paramProductName, paramDescription, paramImage]);
@@ -360,6 +358,12 @@ function CampaignsContent() {
                 </div>
               ) : mediaPreviewUrl ? (
                 <div className="w-full h-full flex flex-col items-center">
+                  {paramImage === mediaPreviewUrl && (
+                    <div className="mb-4 text-center">
+                      <p className="text-sm font-medium text-white/90">Using Store Product Image</p>
+                      <p className="text-xs text-brand-400 mt-1">Got a custom video ad instead? Click below to upload it.</p>
+                    </div>
+                  )}
                   <div className="relative w-full max-w-sm aspect-[4/5] sm:aspect-square mb-4 bg-black/50 rounded-lg overflow-hidden flex items-center justify-center">
                     {mediaFile?.type?.startsWith("video/") ? (
                       <video src={mediaPreviewUrl} controls className="max-w-full max-h-full object-contain" />
@@ -368,7 +372,7 @@ function CampaignsContent() {
                     )}
                   </div>
                   <button className="text-xs font-semibold px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors relative z-20 pointer-events-auto cursor-pointer">
-                    Change Media
+                    {paramImage === mediaPreviewUrl ? "Upload Custom Creative (Video/Image)" : "Change Media"}
                   </button>
                 </div>
               ) : (

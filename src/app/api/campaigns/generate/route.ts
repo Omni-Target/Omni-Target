@@ -240,6 +240,8 @@ no markdown, no preamble:
     exact audience."
 }`;
 
+    const isVideo = imageUrl ? /\.(mp4|mov|webm)$/i.test(imageUrl) : false;
+
     const textContent = 
 `Generate Meta ad copy for:
 
@@ -256,7 +258,12 @@ Store Region: ${storeRegion}
 Store Currency: ${currency}
 ${productVariants ? `Available Variants/Sizes: ${productVariants}` : ""}
 
-${imageUrl ? 
+${isVideo ? 
+  `CRITICAL: The ad creative is a VIDEO. 
+  A 10-frame sequential storyboard of the video has been provided.
+  Ensure the copy works perfectly alongside motion-heavy content. 
+  Do not refer to "this picture" or static imagery.` 
+  : imageUrl ? 
   `A product image has been provided. 
   Use what you observe — colour, style, 
   texture, mood, occasion-fit, aesthetic — 
@@ -273,12 +280,36 @@ ${productVariants ?
 
     const messageContent: any[] = [];
 
-    if (imageUrl) {
+    // Anthropic API only accepts image blocks, not videos
+    if (imageUrl && !isVideo) {
+      // NOTE: Anthropic officially requires base64 for images. 
+      // If 'url' works, it might be a wrapper or beta feature.
       messageContent.push({
         type: "image",
         source: {
           type: "url",
           url: imageUrl,
+        }
+      });
+    } else if (imageUrl && isVideo) {
+      // It's a video on Cloudinary. Generate a 10-frame storyboard.
+      const storyboardFrames = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90];
+      
+      storyboardFrames.forEach((percent) => {
+        const uploadIdx = imageUrl.indexOf("/upload/");
+        if (uploadIdx !== -1) {
+          const base = imageUrl.slice(0, uploadIdx + 8);
+          const rest = imageUrl.slice(uploadIdx + 8);
+          // Insert Cloudinary transformations: start offset percent & force jpeg
+          const frameUrl = `${base}so_${percent}p,f_jpg/${rest}`;
+          
+          messageContent.push({
+            type: "image",
+            source: {
+              type: "url",
+              url: frameUrl,
+            }
+          });
         }
       });
     }

@@ -50,14 +50,14 @@ export function validateMetaAdMedia(params: {
   } else if (resourceType === "video") {
     if (duration !== undefined) {
       // Check limits
-      if (duration > 60) {
-        result.errors.push("Video exceeds 60 seconds. Meta Feed ads support a maximum of 60 seconds.");
+      if (duration > 45) {
+        result.errors.push("Video exceeds 45 seconds. Meta Feed ads perform best when punchy and under 45s.");
       } else if (duration < 1) {
         result.errors.push("Video is too short.");
       }
 
       // Check recommendation
-      if (duration > 15 && duration <= 60) {
+      if (duration > 15 && duration <= 45) {
         result.warnings.push("Videos under 15 seconds typically get higher completion rates on Meta feeds.");
       }
     }
