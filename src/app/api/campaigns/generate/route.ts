@@ -294,13 +294,36 @@ ${productVariants ?
     // Helper to fetch an image URL and convert to base64
     const fetchImageBase64 = async (url: string) => {
       try {
-        const res = await fetch(url);
+        // Force Shopify to return a JPEG to avoid AVIF/WEBP issues
+        let fetchUrl = url;
+        if (fetchUrl.includes("cdn.shopify.com")) {
+          fetchUrl += fetchUrl.includes("?") ? "&format=jpg" : "?format=jpg";
+        }
+
+        const res = await fetch(fetchUrl);
         if (!res.ok) throw new Error(`Failed to fetch image: ${res.statusText}`);
+        
         const buffer = await res.arrayBuffer();
-        const contentType = res.headers.get("content-type") || "image/jpeg";
+        let contentType = (res.headers.get("content-type") || "image/jpeg")
+          .split(";")[0]
+          .trim()
+          .toLowerCase();
+
+        // Map common variations
+        if (contentType === "image/jpg") contentType = "image/jpeg";
+        
+        const supported = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+        
+        // If the CDN still returned an unsupported type (like avif), 
+        // skip the image block to prevent Anthropic from crashing with a 400.
+        if (!supported.includes(contentType)) {
+          console.warn(`Unsupported image type: ${contentType} from ${fetchUrl}. Skipping visual analysis.`);
+          return null;
+        }
+
         return {
           base64: Buffer.from(buffer).toString("base64"),
-          mediaType: contentType === "image/jpg" ? "image/jpeg" : contentType
+          mediaType: contentType as "image/jpeg" | "image/png" | "image/gif" | "image/webp"
         };
       } catch (err) {
         console.error("Error fetching image for AI:", err);
