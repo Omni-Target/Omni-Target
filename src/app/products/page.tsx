@@ -1,0 +1,170 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import Link from "next/link";
+
+export default function ProductsPage() {
+  const [storeData, setStoreData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/store/data", {
+      cache: "no-store"
+    })
+      .then(r => r.json())
+      .then(data => {
+        setStoreData(data.data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const inStockProducts = storeData?.products?.filter((p: any) => p.in_stock) || [];
+  const outOfStockProducts = storeData?.products?.filter((p: any) => !p.in_stock) || [];
+
+  return (
+    <div className="min-h-screen bg-[var(--background)]">
+      {/* Nav */}
+      <nav className="border-b border-border-subtle px-6 h-16 flex items-center justify-between sticky top-0 z-50 bg-surface/80 backdrop-blur-xl">
+        <Link href="/dashboard" className="text-sm text-white/40 hover:text-white/70 flex items-center gap-2 transition-colors no-underline">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+          Back to Dashboard
+        </Link>
+        <span className="text-sm font-semibold text-white/90">
+          Your Products
+        </span>
+        <div />
+      </nav>
+
+      <main className="max-w-6xl mx-auto px-4 py-10">
+        {loading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="w-8 h-8 rounded-full border-2 border-brand-500/20 border-t-brand-500 animate-spin" />
+          </div>
+        ) : (
+          <>
+            {/* Header */}
+            <div className="mb-8">
+              <h1 className="text-2xl font-bold text-white mb-1">
+                Your Products
+              </h1>
+              <p className="text-sm text-white/40">
+                {inStockProducts.length} in stock · {outOfStockProducts.length} out of stock
+              </p>
+            </div>
+
+            {/* In stock section */}
+            {inStockProducts.length > 0 && (
+              <section className="mb-12">
+                <h2 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-4">
+                  Ready to Advertise
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {inStockProducts.map((product: any) => (
+                    <div key={product.id} className="rounded-xl border border-border-subtle bg-surface p-4 flex flex-col gap-3">
+                      
+                      {/* Product image */}
+                      {product.image_url && (
+                        <div className="aspect-square rounded-lg overflow-hidden bg-white/5">
+                          <img
+                            src={product.image_url}
+                            alt={product.name}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )}
+
+                      {/* Product info */}
+                      <div>
+                        <h3 className="text-sm font-semibold text-white mb-1">
+                          {product.name}
+                        </h3>
+                        <p className="text-xs text-white/40 mb-2">
+                          ₦{product.price?.toLocaleString()}
+                        </p>
+                        
+                        {/* AI context */}
+                        {product.units_sold > 0 && (
+                          <p className="text-xs text-brand-400 font-medium mb-3">
+                            {product.units_sold === Math.max(...inStockProducts.map((p: any) => p.units_sold))
+                              ? "🔥 Your top seller"
+                              : product.units_sold > 3
+                                ? `${product.units_sold} sold recently`
+                                : "New to your lineup"
+                            }
+                          </p>
+                        )}
+
+                        {product.description && (
+                          <p className="text-xs text-white/30 line-clamp-2 mb-3">
+                            {product.description}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* CTA */}
+                      <Link
+                        href={`/campaigns?` +
+                          `product_name=${encodeURIComponent(product.name)}&` +
+                          `product_description=${encodeURIComponent(product.description || product.name)}&` +
+                          `product_price=${product.price}&` +
+                          `product_image=${encodeURIComponent(product.image_url || "")}`
+                        }
+                        className="mt-auto w-full py-2 px-4 rounded-lg bg-brand-500/10 border border-brand-500/20 text-brand-400 text-xs font-medium text-center hover:bg-brand-500/20 transition-colors no-underline"
+                      >
+                        Create a Campaign Brief →
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Out of stock section */}
+            {outOfStockProducts.length > 0 && (
+              <section>
+                <h2 className="text-xs font-semibold text-white/20 uppercase tracking-wider mb-4">
+                  Out of Stock — Don't Advertise These
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {outOfStockProducts.map((product: any) => (
+                    <div key={product.id} className="rounded-xl border border-border-subtle bg-surface/50 p-3 opacity-50">
+                      <div className="flex items-center gap-3">
+                        {product.image_url && (
+                          <img
+                            src={product.image_url}
+                            alt={product.name}
+                            className="w-10 h-10 rounded-lg object-cover grayscale"
+                          />
+                        )}
+                        <div>
+                          <p className="text-xs font-medium text-white/50 truncate max-w-[120px]">
+                            {product.name}
+                          </p>
+                          <p className="text-xs text-error-400">
+                            Out of stock
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Empty state */}
+            {!loading && inStockProducts.length === 0 && outOfStockProducts.length === 0 && (
+              <div className="text-center py-20">
+                <p className="text-white/40 text-sm">
+                  No products found. Make sure your Shopify store has active products.
+                </p>
+              </div>
+            )}
+          </>
+        )}
+      </main>
+    </div>
+  );
+}

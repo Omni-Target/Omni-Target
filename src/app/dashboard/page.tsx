@@ -111,9 +111,7 @@ function DashboardContent() {
     insights.push({
       icon: "💡",
       title: "Premium positioning works",
-      detail: `Your average order of ₦${Math.round(aov/1000)}k means buyers trust your pricing. Target 'Luxury goods' and 'Fashion enthusiasts' in Meta.`,
-      action: "Create a premium brief",
-      actionHref: "/campaigns"
+      detail: `Your average order of ₦${Math.round(aov/1000)}k means buyers trust your pricing. Target 'Luxury goods' and 'Fashion enthusiasts' in Meta.`
     });
   }
   
@@ -121,8 +119,7 @@ function DashboardContent() {
     insights.push({
       icon: "🔄",
       title: "Build a lookalike audience",
-      detail: `${Math.round(repeatRate*100)}% of your buyers return. Upload your customer list to Meta and create a lookalike — these are your best potential new customers.`,
-      action: null
+      detail: `${Math.round(repeatRate*100)}% of your buyers return. Upload your customer list to Meta and create a lookalike — these are your best potential new customers.`
     });
   }
   
@@ -132,7 +129,7 @@ function DashboardContent() {
       title: "Stock up before running ads",
       detail: `${Math.round(outOfStockRatio * 100)}% of your products are out of stock. Running ads to unavailable products wastes budget and frustrates buyers.`,
       action: "See in-stock products",
-      actionHref: "#advertise-now"
+      actionHref: "/products"
     });
   }
   
@@ -140,8 +137,7 @@ function DashboardContent() {
     insights.push({
       icon: "📅",
       title: "Time your campaigns right",
-      detail: `Your buyers are most active on ${peakDays.slice(0,2).join(" and ")}. Launch your Meta campaigns on Thursday evening to build momentum before the weekend.`,
-      action: null
+      detail: `Your buyers are most active on ${peakDays.slice(0,2).join(" and ")}. Launch your Meta campaigns on Thursday evening to build momentum before the weekend.`
     });
   }
   
@@ -149,9 +145,7 @@ function DashboardContent() {
     insights.push({
       icon: "📈",
       title: "Ready to scale",
-      detail: `${orders30d} orders last month without paid ads shows organic demand. A targeted Meta campaign could multiply this significantly.`,
-      action: "Create your first brief",
-      actionHref: "/campaigns"
+      detail: `${orders30d} orders last month without paid ads shows organic demand. A targeted Meta campaign could multiply this significantly.`
     });
   }
 
@@ -253,6 +247,51 @@ function DashboardContent() {
               : "Connect your Shopify store to unlock insights"}
           </p>
         </div>
+
+        {/* Quick Actions */}
+        {!loading && connected && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8 animate-fade-in-up">
+            <Link
+              href="/campaigns"
+              className="rounded-xl bg-brand-500/10 border border-brand-500/20 p-5 flex flex-col justify-between hover:bg-brand-500/20 transition-colors no-underline group"
+            >
+              <div>
+                <p className="text-sm font-semibold text-white mb-1">Create a Campaign Brief</p>
+                <p className="text-xs text-white/60">Turn a product into a ready-to-use Meta ad brief in 2 minutes</p>
+              </div>
+              <span className="text-brand-400 group-hover:text-brand-300 text-sm font-medium mt-4 inline-block transition-colors">Create a Campaign Brief →</span>
+            </Link>
+            
+            <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 flex flex-col justify-between">
+              <div>
+                <p className="text-sm font-semibold text-white mb-1">Sync Store Data</p>
+                <p className="text-xs text-white/60">
+                  Last synced {storeData?.generated_at ? (() => {
+                    const diff = Date.now() - new Date(storeData.generated_at).getTime();
+                    const minutes = Math.floor(diff / 60000);
+                    if (minutes < 60) return `${minutes}m ago`;
+                    const hours = Math.floor(minutes / 60);
+                    if (hours < 24) return `${hours}h ago`;
+                    return `${Math.floor(hours / 24)}d ago`;
+                  })() : 'Unknown'}
+                </p>
+              </div>
+              <button onClick={refreshStoreData} className="text-white/80 hover:text-white text-sm font-medium mt-4 text-left cursor-pointer bg-transparent border-none p-0">Sync now</button>
+            </div>
+
+            <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 flex flex-col justify-between">
+              <div>
+                <p className="text-sm font-semibold text-white mb-1">Buy Briefs</p>
+                <p className="text-xs text-white/60">
+                  {credits === 0 ? "You have no briefs remaining" : `${credits} briefs remaining`}
+                </p>
+              </div>
+              <Link href="/pricing" className="text-white/80 hover:text-white text-sm font-medium mt-4 inline-block no-underline">
+                {credits === 0 ? "Buy credits →" : "Buy more →"}
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* Loading State */}
         {loading ? (
@@ -448,7 +487,7 @@ function DashboardContent() {
                               }
                               className="text-brand-400 hover:text-brand-300 font-medium transition-colors no-underline"
                             >
-                              Use in Campaign →
+                              Create a Campaign Brief →
                             </Link>
                           ) : !product.in_stock ? (
                             <span className="text-error-400/70 text-[10px]">Cannot advertise</span>

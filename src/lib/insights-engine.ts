@@ -54,29 +54,60 @@ async function buildLocationTargeting(
   );
 
   const locationPrompt = `
-You are a Meta Ads targeting specialist. 
+You are a Meta Ads targeting specialist 
+for a Shopify store.
 
-A Shopify store uses the currency: ${storeCurrency}
-Here is a frequency map of their customer locations (Location: Purchase Count):
-${rawLocationListMap} // Pass data like {"London": 450, "Ikoyi": 120}
+Store currency: ${storeCurrency}
+Orders from the last 90 days came 
+from these locations:
+${rawLocationListMap}
 
-Your objective is to optimize this list for a Meta Ads location targeting setup. 
-Follow these logical rules strictly:
+Your task:
+1. Determine the store's primary market 
+   from the currency and order patterns
+2. For the primary market, consolidate 
+   all sub-city areas into their 
+   parent city or state only
+   (e.g. Ikoyi + Lagos Island + Lekki 
+   all become just "Lagos")
+3. Remove locations from other countries 
+   unless they represent more than 20% 
+   of total orders — these are likely 
+   diaspora orders that need separate 
+   campaigns
+4. After consolidation, recommend 
+   1-2 additional HIGH VALUE cities 
+   in the primary market that are NOT 
+   in the order data but have strong 
+   purchasing power for this type of store
+5. Return maximum 4 locations total
+6. NEVER list sub-city neighbourhoods 
+   as separate targets
 
-1. PRIMARY MARKET: Identify the primary market based on the highest aggregate purchase volume. Currency is secondary context.
-2. PRESERVE PREMIUM POCKETS: Do NOT consolidate known high-net-worth districts (e.g., Ikoyi, Maitama, Beverly Hills) into their parent cities. Keep them isolated for premium targeting.
-3. CONSOLIDATE THE REST: Roll up low-volume, non-premium city districts into their parent city/region to avoid Meta's "Audience Too Narrow" errors.
-4. OUTLIER PRUNING: Remove international locations unless they constitute >10% of total purchase volume (indicating a strong diaspora or secondary market).
-5. STRATEGIC EXPANSION: Recommend 2 high-purchasing-power locations within the primary market that are absent from the data but share demographic similarities with the top buyers.
+For Nigerian stores (NGN):
+- Consolidate all Lagos areas → "Lagos"
+- Consolidate all Abuja areas → "Abuja"  
+- Add from: [Abuja, Port Harcourt, 
+  Ibadan, Kano] if not present
+- Remove: US cities, European cities 
+  unless > 20% of orders
 
-OUTPUT FORMAT:
-Return ONLY a raw JSON object matching this exact schema. Do not include markdown formatting or backticks.
+Return ONLY valid JSON, no markdown:
 {
-  "primary_market_country": "string",
-  "final_targeting_locations": ["string", "string"],
-  "removed_locations": ["string"],
-  "strategic_additions": [
-    {"location": "string", "reasoning": "string"}
+  "primary_market": "Nigeria",
+  "locations": [
+    {
+      "name": "Lagos",
+      "source": "from_data",
+      "percentage": 45,
+      "note": null
+    },
+    {
+      "name": "Abuja", 
+      "source": "recommended",
+      "percentage": null,
+      "note": "High purchasing power"
+    }
   ]
 }
 `;

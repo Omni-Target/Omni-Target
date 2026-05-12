@@ -100,10 +100,10 @@ export async function fetchShopifyStoreData(
 
   const shop = shopData?.shop;
 
-  // STEP 2 — Fetch last 30 days of orders
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  const createdAtMin = thirtyDaysAgo.toISOString();
+  // STEP 2 — Fetch last 90 days of orders
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+  const createdAtMin = ninetyDaysAgo.toISOString();
 
   const ordersData = await shopifyGet<{ orders: ShopifyOrder[] }>(
     shopDomain,
