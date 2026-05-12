@@ -71,16 +71,20 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(bytes);
 
     const result = await new Promise<CloudinaryUploadResult>((resolve, reject) => {
+      const uploadOptions: any = {
+        resource_type: isVideo ? "video" : "image",
+        folder: "omni-target/campaigns",
+      };
+      
+      if (!isVideo) {
+        uploadOptions.transformation = [
+          { quality: "auto" },
+          { fetch_format: "auto" }
+        ];
+      }
+
       const uploadStream = cloudinary.uploader.upload_stream(
-        {
-          resource_type: isVideo ? "video" : "image",
-          folder: "omni-target/campaigns",
-          // Auto-optimize for Meta ad specs:
-          transformation: isVideo ? [] : [
-            { quality: "auto" },
-            { fetch_format: "auto" }
-          ]
-        },
+        uploadOptions,
         (error, result) => {
           if (error) reject(error);
           else resolve(result as CloudinaryUploadResult);
@@ -100,11 +104,11 @@ export async function POST(request: Request) {
       format: result.format
     }, { status: 200 });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Cloudinary upload error:", error);
-    // 5. Wrap everything in try/catch and return generic error on failure
+    // 5. Wrap everything in try/catch and return actual error if possible
     return NextResponse.json(
-      { error: "Upload failed. Please try again." },
+      { error: error?.message || error?.error?.message || "Upload failed. Please try again." },
       { status: 500 }
     );
   }
