@@ -291,22 +291,41 @@ ${productVariants ?
 
     const messageContent: any[] = [];
 
-    // Anthropic API only accepts image blocks, not videos
+    // Helper to fetch an image URL and convert to base64
+    const fetchImageBase64 = async (url: string) => {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Failed to fetch image: ${res.statusText}`);
+        const buffer = await res.arrayBuffer();
+        const contentType = res.headers.get("content-type") || "image/jpeg";
+        return {
+          base64: Buffer.from(buffer).toString("base64"),
+          mediaType: contentType === "image/jpg" ? "image/jpeg" : contentType
+        };
+      } catch (err) {
+        console.error("Error fetching image for AI:", err);
+        return null;
+      }
+    };
+
+    // Anthropic API only accepts base64 image blocks, not raw URLs
     if (imageUrl && !isVideo) {
-      // NOTE: Anthropic officially requires base64 for images. 
-      // If 'url' works, it might be a wrapper or beta feature.
-      messageContent.push({
-        type: "image",
-        source: {
-          type: "url",
-          url: imageUrl,
-        }
-      });
+      const imgData = await fetchImageBase64(imageUrl);
+      if (imgData) {
+        messageContent.push({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: imgData.mediaType as any,
+            data: imgData.base64,
+          }
+        });
+      }
     } else if (imageUrl && isVideo) {
       // It's a video on Cloudinary. Generate a 10-frame storyboard.
       const storyboardFrames = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90];
       
-      storyboardFrames.forEach((percent) => {
+      const framePromises = storyboardFrames.map(async (percent) => {
         const uploadIdx = imageUrl.indexOf("/upload/");
         if (uploadIdx !== -1) {
           const base = imageUrl.slice(0, uploadIdx + 8); // includes "/upload/"
@@ -316,17 +335,25 @@ ${productVariants ?
           // Insert Cloudinary transformation: start offset percent
           const frameUrl = `${base}so_${percent}p/${restAsJpg}`;
           
-          console.log(`Storyboard frame ${percent}%:`, frameUrl);
+          console.log(`Fetching storyboard frame ${percent}%:`, frameUrl);
           
-          messageContent.push({
-            type: "image",
-            source: {
-              type: "url",
-              url: frameUrl,
-            }
-          });
+          const imgData = await fetchImageBase64(frameUrl);
+          if (imgData) {
+            return {
+              type: "image" as const,
+              source: {
+                type: "base64" as const,
+                media_type: imgData.mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+                data: imgData.base64,
+              }
+            };
+          }
         }
+        return null;
       });
+
+      const resolvedFrames = (await Promise.all(framePromises)).filter(Boolean);
+      messageContent.push(...resolvedFrames);
     }
 
     messageContent.push({
