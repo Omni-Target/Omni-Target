@@ -21,6 +21,7 @@ export interface StoreProduct {
   has_partial_stock: boolean;
   in_stock_variant_count: number;
   total_variant_count: number;
+  in_stock_variant_names?: string[];
 }
 
 export interface StoreData {

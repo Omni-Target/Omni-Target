@@ -58,6 +58,7 @@ function CampaignsContent() {
   const paramPrice = searchParams.get("product_price") || "";
   const paramTags = searchParams.get("product_tags") || "";
   const paramType = searchParams.get("product_type") || "";
+  const paramVariants = searchParams.get("product_variants") || "";
 
   // Handle URL params for auto-fill
   useEffect(() => {
@@ -223,6 +224,7 @@ function CampaignsContent() {
           mediaUrl: mediaCloudUrl || mediaPreviewUrl || null,
           imageUrl: mediaCloudUrl || paramImage || null,
           productPrice: paramPrice || null,
+          productVariants: paramVariants || null,
         }),
       });
 

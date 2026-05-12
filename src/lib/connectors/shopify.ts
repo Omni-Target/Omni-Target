@@ -30,6 +30,7 @@ interface ShopifyProduct {
   vendor: string;
   variants: {
     id: number;
+    title: string;
     price: string;
     inventory_quantity: number;
   }[];
@@ -268,6 +269,7 @@ export async function fetchShopifyStoreData(
       has_partial_stock: hasPartialStock,
       in_stock_variant_count: inStockVariants.length,
       total_variant_count: totalVariants,
+      in_stock_variant_names: inStockVariants.map((v: any) => v.title),
     };
   });
 

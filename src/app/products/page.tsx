@@ -156,7 +156,8 @@ export default function ProductsPage() {
                           `product_name=${encodeURIComponent(product.name)}&` +
                           `product_description=${encodeURIComponent(product.description || product.name)}&` +
                           `product_price=${product.price}&` +
-                          `product_image=${encodeURIComponent(product.image_url || "")}`
+                          `product_image=${encodeURIComponent(product.image_url || "")}&` +
+                          `product_variants=${encodeURIComponent(product.has_partial_stock && product.in_stock_variant_names ? product.in_stock_variant_names.join(', ') : "")}`
                         }
                         className="mt-auto w-full py-2 px-4 rounded-lg bg-brand-500/10 border border-brand-500/20 text-brand-400 text-xs font-medium text-center hover:bg-brand-500/20 transition-colors no-underline"
                       >
