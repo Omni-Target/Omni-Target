@@ -119,7 +119,7 @@ export async function fetchShopifyStoreData(
   const productsData = await shopifyGet<{ products: ShopifyProduct[] }>(
     shopDomain,
     accessToken,
-    "products.json?limit=50&status=active&fields=id,title,body_html,variants,images,product_type,vendor,tags,collections"
+    "products.json?limit=250&status=active&fields=id,title,body_html,variants,images,product_type,vendor,tags,collections"
   );
 
   const rawProducts = productsData?.products || [];
@@ -272,6 +272,9 @@ export async function fetchShopifyStoreData(
       in_stock_variant_names: inStockVariants.map((v: any) => v.title),
     };
   });
+
+  // Sort products by revenue descending so the AI and dashboard prioritize top sellers
+  products.sort((a, b) => b.revenue - a.revenue);
 
   // STEP 6 — Return complete StoreData
   return {

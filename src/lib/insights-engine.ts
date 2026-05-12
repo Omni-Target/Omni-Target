@@ -66,11 +66,13 @@ Your task:
    parent city or state only
    (e.g. Ikoyi + Lagos Island + Lekki 
    all become just "Lagos")
-3. Remove locations from other countries 
-   unless they represent more than 20% 
-   of total orders — these are likely 
-   diaspora orders that need separate 
-   campaigns
+3. STRICTLY EXCLUDE locations outside the 
+   primary market (e.g. US, Europe, etc). 
+   You must REMOVE them from the final 
+   output unless a single foreign city 
+   represents > 20% of all orders. These 
+   are diaspora orders and will ruin the 
+   ad targeting if included.
 4. After consolidation, recommend 
    1-2 additional HIGH VALUE cities 
    in the primary market that are NOT 
@@ -85,8 +87,9 @@ For Nigerian stores (NGN):
 - Consolidate all Abuja areas → "Abuja"  
 - Add from: [Abuja, Port Harcourt, 
   Ibadan, Kano] if not present
-- Remove: US cities, European cities 
-  unless > 20% of orders
+- STRICTLY EXCLUDE: US cities (Detroit, Hanahan, etc), 
+  European cities (Budapest, etc) unless 
+  they individually > 20% of orders.
 
 CRITICAL RULE: 
 A city and its neighbourhoods must 
@@ -180,7 +183,7 @@ primary target gender for Meta ads.
 
   Products:
 ${
-  storeData.products.slice(0, 8)
+  storeData.products.slice(0, 20)
     .map(p => `${p.name}: ${p.description?.slice(0, 100) ||
       p.product_type || ""
       }`)
@@ -238,7 +241,7 @@ async function inferAgeRange(
     const storeRegion = CURRENCY_TO_REGION[currency] || "OTHER";
 
     const productSample = storeData.products
-      .slice(0, 5)
+      .slice(0, 15)
       .map((p) => `${ p.name } — ${ p.price.toLocaleString() } ${ currency } `)
       .join("\n");
 
@@ -300,7 +303,7 @@ async function inferBehaviours(storeData: StoreData): Promise<string[]> {
     const storeRegion = CURRENCY_TO_REGION[currency] || "OTHER";
 
     const productSample = storeData.products
-      .slice(0, 5)
+      .slice(0, 25)
       .map((p) => p.name)
       .join(", ");
 
@@ -374,7 +377,7 @@ async function inferInterests(
     const storeRegion = CURRENCY_TO_REGION[currency] || "OTHER";
 
     const productSample = storeData.products
-      .slice(0, 10)
+      .slice(0, 25)
       .map((p) => p.name)
       .join(", ");
 
