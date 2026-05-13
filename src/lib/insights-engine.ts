@@ -656,15 +656,21 @@ export async function generateRecommendations(
     finalAgeReasoning = `${ finalAgeMin } — ${ finalAgeMax } (AI estimated from your products).` + finalAgeReasoning;
   }
 
-  // --- BUDGET (Multi-Signal Engine) ---
-  const monthlyRevenue = storeData.orders.revenue_last_30_days;
-  const orderCount = storeData.orders.orders_last_30_days;
-  const aov = storeData.orders.average_order_value;
-  const storeCurrency = storeData.store.currency || "USD";
+  // ── BUDGET CALCULATION (3-Month Revenue Ratio) ──
+  // Fallback to 30-day revenue if 3-month average isn't in the payload yet
+  const avgMonthlyRevenue = (storeData.orders as any).revenue_avg_3_months || storeData.orders.revenue_last_30_days || 0;
 
-  // Normalize revenue to USD-equivalent for universal tier thresholds
+  // ── BUDGET REWORK: 3-Month Revenue Average ──
+  const storeCurrency = storeData.store.currency || "USD";
   const currencyMultiplier = CURRENCY_MULTIPLIERS[storeCurrency] || 1;
-  const revenueUSD = monthlyRevenue / currencyMultiplier;
+  const aov = storeData.orders.average_order_value;
+  const revenueUSD = avgMonthlyRevenue / currencyMultiplier;
+
+  // Tier determination (for label/context)
+  let budgetTier: "Starter" | "Testing" | "Growth" | "Scale";
+  if (revenueUSD < 500) budgetTier = "Starter";
+  else if (revenueUSD < 2000) budgetTier = "Growth";
+  else budgetTier = "Scale";
 
   // Goal multipliers (applied client-side, stored for reference)
   const goalMultipliers: Record<string, number> = {
@@ -673,37 +679,6 @@ export async function generateRecommendations(
     "Promote a New Collection": 1.2,
     "Retarget Past Visitors": 0.4,
   };
-
-  // ── Signal 1: Revenue-based budget ──
-  let revenueBased: number;
-  let budgetTier: "Starter" | "Testing" | "Growth" | "Scale";
-
-  if (orderCount === 0 || monthlyRevenue === 0) {
-    // No sales data — use a sensible starter in local currency
-    revenueBased = Math.round(2 * currencyMultiplier); // ~$2/day equivalent
-    budgetTier = "Starter";
-  } else if (revenueUSD < 500) {
-    // < $500/month equivalent
-    revenueBased = Math.max(
-      Math.round(monthlyRevenue * 0.08 / 30),
-      Math.round(1.5 * currencyMultiplier) // min ~$1.50/day
-    );
-    budgetTier = "Testing";
-  } else if (revenueUSD < 2000) {
-    // $500–$2,000/month equivalent
-    revenueBased = Math.round(monthlyRevenue * 0.10 / 30);
-    budgetTier = "Growth";
-  } else {
-    // > $2,000/month equivalent
-    revenueBased = Math.round(monthlyRevenue * 0.12 / 30);
-    budgetTier = "Scale";
-  }
-
-  // ── BUDGET REWORK: 3-Month Revenue Average ──
-  // Fallback to 30-day revenue if 3-month average isn't in the payload yet
-  const avgMonthlyRevenue = (storeData.orders as any).revenue_avg_3_months || storeData.orders.revenue_last_30_days || 0;
-  const storeCurrency = storeData.store.currency || "USD";
-  const currencyMultiplier = CURRENCY_MULTIPLIERS[storeCurrency] || 1;
 
   // Limits (Normalized from NGN base)
   const MIN_DAILY_NGN = 3000;
