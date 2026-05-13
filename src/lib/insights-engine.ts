@@ -594,6 +594,12 @@ export interface MetaRecommendations {
     recommended_duration_days: number;
     reasoning: string;
     currency: string;
+    tier: "Starter" | "Testing" | "Growth" | "Scale";
+    breakdown: {
+      revenue_based: number;
+      aov_based: number;
+      goal_multipliers: Record<string, number>;
+    };
   };
   timing: TimingOutput;
   placements: {
@@ -644,68 +650,92 @@ export async function generateRecommendations(
     finalAgeReasoning = `${ finalAgeMin } — ${ finalAgeMax } (AI estimated from your products).` + finalAgeReasoning;
   }
 
-  // --- BUDGET ---
+  // --- BUDGET (Multi-Signal Engine) ---
   const monthlyRevenue = storeData.orders.revenue_last_30_days;
   const orderCount = storeData.orders.orders_last_30_days;
   const aov = storeData.orders.average_order_value;
   const storeCurrency = storeData.store.currency || "USD";
 
-  let recommendedDaily: number;
-  let budgetReasoning: string;
-  let budgetTier: string;
+  // Normalize revenue to USD-equivalent for universal tier thresholds
+  const currencyMultiplier = CURRENCY_MULTIPLIERS[storeCurrency] || 1;
+  const revenueUSD = monthlyRevenue / currencyMultiplier;
+
+  // Goal multipliers (applied client-side, stored for reference)
+  const goalMultipliers: Record<string, number> = {
+    "Drive Website Sales": 1.0,
+    "Grow Brand Awareness": 0.6,
+    "Promote a New Collection": 1.2,
+    "Retarget Past Visitors": 0.4,
+  };
+
+  // ── Signal 1: Revenue-based budget ──
+  let revenueBased: number;
+  let budgetTier: "Starter" | "Testing" | "Growth" | "Scale";
 
   if (orderCount === 0 || monthlyRevenue === 0) {
-    // No sales data
-    recommendedDaily = 3000;
+    // No sales data — use a sensible starter in local currency
+    revenueBased = Math.round(2 * currencyMultiplier); // ~$2/day equivalent
     budgetTier = "Starter";
-    budgetReasoning = 
-      "No recent sales data found. " +
-      "Start small to gather data before " +
-      "scaling your ad spend.";
-      
-  } else if (monthlyRevenue < 500000) {
-    // Low volume
-    recommendedDaily = Math.max(
+  } else if (revenueUSD < 500) {
+    // < $500/month equivalent
+    revenueBased = Math.max(
       Math.round(monthlyRevenue * 0.08 / 30),
-      2000
+      Math.round(1.5 * currencyMultiplier) // min ~$1.50/day
     );
     budgetTier = "Testing";
-    budgetReasoning = 
-      `Your store is in early growth stage. ` +
-      `8 % of monthly revenue as ad spend` +
-      `= ${
-  formatCurrency(
-    recommendedDaily, storeCurrency
-  )
-}/day. Focus on learning which ` +
-  `products convert before scaling.`;
-      
-  } else if (monthlyRevenue < 2000000) {
-  // Medium volume
-  recommendedDaily = Math.round(
-    monthlyRevenue * 0.10 / 30
-  );
-  budgetTier = "Growth";
-  budgetReasoning =
-    `10% of monthly revenue as ad spend ` +
-    `= ${formatCurrency(
-      recommendedDaily, storeCurrency
-    )}/day. You have enough data to ` +
-    `optimise — test 2-3 products.`;
+  } else if (revenueUSD < 2000) {
+    // $500–$2,000/month equivalent
+    revenueBased = Math.round(monthlyRevenue * 0.10 / 30);
+    budgetTier = "Growth";
+  } else {
+    // > $2,000/month equivalent
+    revenueBased = Math.round(monthlyRevenue * 0.12 / 30);
+    budgetTier = "Scale";
+  }
 
-} else {
-  // High volume
-  recommendedDaily = Math.round(
-    monthlyRevenue * 0.12 / 30
-  );
-  budgetTier = "Scale";
-  budgetReasoning =
-    `12% of monthly revenue for an ` +
-    `established store = ${formatCurrency(
-      recommendedDaily, storeCurrency
-    )}/day. Prioritise your ` +
-    `top-performing products.`;
-}
+  // ── Signal 2: AOV-based acquisition budget ──
+  // "How much to spend daily to acquire X customers?"
+  let targetDailyConversions: number;
+  if (orderCount === 0) {
+    targetDailyConversions = 1;
+  } else if (orderCount < 30) {
+    targetDailyConversions = 2;
+  } else if (orderCount < 100) {
+    targetDailyConversions = 3;
+  } else {
+    targetDailyConversions = 5;
+  }
+
+  // Estimated CPA ≈ 25–35% of AOV for ecommerce (use 30%)
+  // If no AOV data, fall back to a sensible default
+  const estimatedCPA = aov > 0 ? Math.round(aov * 0.30) : Math.round(10 * currencyMultiplier);
+  const aovBased = estimatedCPA * targetDailyConversions;
+
+  // ── Smart Blend ──
+  // Weight both signals. AOV-based is more actionable, revenue-based adds a sanity check.
+  let recommendedDaily: number;
+  let budgetReasoning: string;
+
+  if (orderCount === 0 || monthlyRevenue === 0) {
+    // No data — lean on AOV signal (from product prices) or starter default
+    recommendedDaily = aov > 0 ? aovBased : revenueBased;
+    budgetReasoning =
+      `No recent sales data. ` +
+      (aov > 0
+        ? `Based on your average product price, aim for ~${targetDailyConversions} sale${targetDailyConversions > 1 ? "s" : ""}/day at ~${formatCurrency(estimatedCPA, storeCurrency)} estimated cost per purchase.`
+        : `Start with ${formatCurrency(recommendedDaily, storeCurrency)}/day to gather data before scaling.`);
+  } else {
+    // Blend: 60% AOV-based, 40% revenue-based
+    recommendedDaily = Math.round(aovBased * 0.6 + revenueBased * 0.4);
+    budgetReasoning =
+      `Targeting ~${targetDailyConversions} sales/day at ~${formatCurrency(estimatedCPA, storeCurrency)} estimated cost per purchase. ` +
+      `Cross-checked against ${budgetTier === "Scale" ? "12%" : budgetTier === "Growth" ? "10%" : "8%"} of your monthly revenue. ` +
+      `Adjust the campaign goal to fine-tune this recommendation.`;
+  }
+
+  // Ensure a sensible minimum (~$1/day equivalent)
+  const minDaily = Math.round(1 * currencyMultiplier);
+  recommendedDaily = Math.max(recommendedDaily, minDaily);
 
 // --- TIMING ---
 const timing = buildTiming(
@@ -834,6 +864,12 @@ return {
     recommended_duration_days: 7,
     reasoning: budgetReasoning,
     currency: storeData.store?.currency || "USD",
+    tier: budgetTier,
+    breakdown: {
+      revenue_based: revenueBased,
+      aov_based: aovBased,
+      goal_multipliers: goalMultipliers,
+    },
   },
   timing,
   placements: {

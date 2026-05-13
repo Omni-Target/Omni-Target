@@ -1219,27 +1219,66 @@ function CampaignsContent() {
             {/* SECTION: Budget */}
             <div className="rounded-2xl bg-surface-raised border border-border-subtle p-6">
               <h3 className="text-sm font-bold text-white/50 uppercase tracking-widest mb-5">Budget</h3>
-              {aiInsights?.budget ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Recommended Daily</span>
-                      <p className="text-lg font-bold text-white mt-1">
-                        {formatCurrency(aiInsights.budget.recommended_daily, aiInsights.budget.currency)}/day
+              {aiInsights?.budget ? (() => {
+                const goalMult = aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1;
+                const adjustedDaily = Math.round(aiInsights.budget.recommended_daily * goalMult);
+                const curr = aiInsights.budget.currency;
+                return (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Recommended Daily</span>
+                          {aiInsights.budget.tier && (
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-brand-500/10 border border-brand-500/20 text-brand-400">
+                              {aiInsights.budget.tier}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-lg font-bold text-white mt-1">
+                          {formatCurrency(adjustedDaily, curr)}/day
+                        </p>
+                        {goalMult !== 1 && (
+                          <p className="text-xs text-white/30 mt-0.5">
+                            {goalMult < 1 ? `${Math.round((1 - goalMult) * 100)}% lower` : `${Math.round((goalMult - 1) * 100)}% higher`} for {goal.toLowerCase()}
+                          </p>
+                        )}
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Test Duration</span>
+                        <p className="text-lg font-bold text-white mt-1">7 days</p>
+                        <p className="text-xs text-white/30 mt-0.5">
+                          Total: {formatCurrency(adjustedDaily * 7, curr)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Breakdown */}
+                    {aiInsights.budget.breakdown && (
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="rounded-lg bg-white/[0.02] border border-white/5 p-3 text-center">
+                          <span className="text-[9px] uppercase tracking-wider text-white/30 font-semibold block mb-1">Revenue Signal</span>
+                          <p className="text-sm font-semibold text-white/70">{formatCurrency(aiInsights.budget.breakdown.revenue_based, curr)}/day</p>
+                        </div>
+                        <div className="rounded-lg bg-white/[0.02] border border-white/5 p-3 text-center">
+                          <span className="text-[9px] uppercase tracking-wider text-white/30 font-semibold block mb-1">AOV Signal</span>
+                          <p className="text-sm font-semibold text-white/70">{formatCurrency(aiInsights.budget.breakdown.aov_based, curr)}/day</p>
+                        </div>
+                        <div className="rounded-lg bg-white/[0.02] border border-white/5 p-3 text-center">
+                          <span className="text-[9px] uppercase tracking-wider text-white/30 font-semibold block mb-1">Goal Adjust</span>
+                          <p className="text-sm font-semibold text-white/70">{goalMult === 1 ? "—" : `×${goalMult}`}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="rounded-xl bg-brand-500/5 border border-brand-500/20 p-4">
+                      <p className="text-sm text-brand-400">
+                        {aiInsights.budget.reasoning}
                       </p>
                     </div>
-                    <div>
-                      <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Test Duration</span>
-                      <p className="text-lg font-bold text-white mt-1">7 days</p>
-                    </div>
                   </div>
-                  <div className="rounded-xl bg-brand-500/5 border border-brand-500/20 p-4">
-                    <p className="text-sm text-brand-400">
-                      {aiInsights.budget.reasoning}
-                    </p>
-                  </div>
-                </div>
-              ) : (
+                );
+              })() : (
                 <div className="rounded-xl bg-brand-500/5 border border-brand-500/20 p-4">
                   <p className="text-sm text-brand-400">
                     {loadingAiInsights
@@ -1278,7 +1317,13 @@ function CampaignsContent() {
                       copywriterNote: generatedCopy.copywriterNote,
                     },
                     targeting: aiInsights?.targeting ?? {},
-                    budget: aiInsights?.budget ?? {},
+                    budget: {
+                      ...aiInsights?.budget ?? {},
+                      goal_adjusted_daily: aiInsights?.budget
+                        ? Math.round(aiInsights.budget.recommended_daily * (aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1))
+                        : undefined,
+                      goal_label: (aiInsights?.budget?.breakdown?.goal_multipliers?.[goal] ?? 1) !== 1 ? goal.toLowerCase() : undefined,
+                    },
                     timing: aiInsights?.timing ?? {},
                     warnings: aiInsights?.warnings ?? [],
                     generatedAt: new Date().toLocaleDateString("en-GB", {
@@ -1326,7 +1371,18 @@ function CampaignsContent() {
                     "",
                     "── BUDGET ──",
                     aiInsights?.budget
-                      ? `Recommended: ${formatCurrency(aiInsights.budget.recommended_daily, aiInsights.budget.currency)}/day for 7 days`
+                      ? (() => {
+                          const gm = aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1;
+                          const adj = Math.round(aiInsights.budget.recommended_daily * gm);
+                          const curr = aiInsights.budget.currency;
+                          return [
+                            `Recommended: ${formatCurrency(adj, curr)}/day for 7 days (${aiInsights.budget.tier} tier)`,
+                            `Total test spend: ${formatCurrency(adj * 7, curr)}`,
+                            aiInsights.budget.breakdown
+                              ? `Signals: Revenue ${formatCurrency(aiInsights.budget.breakdown.revenue_based, curr)}/day · AOV ${formatCurrency(aiInsights.budget.breakdown.aov_based, curr)}/day${gm !== 1 ? ` · Goal ×${gm}` : ""}`
+                              : "",
+                          ].filter(Boolean).join("\n");
+                        })()
                       : `Recommended starting budget: ${formatCurrency(5000, storeInsights?.store?.currency || "USD")}/day for 7 days`,
                     aiInsights?.budget?.reasoning || "Set final budget in Meta Ads Manager",
                     "",
