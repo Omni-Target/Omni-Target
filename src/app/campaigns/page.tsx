@@ -461,7 +461,7 @@ function CampaignsContent() {
                 </div>
               ) : mediaPreviewUrl ? (
                 <div className="w-full h-full flex flex-col items-center">
-                  {paramImage === mediaPreviewUrl && (
+                  {autoFilledFromStore && (
                     <div className="mb-4 text-center">
                       <p className="text-sm font-medium text-white/90">Using Store Product Image</p>
                       <p className="text-xs text-brand-400 mt-1">Got a custom video ad instead? Click below to upload it.</p>
@@ -475,7 +475,7 @@ function CampaignsContent() {
                     )}
                   </div>
                   <button className="text-xs font-semibold px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors relative z-20 pointer-events-auto cursor-pointer">
-                    {paramImage === mediaPreviewUrl ? "Upload Custom Creative (Video/Image)" : "Change Media"}
+                    {autoFilledFromStore ? "Upload Custom Creative (Video/Image)" : "Change Media"}
                   </button>
                 </div>
               ) : (
@@ -608,14 +608,11 @@ function CampaignsContent() {
                 <span>Product loaded from your store. Review the details below.</span>
               </div>
               <div className="flex gap-4 text-sm text-white/60 mt-2">
-                {paramPrice && (
-                  <span>Price: {formatCurrency(parseFloat(paramPrice), storeInsights?.store?.currency || "USD")}</span>
+                {productPrice && (
+                  <span>Price: {formatCurrency(parseFloat(productPrice), storeInsights?.store?.currency || "USD")}</span>
                 )}
-                {paramType && (
-                  <span>Type: {paramType}</span>
-                )}
-                {paramTags && (
-                  <span>Tags: {paramTags.split(",").slice(0,3).join(", ")}</span>
+                {productVariants && (
+                  <span>Variants: {productVariants.split(",").slice(0,3).join(", ")}</span>
                 )}
               </div>
             </div>
