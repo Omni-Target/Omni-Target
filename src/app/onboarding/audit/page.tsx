@@ -162,6 +162,10 @@ export default function AuditPage() {
         return { text: "Store Ready", cls: "bg-success-500/10 border-success-500/20 text-success-400" };
       case "moderate":
         return { text: "Needs Some Work", cls: "bg-amber-500/10 border-amber-500/20 text-amber-400" };
+      case "syncing":
+        return { text: "Sync in Progress", cls: "bg-brand-500/10 border-brand-500/20 text-brand-400 animate-pulse" };
+      case "not_connected":
+        return { text: "Disconnected", cls: "bg-error-500/10 border-error-500/20 text-error-400" };
       default:
         return { text: "Needs Attention", cls: "bg-error-500/10 border-error-500/20 text-error-400" };
     }
@@ -288,121 +292,199 @@ export default function AuditPage() {
 
       {/* Results (shown after scanning) */}
       {!scanning && auditResult && (
-        <div className="animate-fade-in-up">
-          {/* Score Circle */}
-          <div className="relative w-24 h-24 mx-auto mb-6">
-            <div className={`w-full h-full rounded-full border-4 ${scoreBorderColor(auditResult.score)} flex items-center justify-center`}>
-              <div className="text-center">
-                <span className={`text-3xl font-bold ${scoreColor(auditResult.score)}`}>
-                  {auditResult.score}
-                </span>
-                <span className="text-xs text-white/30 block -mt-1">/100</span>
-              </div>
-            </div>
-          </div>
-
-          <h2 className="text-xl font-semibold text-white mb-2">
-            Store Readiness Audit
-          </h2>
-
-          {/* Status Badge */}
-          {(() => {
-            const s = statusLabel(auditResult.status);
-            return (
-              <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ${s.cls} mb-6`}>
-                {s.text}
-              </span>
-            );
-          })()}
-
-          {/* Breakdown */}
-          {auditResult.breakdown && (
-            <div className="text-left mb-6">
-              <p className="text-xs font-medium text-white/50 uppercase tracking-wider mb-3">Score Breakdown</p>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { label: "Products", score: auditResult.breakdown.products, max: 25 },
-                  { label: "Orders", score: auditResult.breakdown.orders, max: 25 },
-                  { label: "Retention", score: auditResult.breakdown.retention, max: 25 },
-                  { label: "Availability", score: auditResult.breakdown.availability, max: 25 },
-                ].map((item) => (
-                  <div key={item.label} className="px-3 py-2.5 rounded-lg bg-white/[0.03] border border-white/5">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-xs text-white/50">{item.label}</span>
-                      <span className={`text-xs font-semibold ${item.score >= item.max * 0.7 ? "text-success-400" : item.score >= item.max * 0.4 ? "text-amber-400" : "text-error-400"}`}>
-                        {Math.round((item.score / item.max) * 100)}%
-                      </span>
-                    </div>
-                    <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-700 ${item.score >= item.max * 0.7 ? "bg-success-400" : item.score >= item.max * 0.4 ? "bg-amber-400" : "bg-error-400"}`}
-                        style={{ width: `${(item.score / item.max) * 100}%` }}
-                      />
+        <div className="animate-fade-in-up w-full max-w-2xl mx-auto">
+          
+          {/* Main Glass Card */}
+          <div className="relative overflow-hidden rounded-2xl bg-[#111118]/80 backdrop-blur-xl border border-white/10 p-8 shadow-2xl mb-8">
+            
+            {/* Subtle Gradient Glow Background */}
+            <div className="absolute -top-40 -left-40 w-80 h-80 bg-brand-500/10 rounded-full blur-[100px] pointer-events-none" />
+            <div className="absolute -bottom-40 -right-40 w-80 h-80 bg-brand-600/10 rounded-full blur-[100px] pointer-events-none" />
+            
+            <div className="relative z-10">
+              {auditResult.status === "syncing" ? (
+                <div className="text-center py-10">
+                  <div className="relative w-32 h-32 mx-auto mb-8">
+                    <div className="absolute inset-0 rounded-full border-4 border-brand-500/10" />
+                    <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-brand-500 animate-spin" style={{ animationDuration: "1.5s" }} />
+                    <div className="absolute inset-4 rounded-full border-4 border-transparent border-r-brand-400 animate-spin" style={{ animationDuration: "2s", animationDirection: "reverse" }} />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400 animate-pulse">
+                        <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                        <path d="M21 3v5h-5" />
+                      </svg>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Positives */}
-          {auditResult.positives && auditResult.positives.length > 0 && (
-            <div className="text-left space-y-2 mb-6">
-              <p className="text-xs font-medium text-white/50 uppercase tracking-wider mb-2">What&apos;s Working</p>
-              {auditResult.positives.map((item, i) => (
-                <div key={i} className="flex items-start gap-2 px-4 py-3 rounded-lg bg-success-500/10 border border-success-500/20">
-                  <svg className="shrink-0 mt-0.5 text-success-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                  <span className="text-sm text-success-400">{item}</span>
+                  <h2 className="text-2xl font-bold text-white tracking-tight mb-3">Background Sync in Progress</h2>
+                  <p className="text-sm text-white/60 mb-8 max-w-md mx-auto leading-relaxed">
+                    We're securely pulling your product catalog and recent order history to generate your readiness score. This usually takes just a few moments.
+                  </p>
+                  {/* Status Badge */}
+                  <span className="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest border bg-brand-500/10 border-brand-500/20 text-brand-400 shadow-lg backdrop-blur-md animate-pulse">
+                    Data Syncing
+                  </span>
                 </div>
-              ))}
-            </div>
-          )}
+              ) : (
+                <>
+                  {/* Score SVG Gauge */}
+                  <div className="relative w-40 h-40 mx-auto mb-8 drop-shadow-2xl">
+                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                      <circle cx="50" cy="50" r="42" className="stroke-white/5" strokeWidth="8" fill="none" />
+                      <circle 
+                        cx="50" cy="50" r="42" 
+                        className={`${auditResult.score >= 70 ? "stroke-success-500" : auditResult.score >= 40 ? "stroke-amber-500" : "stroke-error-500"} transition-all duration-1500 ease-out`} 
+                        strokeWidth="8" 
+                        fill="none" 
+                        strokeDasharray={2 * Math.PI * 42} 
+                        strokeDashoffset={(2 * Math.PI * 42) - ((auditResult.score / 100) * (2 * Math.PI * 42))} 
+                        strokeLinecap="round" 
+                        style={{ filter: "drop-shadow(0 0 8px currentColor)" }}
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <span className={`text-5xl font-extrabold tracking-tight ${scoreColor(auditResult.score)} drop-shadow-md`}>
+                        {auditResult.score}
+                      </span>
+                      <span className="text-[10px] text-white/40 font-bold tracking-[0.2em] uppercase mt-1">Score</span>
+                    </div>
+                  </div>
 
-          {/* Issues */}
-          {auditResult.issues.length > 0 && (
-            <div className="text-left space-y-2 mb-6">
-              <p className="text-xs font-medium text-white/50 uppercase tracking-wider mb-2">Areas to Improve</p>
-              {auditResult.issues.map((issue, i) => (
-                <div key={i} className="flex items-start gap-2 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                  <svg className="shrink-0 mt-0.5 text-amber-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                    <line x1="12" y1="9" x2="12" y2="13" />
-                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                  </svg>
-                  <span className="text-sm text-amber-400">{issue}</span>
-                </div>
-              ))}
-            </div>
-          )}
+                  <h2 className="text-2xl font-bold text-white tracking-tight mb-3">
+                    Store Readiness Audit
+                  </h2>
 
-          {/* Recommendations */}
-          {auditResult.recommendations && auditResult.recommendations.length > 0 && (
-            <div className="text-left space-y-2 mb-6">
-              <p className="text-xs font-medium text-white/50 uppercase tracking-wider mb-2">Before You Run Ads</p>
-              {auditResult.recommendations.map((rec, i) => (
-                <div key={i} className="flex items-start gap-2 px-4 py-3 rounded-lg bg-brand-500/10 border border-brand-500/20">
-                  <svg className="shrink-0 mt-0.5 text-brand-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                  </svg>
-                  <span className="text-sm text-brand-400">{rec}</span>
-                </div>
-              ))}
+                  {/* Status Badge */}
+                  <div className="mb-10">
+                    {(() => {
+                      const s = statusLabel(auditResult.status);
+                      return (
+                        <span className={`inline-flex items-center px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest border ${s.cls} shadow-lg backdrop-blur-md`}>
+                          {s.text}
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Breakdown Grid */}
+                  {auditResult.breakdown && (
+                    <div className="text-left mb-10">
+                      <p className="text-[11px] font-bold text-white/40 uppercase tracking-[0.15em] mb-4 flex items-center gap-2">
+                        <span className="w-4 h-[1px] bg-white/20"></span>
+                        Score Breakdown
+                        <span className="flex-1 h-[1px] bg-white/5"></span>
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {[
+                          { label: "Products", score: auditResult.breakdown.products, max: 25, icon: "M16 14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8z M16 14v4a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2h-4 M6 6h.01" },
+                          { label: "Orders", score: auditResult.breakdown.orders, max: 25, icon: "M9 5H7a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2V7a2 2 0 0 0 -2 -2h-2 M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2 M9 5a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2 M12 12h.01 M12 16h.01 M8 12h.01 M8 16h.01 M16 12h.01 M16 16h.01" },
+                          { label: "Retention", score: auditResult.breakdown.retention, max: 25, icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75" },
+                          { label: "Availability", score: auditResult.breakdown.availability, max: 25, icon: "M12 2v20 M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" },
+                        ].map((item) => {
+                          const percentage = Math.round((item.score / item.max) * 100);
+                          const isGood = item.score >= item.max * 0.7;
+                          const isOk = item.score >= item.max * 0.4;
+                          
+                          return (
+                            <div key={item.label} className="group px-4 py-3.5 rounded-xl bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 hover:border-white/10 transition-colors">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/30 group-hover:text-white/50 transition-colors">
+                                    <path d={item.icon} />
+                                  </svg>
+                                  <span className="text-xs font-semibold text-white/70">{item.label}</span>
+                                </div>
+                                <span className={`text-xs font-bold ${isGood ? "text-success-400" : isOk ? "text-amber-400" : "text-error-400"}`}>
+                                  {percentage}%
+                                </span>
+                              </div>
+                              <div className="h-1.5 bg-black/40 rounded-full overflow-hidden shadow-inner">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-1000 ease-out shadow-[0_0_10px_currentColor] ${isGood ? "bg-success-400" : isOk ? "bg-amber-400" : "bg-error-400"}`}
+                                  style={{ width: `${percentage}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Lists Section */}
+                  <div className="space-y-6">
+                    {/* Positives */}
+                    {auditResult.positives && auditResult.positives.length > 0 && (
+                      <div className="text-left">
+                        <p className="text-[11px] font-bold text-success-400/70 uppercase tracking-[0.15em] mb-3 flex items-center gap-2">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                          What&apos;s Working
+                        </p>
+                        <div className="space-y-2">
+                          {auditResult.positives.map((item, i) => (
+                            <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl bg-success-500/5 border border-success-500/10">
+                              <div className="w-1.5 h-1.5 rounded-full bg-success-400 mt-1.5 shadow-[0_0_8px_rgba(52,211,153,0.8)] shrink-0" />
+                              <span className="text-sm text-success-100/80 leading-relaxed">{item}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Issues */}
+                    {auditResult.issues.length > 0 && (
+                      <div className="text-left">
+                        <p className="text-[11px] font-bold text-amber-400/70 uppercase tracking-[0.15em] mb-3 flex items-center gap-2">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+                          Areas to Improve
+                        </p>
+                        <div className="space-y-2">
+                          {auditResult.issues.map((issue, i) => (
+                            <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl bg-amber-500/5 border border-amber-500/10">
+                              <div className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shadow-[0_0_8px_rgba(251,191,36,0.8)] shrink-0" />
+                              <span className="text-sm text-amber-100/80 leading-relaxed">{issue}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Recommendations */}
+                    {auditResult.recommendations && auditResult.recommendations.length > 0 && (
+                      <div className="text-left">
+                        <p className="text-[11px] font-bold text-brand-400/70 uppercase tracking-[0.15em] mb-3 flex items-center gap-2">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
+                          Before You Run Ads
+                        </p>
+                        <div className="space-y-2">
+                          {auditResult.recommendations.map((rec, i) => (
+                            <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl bg-brand-500/10 border border-brand-500/20 backdrop-blur-sm">
+                              <div className="w-1.5 h-1.5 rounded-full bg-brand-400 mt-1.5 shadow-[0_0_8px_rgba(129,140,248,0.8)] shrink-0 animate-pulse" />
+                              <span className="text-sm font-medium text-brand-50 leading-relaxed">{rec}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
-          )}
+          </div>
 
           {/* Continue Button */}
           <button
             onClick={handleContinue}
             disabled={completing}
-            className="group relative w-full py-4 px-6 rounded-xl font-semibold text-sm transition-all duration-300 cursor-pointer mt-4 disabled:opacity-70 disabled:cursor-not-allowed"
+            className="group relative w-full sm:w-auto min-w-[280px] py-4 px-8 rounded-xl font-bold text-sm transition-all duration-300 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed mx-auto block overflow-hidden"
           >
-            <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 transition-all duration-300 group-hover:from-brand-500 group-hover:to-brand-400" />
+            {/* Animated Button Background Sheen */}
+            <div className="absolute inset-0 bg-gradient-to-r from-brand-600 via-brand-500 to-brand-600 bg-[length:200%_auto] animate-shimmer group-hover:scale-105 transition-transform duration-500" />
+            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 bg-white/20 transition-opacity duration-300" />
+            
             <span className="relative flex items-center justify-center gap-2 text-white">
               {completing ? "Taking you to your dashboard..." : fromDashboard ? "Return to Dashboard" : "Continue to Dashboard"}
               {!completing && (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-200 group-hover:translate-x-1">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-300 group-hover:translate-x-1.5">
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>
               )}
