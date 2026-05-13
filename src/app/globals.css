@@ -18,8 +18,8 @@
   --color-surface: #111118;
   --color-surface-raised: #18181f;
   --color-surface-overlay: #1e1e28;
-  --color-border-subtle: #2a2a35;
-  --color-border-default: #3a3a48;
+  --color-border-subtle: rgba(255, 255, 255, 0.08);
+  --color-border-default: rgba(255, 255, 255, 0.15);
 
   --color-success-50: #ecfdf5;
   --color-success-400: #34d399;
@@ -34,6 +34,12 @@
   --color-warning-50: #fffbeb;
   --color-warning-400: #fbbf24;
   --color-warning-500: #f59e0b;
+
+  /* Premium Gradients & Glows */
+  --gradient-primary: linear-gradient(135deg, #6366f1 0%, #818cf8 50%, #c7d2fe 100%);
+  --gradient-surface: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 100%);
+  --shadow-glow: 0 0 40px -10px rgba(99, 102, 241, 0.5);
+  --shadow-premium: 0 20px 50px -12px rgba(0, 0, 0, 0.5);
 }
 
 :root {
@@ -184,9 +190,51 @@ body {
   animation: glow-pulse 2s ease-in-out infinite;
 }
 
+/* Glassmorphism Classes */
+.glass {
+  background: rgba(15, 15, 23, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border-subtle);
+}
+
+.glass-raised {
+  background: rgba(24, 24, 31, 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--color-border-default);
+  box-shadow: var(--shadow-premium);
+}
+
+.text-gradient {
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Premium Layout Utilities */
+.hero-glow {
+  position: absolute;
+  width: 60vw;
+  height: 40vw;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%);
+  filter: blur(100px);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.grid-background {
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(ellipse at center, black, transparent 80%);
+}
+
 /* Hide Clerk Watermark */
-.cl-watermark, 
-[class^="cl-internal-"] > a[href*="clerk.com"],
-.cl-internal-b3al4t {
+div:has(> a[href*="clerk.com"]),
+div:has(> a[href*="clerk.dev"]),
+.cl-watermark {
   display: none !important;
 }

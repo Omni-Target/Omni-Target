@@ -22,10 +22,12 @@ const isOnboardingRoute = createRouteMatcher([
 
 export default clerkMiddleware(async (auth, request) => {
   if (!isPublicRoute(request)) {
-    await auth.protect()
     const session = await auth()
-
     const userId = session.userId
+
+    if (!userId) {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
     
     // Only enforce onboarding on standard page routes
     if (userId && !request.nextUrl.pathname.startsWith('/api/') && !request.nextUrl.pathname.startsWith('/_next/')) {
