@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import sharp from "sharp";
 
 // Credit-gating: check balance before generation
 
@@ -291,18 +292,40 @@ ${productVariants ?
 
     const messageContent: any[] = [];
 
-    // Helper to fetch an image URL and convert to base64
+    // Max base64 size we'll send to Anthropic (4.5 MB leaves headroom under the 5 MB API limit)
+    const MAX_BASE64_BYTES = 4_500_000;
+
+    // Helper to fetch an image URL and convert to base64 with automatic resizing
     const fetchImageBase64 = async (url: string) => {
       try {
-        // Force Shopify to return a JPEG to avoid AVIF/WEBP issues
         let fetchUrl = url;
+
+        // --- Shopify CDN: resize to 1200px wide + force JPEG ---
         if (fetchUrl.includes("cdn.shopify.com")) {
+          // Shopify image URLs support _WIDTHx suffix before the extension
+          // e.g. product.jpg → product_1200x.jpg
+          fetchUrl = fetchUrl.replace(
+            /(\.(jpg|jpeg|png|webp|avif))(\?|$)/i,
+            "_1200x.jpg$3"
+          );
+          // Append format=jpg to force JPEG output regardless of original
           fetchUrl += fetchUrl.includes("?") ? "&format=jpg" : "?format=jpg";
         }
 
+        // --- Cloudinary: add quality + resize transforms ---
+        if (fetchUrl.includes("res.cloudinary.com") && fetchUrl.includes("/upload/")) {
+          const uploadIdx = fetchUrl.indexOf("/upload/");
+          const base = fetchUrl.slice(0, uploadIdx + 8); // includes "/upload/"
+          const rest = fetchUrl.slice(uploadIdx + 8);
+          // Prepend resize + quality transforms (won't clash with existing transforms)
+          fetchUrl = `${base}w_1200,c_limit,q_auto:good,f_jpg/${rest}`;
+        }
+
+        console.log("Fetching image for AI (resized URL):", fetchUrl.slice(0, 120));
+
         const res = await fetch(fetchUrl);
         if (!res.ok) throw new Error(`Failed to fetch image: ${res.statusText}`);
-        
+
         const buffer = await res.arrayBuffer();
         let contentType = (res.headers.get("content-type") || "image/jpeg")
           .split(";")[0]
@@ -311,18 +334,53 @@ ${productVariants ?
 
         // Map common variations
         if (contentType === "image/jpg") contentType = "image/jpeg";
-        
+
         const supported = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-        
-        // If the CDN still returned an unsupported type (like avif), 
+
+        // If the CDN still returned an unsupported type (like avif),
         // skip the image block to prevent Anthropic from crashing with a 400.
         if (!supported.includes(contentType)) {
           console.warn(`Unsupported image type: ${contentType} from ${fetchUrl}. Skipping visual analysis.`);
           return null;
         }
 
+        let imgBuffer: Uint8Array = Buffer.from(buffer);
+
+        // Progressive compression: if still over limit, use sharp to shrink until it fits.
+        // This guarantees visual analysis always works — we never skip the image.
+        const compressionSteps = [
+          { width: 1200, quality: 80 },
+          { width: 1200, quality: 60 },
+          { width: 1000, quality: 50 },
+          { width: 800,  quality: 40 },
+        ];
+
+        let base64 = Buffer.from(imgBuffer).toString("base64");
+
+        if (base64.length > MAX_BASE64_BYTES) {
+          console.info(
+            `Image too large (${(base64.length / 1_000_000).toFixed(1)} MB base64). Compressing with sharp...`
+          );
+
+          for (const step of compressionSteps) {
+            imgBuffer = await sharp(imgBuffer)
+              .resize({ width: step.width, withoutEnlargement: true })
+              .jpeg({ quality: step.quality, mozjpeg: true })
+              .toBuffer();
+
+            base64 = Buffer.from(imgBuffer).toString("base64");
+            contentType = "image/jpeg";
+
+            console.info(
+              `  → ${step.width}px @ q${step.quality}: ${(base64.length / 1_000_000).toFixed(2)} MB`
+            );
+
+            if (base64.length <= MAX_BASE64_BYTES) break;
+          }
+        }
+
         return {
-          base64: Buffer.from(buffer).toString("base64"),
+          base64,
           mediaType: contentType as "image/jpeg" | "image/png" | "image/gif" | "image/webp"
         };
       } catch (err) {
@@ -441,9 +499,17 @@ ${productVariants ?
     return NextResponse.json(parsedResponse, { status: 200 });
   } catch (error: any) {
     console.error("Campaign API Generation Error:", error);
-    // Return the actual error message to the client for debugging
+
+    // Map known Anthropic error types to user-friendly messages
+    const message =
+      error?.status === 400 && error?.message?.includes("image")
+        ? "Product image could not be processed. Try a different image or generate without one."
+        : error?.status === 429
+          ? "AI is temporarily busy. Please try again in a moment."
+          : "Something went wrong generating your brief. Please try again.";
+
     return NextResponse.json(
-      { error: error?.message || "Something went wrong", status: 500 },
+      { error: message },
       { status: 500 }
     );
   }
