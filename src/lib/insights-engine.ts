@@ -599,7 +599,14 @@ export interface MetaRecommendations {
       revenue_based: number;
       aov_based: number;
       goal_multipliers: Record<string, number>;
+      meta_optimal_daily: number; // The ~50 conversions/week threshold
+      learning_phase_constrained: boolean;
     };
+    strategies: {
+      label: string;
+      daily: number;
+      description: string;
+    }[];
   };
   timing: TimingOutput;
   placements: {
@@ -693,49 +700,53 @@ export async function generateRecommendations(
     budgetTier = "Scale";
   }
 
-  // ── Signal 2: AOV-based acquisition budget ──
-  // "How much to spend daily to acquire X customers?"
-  let targetDailyConversions: number;
-  if (orderCount === 0) {
-    targetDailyConversions = 1;
-  } else if (orderCount < 30) {
-    targetDailyConversions = 2;
-  } else if (orderCount < 100) {
-    targetDailyConversions = 3;
-  } else {
-    targetDailyConversions = 5;
-  }
-
-  // Estimated CPA ≈ 25–35% of AOV for ecommerce (use 30%)
-  // If no AOV data, fall back to a sensible default
+  // ── Signal 2: Meta-Aware Acquisition Budget ──
+  // Meta needs ~50 conversions/week to exit the Learning Phase. 
+  // 50 / 7 = ~7.14 conversions/day.
+  const META_OPTIMAL_CONVERSIONS_DAY = 7.14;
+  
+  // Estimated CPA ≈ 30% of AOV. 
   const estimatedCPA = aov > 0 ? Math.round(aov * 0.30) : Math.round(10 * currencyMultiplier);
-  const aovBased = estimatedCPA * targetDailyConversions;
+  const metaOptimalDaily = Math.round(estimatedCPA * META_OPTIMAL_CONVERSIONS_DAY);
 
-  // ── Smart Blend ──
-  // Weight both signals. AOV-based is more actionable, revenue-based adds a sanity check.
-  let recommendedDaily: number;
+  // ── Affordability Check ──
+  // If the 'Optimal' budget is > 25% of their revenue, they are constrained.
+  const isLearningPhaseConstrained = metaOptimalDaily > (monthlyRevenue * 0.25 / 30);
+
+  // ── Strategy Generation ──
+  const strategies = [
+    {
+      label: "Performance (Meta Optimal)",
+      daily: metaOptimalDaily,
+      description: `Designed to exit Meta's Learning Phase by targeting ~50 conversions/week. Best for established stores scaling winners.`
+    },
+    {
+      label: "Balanced (Growth)",
+      daily: Math.round(metaOptimalDaily * 0.5 + revenueBased * 0.5),
+      description: `Blends data-gathering with budget safety. Meta may take longer to optimize.`
+    },
+    {
+      label: "Conservative (Test)",
+      daily: Math.round(Math.max(revenueBased, 2 * currencyMultiplier)),
+      description: `Minimized risk. Recommended for testing new creative concepts or low-budget validation.`
+    }
+  ];
+
+  // Default recommendation (now more aggressive to ensure Meta has a chance)
+  let recommendedDaily = strategies[1].daily; 
   let budgetReasoning: string;
 
-  if (orderCount === 0 || monthlyRevenue === 0) {
-    // No data — lean on AOV signal (from product prices) or starter default
-    recommendedDaily = aov > 0 ? aovBased : revenueBased;
-    budgetReasoning =
-      `No recent sales data. ` +
-      (aov > 0
-        ? `Based on your average product price, aim for ~${targetDailyConversions} sale${targetDailyConversions > 1 ? "s" : ""}/day at ~${formatCurrency(estimatedCPA, storeCurrency)} estimated cost per purchase.`
-        : `Start with ${formatCurrency(recommendedDaily, storeCurrency)}/day to gather data before scaling.`);
+  if (isLearningPhaseConstrained) {
+    budgetReasoning = `Your product price is high relative to your store revenue. To reach Meta's optimal 50 conversions/week, a budget of ${formatCurrency(metaOptimalDaily, storeCurrency)}/day is needed. ` +
+      `We recommend the Balanced strategy, but consider optimizing for 'Add to Cart' instead of 'Purchase' to help Meta find more data points.`;
   } else {
-    // Blend: 60% AOV-based, 40% revenue-based
-    recommendedDaily = Math.round(aovBased * 0.6 + revenueBased * 0.4);
-    budgetReasoning =
-      `Targeting ~${targetDailyConversions} sales/day at ~${formatCurrency(estimatedCPA, storeCurrency)} estimated cost per purchase. ` +
-      `Cross-checked against ${budgetTier === "Scale" ? "12%" : budgetTier === "Growth" ? "10%" : "8%"} of your monthly revenue. ` +
-      `Adjust the campaign goal to fine-tune this recommendation.`;
+    budgetReasoning = `Targeting a high-performance zone. The suggested budget ensures Meta has enough data (~${Math.round((recommendedDaily / estimatedCPA) * 7)} sales/week) to optimize your campaign effectively.`;
   }
 
-  // Ensure a sensible minimum (~$1/day equivalent)
-  const minDaily = Math.round(1 * currencyMultiplier);
+  // Ensure minimums
+  const minDaily = Math.round(1.5 * currencyMultiplier);
   recommendedDaily = Math.max(recommendedDaily, minDaily);
+  strategies.forEach(s => s.daily = Math.max(s.daily, minDaily));
 
 // --- TIMING ---
 const timing = buildTiming(
@@ -867,9 +878,12 @@ return {
     tier: budgetTier,
     breakdown: {
       revenue_based: revenueBased,
-      aov_based: aovBased,
+      aov_based: metaOptimalDaily, // rename for clarity
       goal_multipliers: goalMultipliers,
+      meta_optimal_daily: metaOptimalDaily,
+      learning_phase_constrained: isLearningPhaseConstrained,
     },
+    strategies,
   },
   timing,
   placements: {
