@@ -183,3 +183,10 @@ body {
 .animate-glow-pulse {
   animation: glow-pulse 2s ease-in-out infinite;
 }
+
+/* Hide Clerk Watermark */
+.cl-watermark, 
+[class^="cl-internal-"] > a[href*="clerk.com"],
+.cl-internal-b3al4t {
+  display: none !important;
+}
