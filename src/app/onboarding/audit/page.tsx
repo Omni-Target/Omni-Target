@@ -100,15 +100,39 @@ export default function AuditPage() {
       });
     }, 1000);
 
-    // After 3s of animation, call real API
+    // After 3s of animation, trigger store data fetch then audit
     const apiTimer = setTimeout(async () => {
       clearInterval(stepInterval);
       setCurrentStep(STEPS.length); // mark all steps done
       try {
-        const res = await fetch("/api/pixel/audit");
-        if (!res.ok) throw new Error("Audit API failed");
-        const data: AuditResult = await res.json();
-        setAuditResult(data);
+        // Step 1: Trigger store data fetch — this populates the
+        // store_snapshot in the DB that the audit endpoint needs.
+        // Without this, the audit always returns "syncing".
+        await fetch("/api/store/data");
+
+        // Step 2: Now run the audit (snapshot should be populated)
+        // Retry up to 3 times if we still get "syncing"
+        let auditData: AuditResult | null = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const res = await fetch("/api/pixel/audit");
+          if (!res.ok) throw new Error("Audit API failed");
+          const data: AuditResult = await res.json();
+          
+          if (data.status !== "syncing") {
+            auditData = data;
+            break;
+          }
+          
+          // Wait 2s before retrying
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 2000));
+          } else {
+            // Last attempt — use whatever we got
+            auditData = data;
+          }
+        }
+
+        setAuditResult(auditData);
       } catch (err) {
         console.error("Audit error:", err);
         setAuditError("Failed to complete audit. Please try again.");
