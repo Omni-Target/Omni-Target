@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { SignOutButton, useUser } from "@clerk/nextjs";
@@ -48,40 +48,36 @@ function CampaignsContent() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
 
-  // URL param auto-fill
-  const searchParams = useSearchParams();
   const [autoFilledFromStore, setAutoFilledFromStore] = useState(false);
 
-  const paramProductName = searchParams.get("product_name") || "";
-  const paramDescription = searchParams.get("product_description") || "";
-  const paramImage = searchParams.get("product_image") || "";
-  const paramPrice = searchParams.get("product_price") || "";
-  const paramTags = searchParams.get("product_tags") || "";
-  const paramType = searchParams.get("product_type") || "";
-  const paramVariants = searchParams.get("product_variants") || "";
-
-  // Handle URL params for auto-fill
+  // Read from sessionStorage for auto-fill
   useEffect(() => {
-    if (paramProductName) {
-      setProductName(paramProductName);
-      setAutoFilledFromStore(true);
-      
-      // Build a rich description from 
-      // available data
-      if (paramDescription) {
-        setDescription(paramDescription);
+    const draftStr = sessionStorage.getItem("campaign_draft");
+    if (draftStr) {
+      try {
+        const draft = JSON.parse(draftStr);
+        if (draft.product_name) {
+          setProductName(draft.product_name);
+          setAutoFilledFromStore(true);
+          
+          if (draft.product_description) {
+            setDescription(draft.product_description);
+          }
+          if (draft.product_image) {
+            setMediaPreviewUrl(draft.product_image);
+            setMediaCloudUrl(draft.product_image);
+          }
+          
+          setViewState("input");
+          
+          // Clear it so it doesn't persist if they navigate away and back
+          sessionStorage.removeItem("campaign_draft");
+        }
+      } catch (e) {
+        console.error("Failed to parse campaign draft", e);
       }
-      
-      // Pre-fill media from product image
-      if (paramImage) {
-        setMediaPreviewUrl(paramImage);
-        setMediaCloudUrl(paramImage);
-      }
-      
-      // Jump directly to input
-      setViewState("input");
     }
-  }, [paramProductName, paramDescription, paramImage]);
+  }, []);
 
   // Form State
   const [brandName, setBrandName] = useState("");
