@@ -67,6 +67,12 @@ function CampaignsContent() {
             setMediaPreviewUrl(draft.product_image);
             setMediaCloudUrl(draft.product_image);
           }
+          if (draft.product_price) {
+            setProductPrice(draft.product_price);
+          }
+          if (draft.product_variants) {
+            setProductVariants(draft.product_variants);
+          }
           
           setViewState("input");
           
@@ -83,6 +89,8 @@ function CampaignsContent() {
   const [brandName, setBrandName] = useState("");
   const [productName, setProductName] = useState("");
   const [description, setDescription] = useState("");
+  const [productPrice, setProductPrice] = useState("");
+  const [productVariants, setProductVariants] = useState("");
   const [goal, setGoal] = useState("Drive Website Sales");
   const [tone, setTone] = useState("Let AI decide (recommended)");
 
@@ -261,9 +269,9 @@ function CampaignsContent() {
           campaignGoal: goal,
           tonePreference: tone,
           mediaUrl: mediaCloudUrl || mediaPreviewUrl || null,
-          imageUrl: mediaCloudUrl || paramImage || null,
-          productPrice: paramPrice || null,
-          productVariants: paramVariants || null,
+          imageUrl: mediaCloudUrl || null,
+          productPrice: productPrice || null,
+          productVariants: productVariants || null,
         }),
       });
 
