@@ -8,6 +8,7 @@ interface ShopifyShop {
   myshopify_domain: string;
   currency: string;
   country_code: string;
+  money_format?: string;
 }
 
 interface ShopifyOrder {
@@ -276,12 +277,24 @@ export async function fetchShopifyStoreData(
   // Sort products by revenue descending so the AI and dashboard prioritize top sellers
   products.sort((a, b) => b.revenue - a.revenue);
 
+  // Extract currency symbol from money_format (e.g. "${{amount}}" -> "$", "€{{amount}}" -> "€")
+  let symbol = "₦"; // Fallback
+  if (shop?.money_format) {
+    const match = shop.money_format.match(/^[^\d{]+/);
+    if (match) symbol = match[0].trim();
+    else if (shop.money_format.includes("€")) symbol = "€";
+    else if (shop.money_format.includes("£")) symbol = "£";
+  } else if (shop?.currency) {
+    symbol = shop.currency; // Fallback to code if format missing
+  }
+
   // STEP 6 — Return complete StoreData
   return {
     store: {
       name: shop?.name || shopDomain,
       domain: shop?.domain || shopDomain,
       currency: shop?.currency || "NGN",
+      currency_symbol: symbol,
       country: shop?.country_code || "",
       platform: "shopify",
     },

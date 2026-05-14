@@ -29,6 +29,7 @@ export interface StoreData {
     name: string;
     domain: string;
     currency: string;
+    currency_symbol?: string;
     country: string;
     platform: "shopify" | "woocommerce" | "bigcommerce" | "other";
   };

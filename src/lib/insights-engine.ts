@@ -594,12 +594,19 @@ export interface MetaRecommendations {
     recommended_duration_days: number;
     reasoning: string;
     currency: string;
+    currency_symbol?: string;
     tier: "Starter" | "Testing" | "Growth" | "Scale";
     breakdown: {
       revenue_based: number;
       aov_based: number;
       goal_multipliers: Record<string, number>;
       meta_optimal_daily: number; 
+    };
+    ad_sets: number;
+    optimization_event: {
+      event: string;
+      reasoning: string;
+      target_weekly: number;
     };
     strategies: {
       label: string;
@@ -659,17 +666,14 @@ export async function generateRecommendations(
   // ── BUDGET CALCULATION (3-Month Revenue Ratio) ──
   // Fallback to 30-day revenue if 3-month average isn't in the payload yet
   const avgMonthlyRevenue = (storeData.orders as any).revenue_avg_3_months || storeData.orders.revenue_last_30_days || 0;
-
-  // ── BUDGET REWORK: 3-Month Revenue Average ──
   const storeCurrency = storeData.store.currency || "USD";
   const currencyMultiplier = CURRENCY_MULTIPLIERS[storeCurrency] || 1;
-  const aov = storeData.orders.average_order_value;
-  const revenueUSD = avgMonthlyRevenue / currencyMultiplier;
+  const avgMonthlyRevenueUSD = avgMonthlyRevenue / currencyMultiplier;
 
   // Tier determination (for label/context)
   let budgetTier: "Starter" | "Testing" | "Growth" | "Scale";
-  if (revenueUSD < 500) budgetTier = "Starter";
-  else if (revenueUSD < 2000) budgetTier = "Growth";
+  if (avgMonthlyRevenueUSD < 500) budgetTier = "Starter";
+  else if (avgMonthlyRevenueUSD < 2000) budgetTier = "Growth";
   else budgetTier = "Scale";
 
   // Goal multipliers (applied client-side, stored for reference)
@@ -680,40 +684,69 @@ export async function generateRecommendations(
     "Retarget Past Visitors": 0.4,
   };
 
-  // Limits (Normalized from NGN base)
-  const MIN_DAILY_NGN = 3000;
-  const MAX_DAILY_NGN = 50000;
-  
-  const minDaily = Math.round((MIN_DAILY_NGN / 1500) * currencyMultiplier); 
-  const maxDaily = Math.round((MAX_DAILY_NGN / 1500) * currencyMultiplier);
+  // ── Optimization Event & Ad Sets ──
+  const monthlyOrders = storeData.orders.orders_last_30_days || 0;
+  let optEvent: string;
+  let optReasoning: string;
+  let optTarget: number;
+  let adSets: number;
 
-  const calculateStrategy = (ratio: number) => {
-    const rawDaily = (avgMonthlyRevenue * ratio) / 30;
-    return Math.min(Math.max(Math.round(rawDaily), minDaily), maxDaily);
+  if (monthlyOrders > 200) {
+    optEvent = "Purchase";
+    optReasoning = "High order volume (>200/mo) allows Meta to optimize for bottom-funnel conversions effectively.";
+    optTarget = 50;
+    adSets = 3;
+  } else if (monthlyOrders >= 50) {
+    optEvent = "Initiate Checkout";
+    optReasoning = "Medium order volume (50-200/mo). Optimize for checkouts to give Meta enough data points.";
+    optTarget = 35;
+    adSets = 2;
+  } else {
+    optEvent = "Add to Cart";
+    optReasoning = "Low order volume (<50/mo). Optimize for carts to ensure the algorithm exits learning phase quickly.";
+    optTarget = 30;
+    adSets = 2;
+  }
+
+  // ── Strategies ──
+  const averageDailyRevenue = avgMonthlyRevenue / 30;
+  const maxTotalDaily = averageDailyRevenue * 0.20; // 20% ceiling on total daily budget
+
+  const calculateStrategy = (ratio: number, applyCeiling: boolean) => {
+    let rawDaily = averageDailyRevenue * ratio;
+    
+    // Apply ceiling to the base daily such that base * adSets <= 20% of average daily revenue
+    if (applyCeiling) {
+      const maxBaseDaily = maxTotalDaily / adSets;
+      rawDaily = Math.min(rawDaily, maxBaseDaily);
+    }
+    
+    return Math.round(rawDaily);
   };
 
   const strategies = [
     {
-      label: "Performance (10%)",
-      daily: calculateStrategy(0.10),
-      description: `Aggressive testing spend using 10% of your average monthly revenue. Maxes at ${formatCurrency(maxDaily, storeCurrency)}/day for safety.`
+      label: "Performance (15%)",
+      daily: calculateStrategy(0.15, true),
+      description: `Aggressive testing spend using 15% of your average monthly revenue. Capped to not exceed 20% of your average daily revenue.`
     },
     {
-      label: "Balanced (6%)",
-      daily: calculateStrategy(0.06),
-      description: `Optimal test spend using 6% of your average monthly revenue. Designed for sustainable data gathering.`
+      label: "Balanced (10%)",
+      daily: calculateStrategy(0.10, false),
+      description: `Optimal test spend using 10% of your average monthly revenue. Designed for sustainable data gathering.`
     },
     {
-      label: "Conservative (3%)",
-      daily: calculateStrategy(0.03),
-      description: `Low-risk testing using 3% of your average monthly revenue. Minimum floor of ${formatCurrency(minDaily, storeCurrency)}/day applied.`
+      label: "Conservative (5%)",
+      daily: calculateStrategy(0.05, false),
+      description: `Low-risk testing using 5% of your average monthly revenue.`
     }
   ];
 
   // Default to Balanced
   let recommendedDaily = strategies[1].daily;
-  let budgetReasoning = `Based on your 3-month average revenue of ${formatCurrency(avgMonthlyRevenue, storeCurrency)}, we've calculated three spend ratios (3%, 6%, 10%) capped between ${formatCurrency(minDaily, storeCurrency)} and ${formatCurrency(maxDaily, storeCurrency)} per day. ` +
-    `These are optimized for early-stage test campaigns to validate your product and creative without overspending.`;
+  let budgetReasoning = `Based on your 3-month average revenue, we've calculated three spend ratios (5%, 10%, 15%). ` +
+    `These daily figures apply per ad set and are optimized for early-stage test campaigns to validate your product and creative.`;
+
 
 
 // --- TIMING ---
@@ -840,13 +873,20 @@ return {
   },
   budget: {
     recommended_daily: recommendedDaily,
-    recommended_duration_days: 7,
+    recommended_duration_days: 14,
     reasoning: budgetReasoning,
-    currency: storeData.store?.currency || "USD",
+    currency: storeCurrency,
+    currency_symbol: storeData.store.currency_symbol,
     tier: budgetTier,
+    ad_sets: adSets,
+    optimization_event: {
+      event: optEvent,
+      reasoning: optReasoning,
+      target_weekly: optTarget,
+    },
     breakdown: {
       revenue_based: avgMonthlyRevenue,
-      aov_based: aov, // keep AOV as a signal for frontend display
+      aov_based: storeData.orders.average_order_value, // keep AOV as a signal for frontend display
       goal_multipliers: goalMultipliers,
       meta_optimal_daily: strategies[0].daily, // Performance strategy
     },

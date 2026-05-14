@@ -52,7 +52,13 @@ export interface BriefPDFParams {
     recommended_duration_days?: number;
     reasoning?: string;
     currency?: string;
+    currency_symbol?: string;
     tier?: string;
+    ad_sets?: number;
+    optimization_event?: {
+      event: string;
+      reasoning: string;
+    };
     breakdown?: {
       revenue_based: number;
       aov_based: number;
@@ -319,43 +325,66 @@ export function generateBriefPDF(params: BriefPDFParams): void {
 
   const daily = params.budget.goal_adjusted_daily ?? params.budget.recommended_daily;
   const currency = params.budget.currency || "USD";
-  const duration = params.budget.recommended_duration_days ?? 7;
+  const symbol = params.budget.currency_symbol;
+  const duration = params.budget.recommended_duration_days ?? 14;
   const tier = params.budget.tier;
+  const adSets = params.budget.ad_sets || 1;
 
   const budgetItems: TItem[] = [];
 
   budgetItems.push({ text: "RECOMMENDED DAILY", size: 7.5, style: "bold", color: TEXT_3, gapAfter: 1 });
   if (daily) {
     budgetItems.push({
-      text: `${formatCurrency(daily, currency)}/day${tier ? `  ·  ${tier} tier` : ""}`,
+      text: `${formatCurrency(daily, currency, symbol)}/day${tier ? `  ·  ${tier} Strategy` : ""}`,
       size: 14, style: "bold", color: WHITE, gapAfter: 2,
     });
     budgetItems.push({
-      text: `${duration} days  ·  Total: ${formatCurrency(daily * duration, currency)}`,
+      text: `${duration} days  ·  Total Test Spend: ${formatCurrency(daily * duration, currency, symbol)}`,
       size: 10, color: TEXT_2, gapAfter: 6,
     });
   } else {
     budgetItems.push({
-      text: `Set in Meta Ads Manager (${formatCurrency(5000, currency)}/day recommended)`,
+      text: `Set in Meta Ads Manager (${formatCurrency(5000, currency, symbol)}/day recommended)`,
       size: 10, color: TEXT_2, gapAfter: 6,
     });
   }
+
+  // Optimization Event
+  if (params.budget.optimization_event) {
+    budgetItems.push({ text: "OPTIMIZATION EVENT", size: 7.5, style: "bold", color: TEXT_3, gapAfter: 1 });
+    budgetItems.push({
+      text: params.budget.optimization_event.event,
+      size: 11, style: "bold", color: ACCENT_T, gapAfter: 2,
+    });
+    budgetItems.push({
+      text: params.budget.optimization_event.reasoning,
+      size: 9, color: TEXT_2, gapAfter: 6,
+    });
+  }
+
+  // Ad Sets
+  budgetItems.push({ text: "AD SETS", size: 7.5, style: "bold", color: TEXT_3, gapAfter: 1 });
+  budgetItems.push({
+    text: `${adSets} Ad Sets Maximum`,
+    size: 10, color: WHITE, gapAfter: 6,
+  });
 
   // Breakdown
   if (params.budget.breakdown) {
     budgetItems.push({ text: "HOW THIS WAS CALCULATED", size: 7.5, style: "bold", color: TEXT_3, gapAfter: 1 });
     budgetItems.push({
-      text: `Revenue signal: ${formatCurrency(params.budget.breakdown.revenue_based, currency)}/day  ·  AOV signal: ${formatCurrency(params.budget.breakdown.aov_based, currency)}/day${params.budget.goal_label ? `  ·  Adjusted for ${params.budget.goal_label}` : ""}`,
+      text: `Revenue signal: ${formatCurrency(params.budget.breakdown.revenue_based, currency, symbol)}/day  ·  AOV signal: ${formatCurrency(params.budget.breakdown.aov_based, currency, symbol)}${params.budget.goal_label ? `  ·  Adjusted for ${params.budget.goal_label}` : ""}`,
       size: 9, color: TEXT_2, gapAfter: 6,
     });
   }
 
   // Reasoning
   if (params.budget.reasoning) {
+    budgetItems.push({ text: "STRATEGY CONTEXT", size: 7.5, style: "bold", color: TEXT_3, gapAfter: 1 });
     budgetItems.push({ text: params.budget.reasoning, size: 9.5, color: TEXT_2, gapAfter: 2 });
   }
 
-  renderCard("Budget", budgetItems);
+  renderCard("Budget & Strategy", budgetItems);
 
   // ── Timing Card ─────────────────────────────────────────────────────────
 

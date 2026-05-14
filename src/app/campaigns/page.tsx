@@ -107,8 +107,8 @@ function CampaignsContent() {
   const [aiInsights, setAiInsights] = useState<any>(null);
   const [loadingAiInsights, setLoadingAiInsights] = useState(false);
   const [selectedStrategyIndex, setSelectedStrategyIndex] = useState(1); // 0=Performance, 1=Balanced, 2=Conservative
+  const [selectedDuration, setSelectedDuration] = useState<7 | 14 | 30>(14);
 
-  
   const { credits, isUnlimited } = useCredits();
 
   useEffect(() => {
@@ -1232,8 +1232,10 @@ function CampaignsContent() {
               {aiInsights?.budget ? (() => {
                 const strategies = aiInsights.budget.strategies || [];
                 const currentStrategy = strategies[selectedStrategyIndex] || strategies[1];
+                const adSets = aiInsights.budget.ad_sets || 1;
                 const goalMult = aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1;
-                const adjustedDaily = Math.round(currentStrategy.daily * goalMult);
+                const baseDaily = currentStrategy.daily;
+                const adjustedDaily = Math.round(baseDaily * adSets * goalMult);
                 const curr = aiInsights.budget.currency;
 
                 return (
@@ -1251,16 +1253,45 @@ function CampaignsContent() {
                           }`}
                         >
                           <span className="text-[10px] font-bold uppercase tracking-tighter text-center">{s.label.split(" ")[0]}</span>
-                          <span className="text-xs font-bold mt-1">{formatCurrency(s.daily, curr)}</span>
+                          <span className="text-xs font-bold mt-1">{formatCurrency(s.daily, curr, aiInsights.budget.currency_symbol)}</span>
                         </button>
                       ))}
                     </div>
 
+                    {/* Timeline Toggles */}
+                    <div>
+                      <h4 className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-2">Test Timeline</h4>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { days: 7 as const, label: "Creative Test" },
+                          { days: 14 as const, label: "Standard Test" },
+                          { days: 30 as const, label: "Full Launch" }
+                        ].map((t) => (
+                          <button
+                            key={t.days}
+                            onClick={() => setSelectedDuration(t.days)}
+                            className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all duration-300 ${
+                              selectedDuration === t.days 
+                                ? "bg-white/[0.08] border-white/20 text-white" 
+                                : "bg-white/[0.02] border-white/5 text-white/40 hover:bg-white/[0.05]"
+                            }`}
+                          >
+                            <span className="text-[10px] font-bold uppercase tracking-tighter text-center">{t.label}</span>
+                            <span className="text-xs font-bold mt-1">{t.days} Days</span>
+                            <span className="text-[9px] text-white/30 mt-0.5">{formatCurrency(adjustedDaily * t.days, curr, aiInsights.budget.currency_symbol)} total</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5">
+                      <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5 flex flex-col justify-center">
                         <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Recommended Daily</span>
                         <p className="text-xl font-bold text-white mt-1">
-                          {formatCurrency(adjustedDaily, curr)}/day
+                          {formatCurrency(adjustedDaily, curr, aiInsights.budget.currency_symbol)}<span className="text-sm text-white/40 font-normal">/day</span>
+                        </p>
+                        <p className="text-[10px] text-white/30 mt-1 font-medium">
+                          {formatCurrency(baseDaily, curr, aiInsights.budget.currency_symbol)} × {adSets} Ad Sets
                         </p>
                         {goalMult !== 1 && (
                           <p className="text-[10px] text-brand-400 font-medium mt-1 uppercase tracking-tight">
@@ -1268,13 +1299,21 @@ function CampaignsContent() {
                           </p>
                         )}
                       </div>
-                      <div className="p-4 rounded-xl bg-white/[0.03] border border-white/5">
-                        <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Test Duration</span>
-                        <p className="text-xl font-bold text-white mt-1">7 days</p>
-                        <p className="text-xs text-white/30 mt-1 font-medium">
-                          Total: {formatCurrency(adjustedDaily * 7, curr)}
-                        </p>
-                      </div>
+                      
+                      {aiInsights.budget.optimization_event && (
+                        <div className="p-4 rounded-xl bg-brand-500/5 border border-brand-500/20 flex flex-col justify-center">
+                          <span className="text-[10px] uppercase tracking-wider text-brand-400/60 font-semibold mb-1">Optimization Event</span>
+                          <p className="text-sm font-bold text-white mb-1 flex items-center gap-1.5">
+                            <svg className="w-3.5 h-3.5 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                            {aiInsights.budget.optimization_event.event}
+                          </p>
+                          <p className="text-[10px] text-brand-400/80 leading-snug">
+                            {aiInsights.budget.optimization_event.reasoning}
+                          </p>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-3">
@@ -1341,9 +1380,10 @@ function CampaignsContent() {
                     targeting: aiInsights?.targeting ?? {},
                     budget: {
                       ...aiInsights?.budget ?? {},
+                      recommended_duration_days: selectedDuration,
                       recommended_daily: aiInsights?.budget?.strategies?.[selectedStrategyIndex]?.daily ?? aiInsights?.budget?.recommended_daily,
                       goal_adjusted_daily: aiInsights?.budget
-                        ? Math.round((aiInsights.budget.strategies?.[selectedStrategyIndex]?.daily ?? aiInsights.budget.recommended_daily) * (aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1))
+                        ? Math.round((aiInsights.budget.strategies?.[selectedStrategyIndex]?.daily ?? aiInsights.budget.recommended_daily) * (aiInsights.budget.ad_sets || 1) * (aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1))
                         : undefined,
                       goal_label: (aiInsights?.budget?.breakdown?.goal_multipliers?.[goal] ?? 1) !== 1 ? goal.toLowerCase() : undefined,
                       tier: aiInsights?.budget?.strategies?.[selectedStrategyIndex]?.label ?? aiInsights?.budget?.tier,
@@ -1398,17 +1438,21 @@ function CampaignsContent() {
                       ? (() => {
                           const strategies = aiInsights.budget.strategies || [];
                           const currentS = strategies[selectedStrategyIndex] || strategies[1];
+                          const adSets = aiInsights.budget.ad_sets || 1;
                           const gm = aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1;
-                          const adj = Math.round(currentS.daily * gm);
+                          const adj = Math.round(currentS.daily * adSets * gm);
                           const curr = aiInsights.budget.currency;
                           return [
                             `Strategy: ${currentS.label}`,
-                            `Recommended: ${formatCurrency(adj, curr)}/day for 7 days`,
-                            `Total test spend: ${formatCurrency(adj * 7, curr)}`,
+                            `Optimization Event: ${aiInsights.budget.optimization_event?.event || "Purchase"}`,
+                            `Ad Sets: ${adSets}`,
+                            `Recommended Daily: ${formatCurrency(adj, curr, aiInsights.budget.currency_symbol)}/day`,
+                            `Test Duration: ${selectedDuration} days`,
+                            `Total Test Spend: ${formatCurrency(adj * selectedDuration, curr, aiInsights.budget.currency_symbol)}`,
                             `Meta Context: ${aiInsights.budget.reasoning}`,
                           ].filter(Boolean).join("\n");
                         })()
-                      : `Recommended starting budget: ${formatCurrency(5000, storeInsights?.store?.currency || "USD")}/day for 7 days`,
+                      : `Recommended starting budget: ${formatCurrency(5000, storeInsights?.store?.currency || "USD", storeInsights?.store?.currency_symbol)}/day for 14 days`,
                     aiInsights?.budget?.reasoning || "Set final budget in Meta Ads Manager",
                     "",
                     "── TIMING ──",
