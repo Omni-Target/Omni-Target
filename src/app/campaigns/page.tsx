@@ -1253,7 +1253,7 @@ function CampaignsContent() {
                           }`}
                         >
                           <span className="text-[10px] font-bold uppercase tracking-tighter text-center">{s.label.split(" ")[0]}</span>
-                          <span className="text-xs font-bold mt-1">{formatCurrency(s.daily, curr, aiInsights.budget.currency_symbol)}</span>
+                          <span className="text-xs font-bold mt-1">{formatCurrency(s.total_daily, curr, aiInsights.budget.currency_symbol)}</span>
                         </button>
                       ))}
                     </div>

@@ -611,6 +611,7 @@ export interface MetaRecommendations {
     strategies: {
       label: string;
       daily: number;
+      total_daily: number;
       description: string;
     }[];
   };
@@ -710,15 +711,16 @@ export async function generateRecommendations(
 
   // ── Strategies ──
   const averageDailyRevenue = avgMonthlyRevenue / 30;
-  const maxTotalDaily = averageDailyRevenue * 0.20; // 20% ceiling on total daily budget
+  
+  // The ceiling should be 20% of daily revenue PER AD SET to allow 15% ratio to work 
+  // without being immediately capped to 10% (when 2 ad sets) or 6.6% (when 3 ad sets).
+  const maxPerAdSetDaily = averageDailyRevenue * 0.20; 
 
   const calculateStrategy = (ratio: number, applyCeiling: boolean) => {
     let rawDaily = averageDailyRevenue * ratio;
     
-    // Apply ceiling to the base daily such that base * adSets <= 20% of average daily revenue
     if (applyCeiling) {
-      const maxBaseDaily = maxTotalDaily / adSets;
-      rawDaily = Math.min(rawDaily, maxBaseDaily);
+      rawDaily = Math.min(rawDaily, maxPerAdSetDaily);
     }
     
     return Math.round(rawDaily);
@@ -728,17 +730,20 @@ export async function generateRecommendations(
     {
       label: "Performance (15%)",
       daily: calculateStrategy(0.15, true),
-      description: `Aggressive testing spend using 15% of your average monthly revenue. Capped to not exceed 20% of your average daily revenue.`
+      total_daily: calculateStrategy(0.15, true) * adSets,
+      description: `Aggressive testing spend using 15% of your average monthly revenue per ad set. Capped at 20% of daily revenue for safety.`
     },
     {
       label: "Balanced (10%)",
       daily: calculateStrategy(0.10, false),
-      description: `Optimal test spend using 10% of your average monthly revenue. Designed for sustainable data gathering.`
+      total_daily: calculateStrategy(0.10, false) * adSets,
+      description: `Optimal test spend using 10% of your average monthly revenue per ad set. Designed for sustainable data gathering.`
     },
     {
       label: "Conservative (5%)",
       daily: calculateStrategy(0.05, false),
-      description: `Low-risk testing using 5% of your average monthly revenue.`
+      total_daily: calculateStrategy(0.05, false) * adSets,
+      description: `Low-risk testing using 5% of your average monthly revenue per ad set.`
     }
   ];
 
