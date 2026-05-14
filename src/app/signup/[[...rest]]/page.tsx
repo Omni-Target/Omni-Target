@@ -40,8 +40,9 @@ export default function SignupPage() {
           appearance={{
             variables: {
               colorBackground: "#111127",
-              colorInputBackground: "#111127",
+              colorInputBackground: "#16162d",
               colorText: "#ffffff",
+              colorTextSecondary: "#a1a1aa",
               colorPrimary: "#7c3aed",
               colorInputText: "#ffffff",
               borderRadius: "0.75rem",
@@ -49,18 +50,19 @@ export default function SignupPage() {
             elements: {
               cardBox: "glass-raised border-white/[0.08] shadow-2xl",
               card: "bg-transparent m-0",
-              header: "hidden", // Hide redundant header
+              headerTitle: "text-white font-bold text-xl !text-white",
+              headerSubtitle: "text-white/60 !text-white/60",
               formButtonPrimary: "rounded-xl shadow-lg shadow-[#7c3aed]/20 font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] bg-gradient-to-r from-[#7c3aed] to-[#6d28d9] py-6",
-              socialButtonsBlockButton: "border-white/10 text-white/90 hover:bg-white/5 transition-all rounded-xl py-6",
-              socialButtonsBlockButtonText: "font-medium",
-              formFieldInput: "border-white/10 text-white focus:border-[#7c3aed] focus:ring-[#7c3aed]/20 bg-white/5 transition-all rounded-xl h-11",
-              formFieldLabel: "text-white/60 text-xs uppercase tracking-wider font-bold mb-1.5",
-              footerActionText: "text-white/50",
-              footerActionLink: "text-[#7c3aed] hover:text-[#8b5cf6] font-semibold transition-colors",
-              identityPreviewText: "text-white",
+              socialButtonsBlockButton: "border-white/10 text-white hover:bg-white/5 transition-all rounded-xl py-6 !text-white",
+              socialButtonsBlockButtonText: "font-medium !text-white",
+              formFieldInput: "border-white/10 text-white focus:border-[#7c3aed] focus:ring-[#7c3aed]/20 bg-white/5 transition-all rounded-xl h-11 !text-white !bg-[#16162d]",
+              formFieldLabel: "text-white/60 text-xs uppercase tracking-wider font-bold mb-1.5 !text-white/60",
+              footerActionText: "text-white/50 !text-white/50",
+              footerActionLink: "text-[#7c3aed] hover:text-[#8b5cf6] font-semibold transition-colors !text-[#7c3aed]",
+              identityPreviewText: "text-white !text-white",
               identityPreviewEditButtonIcon: "text-[#7c3aed]",
               dividerLine: "bg-white/10",
-              dividerText: "text-white/40 text-[10px] uppercase tracking-widest font-bold",
+              dividerText: "text-white/40 text-[10px] uppercase tracking-widest font-bold !text-white/40",
             }
           }}
         />
