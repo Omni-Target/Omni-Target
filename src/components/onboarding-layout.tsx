@@ -1,4 +1,5 @@
 import React from "react";
+import { Logo } from "./Logo";
 
 export default function OnboardingLayout({
   children,
@@ -13,20 +14,8 @@ export default function OnboardingLayout({
 
       {/* Logo */}
       <div className="mb-10 animate-fade-in-up flex items-center gap-3">
-        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center shadow-lg shadow-brand-500/20">
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="white"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" />
-          </svg>
+        <div className="w-9 h-9 flex items-center justify-center">
+          <Logo className="w-9 h-9 text-[#9333ea]" />
         </div>
         <span className="text-lg font-semibold tracking-tight text-white/90">
           omni-target

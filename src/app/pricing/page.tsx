@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { CREDIT_PACKS } from "@/lib/credit-packs";
+import { Logo } from "@/components/Logo";
 
 export default function PricingPage() {
   const { user } = useUser();
@@ -44,9 +45,12 @@ export default function PricingPage() {
         <a href="/dashboard" className="text-sm text-white/40 hover:text-white/70 flex items-center gap-2">
           ← Back to Dashboard
         </a>
-        <span className="text-sm font-semibold text-white/90">
-          omni-target
-        </span>
+        <div className="flex items-center gap-2">
+          <Logo className="w-6 h-6 text-[#9333ea]" />
+          <span className="text-sm font-semibold text-white/90">
+            omni-target
+          </span>
+        </div>
         <div />
       </nav>
 

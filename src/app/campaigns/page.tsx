@@ -9,6 +9,7 @@ import { MediaValidationResult } from "@/lib/meta-specs";
 import { generateBriefPDF } from "@/lib/generate-brief-pdf";
 import { formatCurrency, getCurrencySymbol } from "@/lib/currency";
 import { useCredits } from "@/hooks/useCredits";
+import { Logo } from "@/components/Logo";
 
 type CampaignState = "selection" | "media" | "input" | "generating" | "review" | "brief";
 
@@ -360,11 +361,8 @@ function CampaignsContent() {
       <nav className="border-b border-border-subtle bg-surface/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center shadow-lg shadow-brand-500/20 flex-shrink-0">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" />
-              </svg>
+            <div className="w-8 h-8 flex items-center justify-center flex-shrink-0">
+              <Logo className="w-8 h-8 text-[#9333ea]" />
             </div>
             <span className="text-sm font-semibold tracking-tight text-white/90">omni-target</span>
           </div>

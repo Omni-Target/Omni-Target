@@ -1,4 +1,5 @@
 import { SignIn } from "@clerk/nextjs";
+import { Logo } from "@/components/Logo";
 
 export default function LoginPage() {
   return (
@@ -9,20 +10,8 @@ export default function LoginPage() {
 
       {/* Logo Section */}
       <div className="mb-8 z-10 flex flex-col items-center gap-4 animate-fade-in-up">
-        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#7c3aed] to-[#5b21b6] flex items-center justify-center shadow-2xl shadow-[#7c3aed]/40 animate-glow-pulse">
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="white"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" />
-          </svg>
+        <div className="w-16 h-16 flex items-center justify-center animate-glow-pulse">
+          <Logo className="w-16 h-16 text-[#a855f7]" />
         </div>
         <div className="flex flex-col items-center">
           <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
