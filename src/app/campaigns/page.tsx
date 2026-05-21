@@ -101,11 +101,11 @@ function CampaignsContent() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [selectedCta, setSelectedCta] = useState<string>("");
 
-  // Store Insights for Brief
   const [storeInsights, setStoreInsights] = useState<any>(null);
   const [loadingInsights, setLoadingInsights] = useState(false);
   const [aiInsights, setAiInsights] = useState<any>(null);
   const [loadingAiInsights, setLoadingAiInsights] = useState(false);
+  const [gatewayInsight, setGatewayInsight] = useState<any>(null);
   const [selectedStrategyIndex, setSelectedStrategyIndex] = useState(1); // 0=Performance, 1=Balanced, 2=Conservative
   const [selectedDuration, setSelectedDuration] = useState<7 | 14 | 30>(14);
 
@@ -260,6 +260,38 @@ function CampaignsContent() {
     setErrorMsg("");
     setShowBuyCredits(false);
 
+    let currentGatewayInsight: any = null;
+    let storeDataForApi: any = null;
+
+    if (storeInsights?.products) {
+      const products = storeInsights.products;
+      const bestseller = [...products].sort((a: any, b: any) => b.revenue - a.revenue)[0];
+      const gatewayProducts = products.filter((p: any) => p.gateway_classification === "Gateway");
+      const topGateway = gatewayProducts.length > 0 
+        ? [...gatewayProducts].sort((a: any, b: any) => b.revenue - a.revenue)[0] 
+        : null;
+
+      const currentProduct = products.find((p: any) => p.name === productName);
+
+      currentGatewayInsight = {
+        currentProductClassification: currentProduct?.gateway_classification || "Unknown",
+        bestsellerName: bestseller?.name,
+        topGatewayName: topGateway?.name,
+        isBestsellerGateway: bestseller?.id === topGateway?.id,
+        currentProductVelocity: currentProduct?.order_velocity,
+        currentProductRepeatRate: currentProduct?.repeat_purchase_rate,
+        storeAov: storeInsights.orders?.average_order_value,
+        storeBaseFtb: products.reduce((acc: number, p: any) => acc + (p.first_time_buyer_ratio || 0), 0) / products.length,
+        topGatewayImage: topGateway?.image_url,
+      };
+
+      setGatewayInsight(currentGatewayInsight);
+
+      storeDataForApi = {
+        orderVolumeTier: storeInsights.orders?.orders_last_30_days > 200 ? 'High' : storeInsights.orders?.orders_last_30_days > 50 ? 'Medium' : 'Low'
+      };
+    }
+
     try {
       const res = await fetch("/api/campaigns/generate", {
         method: "POST",
@@ -274,6 +306,8 @@ function CampaignsContent() {
           imageUrl: mediaCloudUrl || null,
           productPrice: productPrice || null,
           productVariants: productVariants || null,
+          gatewayInsight: currentGatewayInsight,
+          storeDataForApi,
         }),
       });
 
@@ -1395,6 +1429,7 @@ function CampaignsContent() {
                       month: "long",
                       year: "numeric",
                     }),
+                    gatewayInsight,
                   })
                 }
                 className="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-300 cursor-pointer"
@@ -1488,6 +1523,7 @@ function CampaignsContent() {
                   setMediaCloudUrl("");
                   setMediaValidation(null);
                   setGeneratedCopy(null);
+                  setGatewayInsight(null);
                   setSelectedCta("");
                   setViewState("media");
                 }}

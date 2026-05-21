@@ -202,11 +202,18 @@ export async function fetchShopifyStoreData(
     .slice(0, 3)
     .map(([hour]) => parseInt(hour));
 
-  // Repeat customer detection
+  // Repeat customer detection and First Order tracking
   const customerOrderCount: Record<string, number> = {};
-  orders.forEach((order) => {
-    const customerId = order.customer?.id?.toString() || "guest";
+  const customerFirstOrder: Record<string, number> = {};
+  
+  const sortedOrders = [...orders].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  
+  sortedOrders.forEach((order) => {
+    const customerId = order.customer?.id?.toString() || "guest_" + order.id;
     customerOrderCount[customerId] = (customerOrderCount[customerId] || 0) + 1;
+    if (!customerFirstOrder[customerId]) {
+      customerFirstOrder[customerId] = order.id;
+    }
   });
 
   const totalCustomers = Object.keys(customerOrderCount).length;
@@ -221,10 +228,28 @@ export async function fetchShopifyStoreData(
   // STEP 5 — Process products
   // Build a map of product_id -> units sold from order line items
   const productSalesMap: Record<number, number> = {};
+  const productOrdersMap: Record<number, number> = {};
+  const productFirstTimeOrdersMap: Record<number, number> = {};
+  const productCustomersMap: Record<number, Set<string>> = {};
+
   orders.forEach((order) => {
+    const customerId = order.customer?.id?.toString() || "guest_" + order.id;
+    const isFirstOrder = customerFirstOrder[customerId] === order.id;
+    const productsInOrder = new Set<number>();
+
     order.line_items?.forEach((item) => {
       productSalesMap[item.product_id] =
         (productSalesMap[item.product_id] || 0) + item.quantity;
+      productsInOrder.add(item.product_id);
+    });
+
+    productsInOrder.forEach(pid => {
+      productOrdersMap[pid] = (productOrdersMap[pid] || 0) + 1;
+      if (isFirstOrder) {
+        productFirstTimeOrdersMap[pid] = (productFirstTimeOrdersMap[pid] || 0) + 1;
+      }
+      if (!productCustomersMap[pid]) productCustomersMap[pid] = new Set();
+      productCustomersMap[pid].add(customerId);
     });
   });
 
@@ -246,6 +271,22 @@ export async function fetchShopifyStoreData(
     const hasPartialStock = 
       inStockVariants.length > 0 && 
       inStockVariants.length < totalVariants;
+
+    const totalProductOrders = productOrdersMap[product.id] || 0;
+    const firstTimeBuyerOrders = productFirstTimeOrdersMap[product.id] || 0;
+    const first_time_buyer_ratio = totalProductOrders > 0 ? firstTimeBuyerOrders / totalProductOrders : 0;
+    
+    // velocity in units per day (over 90 days)
+    const order_velocity = unitsSold / 90;
+
+    let repeatCustomersForProduct = 0;
+    const customersForProduct = productCustomersMap[product.id] || new Set();
+    customersForProduct.forEach(cid => {
+      if (customerOrderCount[cid] > 1) {
+        repeatCustomersForProduct++;
+      }
+    });
+    const repeat_purchase_rate = customersForProduct.size > 0 ? repeatCustomersForProduct / customersForProduct.size : 0;
 
     return {
       id: product.id.toString(),
@@ -271,7 +312,45 @@ export async function fetchShopifyStoreData(
       in_stock_variant_count: inStockVariants.length,
       total_variant_count: totalVariants,
       in_stock_variant_names: inStockVariants.map((v: any) => v.title),
+      first_time_buyer_ratio,
+      order_velocity,
+      repeat_purchase_rate,
     };
+  });
+
+  // Dynamic Gateway Product Classification
+  // Calculate store baseline FTB ratio (average across all products that have sales)
+  const productsWithSales = products.filter(p => p.units_sold > 0);
+  const baseline_ftb = productsWithSales.length > 0 
+    ? productsWithSales.reduce((acc, p) => acc + (p.first_time_buyer_ratio || 0), 0) / productsWithSales.length 
+    : 0;
+
+  // Calculate store median velocity
+  const velocities = productsWithSales.map(p => p.order_velocity || 0).sort((a,b) => a - b);
+  const median_velocity = velocities.length > 0 ? velocities[Math.floor(velocities.length / 2)] : 0;
+  const store_aov = aov;
+
+  products.forEach(p => {
+    if (p.units_sold === 0) {
+      p.gateway_classification = "Hybrid";
+      return;
+    }
+
+    const ftb = p.first_time_buyer_ratio || 0;
+    const price = p.price || 0;
+    const velocity = p.order_velocity || 0;
+    const repeat = p.repeat_purchase_rate || 0;
+
+    const isGateway = ftb > baseline_ftb && price < store_aov && velocity > median_velocity;
+    const isConsideration = ftb <= baseline_ftb && price >= store_aov && repeat > 0.1; // "strong repeat purchase signals", >10% repeat is decent
+
+    if (isGateway && !isConsideration) {
+      p.gateway_classification = "Gateway";
+    } else if (isConsideration && !isGateway) {
+      p.gateway_classification = "Consideration";
+    } else {
+      p.gateway_classification = "Hybrid";
+    }
   });
 
   // Sort products by revenue descending so the AI and dashboard prioritize top sellers

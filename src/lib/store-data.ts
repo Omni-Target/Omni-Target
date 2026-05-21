@@ -22,6 +22,10 @@ export interface StoreProduct {
   in_stock_variant_count: number;
   total_variant_count: number;
   in_stock_variant_names?: string[];
+  first_time_buyer_ratio?: number;
+  order_velocity?: number;
+  repeat_purchase_rate?: number;
+  gateway_classification?: "Gateway" | "Consideration" | "Hybrid";
 }
 
 export interface StoreData {

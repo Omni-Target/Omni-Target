@@ -72,11 +72,22 @@ export interface BriefPDFParams {
   };
   warnings: string[];
   generatedAt: string;
+  gatewayInsight?: {
+    currentProductClassification: string;
+    bestsellerName: string;
+    topGatewayName: string;
+    isBestsellerGateway: boolean;
+    currentProductVelocity: number;
+    currentProductRepeatRate: number;
+    storeAov: number;
+    storeBaseFtb: number;
+    topGatewayImage?: string;
+  };
 }
 
 // ─── Generator ───────────────────────────────────────────────────────────────
 
-export function generateBriefPDF(params: BriefPDFParams): void {
+export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
   const doc = new jsPDF();
   let y = 0;
 
@@ -131,11 +142,22 @@ export function generateBriefPDF(params: BriefPDFParams): void {
     color?: RGB;
     indent?: number;
     gapAfter?: number;
+    image?: string;
+    imageFormat?: string;
+    imageW?: number;
+    imageH?: number;
   }
 
   const itemH = (item: TItem): number => {
-    const lines = measure(item.text, item.size, innerW - (item.indent || 0));
-    return lh(item.size, lines.length) + (item.gapAfter ?? 3);
+    let h = 0;
+    if (item.text) {
+      const lines = measure(item.text, item.size, innerW - (item.indent || 0));
+      h += lh(item.size, lines.length);
+    }
+    if (item.image) {
+      h += (item.imageH || 0);
+    }
+    return h + (item.gapAfter ?? 3);
   };
 
   const cardH = (label: string, items: TItem[]): number => {
@@ -169,10 +191,19 @@ export function generateBriefPDF(params: BriefPDFParams): void {
     // Content
     for (const item of items) {
       const indent = item.indent || 0;
-      font(item.size, item.style || "normal", item.color || TEXT_1);
-      const lines = measure(item.text, item.size, innerW - indent);
-      doc.text(lines, MX + CP + indent, y);
-      y += lh(item.size, lines.length) + (item.gapAfter ?? 3);
+      if (item.text) {
+        font(item.size, item.style || "normal", item.color || TEXT_1);
+        const lines = measure(item.text, item.size, innerW - indent);
+        doc.text(lines, MX + CP + indent, y);
+        y += lh(item.size, lines.length);
+      }
+      if (item.image) {
+        // Add a small gap before image if text was present
+        if (item.text) y += 2;
+        doc.addImage(item.image, item.imageFormat || "JPEG", MX + CP + indent, y, item.imageW || 30, item.imageH || 30);
+        y += (item.imageH || 30);
+      }
+      y += (item.gapAfter ?? 3);
     }
 
     y = cardTop + h + 7;
@@ -225,6 +256,74 @@ export function generateBriefPDF(params: BriefPDFParams): void {
   font(10, "normal", ACCENT_T);
   doc.text(params.campaignGoal, MX + 8, y + 4);
   y += 18;
+
+  // ── Gateway Insight Section ───────────────────────────────────────────────
+
+  if (params.gatewayInsight) {
+    const gi = params.gatewayInsight;
+    const isGateway = gi.currentProductClassification === "Gateway";
+    const isConsideration = gi.currentProductClassification === "Consideration";
+    const classificationLabel = isGateway ? "GATEWAY PRODUCT" : isConsideration ? "CONSIDERATION PRODUCT" : "HYBRID PRODUCT";
+    const formatPrescription = isGateway ? "UGC Video (Product in use)" : isConsideration ? "Carousel or Founder-led Video" : "A/B Test UGC vs Carousel";
+    
+    let insightText = "";
+    if (gi.isBestsellerGateway) {
+      insightText = `Your organic bestseller (${gi.bestsellerName || "this product"}) is also your strongest cold-traffic converter.`;
+    } else {
+      insightText = `PRIMARY INSIGHT: Your organic bestseller is ${gi.bestsellerName || "different"}, but ${gi.topGatewayName || "this product"} is your true Gateway Product for converting cold traffic.`;
+    }
+
+    const gatewayItems: TItem[] = [
+      { text: "CLASSIFICATION", size: 7.5, style: "bold", color: TEXT_3, gapAfter: 1 },
+      { text: classificationLabel, size: 11, style: "bold", color: isGateway ? [134, 239, 172] : ACCENT_T, gapAfter: 6 },
+      { text: "STRATEGY INSIGHT", size: 7.5, style: "bold", color: TEXT_3, gapAfter: 1 },
+      { text: insightText, size: 10, gapAfter: 6 },
+      { text: "CREATIVE DIRECTION", size: 7.5, style: "bold", color: TEXT_3, gapAfter: 1 },
+      { text: `Recommended Format: ${formatPrescription}`, size: 10, style: "bold", gapAfter: 2 },
+    ];
+
+    let base64Image = "";
+    let imageFormat = "JPEG";
+
+    if (gi.topGatewayImage) {
+      try {
+        const res = await fetch(gi.topGatewayImage);
+        if (res.ok) {
+          const buffer = await res.arrayBuffer();
+          // Find format from content type
+          const ct = res.headers.get("content-type");
+          if (ct?.includes("png")) imageFormat = "PNG";
+          // Convert arrayBuffer to base64
+          if (typeof Buffer !== "undefined") {
+            base64Image = Buffer.from(buffer).toString("base64");
+          } else {
+            // Browser fallback
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) {
+              binary += String.fromCharCode(bytes[i]);
+            }
+            base64Image = btoa(binary);
+          }
+        }
+      } catch (e) {
+        // Ignore fetch errors
+      }
+    }
+
+    if (base64Image) {
+      gatewayItems.push({
+        text: "VISUAL ANCHOR (GATEWAY HERO)", 
+        size: 7.5, style: "bold", color: TEXT_3, gapAfter: 4,
+        image: base64Image,
+        imageFormat,
+        imageW: 30,
+        imageH: 30
+      });
+    }
+
+    renderCard("Store Intelligence", gatewayItems);
+  }
 
   // ── Ad Copy Card ────────────────────────────────────────────────────────
 

@@ -26,6 +26,8 @@ interface GenerateRequest {
   duration?: string;
   locations?: string[];
   productVariants?: string | null;
+  gatewayInsight?: any;
+  storeDataForApi?: any;
 }
 
 /**
@@ -106,6 +108,8 @@ export async function POST(request: Request) {
       productPrice,
       platform,
       productVariants,
+      gatewayInsight,
+      storeDataForApi,
     } = body;
 
     // Validate required fields
@@ -288,6 +292,16 @@ ${productVariants ?
   `CRITICAL: The available sizes/variants are limited to: ${productVariants}. 
   You MUST weave this limitation into the copy naturally. Do not sound apologetic. 
   Instead, use it to create scarcity or exclusivity (e.g. "Only available in ${productVariants}").`
+  : ""}
+
+${gatewayInsight?.currentProductClassification === "Gateway" ?
+  `CRITICAL: This product is classified as a GATEWAY PRODUCT. It converts cold traffic extremely well.
+  Your hook MUST be derived from its high velocity or repeat rate. 
+  ${gatewayInsight.currentProductVelocity > (gatewayInsight.storeMedianVelocity || 0) ? `Consider a hook like "Sells out every ${Math.max(1, Math.round(90 / (gatewayInsight.currentProductVelocity || 1)))} days".` : ""}
+  ${gatewayInsight.currentProductRepeatRate > 0.1 ? `Or a hook like "The ${productName} our customers come back for".` : ""}`
+  : gatewayInsight?.currentProductClassification === "Consideration" ?
+  `CRITICAL: This product is classified as a CONSIDERATION PRODUCT. It converts warm or returning traffic.
+  Your hook MUST be derived from its premium attributes and the fact that it is a high-consideration purchase. Address the quality and investment value.`
   : ""}`;
 
     const messageContent: any[] = [];
