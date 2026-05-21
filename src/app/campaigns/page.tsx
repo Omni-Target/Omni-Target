@@ -275,6 +275,8 @@ function CampaignsContent() {
 
       currentGatewayInsight = {
         currentProductClassification: currentProduct?.gateway_classification || "Unknown",
+        currentProductName: currentProduct?.name,
+        currentProductImage: currentProduct?.image_url,
         bestsellerName: bestseller?.name,
         topGatewayName: topGateway?.name,
         isBestsellerGateway: bestseller?.id === topGateway?.id,
@@ -282,7 +284,6 @@ function CampaignsContent() {
         currentProductRepeatRate: currentProduct?.repeat_purchase_rate,
         storeAov: storeInsights.orders?.average_order_value,
         storeBaseFtb: products.reduce((acc: number, p: any) => acc + (p.first_time_buyer_ratio || 0), 0) / products.length,
-        topGatewayImage: topGateway?.image_url,
       };
 
       setGatewayInsight(currentGatewayInsight);

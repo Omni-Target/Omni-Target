@@ -74,6 +74,8 @@ export interface BriefPDFParams {
   generatedAt: string;
   gatewayInsight?: {
     currentProductClassification: string;
+    currentProductName: string;
+    currentProductImage: string;
     bestsellerName: string;
     topGatewayName: string;
     isBestsellerGateway: boolean;
@@ -81,7 +83,6 @@ export interface BriefPDFParams {
     currentProductRepeatRate: number;
     storeAov: number;
     storeBaseFtb: number;
-    topGatewayImage?: string;
   };
 }
 
@@ -265,12 +266,19 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
     const isConsideration = gi.currentProductClassification === "Consideration";
     const classificationLabel = isGateway ? "GATEWAY PRODUCT" : isConsideration ? "CONSIDERATION PRODUCT" : "HYBRID PRODUCT";
     const formatPrescription = isGateway ? "UGC Video (Product in use)" : isConsideration ? "Carousel or Founder-led Video" : "A/B Test UGC vs Carousel";
-    
     let insightText = "";
-    if (gi.isBestsellerGateway) {
-      insightText = `Your organic bestseller (${gi.bestsellerName || "this product"}) is also your strongest cold-traffic converter.`;
+    const isCurrentTopGateway = gi.currentProductName === gi.topGatewayName;
+    const isCurrentBestseller = gi.currentProductName === gi.bestsellerName;
+
+    if (isCurrentTopGateway && isCurrentBestseller) {
+      insightText = `This product is both your organic bestseller and your strongest cold-traffic converter.`;
+    } else if (isCurrentTopGateway) {
+      insightText = `While your organic bestseller is ${gi.bestsellerName || "another product"}, this product is your true Gateway Product and strongest cold-traffic converter.`;
+    } else if (isCurrentBestseller) {
+      insightText = `This product is your organic bestseller, but your top Gateway Product for cold traffic is ${gi.topGatewayName || "another product"}.`;
     } else {
-      insightText = `PRIMARY INSIGHT: Your organic bestseller is ${gi.bestsellerName || "different"}, but ${gi.topGatewayName || "this product"} is your true Gateway Product for converting cold traffic.`;
+      const cls = isGateway ? "Gateway" : isConsideration ? "Consideration" : "Hybrid";
+      insightText = `This product is a ${cls} Product. Note that your organic bestseller is ${gi.bestsellerName || "another product"}, and your top Gateway Product is ${gi.topGatewayName || "another product"}.`;
     }
 
     const gatewayItems: TItem[] = [
@@ -285,9 +293,9 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
     let base64Image = "";
     let imageFormat = "JPEG";
 
-    if (gi.topGatewayImage) {
+    if (gi.currentProductImage) {
       try {
-        const res = await fetch(gi.topGatewayImage);
+        const res = await fetch(gi.currentProductImage);
         if (res.ok) {
           const buffer = await res.arrayBuffer();
           // Find format from content type
@@ -313,7 +321,7 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
 
     if (base64Image) {
       gatewayItems.push({
-        text: "VISUAL ANCHOR (GATEWAY HERO)", 
+        text: "VISUAL ANCHOR", 
         size: 7.5, style: "bold", color: TEXT_3, gapAfter: 4,
         image: base64Image,
         imageFormat,
