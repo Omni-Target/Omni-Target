@@ -1,53 +1,21 @@
-# Omni Target — Shopify App Configuration
-# Generated: 2026-05-25
-#
-# This file is the canonical source of truth for Shopify Partner Dashboard
-# configuration. Keep it in sync with any changes made via the UI.
-#
-# Docs: https://shopify.dev/docs/apps/build/cli-for-apps/app-configuration
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-name = "Omni Target"
 client_id = "0c6afe04bdb857fd30f081fd555feb6b"
+name = "Omni Target"
 application_url = "https://app.omnitarget.co"
-embedded = false
-
-[access_scopes]
-# Minimal read-only scopes needed for pre-spend intelligence briefs.
-# Scopes are intentionally narrow — no write access is requested.
-scopes = "read_products,read_orders,read_analytics,read_customers"
-
-[auth]
-redirect_urls = [
-  "https://app.omnitarget.co/api/auth/shopify/callback",
-]
+embedded = true
 
 [webhooks]
-api_version = "2026-01"
+api_version = "2026-04"
 
-  # ── Mandatory Privacy / GDPR Webhooks ─────────────────────────────────────
-  # Shopify requires all apps to register these three endpoints and respond with
-  # 200 OK. Failure to comply blocks app approval in the Partner Dashboard.
-  # Verified via HMAC-SHA256 using SHOPIFY_WEBHOOK_SECRET.
-  #
-  # Endpoint: /api/webhooks/privacy
-  # Auth:     Public (bypasses Clerk — see src/proxy.ts)
-  # Handler:  src/app/api/webhooks/privacy/route.ts
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_analytics,read_customers,read_inventory,read_orders,read_product_listings,read_products,read_reports"
+optional_scopes = [ ]
+use_legacy_install_flow = false
 
-  [[webhooks.subscriptions]]
-  topics = ["customers/data_request"]
-  uri    = "https://app.omnitarget.co/api/webhooks/privacy"
-
-  [[webhooks.subscriptions]]
-  topics = ["customers/redact"]
-  uri    = "https://app.omnitarget.co/api/webhooks/privacy"
-
-  [[webhooks.subscriptions]]
-  topics = ["shop/redact"]
-  uri    = "https://app.omnitarget.co/api/webhooks/privacy"
-
-[app_proxy]
-# No app proxy configured — Omni Target is a standalone SaaS, not an
-# embedded Shopify theme extension.
+[auth]
+redirect_urls = [ "https://app.omnitarget.co/api/auth/shopify/callback" ]
 
 [pos]
 embedded = false
