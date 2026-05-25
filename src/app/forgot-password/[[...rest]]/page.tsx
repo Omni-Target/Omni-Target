@@ -15,7 +15,7 @@ export default function ForgotPasswordPage() {
         </div>
         <div className="flex flex-col items-center">
           <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-            omni-target
+            Omni Target
           </h1>
           <p className="text-white/50 text-sm font-medium mt-1">Reset your password</p>
         </div>

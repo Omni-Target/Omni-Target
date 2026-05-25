@@ -181,7 +181,7 @@ function DashboardContent() {
             <div className="w-8 h-8 flex items-center justify-center">
               <Logo className="w-8 h-8 text-[#9333ea]" />
             </div>
-            <span className="text-sm font-semibold tracking-tight text-white/90">omni-target</span>
+            <span className="text-sm font-semibold tracking-tight text-white/90">Omni Target</span>
           </div>
           <div className="hidden sm:flex items-center justify-center gap-6 absolute left-1/2 -translate-x-1/2">
             <Link href="/dashboard" className="text-sm font-medium text-white/90 transition-colors">Dashboard</Link>

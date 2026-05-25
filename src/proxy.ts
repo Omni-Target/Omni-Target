@@ -14,6 +14,12 @@ const isPublicRoute = createRouteMatcher([
   '/signup(.*)',
   '/forgot-password(.*)',
   '/onboarding/connect-meta', // legacy route — serves a redirect page
+  // Shopify mandatory privacy / GDPR webhooks must be publicly accessible.
+  // Shopify's servers POST to these endpoints with no Clerk session; any auth
+  // redirect would cause a non-200 response and trigger Partner Dashboard
+  // compliance failures during the 'Run' validation check.
+  '/api/webhooks/privacy',
+  '/api/webhooks/gdpr',
 ])
 
 const isOnboardingRoute = createRouteMatcher([

@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Omni-target | Launch Profitable Meta Ads",
+  title: "Omni Target | Launch Profitable Meta Ads",
   description:
-    "Omni-target helps Shopify merchants launch highly profitable Meta Ads by auditing accounts and installing the Meta Pixel.",
+    "Omni Target helps Shopify merchants launch highly profitable Meta Ads by auditing accounts and installing the Meta Pixel.",
 };
 
 export default function RootLayout({

@@ -13,7 +13,7 @@ export function LandingHeader() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Logo className="w-8 h-8 text-[#9333ea]" />
-          <span className="font-bold text-xl tracking-tight">OmniTarget</span>
+          <span className="font-bold text-xl tracking-tight">Omni Target</span>
         </div>
 
         <nav className="hidden md:flex items-center gap-8">

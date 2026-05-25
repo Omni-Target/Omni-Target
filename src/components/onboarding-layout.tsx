@@ -18,7 +18,7 @@ export default function OnboardingLayout({
           <Logo className="w-9 h-9 text-[#9333ea]" />
         </div>
         <span className="text-lg font-semibold tracking-tight text-white/90">
-          omni-target
+          Omni Target
         </span>
       </div>
 

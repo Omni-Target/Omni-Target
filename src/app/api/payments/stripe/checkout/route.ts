@@ -53,7 +53,7 @@ export async function POST(
         price_data: {
           currency: "usd",
           product_data: {
-            name: `Omni-target ${pack.name} Pack`,
+            name: `Omni Target ${pack.name} Pack`,
             description: pack.description,
           },
           unit_amount: pack.price_usd * 100,

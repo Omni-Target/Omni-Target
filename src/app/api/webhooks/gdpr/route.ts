@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "crypto";
+import { verifyShopifyHmac } from "@/lib/verify-shopify-hmac";
 
 const GDPR_TOPICS = [
   "customers/data_request",
@@ -12,31 +12,14 @@ function isValidTopic(topic: string): topic is GdprTopic {
   return (GDPR_TOPICS as readonly string[]).includes(topic);
 }
 
-async function verifyShopifyHmac(
-  rawBody: string,
-  hmacHeader: string,
-  secret: string
-): Promise<boolean> {
-  const digest = createHmac("sha256", secret)
-    .update(rawBody, "utf8")
-    .digest("base64");
-
-  try {
-    return timingSafeEqual(
-      Buffer.from(digest),
-      Buffer.from(hmacHeader)
-    );
-  } catch {
-    // Buffers differ in length — invalid
-    return false;
-  }
-}
-
 export async function POST(request: Request) {
-  const secret = process.env.SHOPIFY_CLIENT_SECRET;
+  // Shopify signs webhook payloads with SHOPIFY_WEBHOOK_SECRET
+  // (same value as CLIENT_SECRET in this app, but use the dedicated
+  // webhook secret var for clarity and forward-compatibility).
+  const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
 
   if (!secret) {
-    console.error("[GDPR] SHOPIFY_CLIENT_SECRET is not configured");
+    console.error("[GDPR] SHOPIFY_WEBHOOK_SECRET is not configured");
     return Response.json(
       { error: "Server misconfiguration" },
       { status: 500 }
