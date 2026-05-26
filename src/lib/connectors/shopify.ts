@@ -254,16 +254,17 @@ export async function fetchShopifyStoreData(
   });
 
   const products: StoreProduct[] = rawProducts.map((product) => {
-    const firstVariant = product.variants[0];
+    const variants = product.variants || [];
+    const images = product.images || [];
+    const firstVariant = variants[0];
     const price = firstVariant ? parseFloat(firstVariant.price) : 0;
     const unitsSold = productSalesMap[product.id] || 0;
-    const allOutOfStock = product.variants.every(
+    const allOutOfStock = variants.length === 0 || variants.every(
       (v) => v.inventory_quantity <= 0
     );
-    const anyInStock = product.variants.some(
+    const anyInStock = variants.some(
       (v) => v.inventory_quantity > 0
     );
-    const variants = product.variants || [];
     const inStockVariants = variants.filter(
       (v: any) => v.inventory_quantity > 0
     );
@@ -296,7 +297,7 @@ export async function fetchShopifyStoreData(
       in_stock: anyInStock,
       price,
       collection: product.product_type || "",
-      image_url: product.images[0]?.src || "",
+      image_url: images[0]?.src || "",
       should_advertise: !allOutOfStock,
       reason: allOutOfStock ? "Out of stock" : undefined,
       description: product.body_html
