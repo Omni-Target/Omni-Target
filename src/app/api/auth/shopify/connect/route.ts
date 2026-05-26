@@ -46,11 +46,13 @@ export async function GET(request: Request) {
 
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "")
     .replace(/\/$/, "");
-  // Remove trailing slash if present
 
   const redirectUri =
     `${appUrl}/api/auth/shopify/callback`;
 
+  // Standard offline token OAuth flow — no grant_options needed.
+  // The expiring=1 parameter is passed during the token exchange
+  // in the callback route, not here.
   const authUrl =
     `https://${shop}/admin/oauth/authorize?` +
     `client_id=${process.env.SHOPIFY_CLIENT_ID}` +

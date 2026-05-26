@@ -44,7 +44,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Exchange code for permanent access token
+    // Exchange code for an EXPIRING offline access token.
+    // The key parameter is "expiring": 1 — this tells Shopify
+    // to return an expiring token + refresh token instead of the
+    // now-deprecated non-expiring token.
     const tokenRes = await fetch(
       `https://${shop}/admin/oauth/access_token`,
       {
@@ -54,21 +57,31 @@ export async function GET(request: Request) {
         },
         body: JSON.stringify({
           client_id: process.env.SHOPIFY_CLIENT_ID,
-          client_secret: 
-            process.env.SHOPIFY_CLIENT_SECRET,
+          client_secret: process.env.SHOPIFY_CLIENT_SECRET,
           code,
+          expiring: 1,
         }),
       }
     );
 
     const tokenData = await tokenRes.json();
     const accessToken = tokenData.access_token;
+    const refreshToken = tokenData.refresh_token || null;
+    const expiresIn = tokenData.expires_in || null; // seconds
 
     if (!accessToken) {
+      console.error("Token exchange failed:", tokenData);
       throw new Error("No access token returned");
     }
 
     console.log("Shopify token exchange success. Shop:", shop);
+    console.log("Token type:", refreshToken ? "expiring" : "non-expiring");
+    if (expiresIn) console.log("Expires in:", expiresIn, "seconds");
+
+    // Calculate token expiration timestamp
+    const tokenExpiresAt = expiresIn
+      ? new Date(Date.now() + expiresIn * 1000).toISOString()
+      : null;
 
     // Fetch shop details to get the primary custom domain
     const shopDetailsRes = await fetch(
@@ -87,12 +100,21 @@ export async function GET(request: Request) {
     console.log("Shopify custom domain:", customDomain);
     console.log("Shopify myshopify URL:", myshopifyUrl);
 
-    // Shopify data payload — store both domains
-    const shopifyData = {
+    // Shopify data payload — store token + refresh token + expiry
+    const shopifyData: Record<string, any> = {
       shopify_store_url: myshopifyUrl,
       shopify_custom_domain: customDomain,
       shopify_access_token: accessToken,
     };
+
+    // Only set refresh columns if the DB supports them
+    // (columns will be added via Supabase migration)
+    if (refreshToken) {
+      shopifyData.shopify_refresh_token = refreshToken;
+    }
+    if (tokenExpiresAt) {
+      shopifyData.shopify_token_expires_at = tokenExpiresAt;
+    }
 
     const { data: existingByStore } = await 
       supabaseAdmin

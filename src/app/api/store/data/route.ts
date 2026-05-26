@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { fetchShopifyStoreData } from "@/lib/connectors/shopify";
+import { getValidShopifyToken } from "@/lib/shopify-token";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -16,70 +17,39 @@ export async function GET() {
   }
 
   console.log("Store data request from userId:", userId);
-  console.log("Fetching store data for userId:", userId);
 
-  // Verify we can write to the table
-  const { data: testRow } = await supabaseAdmin
+  // Get credits info regardless of token status
+  const { data: creditsRow } = await supabaseAdmin
     .from("user_integrations")
-    .select("id, store_snapshot_at")
-    .eq("clerk_user_id", userId!)
-    .single();
-    
-  console.log("Existing row:", testRow);
-
-  const { data: integration } = await supabaseAdmin
-    .from("user_integrations")
-    .select(
-      "shopify_store_url, shopify_access_token, shopify_custom_domain, store_snapshot, store_snapshot_at, credits_balance, credits_unlimited_until"
-    )
+    .select("credits_balance, credits_unlimited_until")
     .eq("clerk_user_id", userId)
     .single();
 
-  if (!integration?.shopify_access_token) {
+  // Get a valid (auto-refreshed) Shopify token
+  const tokenResult = await getValidShopifyToken(userId);
+
+  if (!tokenResult) {
     return Response.json({
       connected: false,
       message: "Shopify store not connected",
-      credits_balance: integration?.credits_balance || 0,
-      credits_unlimited_until: integration?.credits_unlimited_until || null,
+      credits_balance: creditsRow?.credits_balance || 0,
+      credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
     });
   }
-
-  // TODO: Re-enable cache after confirming snapshot saves correctly
-  /*
-  const cacheAge = integration?.store_snapshot_at
-    ? Date.now() - new Date(integration.store_snapshot_at).getTime()
-    : Infinity;
-
-  const SIX_HOURS = 6 * 60 * 60 * 1000;
-
-  if (integration?.store_snapshot && cacheAge < SIX_HOURS) {
-    console.log("Returning cached store data");
-    return Response.json({
-      connected: true,
-      data: integration.store_snapshot,
-      cached: true
-    });
-  }
-  */
-
 
   try {
     const storeData = await fetchShopifyStoreData(
-      integration.shopify_store_url,
-      integration.shopify_access_token
+      tokenResult.shopUrl,
+      tokenResult.accessToken
     );
 
-    console.log("Attempting to cache store data for userId:", userId);
-    console.log("Store data to cache:", 
-      JSON.stringify({
-        store: storeData.store,
-        orderCount: storeData.orders.orders_last_30_days,
-        productCount: storeData.products.length
-      })
-    );
+    console.log("Store data fetched:", {
+      store: storeData.store,
+      orderCount: storeData.orders.orders_last_30_days,
+      productCount: storeData.products.length
+    });
 
-    // Save to Supabase without awaiting
-    // This runs after the response is sent
+    // Save snapshot to Supabase
     supabaseAdmin
       .from("user_integrations")
       .update({ 
@@ -95,13 +65,11 @@ export async function GET() {
         }
       });
 
-    // Return immediately without waiting
-    // for the save
     return Response.json({
       connected: true,
       data: storeData,
-      credits_balance: integration.credits_balance || 0,
-      credits_unlimited_until: integration.credits_unlimited_until || null,
+      credits_balance: creditsRow?.credits_balance || 0,
+      credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
     });
   } catch (error) {
     console.error("Store data error:", error);

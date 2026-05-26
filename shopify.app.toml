@@ -16,7 +16,7 @@ api_version = "2026-04"
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_analytics,read_customers,read_inventory,read_orders,read_product_listings,read_products,read_reports"
 optional_scopes = [ ]
-use_legacy_install_flow = false
+use_legacy_install_flow = true
 
 [auth]
 redirect_urls = [ "https://app.omnitarget.co/api/auth/shopify/callback" ]
