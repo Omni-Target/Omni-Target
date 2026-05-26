@@ -25,7 +25,7 @@ export interface StoreProduct {
   first_time_buyer_ratio?: number;
   order_velocity?: number;
   repeat_purchase_rate?: number;
-  gateway_classification?: "Gateway" | "Consideration" | "Hybrid";
+  gateway_classification?: "Gateway" | "Consideration" | "Hybrid" | "Insufficient Data";
 }
 
 export interface StoreData {

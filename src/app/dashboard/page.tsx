@@ -358,7 +358,7 @@ function DashboardContent() {
                   </div>
                   <div>
                     <p className="text-xs text-white/50 uppercase font-semibold mb-1">How much they spend:</p>
-                    <p className="text-sm text-white mb-0.5">Average order: {formatCurrency(Math.round(aov), storeData.store?.currency || "NGN")}</p>
+                    <p className="text-sm text-white mb-0.5">Average order: {formatCurrency(Math.round(aov), storeData?.store?.currency || "NGN")}</p>
                     <p className="text-xs text-white/50">
                       {aov > 100000 ? "Premium buyers — target higher income audiences" :
                        aov >= 30000 ? "Mid-market buyers — broad targeting works well" :
@@ -408,7 +408,7 @@ function DashboardContent() {
                 <p className="text-sm text-white/60">High-signal products mapped by behavioral velocity and acquisition potential.</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {(storeData.products || [])
+                {(storeData?.products || [])
                   .sort((a: any, b: any) => b.revenue - a.revenue)
                   .slice(0, 6)
                   .map((product: any, index: number) => {
@@ -426,7 +426,19 @@ function DashboardContent() {
                       if (product.order_velocity) {
                         signals.push(`${Math.round(product.order_velocity)} units/mo velocity`);
                       }
-                      subtext = signals.length > 0 ? signals.join(" · ") : "Consistent behavioral performance";
+                      
+                      const metricsText = signals.length > 0 ? ` (${signals.join(" · ")})` : "";
+                      if (product.gateway_classification === "Insufficient Data") {
+                        subtext = "Awaiting initial purchase volume to map cohort signals." + metricsText;
+                      } else if (product.gateway_classification === "Gateway") {
+                        subtext = "High acquisition signal: lowers customer acquisition cost by attracting new shoppers." + metricsText;
+                      } else if (product.gateway_classification === "Consideration") {
+                        subtext = "High consideration/loyalty builder: drives high repeat customer rates and customer value." + metricsText;
+                      } else if (product.gateway_classification === "Hybrid") {
+                        subtext = "Balanced shopper response: shows stable, mixed signals across new and repeat buyers." + metricsText;
+                      } else {
+                        subtext = "Consistent behavioral performance across core acquisition metrics." + metricsText;
+                      }
                     }
 
                     const isGateway = product.gateway_classification === "Gateway";
@@ -459,7 +471,7 @@ function DashboardContent() {
                           )}
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-semibold text-white truncate">{product.name}</p>
-                            <div className="flex items-center gap-2 mt-1">
+                            <div className="flex items-center flex-wrap gap-2 mt-1">
                               <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
                                 product.in_stock
                                   ? "bg-success-500/10 text-success-400"
@@ -475,9 +487,13 @@ function DashboardContent() {
                                     ? "bg-brand-500/10 text-brand-400 border-brand-500/20"
                                     : isConsideration
                                     ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                    : product.gateway_classification === "Insufficient Data"
+                                    ? "bg-white/5 text-white/40 border-white/10"
                                     : "bg-purple-500/10 text-purple-400 border-purple-500/20"
                                 }`}>
-                                  {product.gateway_classification}
+                                  {product.gateway_classification === "Insufficient Data"
+                                    ? "Insufficient data — more orders needed for classification"
+                                    : product.gateway_classification}
                                 </span>
                               )}
                             </div>
@@ -492,7 +508,7 @@ function DashboardContent() {
 
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-white/40">
-                            {product.units_sold} sold · {formatCurrency(Math.round(product.revenue), storeData.store?.currency || "USD")}
+                            {product.units_sold} sold · {formatCurrency(Math.round(product.revenue), storeData?.store?.currency || "USD")}
                           </span>
                           {product.in_stock && product.should_advertise ? (
                             <Link

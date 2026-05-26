@@ -332,8 +332,8 @@ export async function fetchShopifyStoreData(
   const store_aov = aov;
 
   products.forEach(p => {
-    if (p.units_sold === 0) {
-      p.gateway_classification = "Hybrid";
+    if (p.units_sold < 3) {
+      p.gateway_classification = "Insufficient Data";
       return;
     }
 
