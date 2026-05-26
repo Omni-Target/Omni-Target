@@ -401,11 +401,11 @@ function DashboardContent() {
               </div>
             )}
 
-            {/* SECTION 3: What to Advertise Now */}
+            {/* SECTION 3: Pre-Spend Intelligence */}
             <div className="mb-8 animate-fade-in-up-delay-2" id="advertise-now">
               <div className="mb-4">
-                <p className="text-xs text-white/40 uppercase tracking-widest font-semibold mb-1">What to Advertise Now</p>
-                <p className="text-sm text-white/60">Based on your sales data, these products are most likely to convert.</p>
+                <p className="text-xs text-white/40 uppercase tracking-widest font-semibold mb-1">Pre-Spend Intelligence</p>
+                <p className="text-sm text-white/60">High-signal products mapped by behavioral velocity and acquisition potential.</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {(storeData.products || [])
@@ -415,13 +415,22 @@ function DashboardContent() {
                     let subtext = "";
                     if (!product.in_stock) {
                       subtext = "Out of stock — restock before advertising";
-                    } else if (index === 0) {
-                      subtext = "Your #1 seller — proven demand";
-                    } else if (product.price > aov) {
-                      subtext = "Above your average order value";
-                    } else if (product.units_sold > 0) {
-                      subtext = "Sold recently — buyers are interested";
+                    } else {
+                      const signals = [];
+                      if (product.first_time_buyer_ratio) {
+                        signals.push(`${Math.round(product.first_time_buyer_ratio * 100)}% new buyers`);
+                      }
+                      if (product.repeat_purchase_rate) {
+                        signals.push(`${Math.round(product.repeat_purchase_rate * 100)}% repeat rate`);
+                      }
+                      if (product.order_velocity) {
+                        signals.push(`${Math.round(product.order_velocity)} units/mo velocity`);
+                      }
+                      subtext = signals.length > 0 ? signals.join(" · ") : "Consistent behavioral performance";
                     }
+
+                    const isGateway = product.gateway_classification === "Gateway";
+                    const isConsideration = product.gateway_classification === "Consideration";
 
                     return (
                       <div
@@ -459,6 +468,18 @@ function DashboardContent() {
                                 <span className={`w-1 h-1 rounded-full ${product.in_stock ? "bg-success-400" : "bg-error-400"}`} />
                                 {product.in_stock ? "In stock" : "Out of stock"}
                               </span>
+                              
+                              {product.gateway_classification && (
+                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${
+                                  isGateway
+                                    ? "bg-brand-500/10 text-brand-400 border-brand-500/20"
+                                    : isConsideration
+                                    ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                    : "bg-purple-500/10 text-purple-400 border-purple-500/20"
+                                }`}>
+                                  {product.gateway_classification}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
