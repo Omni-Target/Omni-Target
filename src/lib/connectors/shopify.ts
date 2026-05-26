@@ -120,7 +120,7 @@ export async function fetchShopifyStoreData(
   const productsData = await shopifyGet<{ products: ShopifyProduct[] }>(
     shopDomain,
     accessToken,
-    "products.json?limit=250&status=active&fields=id,title,body_html,variants,images,product_type,vendor,tags,collections"
+    "products.json?limit=250&status=active&fields=id,title,body_html,variants,images,product_type,vendor,tags"
   );
 
   const rawProducts = productsData?.products || [];
