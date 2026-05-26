@@ -40,7 +40,6 @@ export async function GET(request: Request) {
     "read_customers",
     "read_products",
     "read_product_listings",
-    "read_collections",
     "read_inventory"
   ].join(",");
 
