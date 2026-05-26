@@ -72,7 +72,7 @@ export async function GET(request: Request) {
 
     // Fetch shop details to get the primary custom domain
     const shopDetailsRes = await fetch(
-      `https://${shop}/admin/api/2024-01/shop.json`,
+      `https://${shop}/admin/api/2026-01/shop.json`,
       {
         headers: {
           "X-Shopify-Access-Token": accessToken

@@ -38,7 +38,7 @@ interface ShopifyProduct {
   images: { src: string }[];
 }
 
-const API_VERSION = "2024-01";
+const API_VERSION = "2026-01";
 
 async function fetchWithTimeout(
   url: string,

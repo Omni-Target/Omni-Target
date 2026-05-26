@@ -45,6 +45,7 @@ export default function LoginPage() {
               socialButtonsBlockButton: "border-white/10 text-white hover:bg-white/5 transition-all rounded-xl py-6 !text-white",
               socialButtonsBlockButtonText: "font-medium !text-white",
               formFieldInput: "border-white/10 text-white focus:border-[#7c3aed] focus:ring-[#7c3aed]/20 bg-white/5 transition-all rounded-xl h-11 !text-white !bg-[#16162d]",
+              otpCodeFieldInput: "!text-white !bg-[#16162d] border-white/10 focus:border-[#7c3aed] focus:ring-[#7c3aed]/20",
               formFieldLabel: "text-white/60 text-xs uppercase tracking-wider font-bold mb-1.5 !text-white/60",
               footerActionText: "text-white/50 !text-white/50",
               footerActionLink: "text-[#7c3aed] hover:text-[#8b5cf6] font-semibold transition-colors !text-[#7c3aed]",
