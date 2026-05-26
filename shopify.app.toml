@@ -3,7 +3,7 @@
 client_id = "0c6afe04bdb857fd30f081fd555feb6b"
 name = "Omni Target"
 application_url = "https://app.omnitarget.co"
-embedded = true
+embedded = false
 
 [webhooks]
 api_version = "2026-04"
