@@ -74,7 +74,8 @@ function ConnectShopifyContent() {
       setResolvedDomain(data.myshopifyDomain);
       setStoreVerified(true);
 
-      window.location.href = `/api/auth/shopify/connect?shop=${data.myshopifyDomain}`;
+      const fromParam = searchParams.get("from") ? `&from=${searchParams.get("from")}` : "";
+      window.location.href = `/api/auth/shopify/connect?shop=${data.myshopifyDomain}${fromParam}`;
     } catch (err) {
       setLocalError("An error occurred while verifying the store.");
       setIsResolving(false);

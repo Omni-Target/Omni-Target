@@ -8,8 +8,11 @@ export async function GET(request: Request) {
   
   const code = searchParams.get("code");
   const shop = searchParams.get("shop");
-  const state = searchParams.get("state");
+  const state = searchParams.get("state") || "";
   const hmac = searchParams.get("hmac");
+
+  const [_, from] = state.split("___");
+  const isFromDashboard = from === "dashboard";
 
   // Verify HMAC signature from Shopify
   const params = Object.fromEntries(
@@ -213,16 +216,17 @@ export async function GET(request: Request) {
         },
         body: JSON.stringify({ 
           shopifyStoreUrl: shop,
-          onboardingStep: "audit"
+          onboardingStep: isFromDashboard ? "complete" : "audit"
         }),
       }
     );
 
     // Redirect to next onboarding step
-    return Response.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}` +
-      `/onboarding/audit`
-    );
+    const redirectUrl = isFromDashboard
+      ? `${process.env.NEXT_PUBLIC_APP_URL}/onboarding/audit?from=dashboard`
+      : `${process.env.NEXT_PUBLIC_APP_URL}/onboarding/audit`;
+
+    return Response.redirect(redirectUrl);
 
   } catch (err) {
     console.error("Shopify OAuth error:", err);

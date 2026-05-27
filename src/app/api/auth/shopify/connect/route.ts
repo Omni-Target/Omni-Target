@@ -13,6 +13,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const shop = searchParams.get("shop");
+  const from = searchParams.get("from") || "";
 
   if (!shop) {
     return Response.json(
@@ -22,7 +23,8 @@ export async function GET(request: Request) {
   }
 
   // Generate nonce for security
-  const state = randomBytes(16).toString("hex");
+  const nonce = randomBytes(16).toString("hex");
+  const state = `${nonce}___${from}`;
 
   // Store state in cookie for verification
   const response = new Response(null, {

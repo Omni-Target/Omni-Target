@@ -70,7 +70,7 @@ export default async function SettingsPage({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <p className="text-sm text-white/50">Your store is not connected yet.</p>
                 <Link 
-                  href="/onboarding/connect-shopify"
+                  href="/onboarding/connect-shopify?from=dashboard"
                   className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-brand-600 hover:bg-brand-500 rounded-xl transition-colors shrink-0"
                 >
                   Connect Store

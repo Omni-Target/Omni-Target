@@ -54,7 +54,9 @@ export default clerkMiddleware(async (auth, request) => {
         }
       } else {
         // Step is complete. If they try to access onboarding, send to dashboard
-        if (isOnboardingRoute(request)) {
+        // EXCEPT if they are explicitly visiting /onboarding/connect-shopify or /onboarding/audit
+        const pathname = request.nextUrl.pathname;
+        if (isOnboardingRoute(request) && !pathname.startsWith('/onboarding/connect-shopify') && !pathname.startsWith('/onboarding/audit')) {
           return NextResponse.redirect(new URL('/dashboard', request.url));
         }
       }

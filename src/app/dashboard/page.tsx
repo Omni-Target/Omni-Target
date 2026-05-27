@@ -321,7 +321,7 @@ function DashboardContent() {
               We&apos;ll read your store data to generate personalised campaign briefs, audience insights, and product recommendations.
             </p>
             <Link
-              href="/onboarding/connect-shopify"
+              href="/onboarding/connect-shopify?from=dashboard"
               className="inline-flex px-6 py-3 rounded-xl bg-brand-500 text-white text-sm font-medium transition-colors hover:bg-brand-400 no-underline"
             >
               Connect Shopify Store →
