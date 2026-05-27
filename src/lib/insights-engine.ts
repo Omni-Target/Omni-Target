@@ -401,7 +401,7 @@ async function inferInterests(
 You are a Meta Ads specialist.
 Based on these products from a Shopify
 store, suggest 5 - 8 relevant Facebook 
-and Instagram interest categories.
+and Instagram interest categories, and write a professional reasoning sentence.
 
 Only suggest interests that actually
 exist in Meta Ads Manager.
@@ -417,7 +417,7 @@ Store AOV: ${
 
 Always include:
 - "Online shopping"
-  - "Fashion"
+- "Fashion"
 
 Add 3 - 6 more specific to these 
 products and this market.
@@ -431,8 +431,11 @@ For ${
         : "global fashion audience"
 }
 
-Return ONLY a JSON array of strings.
-No explanation.No markdown.
+Return ONLY valid JSON, no markdown:
+{
+  "interests": ["Online shopping", "Fashion", ...],
+  "reasoning": "One professional sentence explaining why these interests match your product range."
+}
 `;
 
     const message = await anthropicClient.messages.create({
@@ -448,10 +451,12 @@ No explanation.No markdown.
       .replace(/^```\s*/i, "")
       .replace(/```\s*$/i, "")
       .trim();
-    const interests = JSON.parse(cleanText) as string[];
-
-    const reasoning = `Interests selected based on product catalogue: ${ productSample.slice(0, 80) }${ productSample.length > 80 ? "..." : "" } `;
-    return { interests, interest_reasoning: reasoning };
+    const parsed = JSON.parse(cleanText) as { interests: string[]; reasoning: string };
+    
+    return {
+      interests: parsed.interests || ["Fashion", "Online shopping"],
+      interest_reasoning: parsed.reasoning || "Interests selected based on your store's product categories."
+    };
   } catch (interestError) {
     console.error("Interest generation failed:", interestError);
     return {
