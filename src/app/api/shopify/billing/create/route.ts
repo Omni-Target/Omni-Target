@@ -107,9 +107,9 @@ export async function POST(request: Request) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`Shopify billing API error response: ${response.status} ${response.statusText}`, errorText);
+      console.error(`Shopify billing API HTTP error: ${response.status} ${response.statusText}`, errorText);
       return Response.json(
-        { error: "Failed to create Shopify billing purchase" },
+        { error: `Shopify billing API HTTP ${response.status}: ${errorText}` },
         { status: 502 }
       );
     }
@@ -117,18 +117,22 @@ export async function POST(request: Request) {
     const result = await response.json();
 
     if (result.errors) {
-      console.error("Shopify GraphQL errors:", result.errors);
+      console.error("Shopify GraphQL Errors:", JSON.stringify(result.errors, null, 2));
+      const errorMessage = result.errors.map((e: any) => e.message).join(", ") || "Shopify GraphQL error";
       return Response.json(
-        { error: "Shopify GraphQL error", details: result.errors },
+        { error: `Shopify GraphQL Error: ${errorMessage}`, details: result.errors },
         { status: 500 }
       );
     }
 
     const purchaseCreate = result.data?.appPurchaseOneTimeCreate;
     if (purchaseCreate?.userErrors && purchaseCreate.userErrors.length > 0) {
-      console.error("Shopify mutation user errors:", purchaseCreate.userErrors);
+      console.error("Shopify Mutation User Errors:", JSON.stringify(purchaseCreate.userErrors, null, 2));
+      const userErrorMessage = purchaseCreate.userErrors
+        .map((e: any) => `${e.field ? e.field.join('.') + ': ' : ''}${e.message}`)
+        .join(", ") || "Shopify billing mutation failed";
       return Response.json(
-        { error: "Shopify billing mutation failed", details: purchaseCreate.userErrors },
+        { error: `Shopify Mutation Error: ${userErrorMessage}`, details: purchaseCreate.userErrors },
         { status: 400 }
       );
     }
