@@ -66,13 +66,14 @@ export async function POST(request: Request) {
     const query = `
       mutation AppPurchaseOneTimeCreate($name: String!, $price: MoneyInput!, $returnUrl: URL!, $test: Boolean) {
         appPurchaseOneTimeCreate(name: $name, price: $price, returnUrl: $returnUrl, test: $test) {
+          confirmationUrl
+          appPurchaseOneTime {
+            id
+            status
+          }
           userErrors {
             field
             message
-          }
-          appPurchaseOneTime {
-            id
-            confirmationUrl
           }
         }
       }
@@ -137,7 +138,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const confirmationUrl = purchaseCreate?.appPurchaseOneTime?.confirmationUrl;
+    const confirmationUrl = purchaseCreate?.confirmationUrl;
     if (!confirmationUrl) {
       console.error("Shopify returned no confirmation URL:", result);
       return Response.json(
