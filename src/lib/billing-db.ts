@@ -28,6 +28,19 @@ export async function detectColumns(): Promise<DBColumns> {
       return cachedColumns;
     }
 
+    // PostgreSQL error code '42703' means undefined_column.
+    // If the error code is not '42703', it might be a connection/auth/startup error,
+    // so we should not poison the cache with false values and assume true.
+    if (error.code !== "42703") {
+      console.warn("Transient/auth error during column detection, not caching:", error);
+      return {
+        hasShopDomain: true,
+        hasAccessToken: true,
+        hasCredits: true,
+        hasFreeCreditUsed: true,
+      };
+    }
+
     // Detect individually
     const [shopRes, tokenRes, creditsRes, freeRes] = await Promise.all([
       supabaseAdmin.from("user_integrations").select("shop_domain").limit(1),
@@ -36,20 +49,25 @@ export async function detectColumns(): Promise<DBColumns> {
       supabaseAdmin.from("user_integrations").select("free_credit_used").limit(1),
     ]);
 
+    const hasShopDomain = !shopRes.error || shopRes.error.code !== "42703";
+    const hasAccessToken = !tokenRes.error || tokenRes.error.code !== "42703";
+    const hasCredits = !creditsRes.error || creditsRes.error.code !== "42703";
+    const hasFreeCreditUsed = !freeRes.error || freeRes.error.code !== "42703";
+
     cachedColumns = {
-      hasShopDomain: !shopRes.error,
-      hasAccessToken: !tokenRes.error,
-      hasCredits: !creditsRes.error,
-      hasFreeCreditUsed: !freeRes.error,
+      hasShopDomain,
+      hasAccessToken,
+      hasCredits,
+      hasFreeCreditUsed,
     };
     return cachedColumns;
   } catch (err) {
     console.error("Error detecting database columns:", err);
     return {
-      hasShopDomain: false,
-      hasAccessToken: false,
-      hasCredits: false,
-      hasFreeCreditUsed: false,
+      hasShopDomain: true,
+      hasAccessToken: true,
+      hasCredits: true,
+      hasFreeCreditUsed: true,
     };
   }
 }

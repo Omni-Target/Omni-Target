@@ -47,10 +47,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Exchange code for an EXPIRING offline access token.
-    // The key parameter is "expiring": 1 — this tells Shopify
-    // to return an expiring token + refresh token instead of the
-    // now-deprecated non-expiring token.
+    // Exchange code for a permanent offline access token from Shopify.
     const tokenRes = await fetch(
       `https://${shop}/admin/oauth/access_token`,
       {
@@ -62,15 +59,12 @@ export async function GET(request: Request) {
           client_id: process.env.SHOPIFY_CLIENT_ID,
           client_secret: process.env.SHOPIFY_CLIENT_SECRET,
           code,
-          expiring: 1,
         }),
       }
     );
 
     const tokenData = await tokenRes.json();
     const accessToken = tokenData.access_token;
-    const refreshToken = tokenData.refresh_token || null;
-    const expiresIn = tokenData.expires_in || null; // seconds
 
     if (!accessToken) {
       console.error("Token exchange failed:", tokenData);
@@ -78,13 +72,6 @@ export async function GET(request: Request) {
     }
 
     console.log("Shopify token exchange success. Shop:", shop);
-    console.log("Token type:", refreshToken ? "expiring" : "non-expiring");
-    if (expiresIn) console.log("Expires in:", expiresIn, "seconds");
-
-    // Calculate token expiration timestamp
-    const tokenExpiresAt = expiresIn
-      ? new Date(Date.now() + expiresIn * 1000).toISOString()
-      : null;
 
     // Fetch shop details to get the primary custom domain
     const shopDetailsRes = await fetch(
@@ -103,14 +90,18 @@ export async function GET(request: Request) {
     console.log("Shopify custom domain:", customDomain);
     console.log("Shopify myshopify URL:", myshopifyUrl);
 
-    // Shopify data payload — store token + refresh token + expiry
+    // Shopify data payload — store token + custom domain
     const shopifyData: Record<string, any> = {
       shopify_store_url: myshopifyUrl,
       shopify_custom_domain: customDomain,
       shopify_access_token: accessToken,
+      shop_domain: myshopifyUrl, // explicitly set shop_domain
+      access_token: accessToken, // explicitly set access_token
+      shopify_refresh_token: null, // clear out old expiring token fields
+      shopify_token_expires_at: null,
     };
 
-    // Populate new schema columns if they exist
+    // Populate new schema columns if they exist (backward compatibility / redundancy check)
     const { detectColumns, handleFreeCreditOnInstall } = await import("@/lib/billing-db");
     const cols = await detectColumns();
     if (cols.hasShopDomain) {
@@ -118,15 +109,6 @@ export async function GET(request: Request) {
     }
     if (cols.hasAccessToken) {
       shopifyData.access_token = accessToken;
-    }
-
-    // Only set refresh columns if the DB supports them
-    // (columns will be added via Supabase migration)
-    if (refreshToken) {
-      shopifyData.shopify_refresh_token = refreshToken;
-    }
-    if (tokenExpiresAt) {
-      shopifyData.shopify_token_expires_at = tokenExpiresAt;
     }
 
     const { data: existingByStore } = await 
@@ -146,32 +128,23 @@ export async function GET(request: Request) {
       // by copying shopify credentials
     }
 
-    // Check if a row already exists for this user
-    const { data: existing } = await supabaseAdmin
+    // Upsert the integration row matched by the current Clerk user ID
+    console.log("Upserting user integration for Clerk user:", userId);
+    const { error: upsertError } = await supabaseAdmin
       .from("user_integrations")
-      .select("id")
-      .eq("clerk_user_id", userId)
-      .single();
+      .upsert({
+        clerk_user_id: userId,
+        ...shopifyData,
+      }, {
+        onConflict: "clerk_user_id"
+      });
 
-    console.log("Existing row found:", !!existing);
-
-    if (existing) {
-      const { error: updateError } = await supabaseAdmin
-        .from("user_integrations")
-        .update(shopifyData)
-        .eq("clerk_user_id", userId);
-
-      console.log("Shopify update error:", updateError);
-    } else {
-      const { error: insertError } = await supabaseAdmin
-        .from("user_integrations")
-        .insert({
-          clerk_user_id: userId,
-          ...shopifyData,
-        });
-
-      console.log("Shopify insert error:", insertError);
+    if (upsertError) {
+      console.error("Shopify upsert error:", upsertError);
+      throw upsertError;
     }
+
+    console.log("Shopify upsert success");
 
     // Give 1 free credit on install if free_credit_used is false
     await handleFreeCreditOnInstall(userId!);
