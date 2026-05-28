@@ -398,85 +398,6 @@ function DashboardContent() {
           </div>
         )}
 
-        {/* Shopify Billing Credit Purchase Section */}
-        {!loading && connected && (
-          <div className="mb-8 animate-fade-in-up bg-surface-raised/30 border border-border-subtle/50 rounded-2xl p-6 sm:p-8">
-            <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <p className="text-xs text-brand-400 uppercase tracking-widest font-mono font-bold mb-1">Acquire Credits</p>
-                <h2 className="text-xl font-bold text-white tracking-tight">Campaign Brief Credit Packs</h2>
-                <p className="text-xs text-white/50 mt-1">Direct integration with Shopify Billing API. Purchase one-time packs to instantly generate ad briefs.</p>
-              </div>
-              {credits !== null && (
-                <div className="inline-flex items-center gap-2 rounded-full border border-[#a855f7]/30 bg-[#a855f7]/10 px-4 py-1.5 text-xs text-[#d8b4fe] font-medium backdrop-blur-sm shrink-0 self-start sm:self-center">
-                  <span className="w-2 h-2 rounded-full bg-[#a855f7] animate-pulse"></span>
-                  Current Balance: <strong className="font-semibold text-white ml-0.5">{credits} briefs remaining</strong>
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-4xl">
-              {SHOPIFY_PLANS.map((pack) => (
-                <div
-                  key={pack.id}
-                  className={`flex flex-col rounded-xl p-5 transition-all duration-300 hover:scale-[1.02] border
-                    ${pack.highlight ? "border-[#a855f7] bg-[#a855f7]/5 shadow-[0_4px_20px_-5px_rgba(168,85,247,0.15)]" : "border-border-subtle bg-white/[0.01]"}
-                  `}
-                >
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h3 className="text-sm font-bold text-white">{pack.name}</h3>
-                      <span className="inline-block text-[10px] font-mono text-[#d8b4fe]/90 mt-0.5 font-semibold">
-                        {pack.credits} Credits
-                      </span>
-                    </div>
-                    {pack.highlight && (
-                      <span className="rounded bg-[#a855f7]/20 border border-[#a855f7]/40 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[#d8b4fe]">
-                        Best Choice
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-baseline gap-1 mb-3">
-                    <span className="font-serif font-black text-2xl text-[#a855f7]">${pack.price}</span>
-                    <span className="font-mono text-[9px] text-white/40">USD</span>
-                  </div>
-
-                  <p className="text-[11px] leading-relaxed text-white/50 mb-5 min-h-[32px]">
-                    {pack.description}
-                  </p>
-
-                  <ul className="space-y-2 mb-6 flex-1 border-t border-white/5 pt-4">
-                    {pack.features.map((f) => (
-                      <li key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-[#a855f7] flex-shrink-0">
-                          <polyline points="20 6 9 17 4 12"/>
-                        </svg>
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-
-                  <button
-                    onClick={() => handleShopifyPurchase(pack.id as "starter" | "growth" | "scale")}
-                    disabled={purchaseLoading !== null}
-                    className={`w-full py-2 rounded-lg font-medium text-xs transition-colors disabled:opacity-50 cursor-pointer
-                      ${pack.highlight
-                        ? "bg-[#a855f7] hover:bg-[#9333ea] text-white"
-                        : "border border-white/15 text-white hover:bg-white/5"
-                      }`}
-                  >
-                    {purchaseLoading === pack.id ? "Redirecting..." : "Buy Credits"}
-                  </button>
-                </div>
-              ))}
-            </div>
-            
-            <div className="mt-4 text-center text-[10px] text-white/30">
-              Secured and verified via Shopify Billing API. Credits never expire within 6 months of purchase.
-            </div>
-          </div>
-        )}
 
         {/* Loading State */}
         {loading ? (
@@ -722,6 +643,86 @@ function DashboardContent() {
                   })}
               </div>
             </div>
+
+            {/* Shopify Billing Credit Purchase Section */}
+            {!loading && connected && (
+              <div className="mb-8 animate-fade-in-up bg-surface-raised/30 border border-border-subtle/50 rounded-2xl p-6 sm:p-8 mt-12">
+                <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <p className="text-xs text-brand-400 uppercase tracking-widest font-mono font-bold mb-1">Acquire Credits</p>
+                    <h2 className="text-xl font-bold text-white tracking-tight">Campaign Brief Credit Packs</h2>
+                    <p className="text-xs text-white/50 mt-1">Direct integration with Shopify Billing API. Purchase one-time packs to instantly generate ad briefs.</p>
+                  </div>
+                  {credits !== null && (
+                    <div className="inline-flex items-center gap-2 rounded-full border border-[#a855f7]/30 bg-[#a855f7]/10 px-4 py-1.5 text-xs text-[#d8b4fe] font-medium backdrop-blur-sm shrink-0 self-start sm:self-center">
+                      <span className="w-2 h-2 rounded-full bg-[#a855f7] animate-pulse"></span>
+                      Current Balance: <strong className="font-semibold text-white ml-0.5">{credits} briefs remaining</strong>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-4xl">
+                  {SHOPIFY_PLANS.map((pack) => (
+                    <div
+                      key={pack.id}
+                      className={`flex flex-col rounded-xl p-5 transition-all duration-300 hover:scale-[1.02] border
+                        ${pack.highlight ? "border-[#a855f7] bg-[#a855f7]/5 shadow-[0_4px_20px_-5px_rgba(168,85,247,0.15)]" : "border-border-subtle bg-white/[0.01]"}
+                      `}
+                    >
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h3 className="text-sm font-bold text-white">{pack.name}</h3>
+                          <span className="inline-block text-[10px] font-mono text-[#d8b4fe]/90 mt-0.5 font-semibold">
+                            {pack.credits} Credits
+                          </span>
+                        </div>
+                        {pack.highlight && (
+                          <span className="rounded bg-[#a855f7]/20 border border-[#a855f7]/40 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[#d8b4fe]">
+                            Best Choice
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-baseline gap-1 mb-3">
+                        <span className="font-serif font-black text-2xl text-[#a855f7]">${pack.price}</span>
+                        <span className="font-mono text-[9px] text-white/40">USD</span>
+                      </div>
+
+                      <p className="text-[11px] leading-relaxed text-white/50 mb-5 min-h-[32px]">
+                        {pack.description}
+                      </p>
+
+                      <ul className="space-y-2 mb-6 flex-1 border-t border-white/5 pt-4">
+                        {pack.features.map((f) => (
+                          <li key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-[#a855f7] flex-shrink-0">
+                              <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                            {f}
+                          </li>
+                        ))}
+                      </ul>
+
+                      <button
+                        onClick={() => handleShopifyPurchase(pack.id as "starter" | "growth" | "scale")}
+                        disabled={purchaseLoading !== null}
+                        className={`w-full py-2 rounded-lg font-medium text-xs transition-colors disabled:opacity-50 cursor-pointer
+                          ${pack.highlight
+                            ? "bg-[#a855f7] hover:bg-[#9333ea] text-white"
+                            : "border border-white/15 text-white hover:bg-white/5"
+                          }`}
+                      >
+                        {purchaseLoading === pack.id ? "Redirecting..." : "Buy Credits"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                
+                <div className="mt-4 text-center text-[10px] text-white/30">
+                  Secured and verified via Shopify Billing API. Credits never expire within 6 months of purchase.
+                </div>
+              </div>
+            )}
           </>
         )}
       </main>

@@ -47,7 +47,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Exchange code for a permanent offline access token from Shopify.
+    // Exchange code for an EXPIRING offline access token.
+    // The key parameter is "expiring": 1 — this tells Shopify
+    // to return an expiring token + refresh token instead of the
+    // now-deprecated non-expiring token.
     const tokenRes = await fetch(
       `https://${shop}/admin/oauth/access_token`,
       {
@@ -59,12 +62,15 @@ export async function GET(request: Request) {
           client_id: process.env.SHOPIFY_CLIENT_ID,
           client_secret: process.env.SHOPIFY_CLIENT_SECRET,
           code,
+          expiring: 1,
         }),
       }
     );
 
     const tokenData = await tokenRes.json();
     const accessToken = tokenData.access_token;
+    const refreshToken = tokenData.refresh_token || null;
+    const expiresIn = tokenData.expires_in || null; // seconds
 
     if (!accessToken) {
       console.error("Token exchange failed:", tokenData);
@@ -72,6 +78,13 @@ export async function GET(request: Request) {
     }
 
     console.log("Shopify token exchange success. Shop:", shop);
+    console.log("Token type:", refreshToken ? "expiring" : "non-expiring");
+    if (expiresIn) console.log("Expires in:", expiresIn, "seconds");
+
+    // Calculate token expiration timestamp
+    const tokenExpiresAt = expiresIn
+      ? new Date(Date.now() + expiresIn * 1000).toISOString()
+      : null;
 
     // Fetch shop details to get the primary custom domain
     const shopDetailsRes = await fetch(
@@ -90,15 +103,15 @@ export async function GET(request: Request) {
     console.log("Shopify custom domain:", customDomain);
     console.log("Shopify myshopify URL:", myshopifyUrl);
 
-    // Shopify data payload — store token + custom domain
+    // Shopify data payload — store token + refresh token + expiry
     const shopifyData: Record<string, any> = {
       shopify_store_url: myshopifyUrl,
       shopify_custom_domain: customDomain,
       shopify_access_token: accessToken,
       shop_domain: myshopifyUrl, // explicitly set shop_domain
       access_token: accessToken, // explicitly set access_token
-      shopify_refresh_token: null, // clear out old expiring token fields
-      shopify_token_expires_at: null,
+      shopify_refresh_token: refreshToken,
+      shopify_token_expires_at: tokenExpiresAt,
     };
 
     // Populate new schema columns if they exist (backward compatibility / redundancy check)
