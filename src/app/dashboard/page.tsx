@@ -16,17 +16,116 @@ interface StoreDataResponse {
   credits_unlimited_until?: string | null;
 }
 
+const SHOPIFY_PLANS = [
+  {
+    id: "starter",
+    name: "Starter Pack",
+    credits: 5,
+    price: 39,
+    description: "Perfect for testing new campaigns and finding winning ads.",
+    highlight: false,
+    features: [
+      "5 Campaign Briefs",
+      "Store Intelligence Insights",
+      "AI-Powered Copywriter",
+      "Valid for 6 months",
+    ],
+  },
+  {
+    id: "growth",
+    name: "Growth Pack",
+    credits: 15,
+    price: 99,
+    description: "For scaling brands running multiple products and tests.",
+    highlight: true,
+    features: [
+      "15 Campaign Briefs",
+      "Everything in Starter Pack",
+      "Priority AI Processing",
+      "Advanced Targeting Audiences",
+    ],
+  },
+  {
+    id: "scale",
+    name: "Scale Pack",
+    credits: 30,
+    price: 179,
+    description: "High volume briefs for rapid scaling and continuous optimization.",
+    highlight: false,
+    features: [
+      "30 Campaign Briefs",
+      "Everything in Growth Pack",
+      "Highest Priority Generation",
+      "Best Value ($5.96 / brief)",
+    ],
+  },
+] as const;
+
 function DashboardContent() {
   const [storeData, setStoreData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
   const [showPaymentToast, setShowPaymentToast] = useState(false);
+  const [showBillingToast, setShowBillingToast] = useState(false);
+  const [shop, setShop] = useState<string | null>(null);
+  const [purchaseLoading, setPurchaseLoading] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/user/credits")
+      .then((r) => r.json())
+      .then((data) => {
+        setShop(data.shop);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleShopifyPurchase = async (planKey: "starter" | "growth" | "scale") => {
+    if (!shop) {
+      alert("Shopify domain is not connected. Please connect your store first.");
+      return;
+    }
+
+    setPurchaseLoading(planKey);
+    try {
+      const res = await fetch("/api/shopify/billing/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          shop,
+          plan: planKey,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to create Shopify purchase");
+      }
+
+      const data = await res.json();
+
+      if (data.confirmationUrl) {
+        window.location.href = data.confirmationUrl;
+      } else {
+        alert("Failed to initialize billing. Please try again.");
+        setPurchaseLoading(null);
+      }
+    } catch (err: any) {
+      console.error("Shopify billing purchase error:", err);
+      alert(err.message || "An error occurred while creating the billing charge.");
+      setPurchaseLoading(null);
+    }
+  };
 
   const { credits, isUnlimited } = useCredits();
 
   const searchParams = useSearchParams();
   const paymentSuccess = searchParams.get("payment");
   const packId = searchParams.get("pack");
+  const billingSuccess = searchParams.get("billing");
+  const billingCredits = searchParams.get("credits");
+  const billingPlan = searchParams.get("plan");
 
   useEffect(() => {
     if (paymentSuccess === "success") {
@@ -37,6 +136,16 @@ function DashboardContent() {
       }, 4000);
     }
   }, [paymentSuccess]);
+
+  useEffect(() => {
+    if (billingSuccess === "success") {
+      setShowBillingToast(true);
+      setTimeout(() => {
+        setShowBillingToast(false);
+        window.history.replaceState({}, "", "/dashboard");
+      }, 5000);
+    }
+  }, [billingSuccess]);
 
   useEffect(() => {
     fetch("/api/store/data", { cache: "no-store" })
@@ -234,6 +343,16 @@ function DashboardContent() {
           </div>
         )}
 
+        {/* Shopify Billing Success Toast */}
+        {showBillingToast && (
+          <div className="mb-6 px-4 py-3 rounded-xl bg-success-500/10 border border-success-500/20 text-sm text-success-400 flex items-center gap-2 animate-fade-in-up">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            ✓ Billing successful! Added <strong>{billingCredits} credits</strong> via Shopify for the <strong>{billingPlan} Pack</strong>.
+          </div>
+        )}
+
         {/* Header */}
         <div className="mb-8 animate-fade-in-up">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-1">
@@ -248,7 +367,7 @@ function DashboardContent() {
 
         {/* Quick Actions */}
         {!loading && connected && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8 animate-fade-in-up">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 animate-fade-in-up">
             <Link
               href="/campaigns"
               className="rounded-xl bg-brand-500/10 border border-brand-500/20 p-5 flex flex-col justify-between hover:bg-brand-500/20 transition-colors no-underline group"
@@ -276,17 +395,85 @@ function DashboardContent() {
               </div>
               <button onClick={refreshStoreData} className="text-white/80 hover:text-white text-sm font-medium mt-4 text-left cursor-pointer bg-transparent border-none p-0">Sync now</button>
             </div>
+          </div>
+        )}
 
-            <div className="rounded-xl bg-surface-raised border border-border-subtle p-5 flex flex-col justify-between">
+        {/* Shopify Billing Credit Purchase Section */}
+        {!loading && connected && (
+          <div className="mb-8 animate-fade-in-up bg-surface-raised/30 border border-border-subtle/50 rounded-2xl p-6 sm:p-8">
+            <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold text-white mb-1">Buy Briefs</p>
-                <p className="text-xs text-white/60">
-                  {credits === 0 ? "You have no briefs remaining" : `${credits} briefs remaining`}
-                </p>
+                <p className="text-xs text-brand-400 uppercase tracking-widest font-mono font-bold mb-1">Acquire Credits</p>
+                <h2 className="text-xl font-bold text-white tracking-tight">Campaign Brief Credit Packs</h2>
+                <p className="text-xs text-white/50 mt-1">Direct integration with Shopify Billing API. Purchase one-time packs to instantly generate ad briefs.</p>
               </div>
-              <Link href="/pricing" className="text-white/80 hover:text-white text-sm font-medium mt-4 inline-block no-underline">
-                {credits === 0 ? "Buy credits →" : "Buy more →"}
-              </Link>
+              {credits !== null && (
+                <div className="inline-flex items-center gap-2 rounded-full border border-[#a855f7]/30 bg-[#a855f7]/10 px-4 py-1.5 text-xs text-[#d8b4fe] font-medium backdrop-blur-sm shrink-0 self-start sm:self-center">
+                  <span className="w-2 h-2 rounded-full bg-[#a855f7] animate-pulse"></span>
+                  Current Balance: <strong className="font-semibold text-white ml-0.5">{credits} briefs remaining</strong>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-4xl">
+              {SHOPIFY_PLANS.map((pack) => (
+                <div
+                  key={pack.id}
+                  className={`flex flex-col rounded-xl p-5 transition-all duration-300 hover:scale-[1.02] border
+                    ${pack.highlight ? "border-[#a855f7] bg-[#a855f7]/5 shadow-[0_4px_20px_-5px_rgba(168,85,247,0.15)]" : "border-border-subtle bg-white/[0.01]"}
+                  `}
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-white">{pack.name}</h3>
+                      <span className="inline-block text-[10px] font-mono text-[#d8b4fe]/90 mt-0.5 font-semibold">
+                        {pack.credits} Credits
+                      </span>
+                    </div>
+                    {pack.highlight && (
+                      <span className="rounded bg-[#a855f7]/20 border border-[#a855f7]/40 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[#d8b4fe]">
+                        Best Choice
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-baseline gap-1 mb-3">
+                    <span className="font-serif font-black text-2xl text-[#a855f7]">${pack.price}</span>
+                    <span className="font-mono text-[9px] text-white/40">USD</span>
+                  </div>
+
+                  <p className="text-[11px] leading-relaxed text-white/50 mb-5 min-h-[32px]">
+                    {pack.description}
+                  </p>
+
+                  <ul className="space-y-2 mb-6 flex-1 border-t border-white/5 pt-4">
+                    {pack.features.map((f) => (
+                      <li key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-[#a855f7] flex-shrink-0">
+                          <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+
+                  <button
+                    onClick={() => handleShopifyPurchase(pack.id as "starter" | "growth" | "scale")}
+                    disabled={purchaseLoading !== null}
+                    className={`w-full py-2 rounded-lg font-medium text-xs transition-colors disabled:opacity-50 cursor-pointer
+                      ${pack.highlight
+                        ? "bg-[#a855f7] hover:bg-[#9333ea] text-white"
+                        : "border border-white/15 text-white hover:bg-white/5"
+                      }`}
+                  >
+                    {purchaseLoading === pack.id ? "Redirecting..." : "Buy Credits"}
+                  </button>
+                </div>
+              ))}
+            </div>
+            
+            <div className="mt-4 text-center text-[10px] text-white/30">
+              Secured and verified via Shopify Billing API. Credits never expire within 6 months of purchase.
             </div>
           </div>
         )}

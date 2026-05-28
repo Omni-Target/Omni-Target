@@ -110,6 +110,16 @@ export async function GET(request: Request) {
       shopify_access_token: accessToken,
     };
 
+    // Populate new schema columns if they exist
+    const { detectColumns, handleFreeCreditOnInstall } = await import("@/lib/billing-db");
+    const cols = await detectColumns();
+    if (cols.hasShopDomain) {
+      shopifyData.shop_domain = myshopifyUrl;
+    }
+    if (cols.hasAccessToken) {
+      shopifyData.access_token = accessToken;
+    }
+
     // Only set refresh columns if the DB supports them
     // (columns will be added via Supabase migration)
     if (refreshToken) {
@@ -162,6 +172,9 @@ export async function GET(request: Request) {
 
       console.log("Shopify insert error:", insertError);
     }
+
+    // Give 1 free credit on install if free_credit_used is false
+    await handleFreeCreditOnInstall(userId!);
 
     // Register the orders/paid webhook so confirmed purchases
     // are forwarded to Meta CAPI for attribution
