@@ -14,6 +14,7 @@ interface StoreDataResponse {
   message?: string;
   credits_balance?: number;
   credits_unlimited_until?: string | null;
+  needsReauthForOrders?: boolean;
 }
 
 const SHOPIFY_PLANS = [
@@ -65,6 +66,7 @@ function DashboardContent() {
   const [storeData, setStoreData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
+  const [needsReauth, setNeedsReauth] = useState(false);
   const [showPaymentToast, setShowPaymentToast] = useState(false);
   const [showBillingToast, setShowBillingToast] = useState(false);
   const [shop, setShop] = useState<string | null>(null);
@@ -153,6 +155,9 @@ function DashboardContent() {
       .then((res) => res.json())
       .then((data: StoreDataResponse) => {
         setConnected(data.connected);
+        if (data.needsReauthForOrders) {
+          setNeedsReauth(true);
+        }
         if (data.connected && data.data) {
           setStoreData(data.data);
         }
@@ -276,6 +281,9 @@ function DashboardContent() {
       .then((res) => res.json())
       .then((data: StoreDataResponse) => {
         setConnected(data.connected);
+        if (data.needsReauthForOrders) {
+          setNeedsReauth(true);
+        }
         if (data.connected && data.data) {
           setStoreData(data.data);
         }
@@ -369,6 +377,21 @@ function DashboardContent() {
         </div>
 
         {/* Quick Actions */}
+        {!loading && connected && needsReauth && (
+          <div className="bg-brand-500/10 border border-brand-500/20 text-brand-300 rounded-xl p-4 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in-up">
+            <div>
+              <h3 className="text-sm font-semibold mb-1 text-brand-300">Unlock Full Order History</h3>
+              <p className="text-xs text-brand-300/70">Full order history gives you more accurate recommendations. We recently updated our permissions.</p>
+            </div>
+            <Link
+              href="/api/auth/shopify/connect?from=dashboard"
+              className="bg-brand-500/20 hover:bg-brand-500/30 border border-brand-500/20 text-brand-300 px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+            >
+              Reconnect Store
+            </Link>
+          </div>
+        )}
+
         {!loading && connected && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 animate-fade-in-up">
             <Link

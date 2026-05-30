@@ -61,6 +61,7 @@ export async function GET() {
       data: storeData,
       credits_balance: creditsRow?.credits_balance || 0,
       credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
+      needsReauthForOrders: !creditsRow?.shopify_scopes?.includes("read_all_orders"),
     });
   } catch (error) {
     console.error("Store data error:", error);

@@ -112,6 +112,7 @@ export async function GET(request: Request) {
       access_token: accessToken, // explicitly set access_token
       shopify_refresh_token: refreshToken,
       shopify_token_expires_at: tokenExpiresAt,
+      shopify_scopes: tokenData.scope,
     };
 
     // Populate new schema columns if they exist (backward compatibility / redundancy check)
