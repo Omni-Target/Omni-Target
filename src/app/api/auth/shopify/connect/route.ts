@@ -12,8 +12,14 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-  const shop = searchParams.get("shop");
+  let shop = searchParams.get("shop");
   const from = searchParams.get("from") || "";
+
+  if (!shop) {
+    const { getUserIntegration } = await import("@/lib/db");
+    const integration = await getUserIntegration(userId);
+    shop = integration?.shopify_store_url || integration?.shop_domain;
+  }
 
   if (!shop) {
     return Response.json(
