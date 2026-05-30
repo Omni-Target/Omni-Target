@@ -517,17 +517,10 @@ function DashboardContent() {
                 <p className="text-xs text-white/40 uppercase tracking-widest mb-4 font-semibold">What this means for your ads</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {insights.map((insight, i) => (
-                    <div key={i} className="rounded-xl bg-surface-raised border border-border-subtle p-5 flex flex-col justify-between">
-                      <div>
-                        <div className="text-2xl mb-3">{insight.icon}</div>
-                        <p className="text-sm font-bold text-white mb-2">{insight.title}</p>
-                        <p className="text-xs text-white/60 mb-4 leading-relaxed">{insight.detail}</p>
-                      </div>
-                      {insight.action && insight.actionHref && (
-                        <Link href={insight.actionHref} className="text-xs font-medium text-brand-400 hover:text-brand-300 no-underline inline-block">
-                          {insight.action} →
-                        </Link>
-                      )}
+                    <div key={i} className="rounded-xl bg-surface-raised border border-border-subtle p-5">
+                      <div className="text-2xl mb-3">{insight.icon}</div>
+                      <p className="text-sm font-bold text-white mb-2">{insight.title}</p>
+                      <p className="text-xs text-white/60 leading-relaxed">{insight.detail}</p>
                     </div>
                   ))}
                 </div>
