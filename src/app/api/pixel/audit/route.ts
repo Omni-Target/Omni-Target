@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getUserIntegration } from "@/lib/db";
 
 export async function GET() {
   const { userId } = await auth();
@@ -11,18 +11,7 @@ export async function GET() {
     );
   }
 
-  const { data } = await
-    supabaseAdmin
-      .from("user_integrations")
-      .select(
-        "shopify_access_token, " +
-        "shopify_store_url, " +
-        "store_snapshot"
-      )
-      .eq("clerk_user_id", userId!)
-      .single();
-
-  const integration: any = data;
+  const integration = await getUserIntegration(userId!);
 
   // If no Shopify connection
   if (!integration?.shopify_access_token) {

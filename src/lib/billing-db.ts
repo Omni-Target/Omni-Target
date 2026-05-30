@@ -1,4 +1,10 @@
-import { supabaseAdmin } from "./supabase";
+import {
+  detectDbColumns,
+  selectIntegrationFieldsByShop,
+  updateIntegrationByShop,
+  getUserIntegration,
+  updateUserIntegration,
+} from "./db";
 
 export interface DBColumns {
   hasShopDomain: boolean;
@@ -7,69 +13,8 @@ export interface DBColumns {
   hasFreeCreditUsed: boolean;
 }
 
-let cachedColumns: DBColumns | null = null;
-
 export async function detectColumns(): Promise<DBColumns> {
-  if (cachedColumns) return cachedColumns;
-
-  try {
-    const { error } = await supabaseAdmin
-      .from("user_integrations")
-      .select("shop_domain, access_token, credits, free_credit_used")
-      .limit(1);
-
-    if (!error) {
-      cachedColumns = {
-        hasShopDomain: true,
-        hasAccessToken: true,
-        hasCredits: true,
-        hasFreeCreditUsed: true,
-      };
-      return cachedColumns;
-    }
-
-    // PostgreSQL error code '42703' means undefined_column.
-    // If the error code is not '42703', it might be a connection/auth/startup error,
-    // so we should not poison the cache with false values and assume true.
-    if (error.code !== "42703") {
-      console.warn("Transient/auth error during column detection, not caching:", error);
-      return {
-        hasShopDomain: true,
-        hasAccessToken: true,
-        hasCredits: true,
-        hasFreeCreditUsed: true,
-      };
-    }
-
-    // Detect individually
-    const [shopRes, tokenRes, creditsRes, freeRes] = await Promise.all([
-      supabaseAdmin.from("user_integrations").select("shop_domain").limit(1),
-      supabaseAdmin.from("user_integrations").select("access_token").limit(1),
-      supabaseAdmin.from("user_integrations").select("credits").limit(1),
-      supabaseAdmin.from("user_integrations").select("free_credit_used").limit(1),
-    ]);
-
-    const hasShopDomain = !shopRes.error || shopRes.error.code !== "42703";
-    const hasAccessToken = !tokenRes.error || tokenRes.error.code !== "42703";
-    const hasCredits = !creditsRes.error || creditsRes.error.code !== "42703";
-    const hasFreeCreditUsed = !freeRes.error || freeRes.error.code !== "42703";
-
-    cachedColumns = {
-      hasShopDomain,
-      hasAccessToken,
-      hasCredits,
-      hasFreeCreditUsed,
-    };
-    return cachedColumns;
-  } catch (err) {
-    console.error("Error detecting database columns:", err);
-    return {
-      hasShopDomain: true,
-      hasAccessToken: true,
-      hasCredits: true,
-      hasFreeCreditUsed: true,
-    };
-  }
+  return await detectDbColumns();
 }
 
 /**
@@ -88,23 +33,13 @@ export async function getIntegrationByShop(shop: string) {
 
   const queryField = cols.hasShopDomain ? "shop_domain" : "shopify_store_url";
 
-  const { data, error } = await supabaseAdmin
-    .from("user_integrations")
-    .select(`clerk_user_id, ${selectQuery}`)
-    .eq(queryField, shop)
-    .single() as any;
+  let data = await selectIntegrationFieldsByShop(shop, selectQuery, queryField);
 
-  if (error || !data) {
+  if (!data) {
     // If not found, try the alternate field just in case
     const altField = queryField === "shop_domain" ? "shopify_store_url" : "shop_domain";
-    const { data: altData, error: altError } = await supabaseAdmin
-      .from("user_integrations")
-      .select(`clerk_user_id, ${selectQuery}`)
-      .eq(altField, shop)
-      .single() as any;
-
-    if (altError || !altData) return null;
-    return mapIntegrationData(altData, cols);
+    data = await selectIntegrationFieldsByShop(shop, selectQuery, altField);
+    if (!data) return null;
   }
 
   return mapIntegrationData(data, cols);
@@ -125,23 +60,10 @@ function mapIntegrationData(data: any, cols: DBColumns) {
  */
 export async function handleFreeCreditOnInstall(userId: string) {
   const cols = await detectColumns();
-  
-  // Fetch existing state
-  const selectQuery = [
-    cols.hasCredits ? "credits" : "credits_balance",
-    cols.hasFreeCreditUsed ? "free_credit_used" : null,
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const data = await getUserIntegration(userId);
 
-  const { data, error } = await supabaseAdmin
-    .from("user_integrations")
-    .select(selectQuery)
-    .eq("clerk_user_id", userId)
-    .single() as any;
-
-  if (error || !data) {
-    console.error("Could not find integration to award free credits:", error);
+  if (!data) {
+    console.error("Could not find integration to award free credits for:", userId);
     return;
   }
 
@@ -160,15 +82,11 @@ export async function handleFreeCreditOnInstall(userId: string) {
       updateData.free_credit_used = true;
     }
 
-    const { error: updateError } = await supabaseAdmin
-      .from("user_integrations")
-      .update(updateData)
-      .eq("clerk_user_id", userId);
-
-    if (updateError) {
-      console.error("Failed to apply free credit:", updateError);
-    } else {
+    try {
+      await updateUserIntegration(userId, updateData);
       console.log(`Successfully applied 1 free credit for user ${userId}`);
+    } catch (updateError) {
+      console.error("Failed to apply free credit:", updateError);
     }
   }
 }
@@ -186,26 +104,21 @@ export async function addCreditsToIntegration(shop: string, creditsToAdd: number
     "credits_balance",
   ].join(", ");
 
-  const { data, error } = await supabaseAdmin
-    .from("user_integrations")
-    .select(selectQuery)
-    .eq(queryField, shop)
-    .single() as any;
+  let data = await selectIntegrationFieldsByShop(shop, selectQuery, queryField);
+  let finalQueryField = queryField;
 
-  let currentCredits = 0;
-  if (!error && data) {
-    currentCredits = cols.hasCredits ? (data.credits || 0) : (data.credits_balance || 0);
-  } else {
+  if (!data) {
     // Try alternate field if first lookup failed
     const altField = queryField === "shop_domain" ? "shopify_store_url" : "shop_domain";
-    const { data: altData } = await supabaseAdmin
-      .from("user_integrations")
-      .select(selectQuery)
-      .eq(altField, shop)
-      .single() as any;
-    if (altData) {
-      currentCredits = cols.hasCredits ? (altData.credits || 0) : (altData.credits_balance || 0);
+    data = await selectIntegrationFieldsByShop(shop, selectQuery, altField);
+    if (data) {
+      finalQueryField = altField;
     }
+  }
+
+  let currentCredits = 0;
+  if (data) {
+    currentCredits = cols.hasCredits ? (data.credits || 0) : (data.credits_balance || 0);
   }
 
   const newCredits = currentCredits + creditsToAdd;
@@ -216,19 +129,10 @@ export async function addCreditsToIntegration(shop: string, creditsToAdd: number
   }
   updateData.credits_balance = newCredits;
 
-  const { error: updateError } = await supabaseAdmin
-    .from("user_integrations")
-    .update(updateData)
-    .eq(queryField, shop);
-
-  if (updateError) {
-    // Try alternate field if update failed
-    const altField = queryField === "shop_domain" ? "shopify_store_url" : "shop_domain";
-    await supabaseAdmin
-      .from("user_integrations")
-      .update(updateData)
-      .eq(altField, shop);
+  try {
+    await updateIntegrationByShop(shop, updateData, finalQueryField);
+    console.log(`Added ${creditsToAdd} credits to shop ${shop}. New total: ${newCredits}`);
+  } catch (updateError) {
+    console.error("Failed to add credits to integration:", updateError);
   }
-
-  console.log(`Added ${creditsToAdd} credits to shop ${shop}. New total: ${newCredits}`);
 }

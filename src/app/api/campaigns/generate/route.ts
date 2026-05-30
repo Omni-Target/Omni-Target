@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { queryUserIntegrationSelect, updateUserIntegration, insertCreditUsage } from "@/lib/db";
 import sharp from "sharp";
+
+import { detectColumns } from "@/lib/billing-db";
 
 // Credit-gating: check balance before generation
 
@@ -38,19 +40,26 @@ interface GenerateRequest {
 export async function POST(request: Request) {
   const { userId } = await auth();
 
-  const { data: integration } = await supabaseAdmin
-    .from("user_integrations")
-    .select("store_snapshot, credits_balance, credits_unlimited_until")
-    .eq("clerk_user_id", userId!)
-    .single();
+  const cols = await detectColumns();
+  const selectQuery = [
+    "store_snapshot",
+    cols.hasCredits ? "credits" : "credits_balance",
+    "credits_balance",
+    "credits_unlimited_until"
+  ].join(", ");
+
+  const integration = await queryUserIntegrationSelect(userId!, selectQuery);
 
   // Credit gate: check if user has credits or unlimited access
   const hasUnlimited =
     integration?.credits_unlimited_until &&
     new Date(integration.credits_unlimited_until) > new Date();
 
-  const hasCredits =
-    (integration?.credits_balance || 0) > 0;
+  const currentCredits = integration
+    ? (cols.hasCredits ? integration.credits : integration.credits_balance) ?? integration.credits_balance ?? 0
+    : 0;
+
+  const hasCredits = currentCredits > 0;
 
   if (!hasUnlimited && !hasCredits) {
     return NextResponse.json({
@@ -239,10 +248,7 @@ no markdown, no preamble:
     something the primary text didn't say.",
   "cta": "one of: Shop Now, See Collection, 
     Learn More, Get Offer, Sign Up",
-  "copywriterNote": "1-2 sentences. Name 
-    the specific human truth this copy 
-    is built on and why it fits this 
-    exact audience."
+  "copywriterNote": "A single sentence explaining why this copy works for this audience, written like you're texting a busy fashion founder (maximum 1 sentence, no jargon like 'acquisition signal', 'behavioral velocity', 'cohort signals', or 'units/mo velocity', lead with the actionable implication, sound like a smart marketer friend)."
 }`;
 
     // Detect if the media is a video:
@@ -490,23 +496,15 @@ ${gatewayInsight?.currentProductClassification === "Gateway" ?
 
     // Deduct credit after successful generation
     if (!hasUnlimited) {
-      await supabaseAdmin
-        .from("user_integrations")
-        .update({
-          credits_balance: Math.max(
-            0,
-            (integration?.credits_balance || 0) - 1
-          )
-        })
-        .eq("clerk_user_id", userId!);
+      const newCredits = Math.max(0, currentCredits - 1);
+      const updateData: Record<string, any> = {};
+      if (cols.hasCredits) {
+        updateData.credits = newCredits;
+      }
+      updateData.credits_balance = newCredits;
 
-      await supabaseAdmin
-        .from("credit_usage")
-        .insert({
-          clerk_user_id: userId!,
-          credits_used: 1,
-          action: "brief_generated",
-        });
+      await updateUserIntegration(userId!, updateData);
+      await insertCreditUsage(userId!, 1, "brief_generated");
     }
 
     // Return the successfully parsed JSON output

@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { upsertUserIntegration } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { META_REDIRECT_URI } from "@/lib/meta-oauth";
@@ -62,8 +62,8 @@ export async function GET(request: Request) {
     // Filter to only writable accounts: active + ADVERTISE permission
     const writableAccounts = allAccounts.filter(
       (a: any) =>
-        a.account_status === 1 &&
-        a.user_tasks?.includes("ADVERTISE")
+          a.account_status === 1 &&
+          a.user_tasks?.includes("ADVERTISE")
     );
     console.log("Writable ad accounts:", writableAccounts.length);
 
@@ -100,34 +100,8 @@ export async function GET(request: Request) {
       pixel_health: firstPixel ? "unknown" : "none",
     };
 
-    // Check if a row already exists for this user
-    const { data: existing } = await supabaseAdmin
-      .from("user_integrations")
-      .select("id")
-      .eq("clerk_user_id", clerkUserId)
-      .single();
-
-    console.log("Existing row found:", !!existing);
-
-    if (existing) {
-      // Update the existing row
-      const { error: updateError } = await supabaseAdmin
-        .from("user_integrations")
-        .update(metaData)
-        .eq("clerk_user_id", clerkUserId);
-
-      console.log("Update error:", updateError);
-    } else {
-      // Insert a new row
-      const { error: insertError } = await supabaseAdmin
-        .from("user_integrations")
-        .insert({
-          clerk_user_id: clerkUserId,
-          ...metaData,
-        });
-
-      console.log("Insert error:", insertError);
-    }
+    console.log("Upserting Meta integration details for Clerk user:", clerkUserId);
+    await upsertUserIntegration(clerkUserId!, metaData);
 
     redirect("/settings?meta=connected");
 

@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "@/lib/supabase";
+import { updatePayment, getUserIntegration, updateUserIntegration } from "@/lib/db";
 import { getPackById } from "@/lib/credit-packs";
 
 export async function GET(request: Request) {
@@ -43,13 +43,10 @@ export async function GET(request: Request) {
     }
 
     // Update payment status
-    await supabaseAdmin
-      .from("payments")
-      .update({
-        status: "success",
-        provider_reference: reference,
-      })
-      .eq("id", payment_id);
+    await updatePayment(payment_id, {
+      status: "success",
+      provider_reference: reference,
+    });
 
     // Grant credits
     if (pack.unlimited_days > 0) {
@@ -57,27 +54,17 @@ export async function GET(request: Request) {
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + pack.unlimited_days);
 
-      await supabaseAdmin
-        .from("user_integrations")
-        .update({
-          credits_unlimited_until: expiresAt.toISOString(),
-        })
-        .eq("clerk_user_id", clerk_user_id);
+      await updateUserIntegration(clerk_user_id, {
+        credits_unlimited_until: expiresAt.toISOString(),
+      });
     } else {
       // Launch or Growth pack
-      const { data: current } = await supabaseAdmin
-        .from("user_integrations")
-        .select("credits_balance, credits_total_purchased")
-        .eq("clerk_user_id", clerk_user_id)
-        .single();
+      const current = await getUserIntegration(clerk_user_id);
 
-      await supabaseAdmin
-        .from("user_integrations")
-        .update({
-          credits_balance: (current?.credits_balance || 0) + pack.credits,
-          credits_total_purchased: (current?.credits_total_purchased || 0) + pack.credits,
-        })
-        .eq("clerk_user_id", clerk_user_id);
+      await updateUserIntegration(clerk_user_id, {
+        credits_balance: (current?.credits_balance || 0) + pack.credits,
+        credits_total_purchased: (current?.credits_total_purchased || 0) + pack.credits,
+      });
     }
 
     console.log(`Credits granted: ${pack.credits} to ${clerk_user_id}`);

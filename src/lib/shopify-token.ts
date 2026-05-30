@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "@/lib/supabase";
+import { getUserIntegration, updateUserIntegration } from "./db";
 
 /**
  * Ensures the Shopify access token for a given user is still valid.
@@ -10,13 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 export async function getValidShopifyToken(
   userId: string
 ): Promise<{ accessToken: string; shopUrl: string } | null> {
-  const { data: integration } = await supabaseAdmin
-    .from("user_integrations")
-    .select(
-      "shopify_store_url, shopify_access_token, shopify_refresh_token, shopify_token_expires_at"
-    )
-    .eq("clerk_user_id", userId)
-    .single();
+  const integration = await getUserIntegration(userId);
 
   if (!integration?.shopify_access_token || !integration?.shopify_store_url) {
     return null;
@@ -92,10 +86,7 @@ export async function getValidShopifyToken(
       updateData.shopify_token_expires_at = newExpiresAt;
     }
 
-    await supabaseAdmin
-      .from("user_integrations")
-      .update(updateData)
-      .eq("clerk_user_id", userId);
+    await updateUserIntegration(userId, updateData);
 
     console.log("Token refreshed successfully for user:", userId);
 

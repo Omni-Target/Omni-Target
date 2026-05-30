@@ -118,3 +118,11 @@ ADD COLUMN IF NOT EXISTS meta_selected_account_id TEXT,
 ADD COLUMN IF NOT EXISTS meta_pages JSONB,
 ADD COLUMN IF NOT EXISTS meta_page_access_token TEXT,
 ADD COLUMN IF NOT EXISTS shopify_custom_domain TEXT;
+
+-- Cache for exchange rates
+CREATE TABLE IF NOT EXISTS exchange_rate_cache (
+  id INT PRIMARY KEY DEFAULT 1,
+  rates JSONB NOT NULL,
+  fetched_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT one_row CHECK (id = 1)
+);

@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getUserIntegration } from "@/lib/db";
 import { generateRecommendations } from "@/lib/insights-engine";
 
 export const dynamic = "force-dynamic";
@@ -16,11 +16,7 @@ export async function GET() {
 
   try {
     // Get cached store snapshot
-    const { data: integration } = await supabaseAdmin
-      .from("user_integrations")
-      .select("store_snapshot")
-      .eq("clerk_user_id", userId)
-      .single();
+    const integration = await getUserIntegration(userId);
 
     if (!integration?.store_snapshot) {
       return Response.json({

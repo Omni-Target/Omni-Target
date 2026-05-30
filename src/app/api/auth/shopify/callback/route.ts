@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getExistingIntegrationByStore, upsertUserIntegration, updateUserIntegration } from "@/lib/db";
 import { createHmac } from "crypto";
 
 export async function GET(request: Request) {
@@ -124,13 +124,7 @@ export async function GET(request: Request) {
       shopifyData.access_token = accessToken;
     }
 
-    const { data: existingByStore } = await 
-      supabaseAdmin
-        .from("user_integrations")
-        .select("clerk_user_id")
-        .eq("shopify_store_url", shop)
-        .neq("clerk_user_id", userId!)
-        .single();
+    const existingByStore = await getExistingIntegrationByStore(shop, userId!);
 
     if (existingByStore) {
       console.warn(
@@ -143,19 +137,7 @@ export async function GET(request: Request) {
 
     // Upsert the integration row matched by the current Clerk user ID
     console.log("Upserting user integration for Clerk user:", userId);
-    const { error: upsertError } = await supabaseAdmin
-      .from("user_integrations")
-      .upsert({
-        clerk_user_id: userId,
-        ...shopifyData,
-      }, {
-        onConflict: "clerk_user_id"
-      });
-
-    if (upsertError) {
-      console.error("Shopify upsert error:", upsertError);
-      throw upsertError;
-    }
+    await upsertUserIntegration(userId!, shopifyData);
 
     console.log("Shopify upsert success");
 
@@ -196,12 +178,9 @@ export async function GET(request: Request) {
 
     // Store the webhook ID so we can delete it if the user disconnects
     if (webhookData.webhook?.id) {
-      await supabaseAdmin
-        .from("user_integrations")
-        .update({
-          shopify_webhook_id: String(webhookData.webhook.id),
-        })
-        .eq("clerk_user_id", userId);
+      await updateUserIntegration(userId!, {
+        shopify_webhook_id: String(webhookData.webhook.id),
+      });
     }
 
     // Update Clerk metadata

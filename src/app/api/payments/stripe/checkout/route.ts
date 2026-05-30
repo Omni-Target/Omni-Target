@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { createPayment } from "@/lib/db";
 import { getPackById } from "@/lib/credit-packs";
 
 export async function POST(
@@ -29,21 +29,16 @@ export async function POST(
   }
 
   // Create payment record
-  const { data: payment } = await
-    supabaseAdmin
-      .from("payments")
-      .insert({
-        clerk_user_id: userId,
-        provider: "stripe",
-        pack: packId,
-        amount_usd: pack.price_usd,
-        currency: "USD",
-        credits_granted: pack.credits,
-        unlimited_days: pack.unlimited_days,
-        status: "pending",
-      })
-      .select()
-      .single();
+  const payment = await createPayment({
+    clerk_user_id: userId,
+    provider: "stripe",
+    pack: packId,
+    amount_usd: pack.price_usd,
+    currency: "USD",
+    credits_granted: pack.credits,
+    unlimited_days: pack.unlimited_days,
+    status: "pending",
+  });
 
   // Create Stripe checkout session
   const session = await

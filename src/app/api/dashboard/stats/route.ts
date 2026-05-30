@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getUserIntegration, getUserCampaigns } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -13,14 +13,8 @@ export async function GET() {
   }
 
   // Get user's Meta credentials
-  const { data: integration, error: dbError } = await 
-    supabaseAdmin
-      .from("user_integrations")
-      .select(
-        "meta_access_token, meta_ad_account_id"
-      )
-      .eq("clerk_user_id", userId)
-      .single();
+  const integration = await getUserIntegration(userId);
+  const dbError = !integration ? new Error("Integration not found") : null;
 
   console.log("Dashboard stats - userId:", userId);
   console.log("Integration found:", !!integration);
@@ -78,14 +72,8 @@ export async function GET() {
     }, { status: 500 });
   }
 
-  // Get campaigns from Supabase too
-  const { data: activeCampaigns } = await 
-    supabaseAdmin
-      .from("campaigns")
-      .select("*")
-      .eq("clerk_user_id", userId)
-      .in("status", ["active", "paused", "stopped"])
-      .order("launched_at", { ascending: false });
+  // Get campaigns from database layer too
+  const activeCampaigns = await getUserCampaigns(userId);
 
   // Calculate FX-adjusted totals
   const NGN_RATE = 1565;

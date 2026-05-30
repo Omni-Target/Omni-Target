@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { queryUserIntegrationSelect } from "@/lib/db";
 
 export async function GET() {
   const { userId } = await auth();
@@ -21,11 +21,7 @@ export async function GET() {
     "shopify_store_url"
   ].join(", ");
 
-  const { data } = await supabaseAdmin
-    .from("user_integrations")
-    .select(selectQuery)
-    .eq("clerk_user_id", userId)
-    .single() as any;
+  const data = await queryUserIntegrationSelect(userId, selectQuery);
 
   const isUnlimited =
     data?.credits_unlimited_until &&

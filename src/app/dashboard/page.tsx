@@ -69,6 +69,7 @@ function DashboardContent() {
   const [showBillingToast, setShowBillingToast] = useState(false);
   const [shop, setShop] = useState<string | null>(null);
   const [purchaseLoading, setPurchaseLoading] = useState<string | null>(null);
+  const [showRestocking, setShowRestocking] = useState(false);
 
   useEffect(() => {
     fetch("/api/user/credits")
@@ -259,10 +260,12 @@ function DashboardContent() {
     });
   }
 
-  const validLocations = (orders.top_locations || []).filter((loc: any) => {
-    const isNigeria = loc.country === 'Nigeria' || loc.country === 'NG' || !loc.country; 
-    return isNigeria || loc.percentage >= 15;
-  });
+  const validLocations = (orders.top_locations || [])
+    .filter((loc: any) => {
+      const isNigeria = loc.country === 'Nigeria' || loc.country === 'NG' || !loc.country; 
+      return isNigeria || loc.percentage >= 15;
+    })
+    .slice(0, 2);
   const locationText = validLocations.length > 0 
     ? validLocations.map((l: any) => l.city).join(", ")
     : "Order location data still building";
@@ -515,38 +518,37 @@ function DashboardContent() {
                 <p className="text-xs text-white/40 uppercase tracking-widest font-semibold mb-1">Pre-Spend Intelligence</p>
                 <p className="text-sm text-white/60">High-signal products mapped by behavioral velocity and acquisition potential.</p>
               </div>
+
+              {/* Actionable in-stock products list */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {(storeData?.products || [])
+                  .filter((p: any) => p.in_stock)
                   .sort((a: any, b: any) => b.revenue - a.revenue)
                   .slice(0, 6)
                   .map((product: any, index: number) => {
                     let subtext = "";
-                    if (!product.in_stock) {
-                      subtext = "Out of stock — restock before advertising";
+                    const signals = [];
+                    if (product.first_time_buyer_ratio) {
+                      signals.push(`${Math.round(product.first_time_buyer_ratio * 100)}% new buyers`);
+                    }
+                    if (product.repeat_purchase_rate) {
+                      signals.push(`${Math.round(product.repeat_purchase_rate * 100)}% repeat rate`);
+                    }
+                    if (product.order_velocity) {
+                      signals.push(`${Math.round(product.order_velocity)} units/mo velocity`);
+                    }
+                    
+                    const metricsText = signals.length > 0 ? ` (${signals.join(" · ")})` : "";
+                    if (product.gateway_classification === "Insufficient Data") {
+                      subtext = "Awaiting initial purchase volume to map cohort signals." + metricsText;
+                    } else if (product.gateway_classification === "Gateway") {
+                      subtext = "High acquisition signal: lowers customer acquisition cost by attracting new shoppers." + metricsText;
+                    } else if (product.gateway_classification === "Consideration") {
+                      subtext = "High consideration/loyalty builder: drives high repeat customer rates and customer value." + metricsText;
+                    } else if (product.gateway_classification === "Hybrid") {
+                      subtext = "Balanced shopper response: shows stable, mixed signals across new and repeat buyers." + metricsText;
                     } else {
-                      const signals = [];
-                      if (product.first_time_buyer_ratio) {
-                        signals.push(`${Math.round(product.first_time_buyer_ratio * 100)}% new buyers`);
-                      }
-                      if (product.repeat_purchase_rate) {
-                        signals.push(`${Math.round(product.repeat_purchase_rate * 100)}% repeat rate`);
-                      }
-                      if (product.order_velocity) {
-                        signals.push(`${Math.round(product.order_velocity)} units/mo velocity`);
-                      }
-                      
-                      const metricsText = signals.length > 0 ? ` (${signals.join(" · ")})` : "";
-                      if (product.gateway_classification === "Insufficient Data") {
-                        subtext = "Awaiting initial purchase volume to map cohort signals." + metricsText;
-                      } else if (product.gateway_classification === "Gateway") {
-                        subtext = "High acquisition signal: lowers customer acquisition cost by attracting new shoppers." + metricsText;
-                      } else if (product.gateway_classification === "Consideration") {
-                        subtext = "High consideration/loyalty builder: drives high repeat customer rates and customer value." + metricsText;
-                      } else if (product.gateway_classification === "Hybrid") {
-                        subtext = "Balanced shopper response: shows stable, mixed signals across new and repeat buyers." + metricsText;
-                      } else {
-                        subtext = "Consistent behavioral performance across core acquisition metrics." + metricsText;
-                      }
+                      subtext = "Consistent behavioral performance across core acquisition metrics." + metricsText;
                     }
 
                     const isGateway = product.gateway_classification === "Gateway";
@@ -555,11 +557,7 @@ function DashboardContent() {
                     return (
                       <div
                         key={product.id}
-                        className={`rounded-xl border p-4 transition-colors ${
-                          product.in_stock && product.should_advertise
-                            ? "bg-surface-raised border-border-subtle hover:border-brand-500/30"
-                            : "bg-surface-raised/30 border-border-subtle/50 opacity-60 grayscale"
-                        }`}
+                        className="rounded-xl border p-4 bg-surface-raised border-border-subtle hover:border-brand-500/30 transition-colors"
                       >
                         <div className="flex items-start gap-3 mb-3">
                           {product.image_url ? (
@@ -580,13 +578,9 @@ function DashboardContent() {
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-semibold text-white truncate">{product.name}</p>
                             <div className="flex items-center flex-wrap gap-2 mt-1">
-                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                                product.in_stock
-                                  ? "bg-success-500/10 text-success-400"
-                                  : "bg-error-500/10 text-error-400"
-                              }`}>
-                                <span className={`w-1 h-1 rounded-full ${product.in_stock ? "bg-success-400" : "bg-error-400"}`} />
-                                {product.in_stock ? "In stock" : "Out of stock"}
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-success-500/10 text-success-400">
+                                <span className="w-1 h-1 rounded-full bg-success-400" />
+                                In stock
                               </span>
                               
                               {product.gateway_classification && (
@@ -618,7 +612,7 @@ function DashboardContent() {
                           <span className="text-white/40">
                             {product.units_sold} sold · {formatCurrency(Math.round(product.revenue), storeData?.store?.currency || "USD")}
                           </span>
-                          {product.in_stock && product.should_advertise ? (
+                          {product.should_advertise ? (
                             <Link
                               href={`/campaigns?` +
                                 `product_name=${encodeURIComponent(product.name)}&` +
@@ -632,8 +626,6 @@ function DashboardContent() {
                             >
                               Create a Campaign Brief →
                             </Link>
-                          ) : !product.in_stock ? (
-                            <span className="text-error-400/70 text-[10px]">Cannot advertise</span>
                           ) : (
                             <span className="text-white/30 text-[10px]">Low conversion probability</span>
                           )}
@@ -642,6 +634,108 @@ function DashboardContent() {
                     );
                   })}
               </div>
+
+              {/* Collapsed Restocking Opportunities Section */}
+              {(() => {
+                const restockingProducts = (storeData?.products || [])
+                  .filter((p: any) => !p.in_stock && p.gateway_classification !== "Insufficient Data")
+                  .sort((a: any, b: any) => b.revenue - a.revenue);
+
+                if (restockingProducts.length === 0) return null;
+
+                return (
+                  <div className="mt-6 border border-border-subtle bg-surface/30 rounded-xl overflow-hidden">
+                    <button
+                      onClick={() => setShowRestocking(!showRestocking)}
+                      className="w-full flex items-center justify-between px-5 py-4 text-left transition-colors hover:bg-white/[0.02] cursor-pointer border-none bg-transparent"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-semibold text-white/75">Restocking Opportunities</h3>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-400">
+                            {restockingProducts.length} items
+                          </span>
+                        </div>
+                        <p className="text-xs text-white/40 mt-1">High acquisition potential products currently out of stock. Replenish inventory to start campaigns.</p>
+                      </div>
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className={`text-white/40 transition-transform duration-200 ${showRestocking ? "rotate-180" : ""}`}
+                      >
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </button>
+
+                    {showRestocking && (
+                      <div className="px-5 pb-5 border-t border-border-subtle/50 pt-4 animate-fade-in">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {restockingProducts.map((product: any) => {
+                            const isGateway = product.gateway_classification === "Gateway";
+                            const isConsideration = product.gateway_classification === "Consideration";
+                            return (
+                              <div
+                                key={product.id}
+                                className="rounded-xl border p-4 bg-surface-raised/50 border-border-subtle/50 opacity-75 grayscale hover:grayscale-0 hover:opacity-100 transition-all duration-300"
+                              >
+                                <div className="flex items-start gap-3 mb-3">
+                                  {product.image_url ? (
+                                    <img
+                                      src={product.image_url}
+                                      alt={product.name}
+                                      className="w-12 h-12 rounded-lg object-cover shrink-0"
+                                    />
+                                  ) : (
+                                    <div className="w-12 h-12 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/20">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                                        <circle cx="8.5" cy="8.5" r="1.5" />
+                                        <polyline points="21 15 16 10 5 21" />
+                                      </svg>
+                                    </div>
+                                  )}
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-semibold text-white truncate">{product.name}</p>
+                                    <div className="flex items-center flex-wrap gap-2 mt-1">
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-error-500/10 text-error-400">
+                                        <span className="w-1 h-1 rounded-full bg-error-400" />
+                                        Out of stock
+                                      </span>
+                                      {product.gateway_classification && (
+                                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${
+                                          isGateway
+                                            ? "bg-brand-500/10 text-brand-400 border-brand-500/20"
+                                            : isConsideration
+                                            ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                            : "bg-purple-500/10 text-purple-400 border-purple-500/20"
+                                        }`}>
+                                          {product.gateway_classification}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-white/40">
+                                    {product.units_sold} sold · {formatCurrency(Math.round(product.revenue), storeData?.store?.currency || "USD")}
+                                  </span>
+                                  <span className="text-amber-400/80 text-[10px] font-medium">Restock opportunity</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Shopify Billing Credit Purchase Section */}

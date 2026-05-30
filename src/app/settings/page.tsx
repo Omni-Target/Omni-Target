@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { SignOutButton } from "@clerk/nextjs";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getUserIntegration } from "@/lib/db";
 import Link from "next/link";
 import { SyncButton } from "@/components/SyncButton";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
@@ -17,12 +17,7 @@ export default async function SettingsPage({
   const params = await searchParams;
   const metaStatus = params.meta as string | undefined;
   
-  const { data: integration } = await 
-    supabaseAdmin
-      .from("user_integrations")
-      .select("*")
-      .eq("clerk_user_id", userId)
-      .single();
+  const integration = await getUserIntegration(userId!);
 
   console.log("Integration data:", JSON.stringify(integration));
 

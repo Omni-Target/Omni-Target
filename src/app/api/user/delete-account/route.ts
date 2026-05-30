@@ -1,5 +1,5 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { deleteUserCampaigns, deleteUserCapiEvents, deleteUserIntegration } from "@/lib/db";
 
 export async function DELETE() {
   const { userId } = await auth();
@@ -11,21 +11,10 @@ export async function DELETE() {
   }
 
   try {
-    // Delete all user data from Supabase
-    await supabaseAdmin
-      .from("campaigns")
-      .delete()
-      .eq("clerk_user_id", userId);
-
-    await supabaseAdmin
-      .from("capi_events")
-      .delete()
-      .eq("clerk_user_id", userId);
-
-    await supabaseAdmin
-      .from("user_integrations")
-      .delete()
-      .eq("clerk_user_id", userId);
+    // Delete all user data from database layer
+    await deleteUserCampaigns(userId);
+    await deleteUserCapiEvents(userId);
+    await deleteUserIntegration(userId);
 
     // Delete from Clerk
     const client = await clerkClient();

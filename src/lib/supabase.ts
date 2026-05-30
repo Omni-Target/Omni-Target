@@ -1,15 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
+// WARNING: Do NOT import from this file.
+// The Supabase client is now instantiated exclusively in /lib/db.ts.
+// Please use the centralized database abstraction layer at '@/lib/db' instead.
 
-// Server-side client (uses service role key)
-// Only use in API routes, never in components
-export const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-// Client-side client (uses anon key)
-// Safe to use in components
-export const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+export * from "./db";

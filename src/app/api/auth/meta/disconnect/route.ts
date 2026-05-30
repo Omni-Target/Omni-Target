@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { updateUserIntegration } from "@/lib/db";
 import { NextResponse } from "next/server";
 
 export async function DELETE() {
@@ -10,16 +10,13 @@ export async function DELETE() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    await supabaseAdmin
-      .from("user_integrations")
-      .update({
-        meta_access_token: null,
-        meta_ad_account_id: null,
-        meta_pixel_id: null,
-        meta_connected_at: null,
-        pixel_health: "unknown",
-      })
-      .eq("clerk_user_id", userId);
+    await updateUserIntegration(userId, {
+      meta_access_token: null,
+      meta_ad_account_id: null,
+      meta_pixel_id: null,
+      meta_connected_at: null,
+      pixel_health: "unknown",
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

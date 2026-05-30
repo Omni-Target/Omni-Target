@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getUserIntegration, updateUserIntegration } from "@/lib/db";
 import { fetchShopifyStoreData } from "@/lib/connectors/shopify";
 import { getValidShopifyToken } from "@/lib/shopify-token";
 
@@ -19,11 +19,7 @@ export async function GET() {
   console.log("Store data request from userId:", userId);
 
   // Get credits info regardless of token status
-  const { data: creditsRow } = await supabaseAdmin
-    .from("user_integrations")
-    .select("credits_balance, credits_unlimited_until")
-    .eq("clerk_user_id", userId)
-    .single();
+  const creditsRow = await getUserIntegration(userId);
 
   // Get a valid (auto-refreshed) Shopify token
   const tokenResult = await getValidShopifyToken(userId);
@@ -50,20 +46,15 @@ export async function GET() {
     });
 
     // Save snapshot to Supabase
-    supabaseAdmin
-      .from("user_integrations")
-      .update({ 
+    try {
+      await updateUserIntegration(userId!, {
         store_snapshot: storeData,
         store_snapshot_at: new Date().toISOString()
-      })
-      .eq("clerk_user_id", userId!)
-      .then(({ error }) => {
-        if (error) {
-          console.error("Snapshot save failed:", error);
-        } else {
-          console.log("Snapshot saved successfully");
-        }
       });
+      console.log("Snapshot saved successfully");
+    } catch (error) {
+      console.error("Snapshot save failed:", error);
+    }
 
     return Response.json({
       connected: true,

@@ -47,6 +47,7 @@ export interface StoreData {
     repeat_customer_rate: number;
     revenue_last_30_days: number;
     orders_last_30_days: number;
+    oldest_order_date?: string;
   };
   products: StoreProduct[];
   customers: {

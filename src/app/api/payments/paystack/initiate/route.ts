@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { createPayment } from "@/lib/db";
 import { getPackById } from "@/lib/credit-packs";
 
 export async function POST(request: Request) {
@@ -21,10 +21,10 @@ export async function POST(request: Request) {
     );
   }
 
-  // Create pending payment record
-  const { data: payment, error } = await supabaseAdmin
-    .from("payments")
-    .insert({
+  let payment;
+  try {
+    // Create pending payment record
+    payment = await createPayment({
       clerk_user_id: userId,
       provider: "paystack",
       pack: packId,
@@ -33,11 +33,8 @@ export async function POST(request: Request) {
       credits_granted: pack.credits,
       unlimited_days: pack.unlimited_days,
       status: "pending",
-    })
-    .select()
-    .single();
-
-  if (error) {
+    });
+  } catch (error) {
     console.error("Payment insert error:", error);
     return Response.json(
       { error: "Failed to create payment" },
