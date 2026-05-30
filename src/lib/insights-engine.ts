@@ -98,6 +98,12 @@ export interface TargetingProfile {
     behaviours: string[];
   };
   timing: TimingOutput;
+  optimization_event: {
+    event: string;
+    reasoning: string;
+    target_weekly: number;
+    upgrade_milestone: string;
+  };
 }
 
 /**
@@ -106,7 +112,9 @@ export interface TargetingProfile {
  * to determine locations, demographics, and audience interests/behaviours.
  */
 async function generateTargetingProfile(
-  storeData: StoreData
+  storeData: StoreData,
+  adSets: number,
+  dailyBudget: number
 ): Promise<TargetingProfile> {
   const storeCurrency = storeData.store?.currency || "USD";
   
@@ -182,6 +190,21 @@ Instructions for Timing & Launches (Dynamic Campaign Launches):
 - Generate dynamic, AI-inferred timing and campaign launch date recommendation. Write a highly actionable 1-sentence launch recommendation (e.g., "Launch Sunday evening to capture the strong Monday peak buying momentum").
 - Write a 1-sentence reasoning explaining this launch schedule based on the peak hour/day trends.
 - Populate "peak_days" with the primary peak day(s) detected or recommended.
+
+Instructions for Optimization Event (Critical — Do Not Hardcode):
+- The core question is: "Can Meta get enough optimization events per week to exit the learning phase given this store's budget and order velocity?"
+- Use this logic internally to reason:
+  - weeklyOrderVelocity = (monthly orders / 4)
+  - estimatedWeeklyEventsAtBudget = weeklyOrderVelocity * (dailyBudget / avgOrderValue) * 7
+- Walk down the event hierarchy (Purchase → InitiateCheckout → AddToCart → AddToWishlist → ViewContent) and select the highest event where estimatedWeeklyEventsAtBudget is likely to generate at least 10 events per week (10 is the realistic minimum for a small brand to see meaningful optimization signal).
+- If the store has any purchase history at all, always try Purchase first before downgrading — a store with 8 monthly orders running a focused high budget can still generate purchase signal.
+- Provide a plain English explanation of why this event makes sense to the merchant specifically stating what signal you expect and what to watch for.
+- Also suggest a milestone to upgrade to the next level.
+
+Campaign Context:
+- Monthly Orders: ${storeData.orders.orders_last_30_days || 0}
+- Recommended Ad Sets: ${adSets}
+- Daily Budget per Ad Set: ${dailyBudget} ${storeCurrency}
 `;
 
   try {
@@ -237,9 +260,19 @@ Instructions for Timing & Launches (Dynamic Campaign Launches):
                   reasoning: { type: "string", description: "1-sentence explanation of why this launch timing works best." }
                 },
                 required: ["peak_days", "launch_recommendation", "reasoning"]
+              },
+              optimization_event: {
+                type: "object",
+                properties: {
+                  event: { type: "string", description: "The recommended Meta Ads optimization event (e.g. Purchase, AddToCart, ViewContent)." },
+                  reasoning: { type: "string", description: "Plain english explanation of why this event was chosen given budget and velocity." },
+                  target_weekly: { type: "number", description: "The target number of events per week expected or required." },
+                  upgrade_milestone: { type: "string", description: "A milestone suggestion for when to upgrade to a deeper funnel event." }
+                },
+                required: ["event", "reasoning", "target_weekly", "upgrade_milestone"]
               }
             },
-            required: ["locations", "demographics", "audiences", "timing"]
+            required: ["locations", "demographics", "audiences", "timing", "optimization_event"]
           }
         }
       ],
@@ -305,6 +338,12 @@ Instructions for Timing & Launches (Dynamic Campaign Launches):
       reasoning: storeData.orders.peak_days.length > 0
         ? `Order data shows a clear conversion lift on ${storeData.orders.peak_days.join(", ")}.`
         : "Thursday launches build optimal momentum for weekend e-commerce traffic."
+    },
+    optimization_event: {
+      event: "Add to Cart",
+      reasoning: "A safe fallback event while the AI evaluates your full data.",
+      target_weekly: 10,
+      upgrade_milestone: "Switch to Purchase optimization once you get 10+ orders."
     }
   };
 }
@@ -497,22 +536,22 @@ export async function generateRecommendations(
         },
         strategies: [
           {
-            label: "Performance",
-            daily: Math.round(20 * exchangeRate),
-            total_daily: Math.round(20 * exchangeRate) * 2,
-            description: "Default performance spend."
+            label: "Dip Your Toe",
+            daily: Math.round(15 * exchangeRate * 0.7),
+            total_daily: Math.round(15 * exchangeRate * 0.7) * 2,
+            description: "Low risk, slow learning. Good if you're testing for the first time."
           },
           {
-            label: "Balanced",
-            daily: Math.round(15 * exchangeRate),
-            total_daily: Math.round(15 * exchangeRate) * 2,
-            description: "Default balanced spend."
+            label: "Sweet Spot",
+            daily: Math.round(15 * exchangeRate * 1.0),
+            total_daily: Math.round(15 * exchangeRate * 1.0) * 2,
+            description: "Our recommendation. Enough budget for Meta to learn without burning cash."
           },
           {
-            label: "Conservative",
-            daily: Math.round(10 * exchangeRate),
-            total_daily: Math.round(10 * exchangeRate) * 2,
-            description: "Default conservative spend."
+            label: "Full Send",
+            daily: Math.round(15 * exchangeRate * 1.4),
+            total_daily: Math.round(15 * exchangeRate * 1.4) * 2,
+            description: "Faster results but higher daily spend. Best when you already know your creative works."
           }
         ]
       },
@@ -552,21 +591,6 @@ export async function generateRecommendations(
     }
   }
 
-  // Run unified AI single-pass call
-  const profile = await generateTargetingProfile(storeData);
-
-  // --- TARGETING ---
-  const gender = profile.demographics.gender;
-  const gender_reasoning = profile.demographics.gender_reasoning;
-  const finalAgeMin = profile.demographics.age_min || 25;
-  const finalAgeMax = profile.demographics.age_max || 44;
-  const finalAgeReasoning = profile.demographics.age_reasoning || "Standard e-commerce age targeting (25-44) is highly recommended for early validation campaigns.";
-  
-  const locations = profile.locations;
-  const interests = profile.audiences.interests;
-  const behaviours = profile.audiences.behaviours;
-  const interest_reasoning = profile.audiences.interest_reasoning;
-
   // ── Dynamic Ad Sets: based on data maturity, not hardcoded ──
   const monthlyOrders = storeData.orders.orders_last_30_days || 0;
   let adSets: number;
@@ -581,30 +605,6 @@ export async function generateRecommendations(
   } else {
     adSets = 3;
     adSetReasoning = `With ${monthlyOrders} monthly orders, you have enough purchase volume to run meaningful split tests across 3 ad sets.`;
-  }
-
-  // ── Optimization Event: based on orders-per-adset-per-week ──
-  const weeklyOrdersPerAdSet = monthlyOrders / 4 / adSets; // monthly -> weekly, then split by ad sets
-  let optEvent: string;
-  let optReasoning: string;
-  let optTarget: number;
-  let optUpgradeMilestone: string;
-
-  if (monthlyOrders < 10) {
-    optEvent = "View Content";
-    optReasoning = `Your ${monthlyOrders} orders total means Meta needs top-funnel signals first — View Content gives the algorithm enough events to exit learning phase.`;
-    optTarget = 100;
-    optUpgradeMilestone = "Once you hit 10+ monthly orders, switch to Add to Cart optimization.";
-  } else if (weeklyOrdersPerAdSet < 50) {
-    optEvent = "Add to Cart";
-    optReasoning = `Your ${monthlyOrders} monthly orders across ${adSets} ad set${adSets > 1 ? "s" : ""} gives ~${Math.round(weeklyOrdersPerAdSet)} events/week — not enough for Purchase optimization to exit learning phase.`;
-    optTarget = 50;
-    optUpgradeMilestone = `Once you reach ~${adSets * 50 * 4} monthly orders (${adSets * 50}/week per ad set), switch to Purchase optimization.`;
-  } else {
-    optEvent = "Purchase";
-    optReasoning = `Your ${monthlyOrders} monthly orders across ${adSets} ad set${adSets > 1 ? "s" : ""} gives ~${Math.round(weeklyOrdersPerAdSet)} purchase events/week — enough for Meta to optimize for real buyers.`;
-    optTarget = 50;
-    optUpgradeMilestone = "You're already at Purchase optimization — keep your monthly order volume above this threshold to stay here.";
   }
 
   // ── BUDGET CALCULATION (USD tiered revenue ratio with AOV liquidity guardrail) ──
@@ -656,6 +656,22 @@ export async function generateRecommendations(
   const recommendedDailyLocal = finalDailyPerAdSetUSD * exchangeRate;
   const recommendedDaily = Math.round(recommendedDailyLocal);
 
+
+  // Run unified AI single-pass call
+  const profile = await generateTargetingProfile(storeData, adSets, recommendedDaily);
+
+  // --- TARGETING ---
+  const gender = profile.demographics.gender;
+  const gender_reasoning = profile.demographics.gender_reasoning;
+  const finalAgeMin = profile.demographics.age_min || 25;
+  const finalAgeMax = profile.demographics.age_max || 44;
+  const finalAgeReasoning = profile.demographics.age_reasoning || "Standard e-commerce age targeting (25-44) is highly recommended for early validation campaigns.";
+  
+  const locations = profile.locations;
+  const interests = profile.audiences.interests;
+  const behaviours = profile.audiences.behaviours;
+  const interest_reasoning = profile.audiences.interest_reasoning;
+
   // Goal multipliers (applied client-side, stored for reference)
   const goalMultipliers: Record<string, number> = {
     "Drive Website Sales": 1.0,
@@ -667,22 +683,22 @@ export async function generateRecommendations(
   // ── Strategies ──
   const strategies = [
     {
-      label: "Performance",
-      daily: Math.round(finalDailyPerAdSetUSD * 1.3 * exchangeRate),
-      total_daily: Math.round(finalDailyPerAdSetUSD * 1.3 * exchangeRate) * adSets,
-      description: "Aggressive test spend to maximize data volume. Recommended if you want faster optimization."
+      label: "Dip Your Toe",
+      daily: Math.round(finalDailyPerAdSetUSD * 0.7 * exchangeRate),
+      total_daily: Math.round(finalDailyPerAdSetUSD * 0.7 * exchangeRate) * adSets,
+      description: "Low risk, slow learning. Good if you're testing for the first time."
     },
     {
-      label: "Balanced",
+      label: "Sweet Spot",
       daily: recommendedDaily,
       total_daily: recommendedDaily * adSets,
-      description: "Optimal test spend designed for sustainable pixel learning and early validation."
+      description: "Our recommendation. Enough budget for Meta to learn without burning cash."
     },
     {
-      label: "Conservative",
-      daily: Math.round(Math.max(finalDailyPerAdSetUSD * 0.7, aovUSD * 0.5) * exchangeRate),
-      total_daily: Math.round(Math.max(finalDailyPerAdSetUSD * 0.7, aovUSD * 0.5) * exchangeRate) * adSets,
-      description: "Low-risk testing strategy. Keeps budget as low as possible without starving the ad delivery."
+      label: "Full Send",
+      daily: Math.round(finalDailyPerAdSetUSD * 1.4 * exchangeRate),
+      total_daily: Math.round(finalDailyPerAdSetUSD * 1.4 * exchangeRate) * adSets,
+      description: "Faster results but higher daily spend. Best when you already know your creative works."
     }
   ];
 
@@ -841,10 +857,10 @@ export async function generateRecommendations(
       tier: budgetTier,
       ad_sets: adSets,
       optimization_event: {
-        event: optEvent,
-        reasoning: optReasoning,
-        target_weekly: optTarget,
-        upgrade_milestone: optUpgradeMilestone,
+        event: profile.optimization_event.event,
+        reasoning: profile.optimization_event.reasoning,
+        target_weekly: profile.optimization_event.target_weekly,
+        upgrade_milestone: profile.optimization_event.upgrade_milestone,
       },
       ad_set_reasoning: adSetReasoning,
       breakdown: {

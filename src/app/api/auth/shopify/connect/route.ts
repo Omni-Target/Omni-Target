@@ -39,6 +39,7 @@ export async function GET(request: Request) {
 
   const scopes = [
     "read_orders",
+    "read_all_orders",
     "read_customers",
     "read_products",
     "read_product_listings",

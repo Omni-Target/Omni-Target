@@ -107,7 +107,7 @@ function CampaignsContent() {
   const [aiInsights, setAiInsights] = useState<any>(null);
   const [loadingAiInsights, setLoadingAiInsights] = useState(false);
   const [gatewayInsight, setGatewayInsight] = useState<any>(null);
-  const [selectedStrategyIndex, setSelectedStrategyIndex] = useState(1); // 0=Performance, 1=Balanced, 2=Conservative
+  const [selectedStrategyIndex, setSelectedStrategyIndex] = useState(1); // 0=Dip Your Toe, 1=Sweet Spot, 2=Full Send
   const [selectedDuration, setSelectedDuration] = useState<7 | 14 | 30>(14);
 
   const { credits, isUnlimited } = useCredits();
@@ -1279,13 +1279,16 @@ function CampaignsContent() {
                         <button
                           key={s.label}
                           onClick={() => setSelectedStrategyIndex(idx)}
-                          className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all duration-300 ${
+                          className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all duration-300 relative ${
                             selectedStrategyIndex === idx 
                               ? "bg-brand-500/10 border-brand-500/40 text-white" 
                               : "bg-white/[0.02] border-white/5 text-white/40 hover:bg-white/[0.05]"
                           }`}
                         >
-                          <span className="text-[10px] font-bold uppercase tracking-tighter text-center">{s.label.split(" ")[0]}</span>
+                          {s.label === "Sweet Spot" && (
+                            <div className="absolute -top-2 bg-brand-500 text-black text-[8px] font-black uppercase px-2 py-0.5 rounded-full shadow-lg border border-white/20 whitespace-nowrap z-10">RECOMMENDED</div>
+                          )}
+                          <span className="text-[10px] font-bold uppercase tracking-tighter text-center">{s.label}</span>
                           <span className="text-xs font-bold mt-1">{formatCurrency(s.total_daily, curr, aiInsights.budget.currency_symbol)}</span>
                         </button>
                       ))}
