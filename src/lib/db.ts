@@ -164,10 +164,10 @@ export async function updatePayment(paymentId: string, data: Record<string, any>
  * Query user integration directly using raw supabase select structure if needed,
  * but safely abstracted.
  */
-export async function queryUserIntegrationSelect(userId: string, selectQuery: string) {
+export async function queryUserIntegrationSelect(userId: string, selectQuery: string): Promise<any> {
   const { data, error } = await supabaseAdmin
     .from("user_integrations")
-    .select(selectQuery)
+    .select(selectQuery as any)
     .eq("clerk_user_id", userId)
     .maybeSingle();
 
@@ -175,7 +175,7 @@ export async function queryUserIntegrationSelect(userId: string, selectQuery: st
     console.error("Error in queryUserIntegrationSelect:", error);
     return null;
   }
-  return data;
+  return data as any;
 }
 
 /**
@@ -271,10 +271,10 @@ export async function detectDbColumns() {
 /**
  * Execute dynamic select queries on user_integrations table safely.
  */
-export async function selectIntegrationFieldsByShop(shop: string, selectFields: string, queryField: string) {
+export async function selectIntegrationFieldsByShop(shop: string, selectFields: string, queryField: string): Promise<any> {
   const { data, error } = await supabaseAdmin
     .from("user_integrations")
-    .select(`clerk_user_id, ${selectFields}`)
+    .select(`clerk_user_id, ${selectFields}` as any)
     .eq(queryField, shop)
     .maybeSingle();
 
@@ -282,7 +282,7 @@ export async function selectIntegrationFieldsByShop(shop: string, selectFields: 
     console.error("Error in selectIntegrationFieldsByShop:", error);
     return null;
   }
-  return data;
+  return data as any;
 }
 
 /**
