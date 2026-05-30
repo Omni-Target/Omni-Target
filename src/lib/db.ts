@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 // Supabase client should only be instantiated inside /lib/db.ts and nowhere else in the codebase.
-const supabaseAdmin = createClient(
+export const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
@@ -208,6 +208,8 @@ let cachedColumns: {
   hasAccessToken: boolean;
   hasCredits: boolean;
   hasFreeCreditUsed: boolean;
+  hasRefreshToken: boolean;
+  hasTokenExpiresAt: boolean;
 } | null = null;
 
 export async function detectDbColumns() {
@@ -216,7 +218,7 @@ export async function detectDbColumns() {
   try {
     const { error } = await supabaseAdmin
       .from("user_integrations")
-      .select("shop_domain, access_token, credits, free_credit_used")
+      .select("shop_domain, access_token, credits, free_credit_used, refresh_token, token_expires_at")
       .limit(1);
 
     if (!error) {
@@ -225,6 +227,8 @@ export async function detectDbColumns() {
         hasAccessToken: true,
         hasCredits: true,
         hasFreeCreditUsed: true,
+        hasRefreshToken: true,
+        hasTokenExpiresAt: true,
       };
       return cachedColumns;
     }
@@ -235,26 +239,34 @@ export async function detectDbColumns() {
         hasAccessToken: true,
         hasCredits: true,
         hasFreeCreditUsed: true,
+        hasRefreshToken: true,
+        hasTokenExpiresAt: true,
       };
     }
 
-    const [shopRes, tokenRes, creditsRes, freeRes] = await Promise.all([
+    const [shopRes, tokenRes, creditsRes, freeRes, refreshRes, expiresRes] = await Promise.all([
       supabaseAdmin.from("user_integrations").select("shop_domain").limit(1),
       supabaseAdmin.from("user_integrations").select("access_token").limit(1),
       supabaseAdmin.from("user_integrations").select("credits").limit(1),
       supabaseAdmin.from("user_integrations").select("free_credit_used").limit(1),
+      supabaseAdmin.from("user_integrations").select("refresh_token").limit(1),
+      supabaseAdmin.from("user_integrations").select("token_expires_at").limit(1),
     ]);
 
     const hasShopDomain = !shopRes.error || shopRes.error.code !== "42703";
     const hasAccessToken = !tokenRes.error || tokenRes.error.code !== "42703";
     const hasCredits = !creditsRes.error || creditsRes.error.code !== "42703";
     const hasFreeCreditUsed = !freeRes.error || freeRes.error.code !== "42703";
+    const hasRefreshToken = !refreshRes.error || refreshRes.error.code !== "42703";
+    const hasTokenExpiresAt = !expiresRes.error || expiresRes.error.code !== "42703";
 
     cachedColumns = {
       hasShopDomain,
       hasAccessToken,
       hasCredits,
       hasFreeCreditUsed,
+      hasRefreshToken,
+      hasTokenExpiresAt,
     };
     return cachedColumns;
   } catch (err) {
@@ -264,6 +276,8 @@ export async function detectDbColumns() {
       hasAccessToken: true,
       hasCredits: true,
       hasFreeCreditUsed: true,
+      hasRefreshToken: true,
+      hasTokenExpiresAt: true,
     };
   }
 }

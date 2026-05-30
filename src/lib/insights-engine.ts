@@ -157,8 +157,11 @@ Instructions for Reasoning & Messaging:
 
 Instructions for Locations:
 - Include the store's top buyers' cities from the data, but also recommend 1-2 expansion hubs in their primary market if appropriate.
-- Mark each as source: "from_data" or "recommended".
+- For Nigerian locations: use city-level targeting only (Lagos, Abuja, Port Harcourt, Enugu) — never break down to neighbourhoods or areas, and never use "Nigeria" as a broad country target.
+- For international locations: always use specific cities instead of broad countries — e.g. "New York, NY" or "Houston, TX", not "United States".
 - Consolidate minor sub-cities into their parent metropolitan city.
+- Keep the note field per location explaining whether it's from actual order data or recommended based on purchasing power for the price point.
+- Mark each as source: "from_data" or "recommended".
 
 Instructions for Demographics (Dynamic Age & Gender Selection):
 - Determine the best target gender (all, female, male) and age range (min/max) dynamically based on the price points, styling, and design of the products in this store.

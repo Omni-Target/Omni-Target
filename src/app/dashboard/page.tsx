@@ -516,7 +516,7 @@ function DashboardContent() {
             <div className="mb-8 animate-fade-in-up-delay-2" id="advertise-now">
               <div className="mb-4">
                 <p className="text-xs text-white/40 uppercase tracking-widest font-semibold mb-1">Pre-Spend Intelligence</p>
-                <p className="text-sm text-white/60">High-signal products mapped by behavioral velocity and acquisition potential.</p>
+                <p className="text-sm text-white/60">Best products to advertise right now</p>
               </div>
 
               {/* Actionable in-stock products list */}
@@ -527,28 +527,28 @@ function DashboardContent() {
                   .slice(0, 6)
                   .map((product: any, index: number) => {
                     let subtext = "";
-                    const signals = [];
-                    if (product.first_time_buyer_ratio) {
-                      signals.push(`${Math.round(product.first_time_buyer_ratio * 100)}% new buyers`);
-                    }
-                    if (product.repeat_purchase_rate) {
-                      signals.push(`${Math.round(product.repeat_purchase_rate * 100)}% repeat rate`);
-                    }
-                    if (product.order_velocity) {
-                      signals.push(`${Math.round(product.order_velocity)} units/mo velocity`);
-                    }
+                    let primaryMetric = "";
                     
-                    const metricsText = signals.length > 0 ? ` (${signals.join(" · ")})` : "";
+                    if (product.gateway_classification === "Gateway" && product.first_time_buyer_ratio) {
+                      primaryMetric = `${Math.round(product.first_time_buyer_ratio * 100)}% new buyers`;
+                    } else if (product.gateway_classification === "Consideration" && product.repeat_purchase_rate) {
+                      primaryMetric = `${Math.round(product.repeat_purchase_rate * 100)}% repeat rate`;
+                    } else if (product.order_velocity) {
+                      primaryMetric = `${Math.round(product.order_velocity)} units/mo velocity`;
+                    } else if (product.first_time_buyer_ratio) {
+                      primaryMetric = `${Math.round(product.first_time_buyer_ratio * 100)}% new buyers`;
+                    }
+
                     if (product.gateway_classification === "Insufficient Data") {
-                      subtext = "Awaiting initial purchase volume to map cohort signals." + metricsText;
+                      subtext = "Too early to classify — keep selling";
                     } else if (product.gateway_classification === "Gateway") {
-                      subtext = "High acquisition signal: lowers customer acquisition cost by attracting new shoppers." + metricsText;
+                      subtext = "Great for cold traffic — most buyers are first-timers";
                     } else if (product.gateway_classification === "Consideration") {
-                      subtext = "High consideration/loyalty builder: drives high repeat customer rates and customer value." + metricsText;
+                      subtext = "High consideration builder — drives high repeat purchase rates";
                     } else if (product.gateway_classification === "Hybrid") {
-                      subtext = "Balanced shopper response: shows stable, mixed signals across new and repeat buyers." + metricsText;
+                      subtext = "Balanced shopper response — mixed signals across new and repeat buyers";
                     } else {
-                      subtext = "Consistent behavioral performance across core acquisition metrics." + metricsText;
+                      subtext = "Consistent behavioral performance across core acquisition metrics";
                     }
 
                     const isGateway = product.gateway_classification === "Gateway";
@@ -594,7 +594,7 @@ function DashboardContent() {
                                     : "bg-purple-500/10 text-purple-400 border-purple-500/20"
                                 }`}>
                                   {product.gateway_classification === "Insufficient Data"
-                                    ? "Insufficient data — more orders needed for classification"
+                                    ? "Needs more sales data"
                                     : product.gateway_classification}
                                 </span>
                               )}
@@ -602,9 +602,10 @@ function DashboardContent() {
                           </div>
                         </div>
 
-                        {subtext && (
+                        {(subtext || primaryMetric) && (
                           <div className="mb-3 px-2 py-1.5 bg-white/5 rounded-md">
-                            <p className="text-[11px] text-white/70 italic">{subtext}</p>
+                            {subtext && <p className="text-[11px] text-white/70 italic">{subtext}</p>}
+                            {primaryMetric && <p className="text-[11px] text-white mt-1 font-medium">{primaryMetric}</p>}
                           </div>
                         )}
 
@@ -638,7 +639,7 @@ function DashboardContent() {
               {/* Collapsed Restocking Opportunities Section */}
               {(() => {
                 const restockingProducts = (storeData?.products || [])
-                  .filter((p: any) => !p.in_stock && p.gateway_classification !== "Insufficient Data")
+                  .filter((p: any) => !p.in_stock && p.units_sold > 0)
                   .sort((a: any, b: any) => b.revenue - a.revenue);
 
                 if (restockingProducts.length === 0) return null;
@@ -656,7 +657,7 @@ function DashboardContent() {
                             {restockingProducts.length} items
                           </span>
                         </div>
-                        <p className="text-xs text-white/40 mt-1">High acquisition potential products currently out of stock. Replenish inventory to start campaigns.</p>
+                        <p className="text-xs text-white/40 mt-1">Restock these before running ads</p>
                       </div>
                       <svg
                         width="16"

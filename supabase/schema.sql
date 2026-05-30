@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS user_integrations (
   shopify_store_url TEXT,
   shopify_access_token TEXT,
   shopify_webhook_id TEXT,
+  shopify_refresh_token TEXT,
+  shopify_token_expires_at TIMESTAMPTZ,
+  refresh_token TEXT,
+  token_expires_at TIMESTAMPTZ,
   
   -- Meta
   meta_access_token TEXT,

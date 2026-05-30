@@ -20,6 +20,7 @@ const isPublicRoute = createRouteMatcher([
   // compliance failures during the 'Run' validation check.
   '/api/webhooks/privacy',
   '/api/webhooks/gdpr',
+  '/api/shopify/webhook',
 ])
 
 const isOnboardingRoute = createRouteMatcher([

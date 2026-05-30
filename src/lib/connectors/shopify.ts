@@ -108,7 +108,7 @@ async function shopifyGetPaginated<T>(
   accessToken: string,
   initialEndpoint: string,
   dataKey: string,
-  maxPages = 8
+  maxPages = 200 // Increased to 200 pages (50,000 records) for full lifetime ingestion
 ): Promise<T[]> {
   let results: T[] = [];
   let url = `https://${shopDomain}/admin/api/${API_VERSION}/${initialEndpoint}`;
@@ -158,15 +158,11 @@ export async function fetchShopifyStoreData(
 
   const shop = shopData?.shop;
 
-  // STEP 2 — Fetch last 365 days of orders with pagination support to fetch all history
-  const oneYearAgo = new Date();
-  oneYearAgo.setDate(oneYearAgo.getDate() - 365);
-  const createdAtMin = oneYearAgo.toISOString();
-
+  // STEP 2 — Fetch true lifetime orders (removed 365-day truncation and 2k pagination cap)
   const orders = await shopifyGetPaginated<ShopifyOrder>(
     shopDomain,
     accessToken,
-    `orders.json?status=any&created_at_min=${createdAtMin}&limit=250&fields=id,total_price,created_at,customer,billing_address,shipping_address,financial_status,source_name,line_items`,
+    `orders.json?status=any&limit=250&fields=id,total_price,created_at,customer,billing_address,shipping_address,financial_status,source_name,line_items`,
     "orders"
   );
 
