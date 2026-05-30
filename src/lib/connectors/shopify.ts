@@ -91,6 +91,60 @@ async function shopifyGet<T>(
   }
 }
 
+function parseNextPageUrl(linkHeader: string | null): string | null {
+  if (!linkHeader) return null;
+  const links = linkHeader.split(",");
+  for (const link of links) {
+    const match = link.match(/<([^>]+)>;\s*rel="next"/);
+    if (match) {
+      return match[1];
+    }
+  }
+  return null;
+}
+
+async function shopifyGetPaginated<T>(
+  shopDomain: string,
+  accessToken: string,
+  initialEndpoint: string,
+  dataKey: string,
+  maxPages = 8
+): Promise<T[]> {
+  let results: T[] = [];
+  let url = `https://${shopDomain}/admin/api/${API_VERSION}/${initialEndpoint}`;
+  let pagesFetched = 0;
+
+  while (url && pagesFetched < maxPages) {
+    try {
+      const res = await fetchWithTimeout(url, {
+        headers: {
+          "X-Shopify-Access-Token": accessToken,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!res.ok) {
+        console.error(`Shopify API error: ${res.status} ${res.statusText} for URL ${url}`);
+        break;
+      }
+
+      const body = await res.json() as any;
+      const items = body[dataKey] || [];
+      results = results.concat(items);
+      pagesFetched++;
+
+      // Check for next page
+      const linkHeader = res.headers.get("Link");
+      url = parseNextPageUrl(linkHeader) || "";
+    } catch (error) {
+      console.error(`Shopify fetch error for URL ${url}:`, error);
+      break;
+    }
+  }
+
+  return results;
+}
+
 export async function fetchShopifyStoreData(
   shopDomain: string,
   accessToken: string
@@ -104,27 +158,25 @@ export async function fetchShopifyStoreData(
 
   const shop = shopData?.shop;
 
-  // STEP 2 — Fetch last 90 days of orders
-  const ninetyDaysAgo = new Date();
-  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-  const createdAtMin = ninetyDaysAgo.toISOString();
+  // STEP 2 — Fetch last 365 days of orders with pagination support to fetch all history
+  const oneYearAgo = new Date();
+  oneYearAgo.setDate(oneYearAgo.getDate() - 365);
+  const createdAtMin = oneYearAgo.toISOString();
 
-  const ordersData = await shopifyGet<{ orders: ShopifyOrder[] }>(
+  const orders = await shopifyGetPaginated<ShopifyOrder>(
     shopDomain,
     accessToken,
-    `orders.json?status=any&created_at_min=${createdAtMin}&limit=250&fields=id,total_price,created_at,customer,billing_address,shipping_address,financial_status,source_name,line_items`
+    `orders.json?status=any&created_at_min=${createdAtMin}&limit=250&fields=id,total_price,created_at,customer,billing_address,shipping_address,financial_status,source_name,line_items`,
+    "orders"
   );
 
-  const orders = ordersData?.orders || [];
-
-  // STEP 3 — Fetch products
-  const productsData = await shopifyGet<{ products: ShopifyProduct[] }>(
+  // STEP 3 — Fetch all active products using pagination
+  const rawProducts = await shopifyGetPaginated<ShopifyProduct>(
     shopDomain,
     accessToken,
-    "products.json?limit=250&status=active&fields=id,title,body_html,variants,images,product_type,vendor,tags"
+    "products.json?limit=250&status=active&fields=id,title,body_html,variants,images,product_type,vendor,tags",
+    "products"
   );
-
-  const rawProducts = productsData?.products || [];
 
   // STEP 4 — Process orders into insights
   const thirtyDaysAgoForMetrics = new Date();

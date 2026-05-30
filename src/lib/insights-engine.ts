@@ -115,10 +115,20 @@ async function generateTargetingProfile(
     .map((l) => `${l.city} (${l.percentage}%)`)
     .join(", ");
 
-  // Take top 25 products
+  // Take top 25 products enriched with category, tags, and revenue context
   const productSample = storeData.products
     .slice(0, 25)
-    .map((p) => `${p.name} (price: ${p.price} ${storeCurrency})`)
+    .map((p) => {
+      const tags = (p.tags || []).slice(0, 5).join(", ");
+      const type = p.product_type || p.collection || "";
+      return [
+        `- "${p.name}"`,
+        `price: ${p.price} ${storeCurrency}`,
+        type ? `category: ${type}` : null,
+        tags ? `tags: ${tags}` : null,
+        p.units_sold > 0 ? `units sold: ${p.units_sold}` : null,
+      ].filter(Boolean).join(" | ");
+    })
     .join("\n");
 
   const prompt = `You are a world-class Meta Ads media buyer and marketing consultant advising a busy fashion brand founder.
@@ -131,10 +141,10 @@ Store Details:
 - Currency: ${storeCurrency}
 - Rolling 60-day Average Order Value (AOV): ${Math.round(storeData.orders.average_order_value)} ${storeCurrency}
 
-Top Buyer Locations (last 90 days):
+Top Buyer Locations (from order history):
 ${consolidatedLocations || "None recorded yet"}
 
-Top Products (up to 25):
+Top Products (up to 25, with category, tags, and sales):
 ${productSample || "None available"}
 
 Instructions for Reasoning & Messaging:
@@ -155,10 +165,13 @@ Instructions for Demographics (Dynamic Age & Gender Selection):
 - Do NOT hardcode or default to generic ranges (like 25-44) unless the store data and product catalog actually dictate it.
 - Higher AOV/price points should target older age ranges (e.g. 30-55) with more purchasing power; youth or streetwear brands should target younger age ranges (e.g. 18-34). Ensure min age is at least 18.
 
-Instructions for Audiences (Dynamic Meta Ad Targets):
-- Recommend 4-6 highly specific, dynamic, and high-converting Meta Ads interest targets. They MUST NOT be generic words. They must be exact, standard Meta Ads interests that actually exist and perform extremely well for fashion/e-commerce brands selling similar products (e.g. brand names, style categories, relevant publications, competitor brands).
-- Also recommend 1-2 high-converting Meta behavioral targets (e.g. "Engaged Shoppers").
-- Do not make generic guesses. Use the store's products, AOV, and price points to dynamically choose interests that match the target audience's purchasing power (e.g., for premium products with higher AOV, recommend luxury and upscale interest targets; for affordable/fast-fashion, recommend mass-market fashion interests). Always include "Online shopping" and "Fashion".
+Instructions for Audiences (Critical — Data-Derived Only):
+- Always include "Online Shopping" as one of the interests — it is a universal Meta behavioral signal for e-commerce.
+- Recommend 3-5 additional highly specific Meta Ads interest targets derived DIRECTLY from the store's actual product names, categories, and tags listed above.
+- Do NOT fill the remaining slots with generic fashion interests like "Fashion", "ASOS", or "Zara" unless the store's products specifically compete with those brands.
+- Each additional interest must be a real, targetable Meta Ads interest. Derive it from the specific product styles, fabric types, design aesthetics, cultural references, or brand tier visible in the product list.
+- Also always include "Engaged Shoppers" and "Online Shoppers" as baseline Meta behavioural targets — these are non-negotiable for any e-commerce campaign. Then recommend 1-2 additional behaviours that are specific to the nature of this store's products and target audience (e.g. "Luxury Goods" buyers, "Frequent Travellers", "Health & Wellness" enthusiasts — only if the store data actually supports it).
+- interest_reasoning should reference 1-2 actual product names or tags from the list to justify the store-specific choices.
 
 Instructions for Timing & Launches (Dynamic Campaign Launches):
 - Analyze the store's peak days of orders: [${storeData.orders.peak_days.join(", ") || "None recorded yet"}].
@@ -236,9 +249,15 @@ Instructions for Timing & Launches (Dynamic Campaign Launches):
     const toolUseBlock = response.content.find((c) => c.type === "tool_use");
     if (toolUseBlock && toolUseBlock.type === "tool_use") {
       const profile = toolUseBlock.input as any;
+      // Log raw AI output for debugging targeting quality
+      console.log("[AI targeting profile raw output]", JSON.stringify(profile, null, 2));
       if (profile && profile.locations && profile.demographics && profile.audiences && profile.timing) {
         return profile as TargetingProfile;
+      } else {
+        console.warn("[AI targeting profile] Tool returned incomplete data:", JSON.stringify(profile));
       }
+    } else {
+      console.warn("[AI targeting profile] No tool_use block found in response. Full response:", JSON.stringify(response.content));
     }
   } catch (err) {
     console.error("AI targeting profile generation error:", err);
@@ -357,6 +376,8 @@ export interface MetaRecommendations {
   newStoreCautionMessage?: string;
   highBudgetWarning?: boolean;
   highBudgetWarningMessage?: string;
+  budgetWarning?: boolean;
+  budgetWarningMessage?: string;
   targeting: {
     locations: LocationResult[];
     age_min: number;
@@ -382,10 +403,12 @@ export interface MetaRecommendations {
       meta_optimal_daily: number; 
     };
     ad_sets: number;
+    ad_set_reasoning?: string;
     optimization_event: {
       event: string;
       reasoning: string;
       target_weekly: number;
+      upgrade_milestone?: string;
     };
     strategies: {
       label: string;
@@ -541,28 +564,44 @@ export async function generateRecommendations(
   const behaviours = profile.audiences.behaviours;
   const interest_reasoning = profile.audiences.interest_reasoning;
 
-  // ── Optimization Event & Ad Sets ──
+  // ── Dynamic Ad Sets: based on data maturity, not hardcoded ──
   const monthlyOrders = storeData.orders.orders_last_30_days || 0;
+  let adSets: number;
+  let adSetReasoning: string;
+
+  if (monthlyOrders < 20) {
+    adSets = 1;
+    adSetReasoning = `Your ${monthlyOrders} monthly orders aren't enough to split test — start with 1 ad set to concentrate your data.`;
+  } else if (monthlyOrders <= 50) {
+    adSets = 2;
+    adSetReasoning = `Your ${monthlyOrders} monthly orders give you enough signal to test 2 audience variations — run 1-2 ad sets.`;
+  } else {
+    adSets = 3;
+    adSetReasoning = `With ${monthlyOrders} monthly orders, you have enough purchase volume to run meaningful split tests across 3 ad sets.`;
+  }
+
+  // ── Optimization Event: based on orders-per-adset-per-week ──
+  const weeklyOrdersPerAdSet = monthlyOrders / 4 / adSets; // monthly -> weekly, then split by ad sets
   let optEvent: string;
   let optReasoning: string;
   let optTarget: number;
-  let adSets: number;
+  let optUpgradeMilestone: string;
 
-  if (monthlyOrders > 200) {
-    optEvent = "Purchase";
-    optReasoning = "High order volume (>200/mo) allows Meta to optimize for bottom-funnel conversions effectively.";
-    optTarget = 50;
-    adSets = 3;
-  } else if (monthlyOrders >= 50) {
-    optEvent = "Initiate Checkout";
-    optReasoning = "Medium order volume (50-200/mo). Optimize for checkouts to give Meta enough data points.";
-    optTarget = 35;
-    adSets = 2;
-  } else {
+  if (monthlyOrders < 10) {
+    optEvent = "View Content";
+    optReasoning = `Your ${monthlyOrders} orders total means Meta needs top-funnel signals first — View Content gives the algorithm enough events to exit learning phase.`;
+    optTarget = 100;
+    optUpgradeMilestone = "Once you hit 10+ monthly orders, switch to Add to Cart optimization.";
+  } else if (weeklyOrdersPerAdSet < 50) {
     optEvent = "Add to Cart";
-    optReasoning = "Low order volume (<50/mo). Optimize for carts to ensure the algorithm exits learning phase quickly.";
-    optTarget = 30;
-    adSets = 2;
+    optReasoning = `Your ${monthlyOrders} monthly orders across ${adSets} ad set${adSets > 1 ? "s" : ""} gives ~${Math.round(weeklyOrdersPerAdSet)} events/week — not enough for Purchase optimization to exit learning phase.`;
+    optTarget = 50;
+    optUpgradeMilestone = `Once you reach ~${adSets * 50 * 4} monthly orders (${adSets * 50}/week per ad set), switch to Purchase optimization.`;
+  } else {
+    optEvent = "Purchase";
+    optReasoning = `Your ${monthlyOrders} monthly orders across ${adSets} ad set${adSets > 1 ? "s" : ""} gives ~${Math.round(weeklyOrdersPerAdSet)} purchase events/week — enough for Meta to optimize for real buyers.`;
+    optTarget = 50;
+    optUpgradeMilestone = "You're already at Purchase optimization — keep your monthly order volume above this threshold to stay here.";
   }
 
   // ── BUDGET CALCULATION (USD tiered revenue ratio with AOV liquidity guardrail) ──
@@ -586,11 +625,30 @@ export async function generateRecommendations(
   }
 
   const totalDailySpendUSD = totalTestBudgetUSD / TEST_DURATION_DAYS;
-  const dailyPerAdSetUSD = totalDailySpendUSD / adSets;
+  const tierDailyPerAdSetUSD = totalDailySpendUSD / adSets; // raw tier budget per ad set
 
-  // The AOV Guardrail
+  // ── AOV Guardrail: only apply if within 2x of tier budget; warn if it would exceed 3x ──
   const aovUSD = storeData.orders.average_order_value / exchangeRate;
-  const finalDailyPerAdSetUSD = Math.max(dailyPerAdSetUSD, aovUSD * 0.5);
+  const aovGuardrailUSD = aovUSD * 0.5; // minimum spend Meta needs to see a purchase signal
+
+  let finalDailyPerAdSetUSD: number;
+  let budgetWarning = false;
+  let budgetWarningMessage: string | undefined;
+
+  if (aovGuardrailUSD > tierDailyPerAdSetUSD * 3) {
+    // Guardrail is unaffordable — use tier budget as-is and warn the merchant
+    finalDailyPerAdSetUSD = tierDailyPerAdSetUSD;
+    budgetWarning = true;
+    const guardrailLocal = Math.round(aovGuardrailUSD * exchangeRate);
+    const tierLocal = Math.round(tierDailyPerAdSetUSD * exchangeRate);
+    budgetWarningMessage = `Your product price point ideally requires ${storeData.store.currency_symbol || ""}${guardrailLocal.toLocaleString()}/day per ad set for Meta's algorithm to work efficiently. Starting at ${storeData.store.currency_symbol || ""}${tierLocal.toLocaleString()} is possible but expect a longer learning phase. Consider starting with Add to Cart optimization instead of Purchase.`;
+  } else if (aovGuardrailUSD > tierDailyPerAdSetUSD) {
+    // Guardrail is within reason (1x–3x) — apply it
+    finalDailyPerAdSetUSD = aovGuardrailUSD;
+  } else {
+    // Tier budget already covers the guardrail
+    finalDailyPerAdSetUSD = tierDailyPerAdSetUSD;
+  }
 
   const recommendedDailyLocal = finalDailyPerAdSetUSD * exchangeRate;
   const recommendedDaily = Math.round(recommendedDailyLocal);
@@ -626,14 +684,14 @@ export async function generateRecommendations(
   ];
 
   let budgetReasoning = `Based on your monthly store revenue of ${formatCurrency(Math.round(avgMonthlyRevenue), storeCurrency, storeData.store.currency_symbol)}, ` +
-    `we recommend a daily budget of ${formatCurrency(recommendedDaily, storeCurrency, storeData.store.currency_symbol)} per ad set. ` +
-    `This spend incorporates a ${formatCurrency(Math.round(storeData.orders.average_order_value), storeCurrency, storeData.store.currency_symbol)} AOV liquidity guardrail to prevent Meta's algorithm from starving.`;
+    `we recommend ${adSets} ad set${adSets > 1 ? "s" : ""} at ${formatCurrency(recommendedDaily, storeCurrency, storeData.store.currency_symbol)} per ad set/day. ` +
+    adSetReasoning;
 
-  // Check high budget warning
+  // Check high budget warning (for budgets that are genuinely high in absolute terms, post-guardrail)
   let highBudgetWarning = false;
   let highBudgetWarningMessage: string | undefined;
 
-  if (finalDailyPerAdSetUSD > 50) {
+  if (!budgetWarning && finalDailyPerAdSetUSD > 50) {
     highBudgetWarning = true;
     const formattedAmount = formatCurrency(recommendedDaily, storeCurrency, storeData.store.currency_symbol);
     highBudgetWarningMessage = `Your product price point requires a minimum daily budget of ${formattedAmount} for Meta's algorithm to optimize. Ensure this budget is available before launching.`;
@@ -757,6 +815,8 @@ export async function generateRecommendations(
       newStoreCautionMessage,
       highBudgetWarning,
       highBudgetWarningMessage,
+      budgetWarning,
+      budgetWarningMessage,
     }),
     targeting: {
       locations,
@@ -781,7 +841,9 @@ export async function generateRecommendations(
         event: optEvent,
         reasoning: optReasoning,
         target_weekly: optTarget,
+        upgrade_milestone: optUpgradeMilestone,
       },
+      ad_set_reasoning: adSetReasoning,
       breakdown: {
         revenue_based: avgMonthlyRevenue,
         aov_based: storeData.orders.average_order_value,
