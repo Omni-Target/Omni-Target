@@ -198,7 +198,7 @@ function DashboardContent() {
       textColor: "text-amber-400",
       icon: "!",
       title: "Ready to go",
-      subtext: "A few products are out of stock — focus your briefs on what's available and selling."
+      subtext: "Check Pre-Spend Intelligence below — we've flagged the best products to run right now."
     },
     caution: {
       color: "bg-error-500",
@@ -257,22 +257,34 @@ function DashboardContent() {
     });
   }
 
-  const COUNTRY_CODES: Record<string, string> = { NG: "Nigeria", GB: "United Kingdom", US: "United States", AE: "UAE", GH: "Ghana", KE: "Kenya", ZA: "South Africa", CA: "Canada", AU: "Australia" };
-  const COUNTRY_NAMES = new Set(["Nigeria", "United Kingdom", "United States", "UAE", "Ghana", "Kenya", "South Africa", "Canada", "Australia", "NG", "GB", "US", "AE", "GH", "KE", "ZA", "CA", "AU"]);
+  const COUNTRY_CODES: Record<string, string> = { NG: "Nigeria", GB: "United Kingdom", US: "United States", AE: "UAE", GH: "Ghana", KE: "Kenya", ZA: "South Africa", CA: "Canada", AU: "Australia", HU: "Hungary", DE: "Germany", FR: "France", IT: "Italy", ES: "Spain", NL: "Netherlands", BE: "Belgium", SE: "Sweden", NO: "Norway", DK: "Denmark", FI: "Finland", PL: "Poland", RO: "Romania", CZ: "Czech Republic", PT: "Portugal", AT: "Austria", CH: "Switzerland", IN: "India", CN: "China", JP: "Japan", KR: "South Korea", BR: "Brazil", MX: "Mexico", AR: "Argentina" };
+  // Universal rule: the Shopify connector stores country as city when no city data exists.
+  // Detect this by checking if city === country (or city === country code), which is always wrong data.
+  const isFallbackCountryEntry = (loc: any): boolean => {
+    const city = loc.city?.trim() || "";
+    const country = loc.country?.trim() || "";
+    if (!city) return true;
+    // City matches the country name directly
+    if (city.toLowerCase() === country.toLowerCase()) return true;
+    // City is a 2-letter country code
+    if (/^[A-Z]{2}$/.test(city)) return true;
+    // City resolves to the same country name (e.g. "Hungary" city → "Hungary" country)
+    const resolvedCountry = COUNTRY_CODES[country] || country;
+    if (city.toLowerCase() === resolvedCountry.toLowerCase()) return true;
+    return false;
+  };
   const validLocations = (orders.top_locations || [])
-    .filter((loc: any) => {
-      // Exclude entries where the "city" is actually just a country name or code (fallback data)
-      if (!loc.city || COUNTRY_NAMES.has(loc.city.trim())) return false;
-      return true;
-    })
+    .filter((loc: any) => !isFallbackCountryEntry(loc))
     .slice(0, 3);
   const formatLocation = (l: any) => {
     const countryDisplay = COUNTRY_CODES[l.country] || l.country || "";
-    return countryDisplay ? `${l.city}, ${countryDisplay}` : l.city;
+    return countryDisplay && countryDisplay.toLowerCase() !== l.city?.toLowerCase()
+      ? `${l.city}, ${countryDisplay}`
+      : l.city;
   };
   const locationText = validLocations.length > 0
     ? validLocations.map(formatLocation).join(" · ")
-    : (orders.top_locations?.length > 0 ? "Nigeria" : "Order location data still building");
+    : "Order location data still building";
 
   const refreshStoreData = () => {
     setLoading(true);
@@ -471,7 +483,7 @@ function DashboardContent() {
                 <div>
                   <p className="text-xs text-white/40 uppercase tracking-widest mb-1 font-semibold">Ad Readiness</p>
                   <p className={`text-lg font-bold mb-1 ${adReadinessDisplay.textColor}`}>{adReadinessDisplay.title}</p>
-                  <p className="text-sm text-white/60">{adReadinessDisplay.subtext}</p>
+                  {adReadinessDisplay.subtext && <p className="text-sm text-white/60">{adReadinessDisplay.subtext}</p>}
                 </div>
               </div>
 
