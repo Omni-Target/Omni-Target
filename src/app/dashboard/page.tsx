@@ -190,29 +190,29 @@ function DashboardContent() {
       color: "bg-success-500",
       textColor: "text-success-400",
       icon: "✓",
-      title: "Ready to advertise",
-      subtext: "Your store has active products and recent sales. Good time to run campaigns."
+      title: "You're good to go",
+      subtext: "Active products, recent sales — everything Meta needs to start learning. Let's run something."
     },
     ready_with_warnings: {
       color: "bg-amber-500",
       textColor: "text-amber-400",
       icon: "!",
-      title: "Ready — with caveats",
-      subtext: "Some products are out of stock. Stick to in-stock items when creating briefs."
+      title: "Ready to go",
+      subtext: "A few products are out of stock — focus your briefs on what's available and selling."
     },
     caution: {
       color: "bg-error-500",
       textColor: "text-error-400",
       icon: "×",
-      title: "Not ready to advertise",
-      subtext: !hasRecentOrders ? "No recent orders. Drive organic traffic first." : "High out of stock rate. Restock before advertising."
+      title: "Not quite yet",
+      subtext: !hasRecentOrders ? "No recent orders yet. Build some organic momentum first, then come back." : "Most of your stock is out. Restock your winners and you'll be ready to go."
     },
     not_ready: {
       color: "bg-white/20",
       textColor: "text-white/60",
       icon: "?",
       title: "Connect your store first",
-      subtext: "We need data to assess readiness."
+      subtext: "Link your Shopify store and we'll tell you exactly where you stand."
     }
   }[adReadiness];
 
@@ -239,15 +239,7 @@ function DashboardContent() {
     });
   }
   
-  if (outOfStockRatio > 0.5) {
-    insights.push({
-      icon: "⚠️",
-      title: "Stock up before running ads",
-      detail: `${Math.round(outOfStockRatio * 100)}% of your products are out of stock. Running ads to unavailable products wastes budget and frustrates buyers.`,
-      action: "See in-stock products",
-      actionHref: "/products"
-    });
-  }
+
   
   if (peakDays.includes("Saturday") || peakDays.includes("Sunday")) {
     insights.push({
@@ -265,15 +257,22 @@ function DashboardContent() {
     });
   }
 
+  const COUNTRY_CODES: Record<string, string> = { NG: "Nigeria", GB: "United Kingdom", US: "United States", AE: "UAE", GH: "Ghana", KE: "Kenya", ZA: "South Africa", CA: "Canada", AU: "Australia" };
+  const COUNTRY_NAMES = new Set(["Nigeria", "United Kingdom", "United States", "UAE", "Ghana", "Kenya", "South Africa", "Canada", "Australia", "NG", "GB", "US", "AE", "GH", "KE", "ZA", "CA", "AU"]);
   const validLocations = (orders.top_locations || [])
     .filter((loc: any) => {
-      const isNigeria = loc.country === 'Nigeria' || loc.country === 'NG' || !loc.country; 
-      return isNigeria || loc.percentage >= 15;
+      // Exclude entries where the "city" is actually just a country name or code (fallback data)
+      if (!loc.city || COUNTRY_NAMES.has(loc.city.trim())) return false;
+      return true;
     })
-    .slice(0, 2);
-  const locationText = validLocations.length > 0 
-    ? validLocations.map((l: any) => l.city).join(", ")
-    : "Order location data still building";
+    .slice(0, 3);
+  const formatLocation = (l: any) => {
+    const countryDisplay = COUNTRY_CODES[l.country] || l.country || "";
+    return countryDisplay ? `${l.city}, ${countryDisplay}` : l.city;
+  };
+  const locationText = validLocations.length > 0
+    ? validLocations.map(formatLocation).join(" · ")
+    : (orders.top_locations?.length > 0 ? "Nigeria" : "Order location data still building");
 
   const refreshStoreData = () => {
     setLoading(true);
