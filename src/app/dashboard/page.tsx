@@ -282,9 +282,17 @@ function DashboardContent() {
       ? `${l.city}, ${countryDisplay}`
       : l.city;
   };
+  // If no city-level data, fall back to deduplicated country names
+  const countryFallback = validLocations.length === 0
+    ? [...new Set((orders.top_locations || [])
+        .map((l: any) => COUNTRY_CODES[l.country] || COUNTRY_CODES[l.city] || l.country || l.city || "")
+        .filter(Boolean))]
+        .slice(0, 3)
+        .join(" · ")
+    : "";
   const locationText = validLocations.length > 0
     ? validLocations.map(formatLocation).join(" · ")
-    : "Order location data still building";
+    : countryFallback || "Order location data still building";
 
   const refreshStoreData = () => {
     setLoading(true);

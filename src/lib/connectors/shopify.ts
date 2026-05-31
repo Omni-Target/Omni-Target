@@ -162,7 +162,7 @@ export async function fetchShopifyStoreData(
   const orders = await shopifyGetPaginated<ShopifyOrder>(
     shopDomain,
     accessToken,
-    `orders.json?status=any&limit=250&fields=id,total_price,created_at,customer,billing_address,shipping_address,financial_status,source_name,line_items`,
+    `orders.json?status=any&financial_status=paid&limit=250&fields=id,total_price,created_at,customer,billing_address,shipping_address,financial_status,source_name,line_items`,
     "orders"
   );
 
