@@ -36,7 +36,8 @@ export async function GET() {
   try {
     const storeData = await fetchShopifyStoreData(
       tokenResult.shopUrl,
-      tokenResult.accessToken
+      tokenResult.accessToken,
+      userId
     );
 
     console.log("Store data fetched:", {

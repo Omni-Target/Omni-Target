@@ -25,7 +25,9 @@ export async function GET() {
     }
 
     const recommendations = await generateRecommendations(
-      integration.store_snapshot
+      integration.store_snapshot,
+      undefined,
+      userId
     );
 
     return Response.json(recommendations);

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
 import { Logo } from "@/components/Logo";
 import { formatCurrency } from "@/lib/currency";
@@ -123,6 +123,7 @@ function DashboardContent() {
 
   const { credits, isUnlimited } = useCredits();
 
+  const router = useRouter();
   const searchParams = useSearchParams();
   const paymentSuccess = searchParams.get("payment");
   const packId = searchParams.get("pack");
@@ -649,19 +650,22 @@ function DashboardContent() {
                             {product.units_sold} sold · {formatCurrency(Math.round(product.revenue), storeData?.store?.currency || "USD")}
                           </span>
                           {product.should_advertise ? (
-                            <Link
-                              href={`/campaigns?` +
-                                `product_name=${encodeURIComponent(product.name)}&` +
-                                `product_description=${encodeURIComponent(product.description || product.name)}&` +
-                                `product_type=${encodeURIComponent(product.product_type || "")}&` +
-                                `product_tags=${encodeURIComponent(product.tags?.join(",") || "")}&` +
-                                `product_price=${product.price}&` +
-                                `product_image=${encodeURIComponent(product.image_url || "")}`
-                              }
-                              className="text-brand-400 hover:text-brand-300 font-medium transition-colors no-underline"
+                            <button
+                              onClick={() => {
+                                sessionStorage.setItem("campaign_draft", JSON.stringify({
+                                  product_name: product.name,
+                                  product_description: product.description || product.name,
+                                  product_type: product.product_type || "",
+                                  product_tags: product.tags?.join(",") || "",
+                                  product_price: product.price,
+                                  product_image: product.image_url || ""
+                                }));
+                                router.push("/campaigns");
+                              }}
+                              className="text-brand-400 hover:text-brand-300 font-medium transition-colors cursor-pointer bg-transparent border-none p-0"
                             >
                               Create a Campaign Brief →
-                            </Link>
+                            </button>
                           ) : (
                             <span className="text-white/30 text-[10px]">Low conversion probability</span>
                           )}

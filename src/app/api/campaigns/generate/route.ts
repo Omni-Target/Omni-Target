@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { auth } from "@clerk/nextjs/server";
-import { queryUserIntegrationSelect, updateUserIntegration, insertCreditUsage } from "@/lib/db";
+import { queryUserIntegrationSelect, updateUserIntegration, insertCreditUsage, logApiUsage } from "@/lib/db";
 import sharp from "sharp";
 
 import { detectColumns } from "@/lib/billing-db";
@@ -469,6 +469,15 @@ ${gatewayInsight?.currentProductClassification === "Gateway" ?
       system: systemPrompt,
       messages: [{ role: "user", content: messageContent }],
     });
+
+    if (userId) {
+      logApiUsage(
+        userId,
+        "brief_generation",
+        message.usage.input_tokens,
+        message.usage.output_tokens
+      );
+    }
 
     // Check if we received text content
     const responseBlock = message.content.find((block) => block.type === "text");

@@ -130,3 +130,14 @@ CREATE TABLE IF NOT EXISTS exchange_rate_cache (
   fetched_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT one_row CHECK (id = 1)
 );
+
+-- Stores token usage for Anthropic API calls
+CREATE TABLE IF NOT EXISTS api_usage_log (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id TEXT,
+  feature TEXT,
+  input_tokens INT,
+  output_tokens INT,
+  total_tokens INT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);

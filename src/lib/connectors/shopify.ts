@@ -147,7 +147,8 @@ async function shopifyGetPaginated<T>(
 
 export async function fetchShopifyStoreData(
   shopDomain: string,
-  accessToken: string
+  accessToken: string,
+  userId?: string | null
 ): Promise<StoreData> {
   // STEP 1 — Fetch shop details
   const shopData = await shopifyGet<{ shop: ShopifyShop }>(
@@ -235,7 +236,7 @@ export async function fetchShopifyStoreData(
   let aiMapping: Record<string, string> = {};
   if (uniqueRawLocations.length > 0) {
     try {
-      aiMapping = await consolidateLocationsWithAI(uniqueRawLocations);
+      aiMapping = await consolidateLocationsWithAI(uniqueRawLocations, userId);
     } catch (e) {
       console.error("AI location consolidation failed, using static fallback:", e);
     }

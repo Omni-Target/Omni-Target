@@ -135,8 +135,11 @@ export function consolidateLocation(city: string): string {
 
 const anthropicClient = new Anthropic();
 
+import { logApiUsage } from "@/lib/db";
+
 export async function consolidateLocationsWithAI(
-  rawLocations: { city: string; country: string }[]
+  rawLocations: { city: string; country: string }[],
+  userId?: string | null
 ): Promise<Record<string, string>> {
   if (rawLocations.length === 0) return {};
 
@@ -176,6 +179,14 @@ Example format:
     
     const parsed = JSON.parse(cleanText) as Record<string, string>;
     if (typeof parsed === "object" && parsed !== null) {
+      if (userId) {
+        logApiUsage(
+          userId,
+          "location_consolidation",
+          message.usage.input_tokens,
+          message.usage.output_tokens
+        );
+      }
       return parsed;
     }
     return {};

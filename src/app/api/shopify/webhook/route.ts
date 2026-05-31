@@ -187,7 +187,7 @@ export async function POST(request: Request) {
         const accessToken = integration.shopify_access_token || integration.access_token;
         if (accessToken) {
           console.log(`Starting background Shopify store sync for ${shopDomain}`);
-          const storeData = await fetchShopifyStoreData(shopDomain, accessToken);
+          const storeData = await fetchShopifyStoreData(shopDomain, accessToken, integration.clerk_user_id);
 
           await updateUserIntegration(integration.clerk_user_id, {
             store_snapshot: storeData,

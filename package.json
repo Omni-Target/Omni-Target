@@ -18,6 +18,7 @@
     "lucide-react": "^1.14.0",
     "next": "16.2.1",
     "next-cloudinary": "^6.17.5",
+    "puppeteer": "^25.1.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "stripe": "^22.1.1"

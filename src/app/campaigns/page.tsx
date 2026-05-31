@@ -6,7 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { SignOutButton, useUser } from "@clerk/nextjs";
 import { MediaValidationResult } from "@/lib/meta-specs";
-import { generateBriefPDF } from "@/lib/generate-brief-pdf";
+import type { BriefPDFParams } from "@/lib/generate-brief-pdf";
 import { formatCurrency, getCurrencySymbol } from "@/lib/currency";
 import { useCredits } from "@/hooks/useCredits";
 import { Logo } from "@/components/Logo";
@@ -100,6 +100,7 @@ function CampaignsContent() {
 
   // Review State
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [selectedCta, setSelectedCta] = useState<string>("");
 
   const [storeInsights, setStoreInsights] = useState<any>(null);
@@ -607,17 +608,15 @@ function CampaignsContent() {
       {viewState === "input" && (
         <main className="max-w-2xl mx-auto px-4 sm:px-6 py-10 relative flex-1">
           <div className="mb-8 animate-fade-in-up">
-            {!autoFilledFromStore && (
-              <button 
-                onClick={() => setViewState("media")}
-                className="flex items-center gap-2 text-xs font-medium text-white/40 hover:text-white/80 transition-colors mb-6 cursor-pointer bg-transparent border-none p-0"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M19 12H5M12 19l-7-7 7-7" />
-                </svg>
-                Back to Creative
-              </button>
-            )}
+            <button 
+              onClick={() => setViewState("media")}
+              className="flex items-center gap-2 text-xs font-medium text-white/40 hover:text-white/80 transition-colors mb-6 cursor-pointer bg-transparent border-none p-0"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+              {autoFilledFromStore ? "Upload Custom Creative" : "Back to Creative"}
+            </button>
 
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/20 mb-4">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400">
@@ -1186,7 +1185,7 @@ function CampaignsContent() {
                     <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Locations</span>
                     <p className="text-sm text-white/80 mt-1">
                       {aiInsights?.targeting?.locations?.length > 0
-                        ? aiInsights.targeting.locations.map((l: any) => l.name).join(" · ")
+                        ? aiInsights.targeting.locations.map((l: any) => l.name.split(',')[0].trim()).join(" · ")
                         : storeInsights.orders?.top_locations?.length > 0
                           ? storeInsights.orders.top_locations.map((l: any) => `${l.city}`).join(" · ")
                           : "No order data yet — add locations manually based on your target market"}
@@ -1399,49 +1398,78 @@ function CampaignsContent() {
 
             {/* SECTION: Actions */}
             <div className="space-y-3 pt-4 pb-10">
-              {/* PRIMARY: Download PDF */}
+              {/* PRIMARY: Download PDF (Puppeteer server-render) */}
               <button
-                onClick={() =>
-                  generateBriefPDF({
-                    brandName,
-                    productName,
-                    campaignGoal: goal,
-                    copy: {
-                      headline: generatedCopy.headline,
-                      primaryText: generatedCopy.primaryText,
-                      description: generatedCopy.description,
-                      cta: selectedCta || generatedCopy.cta,
-                      copywriterNote: generatedCopy.copywriterNote,
-                    },
-                    targeting: aiInsights?.targeting ?? {},
-                    budget: {
-                      ...aiInsights?.budget ?? {},
-                      recommended_duration_days: selectedDuration,
-                      recommended_daily: aiInsights?.budget?.strategies?.[selectedStrategyIndex]?.daily ?? aiInsights?.budget?.recommended_daily,
-                      goal_adjusted_daily: aiInsights?.budget
-                        ? Math.round((aiInsights.budget.strategies?.[selectedStrategyIndex]?.daily ?? aiInsights.budget.recommended_daily) * (aiInsights.budget.ad_sets || 1) * (aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1))
-                        : undefined,
-                      goal_label: (aiInsights?.budget?.breakdown?.goal_multipliers?.[goal] ?? 1) !== 1 ? goal.toLowerCase() : undefined,
-                      tier: aiInsights?.budget?.strategies?.[selectedStrategyIndex]?.label ?? aiInsights?.budget?.tier,
-                    },
-                    timing: aiInsights?.timing ?? {},
-                    warnings: aiInsights?.warnings ?? [],
-                    generatedAt: new Date().toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "long",
-                      year: "numeric",
-                    }),
-                    gatewayInsight,
-                  })
-                }
-                className="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-300 cursor-pointer"
+                disabled={isDownloadingPdf}
+                onClick={async () => {
+                  setIsDownloadingPdf(true);
+                  try {
+                    const payload: BriefPDFParams = {
+                      brandName,
+                      productName,
+                      campaignGoal: goal,
+                      copy: {
+                        headline: generatedCopy.headline,
+                        primaryText: generatedCopy.primaryText,
+                        description: generatedCopy.description,
+                        cta: selectedCta || generatedCopy.cta,
+                        copywriterNote: generatedCopy.copywriterNote,
+                      },
+                      targeting: aiInsights?.targeting ?? {},
+                      budget: {
+                        ...aiInsights?.budget ?? {},
+                        recommended_duration_days: selectedDuration,
+                        recommended_daily: aiInsights?.budget?.strategies?.[selectedStrategyIndex]?.daily ?? aiInsights?.budget?.recommended_daily,
+                        goal_adjusted_daily: aiInsights?.budget
+                          ? Math.round((aiInsights.budget.strategies?.[selectedStrategyIndex]?.daily ?? aiInsights.budget.recommended_daily) * (aiInsights.budget.ad_sets || 1) * (aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1))
+                          : undefined,
+                        goal_label: (aiInsights?.budget?.breakdown?.goal_multipliers?.[goal] ?? 1) !== 1 ? goal.toLowerCase() : undefined,
+                        tier: aiInsights?.budget?.strategies?.[selectedStrategyIndex]?.label ?? aiInsights?.budget?.tier,
+                      },
+                      timing: aiInsights?.timing ?? {},
+                      warnings: aiInsights?.warnings ?? [],
+                      generatedAt: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }),
+                      gatewayInsight,
+                    };
+                    const res = await fetch("/api/campaigns/pdf", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(payload),
+                    });
+                    if (!res.ok) throw new Error("PDF generation failed");
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `omni-target-brief-${productName.replace(/\s+/g, "-").toLowerCase()}.pdf`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  } catch (err) {
+                    console.error("PDF error:", err);
+                    alert("Could not generate PDF. Please try again.");
+                  } finally {
+                    setIsDownloadingPdf(false);
+                  }
+                }}
+                className="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-300 cursor-pointer"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-                Download PDF Brief
+                {isDownloadingPdf ? (
+                  <>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                    </svg>
+                    Generating Premium PDF...
+                  </>
+                ) : (
+                  <>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Download PDF Brief
+                  </>
+                )}
               </button>
 
               {/* SECONDARY: Copy to clipboard */}

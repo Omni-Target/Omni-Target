@@ -379,3 +379,37 @@ export async function insertCreditUsage(userId: string, creditsUsed: number, act
     throw error;
   }
 }
+
+/**
+ * Log token usage for Anthropic API calls.
+ * Runs asynchronously and catches errors so it doesn't block the main thread.
+ */
+export async function logApiUsage(
+  userId: string | null,
+  feature: string,
+  inputTokens: number,
+  outputTokens: number
+) {
+  if (!userId) return;
+  const totalTokens = inputTokens + outputTokens;
+  
+  supabaseAdmin
+    .from("api_usage_log")
+    .insert({
+      user_id: userId,
+      feature,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: totalTokens,
+    })
+    .then(
+      ({ error }) => {
+        if (error) {
+          console.error("Failed to log API usage to Supabase:", error);
+        }
+      },
+      (err: any) => {
+        console.error("Exception logging API usage:", err);
+      }
+    );
+}

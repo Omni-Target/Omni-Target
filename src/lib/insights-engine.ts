@@ -4,6 +4,7 @@ import { formatCurrency } from "@/lib/currency";
 import { getExchangeRateCache, setExchangeRateCache } from "./db";
 
 const anthropicClient = new Anthropic();
+import { logApiUsage } from "@/lib/db";
 
 // WARNING: NGN (Naira) is highly volatile.
 // The 24-hour caching window may introduce meaningful variance in daily/monthly budget recommendations
@@ -114,7 +115,8 @@ export interface TargetingProfile {
 async function generateTargetingProfile(
   storeData: StoreData,
   adSets: number,
-  dailyBudget: number
+  dailyBudget: number,
+  userId?: string | null
 ): Promise<TargetingProfile> {
   const storeCurrency = storeData.store?.currency || "USD";
   
@@ -287,6 +289,16 @@ Campaign Context:
       const profile = toolUseBlock.input as any;
       // Log raw AI output for debugging targeting quality
       console.log("[AI targeting profile raw output]", JSON.stringify(profile, null, 2));
+      
+      if (userId) {
+        logApiUsage(
+          userId,
+          "targeting_profile",
+          response.usage.input_tokens,
+          response.usage.output_tokens
+        );
+      }
+
       if (profile && profile.locations && profile.demographics && profile.audiences && profile.timing) {
         return profile as TargetingProfile;
       } else {
@@ -481,7 +493,8 @@ export interface MetaRecommendations {
 
 export async function generateRecommendations(
   storeData: StoreData,
-  dynamicExchangeRates?: Record<string, number>
+  dynamicExchangeRates?: Record<string, number>,
+  userId?: string | null
 ): Promise<MetaRecommendations> {
   const storeCurrency = storeData.store.currency || "USD";
   const rates = dynamicExchangeRates || (await fetchExchangeRates());
@@ -658,7 +671,7 @@ export async function generateRecommendations(
 
 
   // Run unified AI single-pass call
-  const profile = await generateTargetingProfile(storeData, adSets, recommendedDaily);
+  const profile = await generateTargetingProfile(storeData, adSets, recommendedDaily, userId);
 
   // --- TARGETING ---
   const gender = profile.demographics.gender;
