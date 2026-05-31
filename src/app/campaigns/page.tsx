@@ -1366,23 +1366,26 @@ function CampaignsContent() {
                   <div className="space-y-6">
                     {/* Strategy Toggles */}
                     <div className="grid grid-cols-3 gap-2">
-                      {strategies.map((s: any, idx: number) => (
-                        <button
-                          key={s.label}
-                          onClick={() => setSelectedStrategyIndex(idx)}
-                          className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all duration-300 relative ${
-                            selectedStrategyIndex === idx 
-                              ? "bg-brand-500/10 border-brand-500/40 text-white" 
-                              : "bg-white/[0.02] border-white/5 text-white/40 hover:bg-white/[0.05]"
-                          }`}
-                        >
-                          {s.label === "Sweet Spot" && (
-                            <div className="absolute -top-2 bg-brand-500 text-black text-[8px] font-black uppercase px-2 py-0.5 rounded-full shadow-lg border border-white/20 whitespace-nowrap z-10">RECOMMENDED</div>
-                          )}
-                          <span className="text-[10px] font-bold uppercase tracking-tighter text-center">{s.label}</span>
-                          <span className="text-xs font-bold mt-1">{formatCurrency(s.total_daily, curr, aiInsights.budget.currency_symbol)}</span>
-                        </button>
-                      ))}
+                      {strategies.map((s: any, idx: number) => {
+                        const sAdjustedDaily = Math.round(s.daily * adSets * goalMult);
+                        return (
+                          <button
+                            key={s.label}
+                            onClick={() => setSelectedStrategyIndex(idx)}
+                            className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all duration-300 relative ${
+                              selectedStrategyIndex === idx 
+                                ? "bg-brand-500/10 border-brand-500/40 text-white" 
+                                : "bg-white/[0.02] border-white/5 text-white/40 hover:bg-white/[0.05]"
+                            }`}
+                          >
+                            {s.label === "Sweet Spot" && (
+                              <div className="absolute -top-2 bg-brand-500 text-black text-[8px] font-black uppercase px-2 py-0.5 rounded-full shadow-lg border border-white/20 whitespace-nowrap z-10">RECOMMENDED</div>
+                            )}
+                            <span className="text-[10px] font-bold uppercase tracking-tighter text-center">{s.label}</span>
+                            <span className="text-xs font-bold mt-1">{formatCurrency(sAdjustedDaily, curr, aiInsights.budget.currency_symbol)}</span>
+                          </button>
+                        );
+                      })}
                     </div>
 
                     {/* Timeline Toggles */}
