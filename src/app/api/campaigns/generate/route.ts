@@ -470,14 +470,21 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
 
     messageContent.push({
       type: "text",
-      text: textContent
+      text: textContent,
+      cache_control: { type: "ephemeral" }
     });
 
     // Call the Anthropic API
     const message = await client.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 1024,
-      system: systemPrompt,
+      system: [
+        {
+          type: "text",
+          text: systemPrompt,
+          cache_control: { type: "ephemeral" }
+        }
+      ],
       messages: [{ role: "user", content: messageContent }],
     });
 
