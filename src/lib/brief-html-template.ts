@@ -406,6 +406,31 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   }
   .footer-text { font-size: 7px; color: var(--text-3); font-weight: 500; }
   .footer-brand { font-size: 7px; font-weight: 800; color: var(--text-3); letter-spacing: 1px; text-transform: uppercase; }
+
+  /* ── Print Toolbar ── */
+  .print-toolbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 48px;
+    display: flex; justify-content: space-between; align-items: center;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+  .print-toolbar-text { font-size: 13px; font-weight: 600; color: var(--text-1); }
+  .print-btn {
+    font-family: var(--font); font-size: 12px; font-weight: 700;
+    background: linear-gradient(135deg, #7c3aed, #a78bfa); color: #fff;
+    border: none; border-radius: 8px; padding: 10px 24px; cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .print-btn:hover { opacity: 0.85; }
+
+  /* ── Print Overrides ── */
+  @media print {
+    .no-print { display: none !important; }
+    body { padding-top: 0 !important; }
+    .header { margin-top: 0; }
+  }
 </style>
 </head>
 <body>
@@ -438,10 +463,15 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   ${warningsHTML}
 </div>
 
-<footer class="footer">
+<footer class="footer no-print">
   <div class="footer-brand">Omni Target</div>
   <div class="footer-text">omnitarget.co — Confidential Campaign Brief</div>
 </footer>
+
+<div class="print-toolbar no-print">
+  <span class="print-toolbar-text">Your campaign brief is ready</span>
+  <button class="print-btn" onclick="window.print()">⬇ Save as PDF</button>
+</div>
 
 </body>
 </html>`;

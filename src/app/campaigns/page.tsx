@@ -1529,25 +1529,27 @@ function CampaignsContent() {
                     });
                     if (!res.ok) {
                       const errData = await res.json().catch(() => ({}));
-                      throw new Error(errData.detail || errData.error || `HTML generation failed with status ${res.status}`);
+                      throw new Error(errData.detail || errData.error || `Brief generation failed with status ${res.status}`);
                     }
                     
                     const htmlString = await res.text();
                     
-                    // Dynamically import html2pdf to prevent SSR window errors
-                    // @ts-ignore
-                    const html2pdf = (await import("html2pdf.js")).default;
+                    // Open the brief in a new tab and use the browser's native print engine.
+                    // This produces identical quality to Puppeteer (same Chrome rendering engine)
+                    // with perfect vector text, gradients, and typography — zero server dependencies.
+                    const printWindow = window.open("", "_blank");
+                    if (!printWindow) {
+                      throw new Error("Pop-up blocked. Please allow pop-ups for this site and try again.");
+                    }
+                    printWindow.document.write(htmlString);
+                    printWindow.document.close();
                     
-                    const safeName = (productName || "brief").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-                    const opt = {
-                      margin: 0,
-                      filename: `omni-target-brief-${safeName}.pdf`,
-                      image: { type: 'jpeg', quality: 0.98 },
-                      html2canvas: { scale: 2, useCORS: true, logging: false },
-                      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                    // Wait for fonts and images to load, then auto-trigger print
+                    printWindow.onload = () => {
+                      setTimeout(() => {
+                        printWindow.print();
+                      }, 600);
                     };
-                    
-                    await html2pdf().set(opt as any).from(htmlString).save();
                   } catch (err: any) {
                     console.error("PDF error:", err);
                     alert(`Could not generate PDF.\n\nError: ${err.message || String(err)}\n\nPlease try again.`);
