@@ -262,8 +262,8 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     pointer-events: none;
   }
   .header-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 32px; }
-  .wordmark { font-size: 18px; font-weight: 800; color: var(--white); letter-spacing: -0.5px; display: flex; align-items: center; gap: 6px; }
-  .wordmark-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: inline-block; }
+  .wordmark { font-size: 18px; font-weight: 800; color: var(--white); letter-spacing: -0.5px; display: flex; align-items: center; gap: 8px; }
+  .header-logo { width: 22px; height: 22px; color: var(--accent); }
   .header-badge {
     font-size: 8px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
     color: var(--accent); border: 1px solid rgba(124,58,237,0.35);
@@ -438,7 +438,16 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
 <header class="header">
   <div class="header-top">
     <div>
-      <div class="wordmark">Omni Target<span class="wordmark-dot"></span></div>
+      <div class="wordmark">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="header-logo">
+          <circle cx="6.5" cy="17.5" r="3.5" stroke="currentColor" stroke-width="2.5" />
+          <circle cx="17.5" cy="6.5" r="3.5" stroke="currentColor" stroke-width="2.5" />
+          <circle cx="6.5" cy="17.5" r="1.5" fill="currentColor" />
+          <circle cx="17.5" cy="6.5" r="1.5" fill="currentColor" />
+          <path d="M 9 15 Q 15 15 15 9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+        </svg>
+        Omni Target
+      </div>
       <div class="header-date">${esc(params.generatedAt)}</div>
     </div>
     <div class="header-badge">Campaign Brief</div>
