@@ -93,7 +93,11 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     const isGateway = gi.currentProductClassification === "Gateway";
     const classColor = isGateway ? "#4ade80" : "#9b73ff";
     const classLabel = isGateway ? "Gateway Product" : gi.currentProductClassification === "Consideration" ? "Consideration Product" : "Hybrid Product";
-    const formatPrescription = isGateway ? "UGC Video (Product in Use)" : gi.currentProductClassification === "Consideration" ? "Carousel or Founder-Led Video" : "A/B Test UGC vs Carousel";
+    const formatPrescription = isGateway 
+      ? "We recommend leading with a UGC video showing the product in use." 
+      : gi.currentProductClassification === "Consideration" 
+        ? "We recommend a Carousel or a Founder-Led video to build trust." 
+        : "We recommend testing a UGC video against a Carousel to see what resonates.";
 
     let insightText = "";
     if (gi.currentProductName === gi.topGatewayName && gi.currentProductName === gi.bestsellerName) {

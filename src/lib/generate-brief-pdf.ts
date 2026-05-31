@@ -287,7 +287,11 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
     const isGateway = gi.currentProductClassification === "Gateway";
     const isConsideration = gi.currentProductClassification === "Consideration";
     const classificationLabel = isGateway ? "GATEWAY PRODUCT" : isConsideration ? "CONSIDERATION PRODUCT" : "HYBRID PRODUCT";
-    const formatPrescription = isGateway ? "UGC Video (Product in use)" : isConsideration ? "Carousel or Founder-led Video" : "A/B Test UGC vs Carousel";
+    const formatPrescription = isGateway 
+      ? "We recommend leading with a UGC video showing the product in use." 
+      : isConsideration 
+        ? "We recommend a Carousel or a Founder-Led video to build trust." 
+        : "We recommend testing a UGC video against a Carousel to see what resonates.";
     let insightText = "";
     const isCurrentTopGateway = gi.currentProductName === gi.topGatewayName;
     const isCurrentBestseller = gi.currentProductName === gi.bestsellerName;
