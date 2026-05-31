@@ -212,8 +212,8 @@ function DashboardContent() {
       color: "bg-white/20",
       textColor: "text-white/60",
       icon: "?",
-      title: "Connect your store first",
-      subtext: "Link your Shopify store and we'll tell you exactly where you stand."
+      title: "Store data out of sync",
+      subtext: "We couldn't load your products. Click 'Sync now' or 'Reconnect' to refresh your store data."
     }
   }[adReadiness];
 
@@ -439,7 +439,10 @@ function DashboardContent() {
                   })() : 'Unknown'}
                 </p>
               </div>
-              <button onClick={refreshStoreData} className="text-white/80 hover:text-white text-sm font-medium mt-4 text-left cursor-pointer bg-transparent border-none p-0">Sync now</button>
+              <div className="flex items-center gap-4 mt-4">
+                <button onClick={refreshStoreData} className="text-white/80 hover:text-white text-sm font-medium text-left cursor-pointer bg-transparent border-none p-0">Sync now</button>
+                <Link href="/api/auth/shopify/connect?from=dashboard" className="text-white/40 hover:text-white/60 text-xs font-medium transition-colors no-underline">Reconnect</Link>
+              </div>
             </div>
           </div>
         )}
