@@ -326,7 +326,8 @@ function CampaignsContent() {
       }
 
       if (!res.ok) {
-        throw new Error(data.error || "API returned an error");
+        const errorDetail = typeof data.error === 'object' ? (data.error.message || JSON.stringify(data.error)) : data.error;
+        throw new Error(errorDetail || "API returned an error");
       }
 
       const generatedCopyData: GeneratedCopy = data;

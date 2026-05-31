@@ -487,13 +487,17 @@ ${gatewayInsight?.currentProductClassification === "Gateway" ?
 
     let parsedResponse;
     try {
-      // Strip markdown code fences if Claude
-      // wraps the JSON in json ... 
-      const cleaned = responseBlock.text
-        .replace(/^```json\s*/i, "")
-        .replace(/^```\s*/i, "")
-        .replace(/```\s*$/i, "")
-        .trim();
+      let cleaned = responseBlock.text.trim();
+      const jsonMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+      if (jsonMatch) {
+        cleaned = jsonMatch[1].trim();
+      } else {
+        const start = cleaned.indexOf('{');
+        const end = cleaned.lastIndexOf('}');
+        if (start !== -1 && end !== -1 && end > start) {
+          cleaned = cleaned.substring(start, end + 1);
+        }
+      }
       parsedResponse = JSON.parse(cleaned);
     } catch (parseError) {
       console.error("JSON Parsing Error:", parseError);

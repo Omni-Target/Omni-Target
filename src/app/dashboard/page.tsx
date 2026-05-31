@@ -469,16 +469,18 @@ function DashboardContent() {
               </svg>
             </div>
             <h2 className="text-xl font-semibold text-white mb-3">
-              Connect Your Shopify Store
+              {shop ? "Reconnect Your Shopify Store" : "Connect Your Shopify Store"}
             </h2>
             <p className="text-white/40 text-sm mb-6 max-w-md mx-auto">
-              We&apos;ll read your store data to generate personalised campaign briefs, audience insights, and product recommendations.
+              {shop 
+                ? "Your store connection has expired. Please reconnect to continue syncing orders and generating briefs." 
+                : "We'll read your store data to generate personalised campaign briefs, audience insights, and product recommendations."}
             </p>
             <Link
-              href="/onboarding/connect-shopify?from=dashboard"
+              href={shop ? "/api/auth/shopify/connect?from=dashboard" : "/onboarding/connect-shopify?from=dashboard"}
               className="inline-flex px-6 py-3 rounded-xl bg-brand-500 text-white text-sm font-medium transition-colors hover:bg-brand-400 no-underline"
             >
-              Connect Shopify Store →
+              {shop ? "Reconnect Store →" : "Connect Shopify Store →"}
             </Link>
           </div>
         ) : (
