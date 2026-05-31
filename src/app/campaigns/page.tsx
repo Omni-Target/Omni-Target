@@ -1547,7 +1547,7 @@ function CampaignsContent() {
                       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
                     };
                     
-                    await html2pdf().set(opt).from(htmlString).save();
+                    await html2pdf().set(opt as any).from(htmlString).save();
                   } catch (err: any) {
                     console.error("PDF error:", err);
                     alert(`Could not generate PDF.\n\nError: ${err.message || String(err)}\n\nPlease try again.`);
