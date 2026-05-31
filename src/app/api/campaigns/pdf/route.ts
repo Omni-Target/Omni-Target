@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import chromium from "@sparticuz/chromium";
+import chromium from "@sparticuz/chromium-min";
 import puppeteerCore from "puppeteer-core";
 import { BriefPDFParams } from "@/lib/generate-brief-pdf";
 import { buildBriefHTML } from "@/lib/brief-html-template";
@@ -45,8 +45,10 @@ export async function POST(request: Request) {
         ],
       });
     } else {
-      // Vercel production — use @sparticuz/chromium
-      const executablePath = await chromium.executablePath();
+      // Vercel production — use @sparticuz/chromium-min to fetch binary within Vercel's 50MB limit
+      const executablePath = await chromium.executablePath(
+        "https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar"
+      );
       
       // CRITICAL: Set LD_LIBRARY_PATH so Chromium can find its shared libraries on Vercel
       process.env.LD_LIBRARY_PATH = path.dirname(executablePath);

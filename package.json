@@ -12,7 +12,7 @@
     "@anthropic-ai/sdk": "^0.80.0",
     "@clerk/nextjs": "^7.0.7",
     "@paystack/inline-js": "^2.22.8",
-    "@sparticuz/chromium": "^149.0.0",
+    "@sparticuz/chromium-min": "^131.0.1",
     "@supabase/supabase-js": "^2.100.1",
     "cloudinary": "^2.9.0",
     "jspdf": "^4.2.1",
