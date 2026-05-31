@@ -312,14 +312,16 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
     const isCurrentTopGateway = gi.currentProductName === gi.topGatewayName;
     const isCurrentBestseller = gi.currentProductName === gi.bestsellerName;
 
-    if (isCurrentTopGateway && isCurrentBestseller) {
+    if (params.isNewLaunch) {
+      insightText = "New product — targeting built from your store's buyer profile";
+    } else if (isCurrentTopGateway && isCurrentBestseller) {
       insightText = `This product is both your organic bestseller and your strongest cold-traffic converter.`;
     } else if (isCurrentTopGateway) {
       insightText = `While your organic bestseller is ${gi.bestsellerName || "another product"}, this product is your true Gateway Product and strongest cold-traffic converter.`;
     } else if (isCurrentBestseller) {
       insightText = `This product is your organic bestseller, but your top Gateway Product for cold traffic is ${gi.topGatewayName || "another product"}.`;
     } else {
-      const cls = isGateway ? "Gateway" : isConsideration ? "Consideration" : "Hybrid";
+      const cls = isGateway ? "Gateway" : isConsideration ? "Consideration" : gi.currentProductClassification === "Insufficient Data" ? "Insufficient Data" : "Hybrid";
       insightText = `This product is a ${cls} Product. Note that your organic bestseller is ${gi.bestsellerName || "another product"}, and your top Gateway Product is ${gi.topGatewayName || "another product"}.`;
     }
 
@@ -524,7 +526,7 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
   if (params.budget.breakdown) {
     budgetItems.push({ text: "HOW THIS WAS CALCULATED", size: 7.5, style: "bold", color: TEXT_3, gapAfter: 1 });
     budgetItems.push({
-      text: `Revenue signal: ${formatCurrency(params.budget.breakdown.revenue_based, currency, symbol)}/day  ·  AOV signal: ${formatCurrency(params.budget.breakdown.aov_based, currency, symbol)}${params.budget.goal_label ? `  ·  Adjusted for ${params.budget.goal_label}` : ""}`,
+      text: `Revenue signal: ${formatCurrency(params.budget.breakdown.revenue_based, currency, symbol)}/month  ·  AOV signal: ${formatCurrency(params.budget.breakdown.aov_based, currency, symbol)}${params.budget.goal_label ? `  ·  Adjusted for ${params.budget.goal_label}` : ""}`,
       size: 9, color: TEXT_2, gapAfter: 6,
     });
   }

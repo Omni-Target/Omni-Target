@@ -1367,6 +1367,16 @@ function CampaignsContent() {
                 const adjustedDaily = Math.round(baseDaily * adSets * goalMult);
                 const curr = aiInsights.budget.currency;
 
+                let dynamicBudgetReasoning = aiInsights.budget.reasoning;
+                const originalDaily = aiInsights.budget.recommended_daily;
+                const adjustedPerAdSet = Math.round(baseDaily * goalMult);
+                
+                if (originalDaily && originalDaily !== adjustedPerAdSet) {
+                  const oldStr = formatCurrency(originalDaily, curr, aiInsights.budget.currency_symbol);
+                  const newStr = formatCurrency(adjustedPerAdSet, curr, aiInsights.budget.currency_symbol);
+                  dynamicBudgetReasoning = dynamicBudgetReasoning.replace(oldStr, newStr);
+                }
+
                 return (
                   <div className="space-y-6">
                     {/* Strategy Toggles */}
@@ -1484,7 +1494,7 @@ function CampaignsContent() {
 
                       <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
                         <p className="text-xs italic text-white/40 leading-relaxed">
-                          {aiInsights.budget.reasoning}
+                          {dynamicBudgetReasoning}
                         </p>
                       </div>
                     </div>
@@ -1541,6 +1551,23 @@ function CampaignsContent() {
                           : undefined,
                         goal_label: (aiInsights?.budget?.breakdown?.goal_multipliers?.[goal] ?? 1) !== 1 ? goal.toLowerCase() : undefined,
                         tier: aiInsights?.budget?.strategies?.[selectedStrategyIndex]?.label ?? aiInsights?.budget?.tier,
+                        reasoning: typeof window !== 'undefined' ? 
+                          (() => {
+                            const strategies = aiInsights.budget.strategies || [];
+                            const currentStrategy = strategies[selectedStrategyIndex] || strategies[1];
+                            const baseDaily = currentStrategy.daily;
+                            const goalMult = aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1;
+                            const adjustedPerAdSet = Math.round(baseDaily * goalMult);
+                            const originalDaily = aiInsights.budget.recommended_daily;
+                            let res = aiInsights.budget.reasoning;
+                            if (originalDaily && originalDaily !== adjustedPerAdSet) {
+                              const curr = aiInsights.budget.currency;
+                              const oldStr = formatCurrency(originalDaily, curr, aiInsights.budget.currency_symbol);
+                              const newStr = formatCurrency(adjustedPerAdSet, curr, aiInsights.budget.currency_symbol);
+                              res = res.replace(oldStr, newStr);
+                            }
+                            return res;
+                          })() : aiInsights?.budget?.reasoning,
                       },
                       timing: aiInsights?.timing ?? {},
                       warnings: aiInsights?.warnings ?? [],

@@ -686,9 +686,10 @@ function DashboardContent() {
                 thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
                 const newLaunches = (storeData?.products || [])
                   .filter((p: any) => {
-                    const isNew = p.created_at && new Date(p.created_at) >= thirtyDaysAgo;
-                    const hasLowOrders = (p.order_count ?? p.units_sold ?? 0) < 3;
-                    return p.in_stock && (isNew || hasLowOrders);
+                    const orderCount = (p.order_count ?? p.units_sold ?? 0);
+                    const isRecentAndLow = p.created_at && new Date(p.created_at) >= thirtyDaysAgo && orderCount < 3;
+                    const isZero = orderCount === 0;
+                    return p.in_stock && (isRecentAndLow || isZero);
                   })
                   .slice(0, 6);
 

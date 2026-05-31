@@ -100,14 +100,17 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
         : "We recommend testing a UGC video against a Carousel to see what resonates.";
 
     let insightText = "";
-    if (gi.currentProductName === gi.topGatewayName && gi.currentProductName === gi.bestsellerName) {
+    if (params.isNewLaunch) {
+      insightText = "New product — targeting built from your store's buyer profile";
+    } else if (gi.currentProductName === gi.topGatewayName && gi.currentProductName === gi.bestsellerName) {
       insightText = "This product is both your organic bestseller and your strongest cold-traffic converter.";
     } else if (gi.currentProductName === gi.topGatewayName) {
       insightText = `While your organic bestseller is ${gi.bestsellerName || "another product"}, this is your top Gateway Product — the strongest cold-traffic converter in your store.`;
     } else if (gi.currentProductName === gi.bestsellerName) {
       insightText = `This is your organic bestseller, but your top cold-traffic Gateway Product is ${gi.topGatewayName || "another product"}.`;
     } else {
-      insightText = `This is a ${gi.currentProductClassification} Product. Your bestseller is ${gi.bestsellerName || "another product"}, and your top Gateway Product is ${gi.topGatewayName || "another product"}.`;
+      const clsName = gi.currentProductClassification === "Insufficient Data" ? "Insufficient Data" : gi.currentProductClassification;
+      insightText = `This is a ${clsName} Product. Your bestseller is ${gi.bestsellerName || "another product"}, and your top Gateway Product is ${gi.topGatewayName || "another product"}.`;
     }
 
     const imgBlock = productImgSrc
@@ -182,7 +185,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     ${(budget as any).breakdown ? `
       ${field("How This Was Calculated", `
         <div class="breakdown-grid">
-          ${row("Revenue Signal", fmt((budget as any).breakdown.revenue_based, currency, symbol) + "/day")}
+          ${row("Revenue Signal", fmt((budget as any).breakdown.revenue_based, currency, symbol) + "/month")}
           ${row("AOV Signal", fmt((budget as any).breakdown.aov_based, currency, symbol))}
           ${(budget as any).goal_label ? row("Goal Adjustment", `Adjusted for ${(budget as any).goal_label}`) : ""}
         </div>
