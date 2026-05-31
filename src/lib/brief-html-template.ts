@@ -202,12 +202,8 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     `, "#3b82f6");
   }
 
-  // ── Warnings ──
+  // ── Warnings (Omitted by user request) ──
   let warningsHTML = "";
-  if (warnings.length > 0) {
-    const warnItems = warnings.map(w => `<div class="warn-item"><span class="warn-icon">!</span><span>${esc(w)}</span></div>`).join("");
-    warningsHTML = card("Before You Launch", `<div class="warn-list">${warnItems}</div>`, "#f59e0b");
-  }
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -226,9 +222,9 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     --border: #22223a;
     --accent: #7c3aed;
     --accent-glow: rgba(124,58,237,0.15);
-    --text-1: #e8e8f0;
-    --text-2: #8888aa;
-    --text-3: #4a4a6a;
+    --text-1: #ffffff;
+    --text-2: #a1a1aa;
+    --text-3: #8b8b9e;
     --white: #ffffff;
     --success: #4ade80;
     --warning: #f59e0b;
@@ -244,7 +240,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     font-family: var(--font);
     background: var(--bg);
     color: var(--text-1);
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1.6;
     min-height: 100vh;
   }
@@ -304,8 +300,8 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     background: linear-gradient(90deg, var(--accent) 0%, rgba(124,58,237,0.2) 100%);
   }
   .card-label {
-    font-size: 7.5px; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase;
-    color: var(--text-3); padding: 16px 20px 0;
+    font-size: 8.5px; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase;
+    color: var(--text-2); padding: 16px 20px 0;
   }
   .card-body { padding: 12px 20px 20px; }
 
@@ -313,42 +309,42 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   .field { margin-bottom: 16px; }
   .field:last-child { margin-bottom: 0; }
   .field-label {
-    font-size: 7px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
-    color: var(--text-3); margin-bottom: 5px;
+    font-size: 8px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--text-2); margin-bottom: 5px;
   }
-  .field-value { font-size: 10px; color: var(--text-1); line-height: 1.6; }
-  .field-value-large .prose-xl { font-size: 14px !important; font-weight: 700 !important; color: var(--white) !important; }
+  .field-value { font-size: 11.5px; color: var(--text-1); line-height: 1.6; }
+  .field-value-large .prose-xl { font-size: 15px !important; font-weight: 700 !important; color: var(--white) !important; }
 
   .two-col { display: flex; gap: 24px; margin-bottom: 0; }
   .two-col .field { flex: 1; }
 
   /* ── Text styles ── */
-  .prose { font-size: 10px; line-height: 1.7; color: var(--text-1); }
+  .prose { font-size: 11.5px; line-height: 1.7; color: var(--text-1); }
   .prose-white { color: var(--white); }
-  .muted { color: var(--text-2); font-style: italic; font-size: 10px; }
+  .muted { color: var(--text-2); font-style: italic; font-size: 11px; }
   .muted-prose { color: var(--text-2); }
-  .stat { font-size: 14px; font-weight: 700; color: var(--white); }
-  .highlight { font-size: 11px; font-weight: 700; color: #c4b5fd; }
-  .reasoning { font-size: 8.5px; color: var(--text-3); line-height: 1.6; margin-top: 6px; margin-bottom: 12px; }
+  .stat { font-size: 15px; font-weight: 700; color: var(--white); }
+  .highlight { font-size: 12.5px; font-weight: 700; color: #ddd6fe; }
+  .reasoning { font-size: 10px; color: var(--text-2); line-height: 1.6; margin-top: 6px; margin-bottom: 12px; }
 
   /* ── Tags ── */
   .tag {
-    display: inline-block; font-size: 8.5px; font-weight: 600;
+    display: inline-block; font-size: 9.5px; font-weight: 600;
     border: 1px solid; border-radius: 100px;
-    padding: 3px 10px; margin: 2px 3px 2px 0;
+    padding: 4px 12px; margin: 2px 3px 2px 0;
   }
 
   /* ── CTA Badge ── */
   .cta-badge {
-    display: inline-block; font-size: 10px; font-weight: 700;
+    display: inline-block; font-size: 11px; font-weight: 700;
     background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(167,139,250,0.15));
     border: 1px solid rgba(124,58,237,0.35); border-radius: 8px;
-    padding: 6px 14px; color: #c4b5fd; letter-spacing: 0.3px;
+    padding: 6px 14px; color: #ddd6fe; letter-spacing: 0.3px;
   }
 
   /* ── Classification Badge ── */
   .classification-badge {
-    display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 1px;
+    display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 1px;
     text-transform: uppercase; border: 1px solid; border-radius: 100px;
     padding: 4px 12px; margin-bottom: 14px;
   }
@@ -373,21 +369,21 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   .note-bar { width: 3px; background: linear-gradient(180deg, var(--accent) 0%, #a78bfa 100%); flex-shrink: 0; }
   .note-inner { padding: 16px 20px 18px; }
   .note-label {
-    font-size: 7.5px; font-weight: 800; letter-spacing: 2.5px;
-    text-transform: uppercase; color: var(--text-3); margin-bottom: 10px;
+    font-size: 8.5px; font-weight: 800; letter-spacing: 2.5px;
+    text-transform: uppercase; color: var(--text-2); margin-bottom: 10px;
   }
-  .note-text { font-size: 10px; font-style: italic; color: var(--text-2); line-height: 1.8; }
+  .note-text { font-size: 11px; font-style: italic; color: var(--text-2); line-height: 1.8; }
 
   /* ── Budget ── */
   .budget-hero { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
   .budget-amount { font-size: 28px; font-weight: 900; color: var(--white); letter-spacing: -1px; line-height: 1; margin: 4px 0; }
-  .budget-unit { font-size: 12px; font-weight: 500; color: var(--text-2); }
-  .budget-tier { font-size: 8px; font-weight: 700; color: var(--accent); letter-spacing: 1.5px; text-transform: uppercase; margin-top: 4px; }
+  .budget-unit { font-size: 14px; font-weight: 500; color: var(--text-2); }
+  .budget-tier { font-size: 9px; font-weight: 700; color: var(--accent); letter-spacing: 1.5px; text-transform: uppercase; margin-top: 4px; }
   .budget-meta { text-align: right; }
   .row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
   .row:last-child { border-bottom: none; }
-  .row-label { font-size: 8px; color: var(--text-3); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-  .row-value { font-size: 9px; color: var(--text-1); font-weight: 600; }
+  .row-label { font-size: 9px; color: var(--text-2); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .row-value { font-size: 10.5px; color: var(--text-1); font-weight: 600; }
   .breakdown-grid { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
 
   /* ── Warnings ── */
