@@ -49,8 +49,19 @@ export async function POST(request: Request) {
         "Content-Disposition": `attachment; filename="omni-target-brief-${safeName}.pdf"`,
       },
     });
-  } catch (err) {
-    console.error("PDF generation error:", err);
-    return NextResponse.json({ error: "PDF generation failed" }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : "";
+    console.error("[PDF] Generation error:", message);
+    console.error("[PDF] Stack:", stack);
+    console.error("[PDF] Params snapshot:", JSON.stringify({
+      productName: (params as BriefPDFParams).productName,
+      hasCopy: !!(params as BriefPDFParams).copy,
+      hasTargeting: !!(params as BriefPDFParams).targeting,
+      hasBudget: !!(params as BriefPDFParams).budget,
+      locationCount: (params as BriefPDFParams).targeting?.locations?.length ?? "n/a",
+      warningsCount: (params as BriefPDFParams).warnings?.length ?? "n/a",
+    }));
+    return NextResponse.json({ error: "PDF generation failed", detail: message }, { status: 500 });
   }
 }

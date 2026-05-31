@@ -55,19 +55,23 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     inter800 && `@font-face { font-family: 'Inter'; font-style: normal; font-weight: 800; src: url('data:font/woff2;base64,${inter800}') format('woff2'); }`,
   ].filter(Boolean).join("\n  ");
 
-  const gi = params.gatewayInsight;
-  const currency = params.budget.currency || "USD";
-  const symbol = params.budget.currency_symbol || getCurrencySymbol(currency);
-  const daily = params.budget.goal_adjusted_daily ?? params.budget.recommended_daily;
-  const duration = params.budget.recommended_duration_days ?? 14;
-  const adSets = params.budget.ad_sets || 1;
-  const locations = params.targeting.locations ?? [];
-  const interests = params.targeting.interests ?? [];
-  const behaviours = params.targeting.behaviours ?? [];
-  const ageMin = params.targeting.age_min ?? 25;
-  const ageMax = params.targeting.age_max ?? 44;
-  const gender = params.targeting.gender ?? "all";
+  const gi = params.gatewayInsight ?? null;
+  const budget = params.budget ?? {};
+  const targeting = params.targeting ?? {};
+  const copy = params.copy ?? {};
+  const currency = (budget as any).currency || "USD";
+  const symbol = (budget as any).currency_symbol || getCurrencySymbol(currency);
+  const daily = (budget as any).goal_adjusted_daily ?? (budget as any).recommended_daily ?? null;
+  const duration = (budget as any).recommended_duration_days ?? 14;
+  const adSets = (budget as any).ad_sets || 1;
+  const locations = Array.isArray((targeting as any).locations) ? (targeting as any).locations : [];
+  const interests = Array.isArray((targeting as any).interests) ? (targeting as any).interests : [];
+  const behaviours = Array.isArray((targeting as any).behaviours) ? (targeting as any).behaviours : [];
+  const ageMin = (targeting as any).age_min ?? 25;
+  const ageMax = (targeting as any).age_max ?? 44;
+  const gender = (targeting as any).gender ?? "all";
   const genderLabel = gender === "female" ? "Women" : gender === "male" ? "Men" : "All Genders";
+  const warnings: string[] = Array.isArray(params.warnings) ? params.warnings : [];
 
   // ── Fetch product image as base64 via server-side proxy ──
   let productImgSrc = "";
@@ -120,10 +124,10 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
 
   // ── Ad Copy Card ──
   const adCopyHTML = card("Ad Copy", `
-    ${field("Headline", `<p class="prose prose-white prose-xl">${esc(params.copy.headline)}</p>`, true)}
-    ${field("Primary Text", `<p class="prose">${esc(params.copy.primaryText)}</p>`)}
-    ${field("Link Description", `<p class="prose">${esc(params.copy.description)}</p>`)}
-    ${field("Call to Action", `<span class="cta-badge">${esc(params.copy.cta)}</span>`)}
+    ${field("Headline", `<p class="prose prose-white prose-xl">${esc((copy as any).headline)}</p>`, true)}
+    ${field("Primary Text", `<p class="prose">${esc((copy as any).primaryText)}</p>`)}
+    ${field("Link Description", `<p class="prose">${esc((copy as any).description)}</p>`)}
+    ${field("Call to Action", `<span class="cta-badge">${esc((copy as any).cta)}</span>`)}
   `);
 
   // ── Copywriter's Note ──
@@ -132,7 +136,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     <div class="note-bar"></div>
     <div class="note-inner">
       <div class="note-label">Copywriter's Note</div>
-      <p class="note-text">"${esc(params.copy.copywriterNote)}"</p>
+      <p class="note-text">"${esc((copy as any).copywriterNote)}"</p>
     </div>
   </div>`;
 
@@ -146,7 +150,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
       ${field("Age Range", `<span class="stat">${ageMin}–${ageMax}</span>`)}
       ${field("Gender", `<span class="stat">${genderLabel}</span>`)}
     </div>
-    ${params.targeting.age_reasoning ? `<p class="reasoning">${esc(params.targeting.age_reasoning)}</p>` : ""}
+    ${(targeting as any).age_reasoning ? `<p class="reasoning">${esc((targeting as any).age_reasoning)}</p>` : ""}
     ${field("Interests", interests.length > 0 ? tags(interests) : `<span class="muted">Add manually based on your niche</span>`)}
     ${field("Behaviours", behaviours.length > 0
       ? tags(behaviours, "#4ade80", "rgba(74,222,128,0.1)", "rgba(74,222,128,0.25)")
@@ -159,7 +163,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
       <div>
         <div class="field-label">Daily Budget</div>
         <div class="budget-amount">${daily ? fmt(daily, currency, symbol) : "Set Manually"}<span class="budget-unit">/day</span></div>
-        ${params.budget.tier ? `<div class="budget-tier">${esc(params.budget.tier)} Strategy</div>` : ""}
+        ${(budget as any).tier ? `<div class="budget-tier">${esc((budget as any).tier)} Strategy</div>` : ""}
       </div>
       <div class="budget-meta">
         ${row("Duration", `${duration} days`)}
@@ -167,36 +171,37 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
         ${row("Ad Sets", `${adSets} max`)}
       </div>
     </div>
-    ${params.budget.optimization_event ? `
-      ${field("Optimization Event", `<span class="highlight">${esc(params.budget.optimization_event.event)}</span>`)}
-      <p class="reasoning">${esc(params.budget.optimization_event.reasoning)}</p>
+    ${(budget as any).optimization_event ? `
+      ${field("Optimization Event", `<span class="highlight">${esc((budget as any).optimization_event.event)}</span>`)}
+      <p class="reasoning">${esc((budget as any).optimization_event.reasoning)}</p>
     ` : ""}
-    ${params.budget.breakdown ? `
+    ${(budget as any).breakdown ? `
       ${field("How This Was Calculated", `
         <div class="breakdown-grid">
-          ${row("Revenue Signal", fmt(params.budget.breakdown.revenue_based, currency, symbol) + "/day")}
-          ${row("AOV Signal", fmt(params.budget.breakdown.aov_based, currency, symbol))}
-          ${params.budget.goal_label ? row("Goal Adjustment", `Adjusted for ${params.budget.goal_label}`) : ""}
+          ${row("Revenue Signal", fmt((budget as any).breakdown.revenue_based, currency, symbol) + "/day")}
+          ${row("AOV Signal", fmt((budget as any).breakdown.aov_based, currency, symbol))}
+          ${(budget as any).goal_label ? row("Goal Adjustment", `Adjusted for ${(budget as any).goal_label}`) : ""}
         </div>
       `)}
     ` : ""}
-    ${params.budget.reasoning ? field("Strategy Context", `<p class="prose muted-prose">${esc(params.budget.reasoning)}</p>`) : ""}
+    ${(budget as any).reasoning ? field("Strategy Context", `<p class="prose muted-prose">${esc((budget as any).reasoning)}</p>`) : ""}
   `);
 
   // ── Timing Card ──
-  const peakDays = params.timing.peak_days ?? [];
+  const timing = params.timing ?? {};
+  const peakDays: string[] = Array.isArray((timing as any).peak_days) ? (timing as any).peak_days : [];
   let timingHTML = "";
-  if (peakDays.length > 0 || params.timing.launch_recommendation) {
+  if (peakDays.length > 0 || (timing as any).launch_recommendation) {
     timingHTML = card("Timing", `
-      ${params.timing.launch_recommendation ? field("Launch Recommendation", `<p class="prose">${esc(params.timing.launch_recommendation)}</p>`) : ""}
+      ${(timing as any).launch_recommendation ? field("Launch Recommendation", `<p class="prose">${esc((timing as any).launch_recommendation)}</p>`) : ""}
       ${peakDays.length > 0 ? field("Best Days to Run", tags(peakDays, "#60a5fa", "rgba(96,165,250,0.1)", "rgba(96,165,250,0.25)")) : ""}
     `, "#3b82f6");
   }
 
   // ── Warnings ──
   let warningsHTML = "";
-  if (params.warnings.length > 0) {
-    const warnItems = params.warnings.map(w => `<div class="warn-item"><span class="warn-icon">!</span><span>${esc(w)}</span></div>`).join("");
+  if (warnings.length > 0) {
+    const warnItems = warnings.map(w => `<div class="warn-item"><span class="warn-icon">!</span><span>${esc(w)}</span></div>`).join("");
     warningsHTML = card("Before You Launch", `<div class="warn-list">${warnItems}</div>`, "#f59e0b");
   }
 
