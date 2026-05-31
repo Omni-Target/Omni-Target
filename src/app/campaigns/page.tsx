@@ -38,6 +38,7 @@ function CampaignsContent() {
 
   // Overall State
   const [viewState, setViewState] = useState<CampaignState>("selection");
+  const [loadingDraft, setLoadingDraft] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
   const [showBuyCredits, setShowBuyCredits] = useState(false);
 
@@ -84,6 +85,7 @@ function CampaignsContent() {
         console.error("Failed to parse campaign draft", e);
       }
     }
+    setLoadingDraft(false);
   }, []);
 
   // Form State
@@ -339,7 +341,8 @@ function CampaignsContent() {
     }
   };
 
-  const handleStartOver = () => {
+  const handleStartOver = (targetState?: CampaignState | React.MouseEvent) => {
+    const finalState = typeof targetState === "string" ? targetState : "media";
     setBrandName("");
     setProductName("");
     setDescription("");
@@ -353,8 +356,16 @@ function CampaignsContent() {
     setMediaCloudUrl("");
     setMediaFile(null);
     setMediaValidation(null);
-    setViewState("media");
+    setViewState(finalState);
   };
+
+  if (loadingDraft) {
+    return (
+      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center text-white/50">
+        <div className="w-8 h-8 rounded-full border-2 border-brand-500/20 border-t-brand-500 animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] relative overflow-hidden flex flex-col">
@@ -469,6 +480,27 @@ function CampaignsContent() {
       {viewState === "media" && (
         <main className="max-w-2xl mx-auto px-4 sm:px-6 py-10 relative flex-1">
           <div className="mb-8 animate-fade-in-up">
+            {autoFilledFromStore ? (
+              <button 
+                onClick={() => setViewState("input")}
+                className="flex items-center gap-2 text-xs font-medium text-white/40 hover:text-white/80 transition-colors mb-6 cursor-pointer bg-transparent border-none p-0"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+                Back to Campaign Details (Keep Catalog Image)
+              </button>
+            ) : (
+              <button 
+                onClick={() => setViewState("selection")}
+                className="flex items-center gap-2 text-xs font-medium text-white/40 hover:text-white/80 transition-colors mb-6 cursor-pointer bg-transparent border-none p-0"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+                Back to Options
+              </button>
+            )}
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-2">
               Upload Ad Creative
             </h1>
@@ -609,13 +641,19 @@ function CampaignsContent() {
         <main className="max-w-2xl mx-auto px-4 sm:px-6 py-10 relative flex-1">
           <div className="mb-8 animate-fade-in-up">
             <button 
-              onClick={() => setViewState("media")}
+              onClick={() => {
+                if (autoFilledFromStore) {
+                  handleStartOver("selection");
+                } else {
+                  setViewState("media");
+                }
+              }}
               className="flex items-center gap-2 text-xs font-medium text-white/40 hover:text-white/80 transition-colors mb-6 cursor-pointer bg-transparent border-none p-0"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M19 12H5M12 19l-7-7 7-7" />
               </svg>
-              {autoFilledFromStore ? "Upload Custom Creative" : "Back to Creative"}
+              {autoFilledFromStore ? "Change Product / Ad Type" : "Back to Creative"}
             </button>
 
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/20 mb-4">
@@ -651,6 +689,59 @@ function CampaignsContent() {
               </div>
             </div>
           )}
+
+          {/* Selected Media & Custom Upload Option */}
+          <div className="mb-6 rounded-xl border border-border-subtle bg-surface-raised p-4 animate-fade-in-up">
+            <p className="text-xs font-semibold text-white/50 uppercase tracking-wider mb-3">Ad Creative</p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                {mediaPreviewUrl ? (
+                  <div className="relative w-16 h-16 rounded-lg overflow-hidden border border-white/10 shrink-0 bg-black/40 flex items-center justify-center">
+                    {mediaFile?.type?.startsWith("video/") || mediaPreviewUrl.includes(".mp4") || mediaPreviewUrl.includes(".mov") ? (
+                      <div className="w-full h-full flex items-center justify-center bg-black/30">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-brand-400">
+                          <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                      </div>
+                    ) : (
+                      <img src={mediaPreviewUrl} alt="Ad Creative Preview" className="w-full h-full object-cover" />
+                    )}
+                  </div>
+                ) : (
+                  <div className="w-16 h-16 rounded-lg border border-dashed border-white/10 shrink-0 flex items-center justify-center text-white/20">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                  </div>
+                )}
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-white">
+                      {mediaFile ? "Custom Creative Uploaded" : autoFilledFromStore ? "Shopify Catalog Image" : "Custom Ad Creative"}
+                    </span>
+                    {mediaFile && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-brand-500/10 text-brand-400 border border-brand-500/20">
+                        Custom
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-white/40 mt-0.5">
+                    {mediaFile ? (mediaFile.type.startsWith("video/") ? "Custom video ad file" : "Custom image file") : autoFilledFromStore ? "Automatically synced from Shopify store catalog" : "Upload an image or video for this campaign"}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setViewState("media")}
+                className="px-4 py-2 rounded-lg bg-brand-500/10 border border-brand-500/20 hover:bg-brand-500/20 text-xs font-semibold text-brand-400 transition-all duration-200 cursor-pointer self-start sm:self-center shrink-0 whitespace-nowrap"
+              >
+                {autoFilledFromStore && !mediaFile ? "Use Custom Upload" : "Change Ad Creative"}
+              </button>
+            </div>
+          </div>
 
           <div className="space-y-6 animate-fade-in-up-delay-1 mb-8">
             {/* Brand Name */}
