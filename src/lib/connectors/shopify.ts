@@ -30,6 +30,7 @@ interface ShopifyProduct {
   tags: string;
   product_type: string;
   vendor: string;
+  created_at: string;
   variants: {
     id: number;
     title: string;
@@ -171,7 +172,7 @@ export async function fetchShopifyStoreData(
   const rawProducts = await shopifyGetPaginated<ShopifyProduct>(
     shopDomain,
     accessToken,
-    "products.json?limit=250&status=active&fields=id,title,body_html,variants,images,product_type,vendor,tags",
+    "products.json?limit=250&status=active&fields=id,title,body_html,variants,images,product_type,vendor,tags,created_at",
     "products"
   );
 
@@ -461,6 +462,8 @@ export async function fetchShopifyStoreData(
       first_time_buyer_ratio,
       order_velocity,
       repeat_purchase_rate,
+      created_at: product.created_at || undefined,
+      order_count: productOrdersMap[product.id]?.size || 0,
     };
   });
 

@@ -631,11 +631,11 @@ function DashboardContent() {
                                     : isConsideration
                                     ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
                                     : product.gateway_classification === "Insufficient Data"
-                                    ? "bg-white/5 text-white/40 border-white/10"
+                                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                                     : "bg-purple-500/10 text-purple-400 border-purple-500/20"
                                 }`}>
                                   {product.gateway_classification === "Insufficient Data"
-                                    ? "Needs more sales data"
+                                    ? "New Launch Brief"
                                     : product.gateway_classification}
                                 </span>
                               )}
@@ -679,6 +679,94 @@ function DashboardContent() {
                     );
                   })}
               </div>
+
+              {/* New Launches Section */}
+              {(() => {
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                const newLaunches = (storeData?.products || [])
+                  .filter((p: any) => {
+                    const isNew = p.created_at && new Date(p.created_at) >= thirtyDaysAgo;
+                    const hasLowOrders = (p.order_count ?? p.units_sold ?? 0) < 3;
+                    return p.in_stock && (isNew || hasLowOrders);
+                  })
+                  .slice(0, 6);
+
+                if (newLaunches.length === 0) return null;
+
+                return (
+                  <div className="mt-8">
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="text-xs text-white/40 uppercase tracking-widest font-semibold">New Launches</p>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          {newLaunches.length} products
+                        </span>
+                      </div>
+                      <p className="text-sm text-white/60">Just added — build your launch brief before the first sale</p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {newLaunches.map((product: any) => (
+                        <div
+                          key={`new-${product.id}`}
+                          className="rounded-xl border p-4 bg-surface-raised border-emerald-500/20 hover:border-emerald-500/40 transition-colors"
+                        >
+                          <div className="flex items-start gap-3 mb-3">
+                            {product.image_url ? (
+                              <img
+                                src={product.image_url}
+                                alt={product.name}
+                                className="w-12 h-12 rounded-lg object-cover shrink-0"
+                              />
+                            ) : (
+                              <div className="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-400/60">
+                                  <path d="M12 5v14M5 12l7-7 7 7" />
+                                </svg>
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-semibold text-white truncate">{product.name}</p>
+                              <div className="flex items-center flex-wrap gap-2 mt-1">
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                  ✦ New Launch
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mb-3 px-2 py-1.5 bg-emerald-500/5 rounded-md border border-emerald-500/10">
+                            <p className="text-[11px] text-white/60 italic">New product — launch brief available</p>
+                          </div>
+
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-white/40">
+                              {product.units_sold} sold · {formatCurrency(Math.round(product.price), storeData?.store?.currency || "USD")}
+                            </span>
+                            <button
+                              onClick={() => {
+                                sessionStorage.setItem("campaign_draft", JSON.stringify({
+                                  product_name: product.name,
+                                  product_description: product.description || product.name,
+                                  product_type: product.product_type || "",
+                                  product_tags: product.tags?.join(",") || "",
+                                  product_price: product.price,
+                                  product_image: product.image_url || "",
+                                  is_new_launch: true,
+                                }));
+                                router.push("/campaigns");
+                              }}
+                              className="text-emerald-400 hover:text-emerald-300 font-medium transition-colors cursor-pointer bg-transparent border-none p-0"
+                            >
+                              Create Launch Brief →
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Collapsed Restocking Opportunities Section */}
               {(() => {

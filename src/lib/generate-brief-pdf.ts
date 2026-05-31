@@ -84,6 +84,7 @@ export interface BriefPDFParams {
     storeAov: number;
     storeBaseFtb: number;
   };
+  isNewLaunch?: boolean;
 }
 
 // ─── Generator ───────────────────────────────────────────────────────────────
@@ -279,6 +280,21 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
   font(10, "normal", ACCENT_T);
   doc.text(sanitize(params.campaignGoal), MX + 8, y + 4);
   y += 18;
+
+  // NEW LAUNCH badge
+  if (params.isNewLaunch) {
+    const NEW_LAUNCH_BG = [16, 50, 35] as const;
+    const NEW_LAUNCH_T = [52, 211, 153] as const;
+    const badgeW = 38;
+    const badgeH = 8;
+    doc.setFillColor(...NEW_LAUNCH_BG);
+    doc.roundedRect(MX, y, badgeW, badgeH, 1.5, 1.5, "F");
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...NEW_LAUNCH_T);
+    doc.text("NEW LAUNCH", MX + 3, y + 5.5);
+    y += 14;
+  }
 
   // ── Gateway Insight Section ───────────────────────────────────────────────
 
@@ -553,7 +569,20 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
     renderCard("Before You Launch", warnItems);
   }
 
-  // ── Footer on every page ────────────────────────────────────────────────
+  // NEW LAUNCH footer note
+  if (params.isNewLaunch) {
+    renderCard("New Launch Note", [
+      {
+        text: "Targeting built from your store's buyer profile — refine after your first 10 orders",
+        size: 9.5,
+        style: "italic" as const,
+        color: [52, 211, 153] as unknown as typeof TEXT_2,
+        gapAfter: 2,
+      },
+    ]);
+  }
+
+  // Footer on every page
 
   const pageCount = (doc.internal as any).pages.length - 1;
   for (let i = 1; i <= pageCount; i++) {

@@ -26,6 +26,8 @@ export interface StoreProduct {
   order_velocity?: number;
   repeat_purchase_rate?: number;
   gateway_classification?: "Gateway" | "Consideration" | "Hybrid" | "Insufficient Data";
+  created_at?: string;
+  order_count?: number;
 }
 
 export interface StoreData {

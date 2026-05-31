@@ -75,6 +75,9 @@ function CampaignsContent() {
           if (draft.product_variants) {
             setProductVariants(draft.product_variants);
           }
+          if (draft.is_new_launch) {
+            setIsNewLaunch(true);
+          }
           
           setViewState("input");
           
@@ -112,6 +115,7 @@ function CampaignsContent() {
   const [gatewayInsight, setGatewayInsight] = useState<any>(null);
   const [selectedStrategyIndex, setSelectedStrategyIndex] = useState(1); // 0=Dip Your Toe, 1=Sweet Spot, 2=Full Send
   const [selectedDuration, setSelectedDuration] = useState<7 | 14 | 30>(14);
+  const [isNewLaunch, setIsNewLaunch] = useState(false);
 
   const { credits, isUnlimited } = useCredits();
 
@@ -313,6 +317,7 @@ function CampaignsContent() {
           productVariants: productVariants || null,
           gatewayInsight: currentGatewayInsight,
           storeDataForApi,
+          isNewLaunch,
         }),
       });
 
@@ -1541,6 +1546,7 @@ function CampaignsContent() {
                       warnings: aiInsights?.warnings ?? [],
                       generatedAt: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }),
                       gatewayInsight,
+                      isNewLaunch,
                     };
                     const res = await fetch("/api/campaigns/pdf", {
                       method: "POST",

@@ -202,8 +202,15 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     `, "#3b82f6");
   }
 
-  // ── Warnings (Omitted by user request) ──
+  // Warnings (omitted by user request)
   let warningsHTML = "";
+
+  // New Launch note card
+  const newLaunchNoteHTML = params.isNewLaunch ? card(
+    "New Launch",
+    `<p class="prose" style="color:#34d399;font-style:italic">Targeting built from your store's buyer profile &mdash; refine after your first 10 orders</p>`,
+    "#10b981"
+  ) : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -455,6 +462,11 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
 
   <div class="header-product">${esc(params.productName)}</div>
   <div class="header-brand">by ${esc(params.brandName)}</div>
+  ${params.isNewLaunch ? `
+  <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:100px;padding:5px 12px;margin-bottom:12px;">
+    <span style="width:6px;height:6px;border-radius:50%;background:#10b981;display:inline-block;"></span>
+    <span style="font-size:8px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#34d399;">New Launch</span>
+  </div>` : ""}
   <div class="header-goal">
     <span class="header-goal-dot"></span>
     <span class="header-goal-text">${esc(params.campaignGoal)}</span>
@@ -470,6 +482,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   ${budgetHTML}
   ${timingHTML}
   ${warningsHTML}
+  ${newLaunchNoteHTML}
 </div>
 
 <footer class="footer no-print">

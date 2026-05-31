@@ -141,7 +141,7 @@ async function generateTargetingProfile(
     })
     .join("\n");
 
-  const prompt = `You are a world-class Meta Ads media buyer and marketing consultant advising a busy fashion brand founder.
+  const prompt = `You are a world-class Meta Ads media buyer and marketing consultant advising a busy e-commerce brand founder.
 Analyze this Shopify store's data to generate a complete, high-converting targeting profile.
 
 Store Details:
@@ -158,7 +158,7 @@ Top Products (up to 25, with category, tags, and sales):
 ${productSample || "None available"}
 
 Instructions for Reasoning & Messaging:
-- Write like you're texting a busy fashion brand founder, not writing a report.
+- Write like you're texting a busy e-commerce brand founder, not writing a report.
 - Maximum one sentence for each reasoning / note / recommendation field.
 - Never use jargon like "acquisition signal", "behavioral velocity", "cohort signals", or "units/mo velocity".
 - Lead with the actionable implication, not the data behind it.
@@ -193,15 +193,19 @@ Instructions for Timing & Launches (Dynamic Campaign Launches):
 - Write a 1-sentence reasoning explaining this launch schedule based on the peak hour/day trends.
 - Populate "peak_days" with the primary peak day(s) detected or recommended.
 
-Instructions for Optimization Event (Critical — Do Not Hardcode):
+Instructions for Optimization Event (Critical):
 - The core question is: "Can Meta get enough optimization events per week to exit the learning phase given this store's budget and order velocity?"
 - Use this logic internally to reason:
   - weeklyOrderVelocity = (monthly orders / 4)
   - estimatedWeeklyEventsAtBudget = weeklyOrderVelocity * (dailyBudget / avgOrderValue) * 7
-- Walk down the event hierarchy (Purchase → InitiateCheckout → AddToCart → AddToWishlist → ViewContent) and select the highest event where estimatedWeeklyEventsAtBudget is likely to generate at least 10 events per week (10 is the realistic minimum for a small brand to see meaningful optimization signal).
-- If the store has any purchase history at all, always try Purchase first before downgrading — a store with 8 monthly orders running a focused high budget can still generate purchase signal.
+- The dynamic hierarchy MUST only move between these three events: Purchase, InitiateCheckout, and AddToCart.
+  - Purchase: Use when weekly order velocity divided by ad set count can reasonably generate 10+ purchase events per week at the recommended budget.
+  - InitiateCheckout: Use when store has consistent checkout activity but purchase volume is too low for Purchase optimization.
+  - AddToCart: This is the absolute floor. Any store with order history below the InitiateCheckout threshold gets AddToCart. NEVER go lower.
+- NEVER recommend ViewContent, PageView, or any awareness-level event to an e-commerce store regardless of data volume.
 - Provide a plain English explanation of why this event makes sense to the merchant specifically stating what signal you expect and what to watch for.
-- Also suggest a milestone to upgrade to the next level.
+- CRITICAL: Use gender-neutral language (e.g. "buyers", "customers", "people") unless the catalog explicitly caters exclusively to one gender.
+- CRITICAL: DO NOT include any specific budget numbers, amounts, or currency symbols in this reasoning text, as the user's budget is dynamic and will change on the frontend.
 
 Campaign Context:
 - Monthly Orders: ${storeData.orders.orders_last_30_days || 0}
@@ -352,8 +356,8 @@ Campaign Context:
         : "Thursday launches build optimal momentum for weekend e-commerce traffic."
     },
     optimization_event: {
-      event: "Add to Cart",
-      reasoning: "A safe fallback event while the AI evaluates your full data.",
+      event: "AddToCart",
+      reasoning: "We're starting with AddToCart to give Meta enough signal to find your buyers. Switch to Purchase once you're seeing consistent weekly orders.",
       target_weekly: 10,
       upgrade_milestone: "Switch to Purchase optimization once you get 10+ orders."
     }
@@ -532,9 +536,9 @@ export async function generateRecommendations(
         tier: "Starter",
         ad_sets: 2,
         optimization_event: {
-          event: "Add to Cart",
-          reasoning: "Recommended for early testing with limited purchase data.",
-          target_weekly: 30
+          event: "AddToCart",
+          reasoning: "We're starting with AddToCart to give Meta enough signal to find your buyers. Switch to Purchase once you're seeing consistent weekly orders.",
+          target_weekly: 10
         },
         breakdown: {
           revenue_based: 0,

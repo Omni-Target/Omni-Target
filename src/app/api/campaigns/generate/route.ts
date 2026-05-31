@@ -30,6 +30,7 @@ interface GenerateRequest {
   productVariants?: string | null;
   gatewayInsight?: any;
   storeDataForApi?: any;
+  isNewLaunch?: boolean;
 }
 
 /**
@@ -119,6 +120,7 @@ export async function POST(request: Request) {
       productVariants,
       gatewayInsight,
       storeDataForApi,
+      isNewLaunch,
     } = body;
 
     // Validate required fields
@@ -248,7 +250,7 @@ no markdown, no preamble:
     something the primary text didn't say.",
   "cta": "one of: Shop Now, See Collection, 
     Learn More, Get Offer, Sign Up",
-  "copywriterNote": "A single sentence explaining why this copy works for this audience, written like you're texting a busy fashion founder (maximum 1 sentence, no jargon like 'acquisition signal', 'behavioral velocity', 'cohort signals', or 'units/mo velocity', lead with the actionable implication, sound like a smart marketer friend)."
+  "copywriterNote": "A single sentence explaining why this copy works for this audience, written like you're texting a busy e-commerce founder (maximum 1 sentence, no jargon like 'acquisition signal', 'behavioral velocity', 'cohort signals', or 'units/mo velocity', lead with the actionable implication, sound like a smart marketer friend)."
 }`;
 
     // Detect if the media is a video:
@@ -308,7 +310,16 @@ ${gatewayInsight?.currentProductClassification === "Gateway" ?
   : gatewayInsight?.currentProductClassification === "Consideration" ?
   `CRITICAL: This product is classified as a CONSIDERATION PRODUCT. It converts warm or returning traffic.
   Your hook MUST be derived from its premium attributes and the fact that it is a high-consideration purchase. Address the quality and investment value.`
-  : ""}`;
+  : ""}
+
+${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — there is no purchase history to reference.
+  CRITICAL for New Launches:
+  - Frame this as a first look or early access moment — not a proven bestseller.
+  - NEVER use social proof phrases like "loved by thousands", "our best-seller", or "customers say".
+  - NEVER use scarcity tactics like "selling fast" or "only X left" — there is no history to back this up.
+  - Recommended angles: UGC-style discovery, founder introduction, early adopter framing ("Be the first", "Before everyone else").
+  - Write copy that builds desire and curiosity rather than urgency or proof.
+  - Use the product's design, materials, and category to sell the vision, not the track record.` : ""}`;
 
     const messageContent: any[] = [];
 
