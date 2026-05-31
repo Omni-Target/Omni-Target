@@ -1527,17 +1527,30 @@ function CampaignsContent() {
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify(payload),
                     });
-                    if (!res.ok) throw new Error("PDF generation failed");
-                    const blob = await res.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = `omni-target-brief-${productName.replace(/\s+/g, "-").toLowerCase()}.pdf`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  } catch (err) {
+                    if (!res.ok) {
+                      const errData = await res.json().catch(() => ({}));
+                      throw new Error(errData.detail || errData.error || `HTML generation failed with status ${res.status}`);
+                    }
+                    
+                    const htmlString = await res.text();
+                    
+                    // Dynamically import html2pdf to prevent SSR window errors
+                    // @ts-ignore
+                    const html2pdf = (await import("html2pdf.js")).default;
+                    
+                    const safeName = (productName || "brief").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+                    const opt = {
+                      margin: 0,
+                      filename: `omni-target-brief-${safeName}.pdf`,
+                      image: { type: 'jpeg', quality: 0.98 },
+                      html2canvas: { scale: 2, useCORS: true, logging: false },
+                      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                    };
+                    
+                    await html2pdf().set(opt).from(htmlString).save();
+                  } catch (err: any) {
                     console.error("PDF error:", err);
-                    alert("Could not generate PDF. Please try again.");
+                    alert(`Could not generate PDF.\n\nError: ${err.message || String(err)}\n\nPlease try again.`);
                   } finally {
                     setIsDownloadingPdf(false);
                   }
