@@ -104,37 +104,37 @@ export async function GET() {
 
   if (totalProducts < 5) {
     issues.push(
-      "Low product count — fewer products to advertise"
+      "Limited product catalog for broad testing"
     );
     recommendations.push(
-      "Add more products to your Shopify store"
+      "Consider expanding your catalog to give Meta's algorithm more creative variables"
     );
   }
 
   if (orders30d === 0) {
     issues.push(
-      "No orders in the last 30 days"
+      "No recent order data for the algorithm to analyze"
     );
     recommendations.push(
-      "Make sure your store is live and accepting orders"
+      "Run a small engagement or traffic campaign to generate initial pixel data"
     );
   }
 
   if (inStockRatio < 0.5) {
     issues.push(
-      `${totalProducts - activeProducts} products are out of stock`
+      `A significant portion of your catalog (${totalProducts - activeProducts} items) is currently out of stock`
     );
     recommendations.push(
-      "Restock products before running ads — don't advertise out-of-stock items"
+      "Ensure your core Gateway Products are fully stocked before scaling ad spend"
     );
   }
 
   if (repeatRate < 0.1) {
     issues.push(
-      "Low repeat customer rate (< 10%)"
+      "Opportunity to increase lifetime value (repeat rate < 10%)"
     );
     recommendations.push(
-      "Focus first campaign on your best-selling product to build customer trust"
+      "Focus ads on high-retention products or implement a post-purchase email flow"
     );
   }
 
@@ -142,22 +142,22 @@ export async function GET() {
   const positives: string[] = [];
   if (orders30d >= 10) {
     positives.push(
-      `${orders30d} orders in the last 30 days`
+      `Healthy recent sales volume (${orders30d} orders in 30 days)`
     );
   }
   if (totalProducts >= 10) {
     positives.push(
-      `${totalProducts} active products`
+      `Strong catalog size with ${totalProducts} products ready to test`
     );
   }
   if (repeatRate >= 0.2) {
     positives.push(
-      `${Math.round(repeatRate * 100)}% repeat customer rate`
+      `Excellent customer retention (${Math.round(repeatRate * 100)}% repeat rate)`
     );
   }
   if (inStockRatio >= 0.8) {
     positives.push(
-      `${Math.round(inStockRatio * 100)}% of products in stock`
+      `Great inventory health (${Math.round(inStockRatio * 100)}% in stock)`
     );
   }
 

@@ -137,9 +137,10 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   </div>`;
 
   // ── Targeting Card ──
+  const safeLocations = Array.isArray(locations) ? locations : [];
   const targetingHTML = card("Audience Targeting", `
-    ${field("Locations", locations.length > 0
-      ? tags(locations.map(l => `${l.name.split(',')[0].trim()}${l.source === "from_data" ? " ✓" : ""}`))
+    ${field("Locations", safeLocations.length > 0
+      ? tags(safeLocations.map(l => `${(l?.name || l?.city || "").split(',')[0].trim()}${l?.source === "from_data" ? " ✓" : ""}`).filter(Boolean))
       : `<span class="muted">Set manually in Meta Ads Manager</span>`)}
     <div class="two-col">
       ${field("Age Range", `<span class="stat">${ageMin}–${ageMax}</span>`)}

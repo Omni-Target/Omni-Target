@@ -1185,9 +1185,9 @@ function CampaignsContent() {
                     <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Locations</span>
                     <p className="text-sm text-white/80 mt-1">
                       {aiInsights?.targeting?.locations?.length > 0
-                        ? aiInsights.targeting.locations.map((l: any) => l.name.split(',')[0].trim()).join(" · ")
+                        ? aiInsights.targeting.locations.map((l: any) => (l?.name || l?.city || "").split(',')[0].trim()).filter(Boolean).join(" · ")
                         : storeInsights.orders?.top_locations?.length > 0
-                          ? storeInsights.orders.top_locations.map((l: any) => `${l.city}`).join(" · ")
+                          ? storeInsights.orders.top_locations.map((l: any) => `${l.city}`).filter(Boolean).join(" · ")
                           : "No order data yet — add locations manually based on your target market"}
                     </p>
                   </div>

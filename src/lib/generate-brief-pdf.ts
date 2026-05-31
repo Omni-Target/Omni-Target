@@ -38,7 +38,7 @@ export interface BriefPDFParams {
     copywriterNote: string;
   };
   targeting: {
-    locations?: { name: string; source: string }[];
+    locations?: { name?: string; city?: string; source?: string }[];
     age_min?: number;
     age_max?: number;
     gender?: string;
@@ -413,9 +413,10 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
 
   // Locations
   targetItems.push({ text: "LOCATIONS", size: 7.5, style: "bold", color: TEXT_3, gapAfter: 1 });
-  if (locations.length > 0) {
+  const safeLocations = Array.isArray(locations) ? locations : [];
+  if (safeLocations.length > 0) {
     targetItems.push({
-      text: locations.map(l => `${l.name.split(',')[0].trim()} (${l.source === "from_data" ? "from orders" : "recommended"})`).join("  ·  "),
+      text: safeLocations.map(l => `${(l?.name || l?.city || "").split(',')[0].trim()} (${l?.source === "from_data" ? "from orders" : "recommended"})`).filter(Boolean).join("  ·  "),
       size: 10, gapAfter: 6,
     });
   } else {
