@@ -1456,7 +1456,23 @@ function CampaignsContent() {
                           </div>
                           <div>
                             <p className="text-xs font-bold text-white/90 uppercase tracking-wider mb-1">{currentStrategy.label}</p>
-                            <p className="text-xs leading-relaxed text-white/60">{currentStrategy.description}</p>
+                            <p className="text-xs leading-relaxed text-white/60">
+                              {(() => {
+                                let desc = currentStrategy.description;
+                                if (goalMult !== 1) {
+                                  const oldDailyStr = formatCurrency(currentStrategy.daily, curr, aiInsights.budget.currency_symbol);
+                                  const newDailyStr = formatCurrency(Math.round(currentStrategy.daily * goalMult), curr, aiInsights.budget.currency_symbol);
+                                  const oldTotalStr = formatCurrency(currentStrategy.total_daily, curr, aiInsights.budget.currency_symbol);
+                                  const newTotalStr = formatCurrency(Math.round(currentStrategy.total_daily * goalMult), curr, aiInsights.budget.currency_symbol);
+                                  
+                                  desc = desc.replace(oldDailyStr, newDailyStr);
+                                  if (oldTotalStr !== oldDailyStr) {
+                                    desc = desc.replace(oldTotalStr, newTotalStr);
+                                  }
+                                }
+                                return desc;
+                              })()}
+                            </p>
                           </div>
                         </div>
                       </div>
