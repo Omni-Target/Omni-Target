@@ -143,7 +143,38 @@ export async function GET(request: Request) {
     console.log("Shopify upsert success");
 
     // Give 1 free credit on install if free_credit_used is false
+    const { getUserIntegration } = await import("@/lib/db");
+    const userIntegration = await getUserIntegration(userId!);
+    const freeCreditUsedBefore = cols.hasFreeCreditUsed ? !!userIntegration?.free_credit_used : false;
+
     await handleFreeCreditOnInstall(userId!);
+
+    if (!freeCreditUsedBefore) {
+      try {
+        const { clerkClient } = await import("@clerk/nextjs/server");
+        const user = await clerkClient().users.getUser(userId!);
+        const email = user.emailAddresses[0]?.emailAddress;
+        
+        if (email) {
+          const { sendEmail } = await import("@/lib/email");
+          const { renderToStaticMarkup } = await import("react-dom/server");
+          // @ts-ignore
+          const { WelcomeEmail } = await import("@/emails/welcome");
+          
+          const html = renderToStaticMarkup(WelcomeEmail({}));
+          await sendEmail({
+            to: email,
+            subject: "Your free brief is waiting",
+            html,
+            userId: userId!,
+            templateName: "welcome"
+          });
+          console.log("Welcome email sent to", email);
+        }
+      } catch (err) {
+        console.error("Failed to send welcome email:", err);
+      }
+    }
 
     // Register the orders/paid webhook so confirmed purchases
     // are forwarded to Meta CAPI for attribution
