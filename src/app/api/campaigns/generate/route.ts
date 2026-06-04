@@ -545,27 +545,24 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
           
           if (email) {
             const { sendEmail } = await import("@/lib/email");
-            const { renderToStaticMarkup } = await import("react-dom/server");
             
             if (newCredits === 1) {
               // @ts-ignore
               const { CreditLowEmail } = await import("@/emails/credit-low");
-              const html = renderToStaticMarkup(CreditLowEmail({}));
               await sendEmail({
                 to: email,
                 subject: "1 brief credit left",
-                html,
+                react: CreditLowEmail({}),
                 userId: userId!,
                 templateName: "credit-low"
               });
             } else if (newCredits === 0) {
               // @ts-ignore
               const { CreditExhaustedEmail } = await import("@/emails/credit-exhausted");
-              const html = renderToStaticMarkup(CreditExhaustedEmail({}));
               await sendEmail({
                 to: email,
                 subject: "You've used all your credits",
-                html,
+                react: CreditExhaustedEmail({}),
                 userId: userId!,
                 templateName: "credit-exhausted"
               });

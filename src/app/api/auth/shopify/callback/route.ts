@@ -156,16 +156,14 @@ export async function GET(request: Request) {
         const email = user.emailAddresses[0]?.emailAddress;
         
         if (email) {
-          const { sendEmail } = await import("@/lib/email");
-          const { renderToStaticMarkup } = await import("react-dom/server");
+          const { sendEmail } = await import('@/lib/email');
           // @ts-ignore
-          const { WelcomeEmail } = await import("@/emails/welcome");
+          const { WelcomeEmail } = await import('@/emails/welcome');
           
-          const html = renderToStaticMarkup(WelcomeEmail({}));
           await sendEmail({
             to: email,
             subject: "Your free brief is waiting",
-            html,
+            react: WelcomeEmail({}),
             userId: userId!,
             templateName: "welcome"
           });

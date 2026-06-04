@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { Resend } from 'resend';
 import { supabaseAdmin } from './db';
 
@@ -6,7 +7,7 @@ const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KE
 interface SendEmailOptions {
   to: string | string[];
   subject: string;
-  html: string;
+  react: React.ReactNode;
   from?: string;
   userId?: string;
   templateName?: string;
@@ -19,7 +20,7 @@ interface SendEmailOptions {
 export async function sendEmail({ 
   to, 
   subject, 
-  html, 
+  react, 
   from = 'Omni Target <hello@app.omnitarget.co>',
   userId,
   templateName
@@ -54,7 +55,7 @@ export async function sendEmail({
       from,
       to,
       subject,
-      html,
+      react,
     });
 
     if (error) {

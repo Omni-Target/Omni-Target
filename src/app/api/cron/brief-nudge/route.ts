@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/db';
 import { sendEmail } from '@/lib/email';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { BriefNudgeEmail } from '@/emails/brief-nudge';
 import { clerkClient } from '@clerk/nextjs/server';
 
@@ -49,11 +48,10 @@ export async function GET(request: Request) {
           const email = user.emailAddresses[0]?.emailAddress;
           
           if (email) {
-            const html = renderToStaticMarkup(BriefNudgeEmail({}));
             const result = await sendEmail({
               to: email,
               subject: "You haven't run your first brief yet",
-              html,
+              react: BriefNudgeEmail({}),
               userId: userId,
               templateName: "brief-nudge"
             });
