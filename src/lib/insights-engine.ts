@@ -254,7 +254,7 @@ Campaign Context:
                 properties: {
                   interests: { type: "array", items: { type: "string" }, description: "Specific Meta Ads interest targets" },
                   interest_reasoning: { type: "string", description: "Actionable 1-sentence explanation of why these interests convert best." },
-                  behaviours: { type: "array", items: { type: "string" }, description: "Target behaviors (e.g. ['Engaged Shoppers'])" }
+                  behaviours: { type: "array", items: { type: "string" }, description: "List of 3-4 target behaviors. MUST include Engaged Shoppers, Online Shoppers, AND 1-2 additional specific Meta behaviors." }
                 },
                 required: ["interests", "interest_reasoning", "behaviours"]
               },
