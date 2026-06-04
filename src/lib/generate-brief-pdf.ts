@@ -29,6 +29,7 @@ const BOTTOM_SAFE = PH - 22;
 export interface BriefPDFParams {
   brandName: string;
   productName: string;
+  productUrl?: string;
   campaignGoal: string;
   copy: {
     headline: string;

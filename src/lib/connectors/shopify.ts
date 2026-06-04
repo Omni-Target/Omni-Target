@@ -26,6 +26,7 @@ interface ShopifyOrder {
 interface ShopifyProduct {
   id: number;
   title: string;
+  handle: string;
   body_html: string;
   tags: string;
   product_type: string;
@@ -172,7 +173,7 @@ export async function fetchShopifyStoreData(
   const rawProducts = await shopifyGetPaginated<ShopifyProduct>(
     shopDomain,
     accessToken,
-    "products.json?limit=250&status=active&fields=id,title,body_html,variants,images,product_type,vendor,tags,created_at",
+    "products.json?limit=250&status=active&fields=id,title,handle,body_html,variants,images,product_type,vendor,tags,created_at",
     "products"
   );
 
@@ -438,6 +439,7 @@ export async function fetchShopifyStoreData(
     return {
       id: product.id.toString(),
       name: product.title,
+      handle: product.handle,
       revenue: unitsSold * price,
       units_sold: unitsSold,
       in_stock: anyInStock,

@@ -215,6 +215,49 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     "#10b981"
   ) : "";
 
+  // Implementation Guide for Beginners
+  const implementationGuideHTML = card(
+    "Meta Ads Implementation Guide",
+    `
+    <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 6px;">
+      <!-- Step 1 -->
+      <div style="display: flex; gap: 12px; align-items: flex-start; background: rgba(255,255,255,0.03); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);">
+        <div style="background: rgba(56, 189, 248, 0.1); padding: 6px; border-radius: 6px; color: #38bdf8; flex-shrink: 0;">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+        </div>
+        <div>
+          <div style="color: var(--text-1); font-weight: bold; font-size: 12.5px; margin-bottom: 2px;">1. Campaign Level</div>
+          <div style="color: var(--text-2); font-size: 11.5px; line-height: 1.4;">Go to Meta Ads Manager, click <strong>Create</strong>, and choose the <strong>Sales</strong> objective.</div>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div style="display: flex; gap: 12px; align-items: flex-start; background: rgba(255,255,255,0.03); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);">
+        <div style="background: rgba(56, 189, 248, 0.1); padding: 6px; border-radius: 6px; color: #38bdf8; flex-shrink: 0;">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+        </div>
+        <div>
+          <div style="color: var(--text-1); font-weight: bold; font-size: 12.5px; margin-bottom: 2px;">2. Ad Set Level</div>
+          <div style="color: var(--text-2); font-size: 11.5px; line-height: 1.4;">Paste your <strong>Locations, Age, Gender, and Interests</strong> from the Audience section. Set your optimization event to Purchases and enter your budget.</div>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div style="display: flex; gap: 12px; align-items: flex-start; background: rgba(255,255,255,0.03); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);">
+        <div style="background: rgba(56, 189, 248, 0.1); padding: 6px; border-radius: 6px; color: #38bdf8; flex-shrink: 0;">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+        </div>
+        <div>
+          <div style="color: var(--text-1); font-weight: bold; font-size: 12.5px; margin-bottom: 2px;">3. Ad Level</div>
+          <div style="color: var(--text-2); font-size: 11.5px; line-height: 1.4;">Upload your own <strong>creative visual assets (UGC video or product images)</strong>. Copy and paste the <strong>Primary Text, Headline, and Link Description</strong>. Finally, paste your Product Link into the Destination URL field.</div>
+        </div>
+      </div>
+    </div>
+    <p style="margin-top: 12px; font-style: italic; color: var(--text-3); font-size: 11px; text-align: center;">This brief is designed to be directly copy-pasted into Meta Ads Manager to eliminate guesswork.</p>
+    `,
+    "#38bdf8"
+  );
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -472,6 +515,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   </div>
 
   <div class="header-product">${esc(params.productName)}</div>
+  ${params.productUrl ? `<div style="font-size:12px; margin-bottom:12px; margin-top:-4px;"><a href="${esc(params.productUrl)}" target="_blank" style="color:var(--info);text-decoration:none;">🔗 ${esc(params.productUrl)}</a></div>` : ""}
   <div class="header-brand">by ${esc(params.brandName)}</div>
   ${params.isNewLaunch ? `
   <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:100px;padding:5px 12px;margin-bottom:12px;">
@@ -494,6 +538,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   ${timingHTML}
   ${warningsHTML}
   ${newLaunchNoteHTML}
+  ${implementationGuideHTML}
 </div>
 
 <footer class="footer no-print">
@@ -506,6 +551,13 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   <button class="print-btn" onclick="window.print()">⬇ Save as PDF</button>
 </div>
 
+<script>
+  window.onload = function() {
+    setTimeout(function() {
+      window.print();
+    }, 800);
+  };
+</script>
 </body>
 </html>`;
 }

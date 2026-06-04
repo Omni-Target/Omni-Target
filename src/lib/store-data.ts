@@ -7,6 +7,7 @@ export interface StoreLocation {
 export interface StoreProduct {
   id: string;
   name: string;
+  handle?: string;
   revenue: number;
   units_sold: number;
   in_stock: boolean;

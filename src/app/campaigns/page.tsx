@@ -1299,17 +1299,19 @@ function CampaignsContent() {
                     Upload Different Creative
                   </button>
 
-                  <button
-                    onClick={() => handleGenerate(false)}
-                    className="w-full py-2.5 px-4 rounded-lg bg-white/[0.05] border border-white/10 text-sm font-medium text-white hover:bg-white/[0.08] transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="1 4 1 10 7 10" />
-                      <polyline points="23 20 23 14 17 14" />
-                      <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
-                    </svg>
-                    Generate Another Variation
-                  </button>
+                  {regenerateCount < 3 && (
+                    <button
+                      onClick={() => handleGenerate(true)}
+                      className="w-full py-2.5 px-4 rounded-lg bg-white/[0.05] border border-white/10 text-sm font-medium text-white hover:bg-white/[0.08] transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="1 4 1 10 7 10" />
+                        <polyline points="23 20 23 14 17 14" />
+                        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
+                      </svg>
+                      Generate Another Variation ({3 - regenerateCount} free left)
+                    </button>
+                  )}
 
                   <button
                     onClick={handleStartOver}
@@ -1660,9 +1662,18 @@ function CampaignsContent() {
                 onClick={async () => {
                   setIsDownloadingPdf(true);
                   try {
+                    let productUrl = undefined;
+                    if (storeInsights?.store?.domain) {
+                      const cp = storeInsights.products?.find((p: any) => p.name === productName);
+                      if (cp?.handle) {
+                        productUrl = `https://${storeInsights.store.domain}/products/${cp.handle}`;
+                      }
+                    }
+
                     const payload: BriefPDFParams = {
                       brandName,
                       productName,
+                      productUrl,
                       campaignGoal: goal,
                       copy: {
                         headline: generatedCopy.headline,
@@ -1717,22 +1728,23 @@ function CampaignsContent() {
                     
                     const htmlString = await res.text();
                     
-                    // Open the brief in a new tab and use the browser's native print engine.
-                    // This produces identical quality to Puppeteer (same Chrome rendering engine)
-                    // with perfect vector text, gradients, and typography — zero server dependencies.
+                    // Open the popup immediately to avoid blockers
                     const printWindow = window.open("", "_blank");
                     if (!printWindow) {
                       throw new Error("Pop-up blocked. Please allow pop-ups for this site and try again.");
                     }
-                    printWindow.document.write(htmlString);
-                    printWindow.document.close();
                     
-                    // Wait for fonts and images to load, then auto-trigger print
-                    printWindow.onload = () => {
-                      setTimeout(() => {
-                        printWindow.print();
-                      }, 600);
-                    };
+                    // Convert the HTML string into a Blob URL
+                    // This is much more reliable on mobile browsers (like Android Brave/Chrome)
+                    // than using document.write() on an about:blank page, which often blocks window.print()
+                    const blob = new Blob([htmlString], { type: "text/html;charset=utf-8" });
+                    const blobUrl = URL.createObjectURL(blob);
+                    
+                    // Navigate the popup to the Blob URL
+                    printWindow.location.href = blobUrl;
+                    
+                    // The HTML template now contains a self-executing window.onload script
+                    // that automatically triggers window.print() once the fonts load.
                   } catch (err: any) {
                     console.error("PDF error:", err);
                     alert(`Could not generate PDF.\n\nError: ${err.message || String(err)}\n\nPlease try again.`);
@@ -1828,19 +1840,6 @@ function CampaignsContent() {
                   <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg> Copy Brief to Clipboard</>
                 )}
               </button>
-
-              {regenerateCount < 3 && (
-                <button
-                  onClick={() => handleGenerate(true)}
-                  className="w-full py-3 px-6 rounded-xl border border-border-subtle text-brand-400 font-medium text-sm hover:text-brand-300 hover:border-brand-500/50 transition-colors cursor-pointer bg-brand-500/5 flex items-center justify-center gap-2"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-                    <polyline points="21 3 21 8 16 8" />
-                  </svg>
-                  Regenerate Variation ({3 - regenerateCount} free left)
-                </button>
-              )}
 
               <button
                 onClick={() => {
