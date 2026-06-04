@@ -182,8 +182,8 @@ Instructions for Audiences (Critical — Data-Derived Only):
 - Always include "Online Shopping" as one of the interests — it is a universal Meta behavioral signal for e-commerce.
 - Recommend 3-5 additional highly specific Meta Ads interest targets derived DIRECTLY from the store's actual product names, categories, and tags listed above.
 - Do NOT fill the remaining slots with generic fashion interests like "Fashion", "ASOS", or "Zara" unless the store's products specifically compete with those brands.
-- Each additional interest must be a real, targetable Meta Ads interest. Derive it from the specific product styles, fabric types, design aesthetics, cultural references, or brand tier visible in the product list.
-- Also always include "Engaged Shoppers" and "Online Shoppers" as baseline Meta behavioural targets — these are non-negotiable for any e-commerce campaign. You MUST also recommend 1-2 additional behaviours that match the product price point, buyer lifestyle, or purchasing habits. Do not leave this at just the baseline two.
+- Each additional interest MUST be a real, officially targetable Meta Ads interest that exists in Facebook Ads Manager. Do not hallucinate obscure interests. Derive them from the specific product styles, fabric types, design aesthetics, cultural references, or brand tier visible in the product list.
+- Also always include "Engaged Shoppers" and "Online Shoppers" as baseline Meta behavioural targets — these are non-negotiable for any e-commerce campaign. You MUST also recommend 1-2 additional behaviours that match the product price point, buyer lifestyle, or purchasing habits. IMPORTANT: These MUST be officially available Meta behaviors. Do NOT make up behaviors that do not exist in Meta Ads Manager.
 - interest_reasoning should reference 1-2 actual product names or tags from the list to justify the store-specific choices.
 
 Instructions for Timing & Launches (Dynamic Campaign Launches):
