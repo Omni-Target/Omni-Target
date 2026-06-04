@@ -17,7 +17,7 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
             Omni Target
           </h1>
-          <p className="text-white/50 text-sm font-medium mt-1">Scale your Shopify ads with AI</p>
+          <p className="text-white/50 text-sm font-medium mt-1">Pre-Spend Intelligence for Shopify Fashion Brands</p>
         </div>
       </div>
 
