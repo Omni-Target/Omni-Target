@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { SignOutButton } from "@clerk/nextjs";
 import { getUserIntegration } from "@/lib/db";
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { SyncButton } from "@/components/SyncButton";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
@@ -15,10 +16,15 @@ export default async function SettingsPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { userId } = await auth();
+  
+  if (!userId) {
+    redirect("/login");
+  }
+
   const params = await searchParams;
   const metaStatus = params.meta as string | undefined;
   
-  const integration = await getUserIntegration(userId!);
+  const integration = await getUserIntegration(userId);
 
   console.log("Integration data:", JSON.stringify(integration));
 
