@@ -146,6 +146,31 @@ function CampaignsContent() {
       .catch(() => setLoadingInsights(false));
   }, []);
 
+  // Prevent accidental navigation during generation
+  useEffect(() => {
+    if (viewState === "generating") {
+      const handlePopState = (e: PopStateEvent) => {
+        // Push the state back to stay on the page
+        window.history.pushState(null, "", window.location.href);
+      };
+      
+      // Push an extra state so the first back click pops it instead of navigating
+      window.history.pushState(null, "", window.location.href);
+      window.addEventListener("popstate", handlePopState);
+      
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        e.preventDefault();
+        e.returnValue = "";
+      };
+      window.addEventListener("beforeunload", handleBeforeUnload);
+      
+      return () => {
+        window.removeEventListener("popstate", handlePopState);
+        window.removeEventListener("beforeunload", handleBeforeUnload);
+      };
+    }
+  }, [viewState]);
+
   const handleCopy = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
     setCopiedField(field);
@@ -1316,18 +1341,6 @@ function CampaignsContent() {
                 </svg>
                 Generate Campaign Brief →
               </span>
-            </button>
-
-            <button
-              onClick={() => handleGenerate(false)}
-              className="w-full mt-3 py-3 px-6 rounded-xl border border-border-subtle text-white/60 font-medium text-sm hover:text-white hover:border-white/20 transition-colors cursor-pointer bg-transparent flex items-center justify-center gap-2"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="1 4 1 10 7 10" />
-                <polyline points="23 20 23 14 17 14" />
-                <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
-              </svg>
-              Generate Another Variation
             </button>
 
             <p className="text-center text-xs text-white/20 mt-4">
