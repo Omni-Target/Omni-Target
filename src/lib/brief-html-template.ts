@@ -242,17 +242,25 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     --font: 'Inter', -apple-system, sans-serif;
   }
 
-  @page { size: A4; margin: 0; }
+  @page { size: auto; margin: 0; }
 
-  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  html {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    background-color: var(--bg) !important;
+    margin: 0;
+    padding: 0;
+  }
 
   body {
     font-family: var(--font);
-    background: var(--bg);
+    background-color: var(--bg) !important;
     color: var(--text-1);
     font-size: 11px;
     line-height: 1.6;
     min-height: 100vh;
+    margin: 0;
+    padding: 0;
   }
 
   /* ── Header ── */

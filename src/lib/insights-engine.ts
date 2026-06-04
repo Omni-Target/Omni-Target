@@ -686,7 +686,7 @@ export async function generateRecommendations(
   
   const locations = profile.locations;
   const interests = profile.audiences.interests;
-  const behaviours = profile.audiences.behaviours;
+  const behaviours = profile.audiences.behaviours || (profile.audiences as any).behaviors || ["Engaged Shoppers"];
   const interest_reasoning = profile.audiences.interest_reasoning;
 
   // Goal multipliers (applied client-side, stored for reference)
