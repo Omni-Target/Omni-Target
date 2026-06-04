@@ -44,7 +44,7 @@ export async function GET(request: Request) {
         // User has 0 briefs. Attempt to send nudge email.
         // The sendEmail utility will prevent duplicate sends using email_log.
         try {
-          const user = await clerkClient().users.getUser(userId);
+          const user = await (await clerkClient()).users.getUser(userId);
           const email = user.emailAddresses[0]?.emailAddress;
           
           if (email) {
