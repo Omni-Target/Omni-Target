@@ -640,7 +640,7 @@ function CampaignsContent() {
 
           <div className="flex flex-col gap-4 animate-fade-in-up-delay-2">
             <button
-              onClick={() => setViewState("input")}
+              onClick={() => handleGenerate(false)}
               disabled={isUploading || !mediaCloudUrl || (mediaValidation ? !mediaValidation.isValid : false)}
               className="group relative w-full py-4 px-6 rounded-xl font-semibold text-sm transition-all duration-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 z-0"
             >
@@ -896,7 +896,7 @@ function CampaignsContent() {
 
           <button
             id="generate-btn"
-            onClick={handleGenerate}
+            onClick={() => handleGenerate(false)}
             className="group relative w-full py-4 px-6 rounded-xl font-semibold text-sm transition-all duration-300 animate-fade-in-up-delay-2 cursor-pointer z-0"
           >
             <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 transition-all duration-300 group-hover:from-brand-500 group-hover:to-brand-400" />
@@ -1275,7 +1275,7 @@ function CampaignsContent() {
                   </button>
 
                   <button
-                    onClick={handleGenerate}
+                    onClick={() => handleGenerate(false)}
                     className="w-full py-2.5 px-4 rounded-lg bg-white/[0.05] border border-white/10 text-sm font-medium text-white hover:bg-white/[0.08] transition-colors flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1319,7 +1319,7 @@ function CampaignsContent() {
             </button>
 
             <button
-              onClick={handleGenerate}
+              onClick={() => handleGenerate(false)}
               className="w-full mt-3 py-3 px-6 rounded-xl border border-border-subtle text-white/60 font-medium text-sm hover:text-white hover:border-white/20 transition-colors cursor-pointer bg-transparent flex items-center justify-center gap-2"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
