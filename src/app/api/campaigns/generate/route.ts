@@ -31,6 +31,7 @@ interface GenerateRequest {
   gatewayInsight?: any;
   storeDataForApi?: any;
   isNewLaunch?: boolean;
+  isRegeneration?: boolean;
 }
 
 /**
@@ -121,6 +122,7 @@ export async function POST(request: Request) {
       gatewayInsight,
       storeDataForApi,
       isNewLaunch,
+      isRegeneration = false,
     } = body;
 
     // Validate required fields
@@ -525,8 +527,8 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
       );
     }
 
-    // Deduct credit after successful generation
-    if (!hasUnlimited) {
+    // Deduct credit after successful generation, ONLY if it's not a free regeneration
+    if (!hasUnlimited && !isRegeneration) {
       const newCredits = Math.max(0, currentCredits - 1);
       const updateData: Record<string, any> = {};
       if (cols.hasCredits) {

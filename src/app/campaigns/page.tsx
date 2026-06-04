@@ -111,6 +111,7 @@ function CampaignsContent() {
   const [selectedStrategyIndex, setSelectedStrategyIndex] = useState(1); // 0=Dip Your Toe, 1=Sweet Spot, 2=Full Send
   const [selectedDuration, setSelectedDuration] = useState<7 | 14 | 30>(14);
   const [isNewLaunch, setIsNewLaunch] = useState(false);
+  const [regenerateCount, setRegenerateCount] = useState(0);
 
   const { credits, isUnlimited } = useCredits();
 
@@ -251,7 +252,7 @@ function CampaignsContent() {
     }
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (isRegeneration = false) => {
     const errors: string[] = [];
 
     if (!brandName.trim()) errors.push("Brand name is required");
@@ -317,6 +318,7 @@ function CampaignsContent() {
           gatewayInsight: currentGatewayInsight,
           storeDataForApi,
           isNewLaunch,
+          isRegeneration,
         }),
       });
 
@@ -338,6 +340,10 @@ function CampaignsContent() {
       setGeneratedCopy(generatedCopyData);
       setSelectedCta(generatedCopyData.cta);
       
+      if (isRegeneration) {
+        setRegenerateCount(prev => prev + 1);
+      }
+      
       setViewState("review");
     } catch (err: any) {
       console.error(err);
@@ -357,6 +363,7 @@ function CampaignsContent() {
     setErrorMsg("");
     setShowBuyCredits(false);
     setAutoFilledFromStore(false);
+    setRegenerateCount(0);
     setMediaPreviewUrl("");
     setMediaCloudUrl("");
     setMediaFile(null);
@@ -1809,6 +1816,19 @@ function CampaignsContent() {
                 )}
               </button>
 
+              {regenerateCount < 3 && (
+                <button
+                  onClick={() => handleGenerate(true)}
+                  className="w-full py-3 px-6 rounded-xl border border-border-subtle text-brand-400 font-medium text-sm hover:text-brand-300 hover:border-brand-500/50 transition-colors cursor-pointer bg-brand-500/5 flex items-center justify-center gap-2"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                    <polyline points="21 3 21 8 16 8" />
+                  </svg>
+                  Regenerate Variation ({3 - regenerateCount} free left)
+                </button>
+              )}
+
               <button
                 onClick={() => {
                   setBrandName("");
@@ -1824,6 +1844,7 @@ function CampaignsContent() {
                   setGeneratedCopy(null);
                   setGatewayInsight(null);
                   setSelectedCta("");
+                  setRegenerateCount(0);
                   setViewState("media");
                 }}
                 className="w-full py-3 px-6 rounded-xl border border-border-subtle/50 text-white/30 font-medium text-sm hover:text-white/60 hover:border-white/10 transition-colors cursor-pointer bg-transparent"
