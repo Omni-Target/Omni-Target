@@ -10,6 +10,7 @@ import type { BriefPDFParams } from "@/lib/generate-brief-pdf";
 import { formatCurrency, getCurrencySymbol } from "@/lib/currency";
 import { useCredits } from "@/hooks/useCredits";
 import { Logo } from "@/components/Logo";
+import { MobileNav } from "@/components/MobileNav";
 
 type CampaignState = "selection" | "media" | "input" | "generating" | "review" | "brief";
 
@@ -372,7 +373,7 @@ function CampaignsContent() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] relative overflow-hidden flex flex-col">
+    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] relative overflow-hidden flex flex-col pb-28 sm:pb-0">
       {/* Top nav bar */}
       <nav className="border-b border-border-subtle bg-surface/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
@@ -398,7 +399,18 @@ function CampaignsContent() {
             
             <Link href="/settings" className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Settings</Link>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4 sm:gap-6">
+            {/* Show credits on mobile too */}
+            <div className="sm:hidden flex items-center">
+              {isUnlimited ? (
+                <span className="text-[10px] text-brand-400 font-bold bg-brand-500/10 px-2 py-1 rounded-md uppercase tracking-wider">Unlimited</span>
+              ) : credits !== null && (
+                <span className={`text-xs font-medium px-2 py-1 rounded-md ${credits === 0 ? "text-error-400 bg-error-500/10" : "text-white/70 bg-white/5"}`}>
+                  {credits} left
+                </span>
+              )}
+            </div>
+
             <SignOutButton>
               <button className="text-xs font-medium text-white/40 hover:text-white/80 transition-colors cursor-pointer bg-transparent border-none p-0">
                 Sign Out
@@ -1822,6 +1834,8 @@ function CampaignsContent() {
           </div>
         </main>
       )}
+
+      <MobileNav />
     </div>
   );
 }

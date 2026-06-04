@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
 import { Logo } from "@/components/Logo";
+import { MobileNav } from "@/components/MobileNav";
 import { formatCurrency } from "@/lib/currency";
 import { useCredits } from "@/hooks/useCredits";
 
@@ -339,7 +340,18 @@ function DashboardContent() {
             
             <Link href="/settings" className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Settings</Link>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4 sm:gap-6">
+            {/* Show credits on mobile too */}
+            <div className="sm:hidden flex items-center">
+              {isUnlimited ? (
+                <span className="text-[10px] text-brand-400 font-bold bg-brand-500/10 px-2 py-1 rounded-md uppercase tracking-wider">Unlimited</span>
+              ) : credits !== null && (
+                <span className={`text-xs font-medium px-2 py-1 rounded-md ${credits === 0 ? "text-error-400 bg-error-500/10" : "text-white/70 bg-white/5"}`}>
+                  {credits} left
+                </span>
+              )}
+            </div>
+
             <SignOutButton>
               <button className="text-xs font-medium text-white/40 hover:text-white/80 transition-colors cursor-pointer bg-transparent border-none p-0">
                 Sign Out
@@ -363,7 +375,7 @@ function DashboardContent() {
       <div className="fixed top-0 left-1/4 w-[500px] h-[500px] bg-brand-600/5 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed bottom-0 right-1/3 w-[400px] h-[400px] bg-success-500/3 rounded-full blur-[100px] pointer-events-none" />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 relative">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 pb-28 sm:pb-8 relative">
         {/* Success Toast */}
         {showPaymentToast && (
           <div className="mb-6 px-4 py-3 rounded-xl bg-success-500/10 border border-success-500/20 text-sm text-success-400 flex items-center gap-2 animate-fade-in-up">
@@ -954,6 +966,8 @@ function DashboardContent() {
           </>
         )}
       </main>
+
+      <MobileNav />
     </div>
   );
 }
