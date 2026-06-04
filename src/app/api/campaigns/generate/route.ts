@@ -540,29 +540,27 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
       if (newCredits === 1 || newCredits === 0) {
         try {
           const { clerkClient } = await import("@clerk/nextjs/server");
-          const user = await clerkClient().users.getUser(userId!);
+          const user = await (await clerkClient()).users.getUser(userId!);
           const email = user.emailAddresses[0]?.emailAddress;
           
           if (email) {
             const { sendEmail } = await import("@/lib/email");
             
             if (newCredits === 1) {
-              // @ts-ignore
-              const { CreditLowEmail } = await import("@/emails/credit-low");
+              const { creditLowEmailHtml } = await import("@/emails/credit-low");
               await sendEmail({
                 to: email,
                 subject: "1 brief credit left",
-                react: CreditLowEmail({}),
+                html: creditLowEmailHtml(),
                 userId: userId!,
                 templateName: "credit-low"
               });
             } else if (newCredits === 0) {
-              // @ts-ignore
-              const { CreditExhaustedEmail } = await import("@/emails/credit-exhausted");
+              const { creditExhaustedEmailHtml } = await import("@/emails/credit-exhausted");
               await sendEmail({
                 to: email,
                 subject: "You've used all your credits",
-                react: CreditExhaustedEmail({}),
+                html: creditExhaustedEmailHtml(),
                 userId: userId!,
                 templateName: "credit-exhausted"
               });

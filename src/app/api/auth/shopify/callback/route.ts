@@ -157,13 +157,12 @@ export async function GET(request: Request) {
         
         if (email) {
           const { sendEmail } = await import('@/lib/email');
-          // @ts-ignore
-          const { WelcomeEmail } = await import('@/emails/welcome');
+          const { welcomeEmailHtml } = await import('@/emails/welcome');
           
           await sendEmail({
             to: email,
             subject: "Your free brief is waiting",
-            react: WelcomeEmail({}),
+            html: welcomeEmailHtml(),
             userId: userId!,
             templateName: "welcome"
           });

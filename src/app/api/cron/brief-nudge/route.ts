@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/db';
 import { sendEmail } from '@/lib/email';
-import { BriefNudgeEmail } from '@/emails/brief-nudge';
+import { briefNudgeEmailHtml } from '@/emails/brief-nudge';
 import { clerkClient } from '@clerk/nextjs/server';
 
 export const maxDuration = 60; // 60 seconds
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
             const result = await sendEmail({
               to: email,
               subject: "You haven't run your first brief yet",
-              react: BriefNudgeEmail({}),
+              html: briefNudgeEmailHtml(),
               userId: userId,
               templateName: "brief-nudge"
             });
