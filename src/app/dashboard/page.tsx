@@ -338,7 +338,7 @@ function DashboardContent() {
               </span>
             )}
             
-            <Link href="/settings" className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Settings</Link>
+            <Link href="/settings" target="_self" prefetch={true} className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Settings</Link>
           </div>
           <div className="flex items-center gap-4 sm:gap-6">
             {/* Show credits on mobile too */}
