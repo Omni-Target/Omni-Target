@@ -959,7 +959,7 @@ function DashboardContent() {
                 </div>
                 
                 <div className="mt-4 text-center text-[10px] text-white/30">
-                  Secured and verified via Shopify Billing API. Credits never expire within 6 months of purchase.
+                  All charges are billed safely in USD via the official Shopify Billing API. Credits are subject to a 12-month dormancy policy.
                 </div>
               </div>
             )}
