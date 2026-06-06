@@ -3,6 +3,7 @@ import { Anthropic } from "@anthropic-ai/sdk";
 import { auth } from "@clerk/nextjs/server";
 import { queryUserIntegrationSelect, updateUserIntegration, insertCreditUsage, logApiUsage } from "@/lib/db";
 import sharp from "sharp";
+import { getPriceTier, getPriceTierPromptHint } from "@/lib/price-tier";
 
 import { detectColumns } from "@/lib/billing-db";
 
@@ -30,6 +31,8 @@ interface GenerateRequest {
   productVariants?: string | null;
   gatewayInsight?: any;
   storeDataForApi?: any;
+  storeAov?: number | null;
+  storePrices?: number[];
   isNewLaunch?: boolean;
   isRegeneration?: boolean;
 }
@@ -121,9 +124,20 @@ export async function POST(request: Request) {
       productVariants,
       gatewayInsight,
       storeDataForApi,
+      storeAov,
+      storePrices,
       isNewLaunch,
       isRegeneration = false,
     } = body;
+
+    // Derive a qualitative price tier from the store's own catalog distribution.
+    // Thresholds are computed from the data — no hardcoded currency amounts.
+    const priceTier = getPriceTier(
+      productPrice,
+      storePrices ?? [],
+      storeAov ?? gatewayInsight?.storeAov
+    );
+    const priceTierHint = priceTier ? getPriceTierPromptHint(priceTier) : null;
 
     // Validate required fields
     if (!brandName || !productName || !productDescription) {
@@ -229,6 +243,9 @@ WHAT KILLS GOOD COPY (NEVER DO THESE):
 - "You deserve" or "Treat yourself"
 - Three adjectives in a row
 - Abstract cleverness that needs interpretation
+- NEVER include the product price or any currency amount in the copy — not even as a hook
+- NEVER reference inventory, stock levels, or how many units remain — this information goes stale and violates Meta policy
+- NEVER assume the reader's country, currency, or local pricing — copy must work equally well in any market
 
 WHAT MAKES GREAT COPY:
 - A first sentence that immediately states a benefit or striking detail.
@@ -274,8 +291,8 @@ no markdown, no preamble:
 Brand: ${brandName}
 Product: ${productName}
 Description: ${productDescription}
-${productPrice ? 
-  `Price: ${productPrice}` : ""}
+${priceTier ? `Price Tier: ${priceTier}` : ""}
+${priceTierHint ? `Tone Directive (from price positioning): ${priceTierHint}` : ""}
 Audience: ${targetAudience || 
   "Not specified"}
 Goal: ${campaignGoal}

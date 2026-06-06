@@ -326,6 +326,12 @@ function CampaignsContent() {
       };
     }
 
+    // Collect all catalog prices so the API can derive quartile-based tier
+    // boundaries from the store's own distribution — no hardcoded thresholds.
+    const storePrices: number[] = (storeInsights?.products ?? [])
+      .map((p: any) => Number(p.price))
+      .filter((p: number) => p > 0);
+
     try {
       const res = await fetch("/api/campaigns/generate", {
         method: "POST",
@@ -338,7 +344,12 @@ function CampaignsContent() {
           tonePreference: tone,
           mediaUrl: mediaCloudUrl || mediaPreviewUrl || null,
           imageUrl: mediaCloudUrl || null,
+          // productPrice is sent for tier classification only — the API converts
+          // it to a qualitative tier (e.g. "Premium") using catalog quartiles.
+          // The raw number never appears in the AI prompt or generated copy.
           productPrice: productPrice || null,
+          storeAov: storeInsights?.orders?.average_order_value ?? null,
+          storePrices,
           productVariants: productVariants || null,
           gatewayInsight: currentGatewayInsight,
           storeDataForApi,

@@ -21,6 +21,22 @@ export default function ProductsPage() {
       .catch(() => setLoading(false));
   }, []);
 
+  const storeCurrency: string = storeData?.store?.currency || "USD";
+
+  const formatPrice = (price: number) => {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: storeCurrency,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(price);
+    } catch {
+      // Fallback if currency code is unrecognised
+      return `${storeCurrency} ${price.toLocaleString()}`;
+    }
+  };
+
   const inStockProducts = storeData?.products?.filter((p: any) => p.in_stock) || [];
   const outOfStockProducts = storeData?.products?.filter((p: any) => !p.in_stock) || [];
 
@@ -132,7 +148,7 @@ export default function ProductsPage() {
                           </p>
                         )}
                         <p className="text-xs text-white/40 mb-2">
-                          ₦{product.price?.toLocaleString()}
+                          {formatPrice(product.price)}
                         </p>
                         
                         {/* AI context */}
@@ -158,9 +174,11 @@ export default function ProductsPage() {
                           sessionStorage.setItem("campaign_draft", JSON.stringify({
                             product_name: product.name,
                             product_description: product.description || product.name,
-                            product_price: product.price,
+                            // product_price is intentionally excluded — price flows to the AI
+                            // only as a qualitative tier, never as a raw number in copy.
                             product_image: product.image_url || "",
-                            product_variants: product.has_partial_stock && product.in_stock_variant_names ? product.in_stock_variant_names.join(', ') : ""
+                            product_variants: product.has_partial_stock && product.in_stock_variant_names ? product.in_stock_variant_names.join(', ') : "",
+                            is_new_launch: (product.units_sold ?? 0) < 3,
                           }));
                           router.push("/campaigns");
                         }}
