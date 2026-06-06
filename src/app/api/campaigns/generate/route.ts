@@ -66,49 +66,20 @@ export async function POST(request: Request) {
 
   const hasCredits = currentCredits > 0;
 
-  if (!hasUnlimited && !hasCredits) {
-    return NextResponse.json({
-      error: "no_credits",
-      message: "You have no briefs remaining. Purchase a pack to continue.",
-      redirect: "/pricing"
-    }, { status: 402 });
-  }
-
-  const currency = integration?.store_snapshot?.store?.currency || "USD";
-
-  const CURRENCY_TO_REGION: Record<string, string> = {
-    "NGN": "NG",
-    "GBP": "GB",
-    "EUR": "EU",
-    "AED": "AE",
-    "USD": "US",
-    "CAD": "CA",
-    "AUD": "AU",
-    "GHS": "GH",
-    "KES": "KE",
-    "ZAR": "ZA",
-  };
-
-  const storeRegion = CURRENCY_TO_REGION[currency] || "OTHER";
-
-  console.log("Key check:", 
-    process.env.ANTHROPIC_API_KEY?.slice(0,14))
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  console.log("API Key loaded:", !!apiKey, 
-    "| Prefix:", apiKey?.slice(0, 14));
-
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "Anthropic API key not configured" },
-      { status: 500 }
-    );
-  }
-  const client = new Anthropic({ 
-    apiKey: process.env.ANTHROPIC_API_KEY || "" 
-  });
-
   try {
     const body: Partial<GenerateRequest> = await request.json();
+
+    // Extract isRegeneration early — regenerations bypass the credit gate entirely.
+    const isRegeneration = body.isRegeneration ?? false;
+
+    // Credit gate: block only if user has no credits AND it's not a free regeneration
+    if (!hasUnlimited && !hasCredits && !isRegeneration) {
+      return NextResponse.json({
+        error: "no_credits",
+        message: "You have no briefs remaining. Purchase a pack to continue.",
+        redirect: "/pricing"
+      }, { status: 402 });
+    }
 
     const {
       brandName,
@@ -127,8 +98,33 @@ export async function POST(request: Request) {
       storeAov,
       storePrices,
       isNewLaunch,
-      isRegeneration = false,
     } = body;
+
+    const currency = integration?.store_snapshot?.store?.currency || "USD";
+
+    const CURRENCY_TO_REGION: Record<string, string> = {
+      "NGN": "NG",
+      "GBP": "GB",
+      "EUR": "EU",
+      "AED": "AE",
+      "USD": "US",
+      "CAD": "CA",
+      "AUD": "AU",
+      "GHS": "GH",
+      "KES": "KE",
+      "ZAR": "ZA",
+    };
+
+    const storeRegion = CURRENCY_TO_REGION[currency] || "OTHER";
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "Anthropic API key not configured" },
+        { status: 500 }
+      );
+    }
+    const client = new Anthropic({ apiKey });
 
     // Derive a qualitative price tier from the store's own catalog distribution.
     // Thresholds are computed from the data — no hardcoded currency amounts.
