@@ -92,8 +92,7 @@ export async function GET() {
       const soldCount = bestProduct.units_sold || 0;
       let reason = "converts cold traffic well";
       if (velocity && velocity > 0) {
-        const cycleDays = Math.max(1, Math.round(90 / velocity));
-        reason = `sells consistently — roughly one cycle every ${cycleDays} day${cycleDays > 1 ? "s" : ""}`;
+        reason = `sells regularly and converts cold traffic well`;
       } else if (soldCount > 0) {
         reason = `has ${soldCount} sales and is classified as a cold-traffic converter`;
       }
