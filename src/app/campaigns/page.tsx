@@ -178,7 +178,7 @@ function CampaignsContent() {
   };
 
   const isVideo = (mediaFile?.type.startsWith("video/") ?? false) 
-    || (mediaCloudUrl?.includes("/video/upload/") ?? false);
+    || (mediaCloudUrl?.match(/\.(mp4|mov|webm)(\?|$)/i) !== null);
 
   const handleMediaSelect = async (
     e: React.ChangeEvent<HTMLInputElement>
@@ -198,78 +198,95 @@ function CampaignsContent() {
     
     setIsUploading(true);
     try {
-      if (isVideoFile) {
-        // Upload videos DIRECTLY to Cloudinary from the browser
-        // This bypasses the Next.js API body size limit
-        const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
-        
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("upload_preset", "omni_unsigned");
-        formData.append("folder", "omni-target/campaigns");
-        
-        const cloudRes = await fetch(
-          `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`,
-          { method: "POST", body: formData }
-        );
-        
-        if (!cloudRes.ok) {
-          const err = await cloudRes.json();
-          setUploadError(err?.error?.message || "Video upload failed. Please try again.");
-          setMediaFile(null);
-          setMediaPreviewUrl("");
-          return;
-        }
-        
-        const data = await cloudRes.json();
-        setMediaCloudUrl(data.secure_url);
-        
-        // Validate against Meta specs
-        const { validateMetaAdMedia } = await import("@/lib/meta-specs");
-        const validation = validateMetaAdMedia({
-          width: data.width,
-          height: data.height,
-          duration: data.duration,
-          format: data.format,
-          resourceType: "video",
-        });
-        setMediaValidation(validation);
-        
-      } else {
-        // Images go through the API route (small enough)
-        const formData = new FormData();
-        formData.append("file", file);
-        
-        const res = await fetch("/api/media/upload", {
-          method: "POST",
-          body: formData,
-        });
-        
-        if (!res.ok) {
-          const err = await res.json();
-          setUploadError(err.error || "Upload failed. Please try again.");
-          setMediaFile(null);
-          setMediaPreviewUrl("");
-          return;
-        }
-        
-        const data = await res.json();
-        setMediaCloudUrl(data.url);
-        
-        // Validate against Meta specs
-        const { validateMetaAdMedia } = await import("@/lib/meta-specs");
-        const validation = validateMetaAdMedia({
-          width: data.width,
-          height: data.height,
-          duration: data.duration,
-          format: data.format,
-          resourceType: data.resourceType,
-        });
-        setMediaValidation(validation);
+      // 1. Get Presigned URL
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: file.type,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        setUploadError(err.error || "Failed to get upload URL. Please try again.");
+        setMediaFile(null);
+        setMediaPreviewUrl("");
+        return;
       }
+
+      const { presignedUrl, publicUrl } = await res.json();
+
+      // 2. Upload directly to Cloudflare R2
+      const uploadRes = await fetch(presignedUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": file.type,
+        },
+        body: file,
+      });
+
+      if (!uploadRes.ok) {
+        setUploadError("Failed to upload file. Please try again.");
+        setMediaFile(null);
+        setMediaPreviewUrl("");
+        return;
+      }
+
+      setMediaCloudUrl(publicUrl);
+
+      // 3. Validate against Meta specs using local file properties
+      const getMediaDimensions = (): Promise<{width: number, height: number, duration?: number}> => {
+        return new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error("Media metadata extraction timed out. Please check if the file format/codec is supported."));
+          }, 10000); // 10 second timeout
+
+          if (isVideoFile) {
+            const video = document.createElement("video");
+            video.preload = "metadata";
+            video.onloadedmetadata = () => {
+              clearTimeout(timeout);
+              resolve({ width: video.videoWidth, height: video.videoHeight, duration: video.duration });
+              URL.revokeObjectURL(video.src);
+            };
+            video.onerror = () => {
+              clearTimeout(timeout);
+              reject(new Error("Failed to load video metadata. Unsupported codec or corrupted file."));
+              URL.revokeObjectURL(video.src);
+            };
+            video.src = URL.createObjectURL(file);
+          } else {
+            const img = new window.Image();
+            img.onload = () => {
+              clearTimeout(timeout);
+              resolve({ width: img.width, height: img.height });
+              URL.revokeObjectURL(img.src);
+            };
+            img.onerror = () => {
+              clearTimeout(timeout);
+              reject(new Error("Failed to load image. Unsupported format or corrupted file."));
+              URL.revokeObjectURL(img.src);
+            };
+            img.src = URL.createObjectURL(file);
+          }
+        });
+      };
+
+      const dimensions = await getMediaDimensions();
+      const { validateMetaAdMedia } = await import("@/lib/meta-specs");
+      const validation = validateMetaAdMedia({
+        width: dimensions.width,
+        height: dimensions.height,
+        duration: dimensions.duration,
+        format: file.type.split('/')[1],
+        resourceType: isVideoFile ? "video" : "image",
+      });
+      setMediaValidation(validation);
       
-    } catch {
-      setUploadError("Upload failed. Please try again.");
+    } catch (err: any) {
+      setUploadError(err.message || "Upload failed. Please try again.");
       setMediaFile(null);
       setMediaPreviewUrl("");
     } finally {
