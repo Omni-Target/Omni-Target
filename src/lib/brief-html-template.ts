@@ -109,8 +109,10 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     } else if (gi.currentProductName === gi.bestsellerName) {
       insightText = `This is your organic bestseller, but your top cold-traffic Gateway Product is ${gi.topGatewayName || "another product"}.`;
     } else {
-      const clsName = gi.currentProductClassification === "Insufficient Data" ? "Insufficient Data" : gi.currentProductClassification;
-      insightText = `This is a ${clsName} Product. Your bestseller is ${gi.bestsellerName || "another product"}, and your top Gateway Product is ${gi.topGatewayName || "another product"}.`;
+      const clsName = gi.currentProductClassification === "Insufficient Data" ? "Insufficient Data" : 
+                      (gi.currentProductClassification === "Unknown" || !gi.currentProductClassification ? "Hybrid" : gi.currentProductClassification);
+      const article = (clsName === "Insufficient Data" || clsName === "Unknown") ? "an" : "a";
+      insightText = `This is ${article} ${clsName} Product. Your bestseller is ${gi.bestsellerName || "another product"}, and your top Gateway Product is ${gi.topGatewayName || "another product"}.`;
     }
 
     const imgBlock = productImgSrc
@@ -238,7 +240,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
         </div>
         <div>
           <div style="color: var(--text-1); font-weight: bold; font-size: 12.5px; margin-bottom: 2px;">2. Ad Set Level</div>
-          <div style="color: var(--text-2); font-size: 11.5px; line-height: 1.4;">Paste your <strong>Locations, Age, Gender, and Interests</strong> from the Audience section. Set your optimization event to Purchases and enter your budget.</div>
+          <div style="color: var(--text-2); font-size: 11.5px; line-height: 1.4;">Paste your <strong>Locations, Age, Gender, and Interests</strong> from the Audience section. Set your optimization event to <strong>${esc((budget as any).optimization_event?.event || 'Purchases')}</strong> and enter your budget.</div>
         </div>
       </div>
 

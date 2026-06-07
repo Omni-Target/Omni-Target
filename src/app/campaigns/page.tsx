@@ -321,7 +321,9 @@ function CampaignsContent() {
         ? [...gatewayProducts].sort((a: any, b: any) => b.revenue - a.revenue)[0] 
         : null;
 
-      const currentProduct = products.find((p: any) => p.name === productName);
+      const normalizeStr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normalizedInput = normalizeStr(productName);
+      const currentProduct = products.find((p: any) => normalizeStr(p.name) === normalizedInput);
 
       currentGatewayInsight = {
         currentProductClassification: currentProduct?.gateway_classification || "Unknown",
@@ -846,12 +848,20 @@ function CampaignsContent() {
               </label>
               <input
                 id="productName"
+                list="store-products-list"
                 type="text"
                 value={productName}
                 onChange={(e) => setProductName(e.target.value)}
                 placeholder="e.g. Adire Maxi Dress"
                 className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-border-subtle text-sm text-white placeholder:text-white/20 outline-none transition-all duration-200 focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/20"
               />
+              {storeInsights?.products && storeInsights.products.length > 0 && (
+                <datalist id="store-products-list">
+                  {storeInsights.products.map((p: any) => (
+                    <option key={p.id} value={p.name} />
+                  ))}
+                </datalist>
+              )}
             </div>
 
             {/* Product Description */}
