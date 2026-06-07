@@ -693,7 +693,7 @@ function CampaignsContent() {
 
           <div className="flex flex-col gap-4 animate-fade-in-up-delay-2">
             <button
-              onClick={() => handleGenerate(false)}
+              onClick={() => setViewState("input")}
               disabled={isUploading || !mediaCloudUrl || (mediaValidation ? !mediaValidation.isValid : false)}
               className="group relative w-full py-4 px-6 rounded-xl font-semibold text-sm transition-all duration-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 z-0"
             >
