@@ -191,6 +191,11 @@ If Store Primary Country or Top Customer Locations are missing or ambiguous, fal
 STEP 3 — UNIVERSAL MANDATES
 1. Luxury Restraint Rule: If the tier is determined to be Luxury in Step 1, copy must always prioritize restraint over excitement. There is an absolute ban on exclamation marks, urgency tactics, countdowns, and "limited time" language. Earn desire through confidence and positioning, not pressure.
 2. Meta Best Practices: Maximize hook rate in the first 3 lines. Keep visual copy recommendations clean and low-text.
+3. Campaign Objective Adaptation:
+   - "Drive Website Sales": The copy's last line must always be a direct, clear call to action encouraging purchase.
+   - "Grow Brand Awareness": Focus heavily on the brand's unique aesthetic, craft, mission, or identity.
+   - "Promote a New Collection": Lead with the newness or first-look framing, creating excitement without appearing desperate.
+   - "Retarget Past Visitors": Assume the reader is already familiar with the brand. Remind them of the core benefit or address returning buyer consideration directly.
 
 CRITICAL RULES FOR TONE & APPROACH:
 - DO NOT just creatively rewrite the product description! The description is merely background context so you understand what the product is.

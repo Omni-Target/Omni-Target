@@ -125,17 +125,21 @@ async function generateTargetingProfile(
     .map((l) => `${l.city} (${l.percentage}%)`)
     .join(", ");
 
-  // Take top 25 products enriched with category, tags, and revenue context
+  // Take top 25 products enriched with category, tags, revenue context, and classification
   const productSample = storeData.products
     .slice(0, 25)
     .map((p) => {
       const tags = (p.tags || []).slice(0, 5).join(", ");
       const type = p.product_type || p.collection || "";
+      const isNew = p.order_velocity !== undefined && p.order_velocity < 3; // or matching Shopify order_count threshold
+      const classification = p.gateway_classification || "New Launch";
       return [
         `- "${p.name}"`,
         `price: ${p.price} ${storeCurrency}`,
         type ? `category: ${type}` : null,
         tags ? `tags: ${tags}` : null,
+        `classification: ${classification}`,
+        isNew ? `status: New Launch` : null,
         p.units_sold > 0 ? `units sold: ${p.units_sold}` : null,
       ].filter(Boolean).join(" | ");
     })
@@ -192,7 +196,9 @@ Output requirements:
 - Recommend 3-5 additional highly specific Meta Ads interest targets derived from the buyer psychology, price positioning, and market context analyzed above.
 - UNIVERSAL BAN ON BRAND NAMES: Do NOT recommend specific brand names (e.g., competitors, retailers, or luxury labels like Zara, ASOS, Gucci, Chanel, etc.) as interest targets. Use only Meta interest categories (e.g., Luxury Goods, Boutique, Streetwear, Fine jewelry) and behavior signals. Brand targeting creates client-facing friction, whereas available category and behavioral signals are sufficiently granular.
 - Each interest MUST be a real, officially targetable Meta Ads interest that exists in Facebook Ads Manager. Do not hallucinate obscure interests.
-- Also always include "Engaged Shoppers" and "Online Shoppers" as baseline Meta behavioural targets. Recommend 1-2 additional behaviors that match the product price point, buyer lifestyle, or purchasing habits. IMPORTANT: These MUST be officially available Meta behaviors.
+- Also always include "Engaged Shoppers" and "Online Shoppers" as baseline Meta behavioural targets. Recommend 1-2 additional behaviors that match the product price point, buyer lifestyle, or purchasing habits. IMPORTANT: These MUST be officially available Meta behaviors. Behaviour signals must always align with the buyer type the product classification indicates — never select retention signals for cold traffic products and never select only acquisition signals for hybrid products.
+  - Gateway or New Launch: Only select behaviours that indicate first-time buyer potential (e.g. Engaged Shoppers, Online Shoppers, Luxury Shoppers, Frequent Travelers, Luxury Goods Buyers). The goal is cold traffic acquisition — someone discovering this brand for the first time. NEVER select behaviours that indicate repeat purchase patterns, return visits, or loyalty/retention signals.
+  - Hybrid: Layer both acquisition and retention behaviours. Since this product attracts both new and returning buyers, both signal types are valid.
 - interest_reasoning MUST explain why these interests fit the buyer psychology and price positioning in the primary market context. Keep it under 2 sentences.
 
 Instructions for Timing & Launches (Dynamic Campaign Launches):
