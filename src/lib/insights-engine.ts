@@ -178,13 +178,22 @@ Instructions for Demographics (Dynamic Age & Gender Selection):
 - Do NOT hardcode or default to generic ranges (like 25-44) unless the store data and product catalog actually dictate it.
 - Higher AOV/price points should target older age ranges (e.g. 30-55) with more purchasing power; youth or streetwear brands should target younger age ranges (e.g. 18-34). Ensure min age is at least 18.
 
-Instructions for Audiences (Critical — Data-Derived Only):
+Instructions for Audiences (Critical — Dynamic Media Buyer Reasoning):
+Before generating any interests, you must reason about each product in the catalog as a senior Meta media buyer:
+1. What is the actual purchase decision being made here? (e.g. is it a low-consideration convenience purchase or a high-consideration lifestyle/luxury commitment?)
+2. Pull the store's primary market from the store's country setting (${storeData.store.country}) and top buyer locations (e.g., Lagos, London, New York). Use this as the market context for all targeting decisions.
+3. Does the product price represent a significant financial commitment for a buyer in that specific market? Evaluate this against real-world purchasing power in that market — not against the store's AOV alone. A product priced at ₦160K in Lagos, £140 in London, or $140 in New York carries completely different purchasing weight. Reason accordingly.
+4. If the product represents a high-consideration purchase in its market context, apply luxury/premium buyer targeting (e.g. targeting high-value goods, premium lifestyles, or specific luxury brands) regardless of where it sits relative to store AOV and regardless of which collection it belongs to.
+5. Do not derive interests from collection names or store category labels. Collection names reflect how the brand organises its inventory — they do not reflect how Meta's algorithm categorises buyer behaviour. For example, a high-consideration product in a "Loungewear" collection should be targeted as high-end premium lifestyle/fashion, NOT as generic "Sleepwear" or "Robes".
+6. Apply industry-standard Meta targeting logic throughout. Reason from the product's actual price positioning, market context, and implied buyer psychology — not from the store's taxonomy.
+
+Output requirements:
 - Always include "Online Shopping" as one of the interests — it is a universal Meta behavioral signal for e-commerce.
-- Recommend 3-5 additional highly specific Meta Ads interest targets derived DIRECTLY from the store's actual product names, categories, and tags listed above.
-- Do NOT fill the remaining slots with generic fashion interests like "Fashion", "ASOS", or "Zara" unless the store's products specifically compete with those brands.
-- Each additional interest MUST be a real, officially targetable Meta Ads interest that exists in Facebook Ads Manager. Do not hallucinate obscure interests. Derive them from the specific product styles, fabric types, design aesthetics, cultural references, or brand tier visible in the product list.
-- Also always include "Engaged Shoppers" and "Online Shoppers" as baseline Meta behavioural targets — these are non-negotiable for any e-commerce campaign. You MUST also recommend 1-2 additional behaviours that match the product price point, buyer lifestyle, or purchasing habits. IMPORTANT: These MUST be officially available Meta behaviors. Do NOT make up behaviors that do not exist in Meta Ads Manager.
-- interest_reasoning should reference 1-2 actual product names or tags from the list to justify the store-specific choices.
+- Recommend 3-5 additional highly specific Meta Ads interest targets derived from the buyer psychology, price positioning, and market context analyzed above.
+- Do NOT fill slots with generic fashion interests like "Fashion", "ASOS", or "Zara" unless the store's products specifically compete with those brands.
+- Each interest MUST be a real, officially targetable Meta Ads interest that exists in Facebook Ads Manager. Do not hallucinate obscure interests.
+- Also always include "Engaged Shoppers" and "Online Shoppers" as baseline Meta behavioural targets. Recommend 1-2 additional behaviors that match the product price point, buyer lifestyle, or purchasing habits. IMPORTANT: These MUST be officially available Meta behaviors.
+- interest_reasoning MUST explain why these interests fit the buyer psychology and price positioning in the primary market context. Keep it under 2 sentences.
 
 Instructions for Timing & Launches (Dynamic Campaign Launches):
 - Analyze the store's peak days of orders: [${storeData.orders.peak_days.join(", ") || "None recorded yet"}].

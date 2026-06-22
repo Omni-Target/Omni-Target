@@ -374,6 +374,8 @@ function CampaignsContent() {
           storeDataForApi,
           isNewLaunch,
           isRegeneration,
+          shopifyStoreCountry: storeInsights?.store?.country || null,
+          topCustomerLocations: storeInsights?.orders?.top_locations || null,
         }),
       });
 
@@ -1749,7 +1751,22 @@ function CampaignsContent() {
                           })() : aiInsights?.budget?.reasoning,
                       },
                       timing: aiInsights?.timing ?? {},
-                      warnings: aiInsights?.warnings ?? [],
+                      warnings: (() => {
+                        const cp = storeInsights?.products?.find((p: any) => p.name === productName);
+                        const descLength = cp?.description?.trim().length ?? 0;
+                        const tagCount = cp?.tags?.length ?? 0;
+                        const orderCount = cp?.order_count ?? cp?.units_sold ?? 0;
+                        const storeOrderCount = storeInsights?.orders?.order_count ?? storeInsights?.orders?.orders_last_30_days ?? 0;
+
+                        const w = [...(aiInsights?.warnings ?? [])];
+                        if (descLength < 30 || tagCount < 2 || orderCount < 5 || storeOrderCount < 20) {
+                          const warningMsg = "Limited product data detected — review interests before launching.";
+                          if (!w.includes(warningMsg)) {
+                            w.push(warningMsg);
+                          }
+                        }
+                        return w;
+                      })(),
                       generatedAt: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }),
                       gatewayInsight,
                       isNewLaunch,

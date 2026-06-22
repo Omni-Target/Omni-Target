@@ -207,8 +207,20 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     `, "#3b82f6");
   }
 
-  // Warnings (omitted by user request)
+  // Warnings
   let warningsHTML = "";
+  if (warnings.length > 0) {
+    warningsHTML = card("Targeting Warnings & Notes", `
+      <div class="warn-list">
+        ${warnings.map(w => `
+          <div class="warn-item">
+            <span class="warn-icon">!</span>
+            <span>${esc(w)}</span>
+          </div>
+        `).join("")}
+      </div>
+    `, "#f59e0b");
+  }
 
   // New Launch note card
   const newLaunchNoteHTML = params.isNewLaunch ? card(

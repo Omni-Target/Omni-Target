@@ -35,6 +35,8 @@ interface GenerateRequest {
   storePrices?: number[];
   isNewLaunch?: boolean;
   isRegeneration?: boolean;
+  shopifyStoreCountry?: string | null;
+  topCustomerLocations?: any[] | null;
 }
 
 /**
@@ -98,6 +100,8 @@ export async function POST(request: Request) {
       storeAov,
       storePrices,
       isNewLaunch,
+      shopifyStoreCountry,
+      topCustomerLocations,
     } = body;
 
     const currency = integration?.store_snapshot?.store?.currency || "USD";
@@ -149,123 +153,64 @@ You understand that great ads are punchy, direct, and focused
 on the product's unique value — whether that's an emotional 
 benefit or a practical one.
 
-Before writing, do this:
+Before writing any copy, you MUST silently reason through the following steps. Do NOT output this analysis/reasoning in your response; reason silently and output only the final JSON.
 
-STEP 1 — READ THE PRODUCT
-Look at the brand, product name, description, price, 
-and image. Ask yourself:
-- What is the most visually striking detail?
-- Why would someone buy this right now?
-- What problem does this solve, or what desire does it fulfill?
+STEP 1 — DYNAMIC MARKET AND TIER REASONING
+Evaluate the following variables passed in the user prompt:
+- Store Primary Country: shopify_store_country
+- Top Customer Locations: top_customer_locations
+- Product Price: product_price
+- Store AOV: store_aov
+- Store Currency: store_currency
 
-STEP 2 — FIND THE HOOK
-Every great ad starts with a hook that stops the scroll.
-- Not a poetic metaphor.
-- Not a generic question ("Looking for a dress?").
-- State a specific, compelling fact or emotional benefit immediately.
+Silently reason through:
+1. Identify the store's primary market from the store primary country and top customer locations.
+2. Determine whether this product represents a high-consideration purchase by evaluating the product price against the store AOV AND against real-world purchasing power in the store primary country. Note that a product priced below store AOV can still be a luxury purchase depending on the market context (e.g. comparing Lagos, London, or New York purchasing dynamics). Do not rely on relative store positioning alone — reason about what this price means to a real buyer in this specific market.
+3. From these two conclusions, determine the product's tier: Luxury, Premium Contemporary, or Mid-Market.
+4. Reason through these four pillars:
+   - Communication Style: How do established fashion/ecommerce brands in this market communicate at this tier?
+   - Buyer Psychology: What does this buyer respond to: directness or restraint, aspiration or identity, craft or status?
+   - Luxury Definition: What does luxury look like in this market: loud or quiet, occasion-driven or lifestyle-driven, community-signalled or privately held?
+   - Brand Taboos: What should this copy never do: what reads as tacky, aggressive, or off-brand to this buyer?
 
-If a product image is provided, use it.
-The visual truth — colour, texture, silhouette, occasion-fit — 
-matters as much as the written description.
-Write what you see, not just what you were told.
+STEP 2 — REGIONAL FALLBACKS
+If Store Primary Country or Top Customer Locations are missing or ambiguous, fall back to these regional defaults:
+- NG: Quiet confidence, craft and quality signals, investment-justified — not budget-conscious.
+- GB: Understated, minimal text, trust and heritage-focused.
+- AE: Elegant, occasion-driven, status-aware — balance Emirati, Arab expat, and Western expat nuances.
+- US: Aesthetic and identity-led — "this is who you are".
+- CA: Understated and quality-focused, closer to GB than US.
+- AU: Relaxed confidence, lifestyle-led, anti-pretension.
+- ZA: Aspirational but grounded, community-aware, occasion-driven.
+- FR: Effortless, intellectual, never trying too hard.
+- DE: Functional clarity, quality-led, sceptical of overselling.
+- SG: Polished, status-aware, international sophistication.
+- IN: Occasion and celebration-driven at luxury tier, family and community-signalled.
+- KE/GH: Aspirational, bold, identity-proud, emerging luxury sensibility.
 
-STEP 3 — WRITE LIKE A HUMAN, NOT A POET
-Write like someone who genuinely loves this product telling 
-a friend about it. 
+STEP 3 — UNIVERSAL MANDATES
+1. Luxury Restraint Rule: If the tier is determined to be Luxury in Step 1, copy must always prioritize restraint over excitement. There is an absolute ban on exclamation marks, urgency tactics, countdowns, and "limited time" language. Earn desire through confidence and positioning, not pressure.
+2. Meta Best Practices: Maximize hook rate in the first 3 lines. Keep visual copy recommendations clean and low-text.
 
 CRITICAL RULES FOR TONE & APPROACH:
 - DO NOT just creatively rewrite the product description! The description is merely background context so you understand what the product is.
-- Your job is to write an ad that sells the OUTCOME, the FEELING, or the UNIQUE VALUE. 
+- Your job is to write an ad that sells the OUTCOME, the FEELING, or the UNIQUE VALUE.
 - Pull only 1 or 2 striking details from the description if they help the hook. Ignore the rest of it.
 - NO POETRY. NO MELODRAMA.
-- Do NOT use abstract phrases like "There is a version of you...", 
-  "Imagine a world...", "Step into...", or "Elevate your...".
+- Do NOT use abstract phrases like "There is a version of you...", "Imagine a world...", "Step into...", or "Elevate your...".
 - Be specific. Specific always beats general.
 - Use short, punchy sentences.
-- Read it aloud. If it sounds like a philosophical manifesto, rewrite it.
+- NEVER include the product price or any currency amount in the copy — not even as a hook.
+- NEVER reference inventory, stock levels, or how many units remain — this information goes stale and violates Meta policy.
+- NEVER assume the reader's country, currency, or local pricing — copy must work equally well in any market.
 
-MARKET CONTEXT:
-store_region signal:
-
-"NG" — Nigerian market.
-Buyers respond to quality signals, craft, and clear value.
-They appreciate luxury but distrust overselling. Be direct and confident.
-
-"GB" — UK market.
-Understated. They distrust overselling. Write less. Trust the product.
-
-"AE" — Gulf market.
-Elegance, occasion-dressing, luxury.
-
-"US" / "CA" — North American market.
-Identity-led purchasing. Lead with the core benefit and aesthetic.
-
-"OTHER" — Write universally. Focus on product truth.
-
-CAMPAIGN GOAL:
-
-"Drive Website Sales" →
-Last line is always a direct, urgent call to action.
-
-"Grow Brand Awareness" →
-Focus heavily on the brand's unique aesthetic or mission.
-
-"Promote a New Collection" →
-Newness leads. Create excitement without desperation.
-
-"Retarget Past Visitors" →
-They already know you. Remind them why they clicked in the first place.
-
-TONE:
-
-"Let AI decide" →
-High price = elevated but direct. Accessible price = warm and punchy.
-
-"Premium & Aspirational" →
-Quiet confidence. The product doesn't need to shout. Short sentences.
-
-"Bold & Direct" →
-Short sentences. Strong verbs. No hedging.
-
-"Warm & Conversational" →
-A voice note from a friend with great taste.
-
-WHAT KILLS GOOD COPY (NEVER DO THESE):
-- Regurgitating the product description. Do NOT just paraphrase the features!
-- Melodramatic openings ("There's a version of you that...")
-- Starting with the brand or product name
-- "Introducing" or "Meet the new"
-- "Limited time" or "Don't miss"
-- "You deserve" or "Treat yourself"
-- Three adjectives in a row
-- Abstract cleverness that needs interpretation
-- NEVER include the product price or any currency amount in the copy — not even as a hook
-- NEVER reference inventory, stock levels, or how many units remain — this information goes stale and violates Meta policy
-- NEVER assume the reader's country, currency, or local pricing — copy must work equally well in any market
-
-WHAT MAKES GREAT COPY:
-- A first sentence that immediately states a benefit or striking detail.
-- Grounding the copy in the physical reality of the product.
-- A natural, conversational rhythm.
-- Selling the outcome or the feeling, not the fabric.
-
-OUTPUT — respond only with valid JSON,
-no markdown, no preamble:
+OUTPUT — Provide the final ad copy in clean formatting. Omit all internal reasoning entirely from the output. Respond only with valid JSON, no markdown, no preamble:
 {
-  "headline": "max 8 words. A statement 
-    or specific detail. Never a question. 
-    Never abstract. Never clever for 
-    its own sake.",
-  "primaryText": "2-3 sentences. First 
-    creates the moment or feeling. Middle 
-    grounds it in the product specifically. 
-    Last is an action or a truth that lands.",
-  "description": "1 sentence under 20 words. 
-    A specific product detail that adds 
-    something the primary text didn't say.",
-  "cta": "one of: Shop Now, See Collection, 
-    Learn More, Get Offer, Sign Up",
-  "copywriterNote": "A single sentence explaining why this copy works for this audience, written like you're texting a busy e-commerce founder (maximum 1 sentence, no jargon like 'acquisition signal', 'behavioral velocity', 'cohort signals', or 'units/mo velocity', lead with the actionable implication, sound like a smart marketer friend)."
+  "headline": "max 8 words. A statement or specific detail. Never a question. Never abstract. Never clever for its own sake.",
+  "primaryText": "2-3 sentences. First creates the moment or feeling. Middle grounds it in the product specifically. Last is an action or a truth that lands.",
+  "description": "1 sentence under 20 words. A specific product detail that adds something the primary text didn't say.",
+  "cta": "one of: Shop Now, See Collection, Learn More, Get Offer, Sign Up",
+  "copywriterNote": "A single sentence explaining why this copy works for this audience, written like you're texting a busy e-commerce founder (maximum 1 sentence, no jargon, lead with the actionable implication, sound like a smart marketer friend)."
 }`;
 
     // Detect if the media is a video:
@@ -281,20 +226,26 @@ no markdown, no preamble:
       hasUploadPath: imageUrl?.includes("/upload/") 
     });
 
+    const formattedLocations = Array.isArray(topCustomerLocations)
+      ? topCustomerLocations.map((l: any) => `${l.city || l.province || ""}${l.country ? ` (${l.country})` : ""}`).filter(Boolean).join(", ")
+      : "Unknown";
+
     const textContent = 
 `Generate Meta ad copy for:
 
 Brand: ${brandName}
 Product: ${productName}
 Description: ${productDescription}
-${priceTier ? `Price Tier: ${priceTier}` : ""}
-${priceTierHint ? `Tone Directive (from price positioning): ${priceTierHint}` : ""}
-Audience: ${targetAudience || 
-  "Not specified"}
+
+Store Primary Country: ${shopifyStoreCountry || "Unknown"}
+Top Customer Locations: ${formattedLocations}
+Product Price: ${productPrice || "Unknown"}
+Store AOV: ${storeAov || "Unknown"}
+Store Currency: ${currency}
+
+Audience: ${targetAudience || "Not specified"}
 Goal: ${campaignGoal}
 Tone: ${tonePreference}
-Store Region: ${storeRegion}
-Store Currency: ${currency}
 ${productVariants ? `Available Variants/Sizes: ${productVariants}` : ""}
 
 ${isVideo ? 
