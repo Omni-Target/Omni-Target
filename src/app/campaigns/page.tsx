@@ -1279,7 +1279,7 @@ function CampaignsContent() {
                         {[
                           "Shop Now",
                           "Learn More",
-                          "See Collection",
+                          "Order Now",
                           "Get Offer",
                           "Sign Up",
                           "Book Now",

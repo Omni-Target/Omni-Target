@@ -214,7 +214,7 @@ OUTPUT — Provide the final ad copy in clean formatting. Omit all internal reas
   "headline": "max 8 words. A statement or specific detail. Never a question. Never abstract. Never clever for its own sake.",
   "primaryText": "2-3 sentences. First creates the moment or feeling. Middle grounds it in the product specifically. Last is an action or a truth that lands.",
   "description": "1 sentence under 20 words. A specific product detail that adds something the primary text didn't say.",
-  "cta": "one of: Shop Now, See Collection, Learn More, Get Offer, Sign Up",
+  "cta": "one of: Shop Now, Learn More, Order Now, Get Offer, Sign Up, Book Now, Contact Us",
   "copywriterNote": "A single sentence explaining why this copy works for this audience, written like you're texting a busy e-commerce founder (maximum 1 sentence, no jargon, lead with the actionable implication, sound like a smart marketer friend)."
 }`;
 

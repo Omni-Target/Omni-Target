@@ -212,6 +212,13 @@ export async function GET(request: Request) {
       });
     }
 
+    // Check if user has already completed onboarding
+    const { clerkClient } = await import("@clerk/nextjs/server");
+    const user = await (await clerkClient()).users.getUser(userId!);
+    const currentOnboardingStep = (user.publicMetadata as { onboardingStep?: string })?.onboardingStep;
+    const isAlreadyComplete = currentOnboardingStep === "complete";
+    const shouldSkipAudit = isFromDashboard || isAlreadyComplete;
+
     // Update Clerk metadata
     await fetch(
       `${process.env.NEXT_PUBLIC_APP_URL}` +
@@ -223,14 +230,14 @@ export async function GET(request: Request) {
         },
         body: JSON.stringify({ 
           shopifyStoreUrl: shop,
-          onboardingStep: isFromDashboard ? "complete" : "audit"
+          onboardingStep: shouldSkipAudit ? "complete" : "audit"
         }),
       }
     );
 
-    // Redirect to next onboarding step
-    const redirectUrl = isFromDashboard
-      ? `${process.env.NEXT_PUBLIC_APP_URL}/onboarding/audit?from=dashboard`
+    // Redirect to dashboard directly if skipping audit, otherwise next onboarding step
+    const redirectUrl = shouldSkipAudit
+      ? `${process.env.NEXT_PUBLIC_APP_URL}/dashboard`
       : `${process.env.NEXT_PUBLIC_APP_URL}/onboarding/audit`;
 
     return Response.redirect(redirectUrl);
