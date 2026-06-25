@@ -1504,7 +1504,7 @@ function CampaignsContent() {
                   <div>
                     <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Behaviours to Add</span>
                     <div className="flex flex-wrap gap-2 mt-2">
-                      {(aiInsights?.targeting?.behaviours || ["Engaged Shoppers", "Online Shoppers"]).map((b: string) => (
+                      {(aiInsights?.targeting?.behaviours || ["Engaged Shoppers"]).map((b: string) => (
                         <span key={b} className="px-3 py-1 rounded-full text-xs font-medium bg-success-500/10 border border-success-500/20 text-success-400">{b}</span>
                       ))}
                     </div>
@@ -1852,7 +1852,7 @@ function CampaignsContent() {
                     `Age: ${aiInsights?.targeting?.age_min || 25} — ${aiInsights?.targeting?.age_max || 44}`,
                     `Gender: ${aiInsights?.targeting?.gender || "All"}`,
                     `Interests: ${aiInsights?.targeting?.interests?.join(", ") || "Set manually"}`,
-                    `Behaviours: ${(aiInsights?.targeting?.behaviours || ["Engaged Shoppers", "Online Shoppers"]).join(", ")}`,
+                    `Behaviours: ${(aiInsights?.targeting?.behaviours || ["Engaged Shoppers"]).join(", ")}`,
                     "",
                     "── BUDGET ──",
                     aiInsights?.budget

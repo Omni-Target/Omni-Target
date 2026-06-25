@@ -192,13 +192,16 @@ Before generating any interests, you must reason about each product in the catal
 6. Apply industry-standard Meta targeting logic throughout. Reason from the product's actual price positioning, market context, and implied buyer psychology — not from the store's taxonomy.
 
 Output requirements:
-- Always include "Online Shopping" as one of the interests — it is a universal Meta behavioral signal for e-commerce.
+- Always include "Online Shopping" as one of the interests — it is a confirmed Meta interest category for e-commerce.
 - Recommend 3-5 additional highly specific Meta Ads interest targets derived from the buyer psychology, price positioning, and market context analyzed above.
 - UNIVERSAL BAN ON BRAND NAMES: Do NOT recommend specific brand names (e.g., competitors, retailers, or luxury labels like Zara, ASOS, Gucci, Chanel, etc.) as interest targets. Use only Meta interest categories (e.g., Luxury Goods, Boutique, Streetwear, Fine jewelry) and behavior signals. Brand targeting creates client-facing friction, whereas available category and behavioral signals are sufficiently granular.
-- Each interest MUST be a real, officially targetable Meta Ads interest that exists in Facebook Ads Manager. Do not hallucinate obscure interests.
-- Also always include "Engaged Shoppers" and "Online Shoppers" as baseline Meta behavioural targets. Recommend 1-2 additional behaviors that match the product price point, buyer lifestyle, or purchasing habits. IMPORTANT: These MUST be officially available Meta behaviors. Behaviour signals must always align with the buyer type the product classification indicates — never select retention signals for cold traffic products and never select only acquisition signals for hybrid products.
-  - Gateway or New Launch: Only select behaviours that indicate first-time buyer potential (e.g. Engaged Shoppers, Online Shoppers, Luxury Shoppers, Frequent Travelers, Luxury Goods Buyers). The goal is cold traffic acquisition — someone discovering this brand for the first time. NEVER select behaviours that indicate repeat purchase patterns, return visits, or loyalty/retention signals.
-  - Hybrid: Layer both acquisition and retention behaviours. Since this product attracts both new and returning buyers, both signal types are valid.
+- CRITICAL — VERIFIED INTERESTS ONLY: Each interest MUST be a real, officially targetable Meta Ads interest that can be searched and found inside Facebook Ads Manager's Detailed Targeting search box. Do NOT suggest interests that cannot be found there (e.g. "Lifestyle (Sociology)" is a parent category label, not a targetable leaf node — never suggest it. "High End Fashion" does not exist as a targetable interest — do not suggest it or any variant of it). Only suggest interests a user would successfully find by typing them into the Ads Manager search field.
+- Always include "Engaged Shoppers" as the first behaviour — it is the only confirmed, consistently available shopping behavior in Meta Ads Manager. Do NOT include "Online Shoppers" — it has been deprecated and removed by Meta.
+- Recommend 1-2 additional behaviors beyond Engaged Shoppers that are genuinely the most relevant match for this specific product's buyer profile, price point, and market context. CRITICAL RULE: Every behavior you suggest MUST be a real, searchable option inside Facebook Ads Manager's Detailed Targeting — one a user could actually find by typing it into the search field. Do NOT invent or hallucinate behavior names. If you cannot confidently confirm a behavior exists in Meta Ads Manager, do not suggest it.
+- For reference, examples of behaviors that ARE confirmed available in Meta Ads Manager include: Engaged Shoppers, Frequent international travelers, Small business owners, Frequent travelers. This is NOT an exhaustive list — use your knowledge of Meta Ads Manager to identify other genuinely available behaviors that are a stronger fit for the product. The goal is the best match, not a rotation of the same defaults.
+- Behaviour signals must always align with the buyer type the product classification indicates:
+  - Gateway or New Launch: Select behaviours that signal first-time buyer potential — someone discovering this brand for the first time. NEVER select behaviours that indicate repeat purchase patterns, return visits, or loyalty/retention signals.
+  - Hybrid: Layer both acquisition and retention behaviours, since this product attracts both new and returning buyers.
 - interest_reasoning MUST explain why these interests fit the buyer psychology and price positioning in the primary market context. Keep it under 2 sentences.
 
 Instructions for Timing & Launches (Dynamic Campaign Launches):
@@ -269,7 +272,7 @@ Campaign Context:
                 properties: {
                   interests: { type: "array", items: { type: "string" }, description: "Specific Meta Ads interest targets" },
                   interest_reasoning: { type: "string", description: "Actionable 1-sentence explanation of why these interests convert best." },
-                  behaviours: { type: "array", items: { type: "string" }, description: "List of 3-4 target behaviors. MUST include Engaged Shoppers, Online Shoppers, AND 1-2 additional specific Meta behaviors." }
+                  behaviours: { type: "array", items: { type: "string" }, description: "List of 2-3 target behaviors. MUST include Engaged Shoppers as the first item. Do NOT include Online Shoppers (deprecated). Only add 1-2 additional behaviors that are verifiably searchable in Meta Ads Manager today." }
                 },
                 required: ["interests", "interest_reasoning", "behaviours"]
               },
@@ -357,7 +360,7 @@ Campaign Context:
       age_reasoning: "Standard e-commerce age targeting (25-44) is highly recommended for early validation campaigns."
     },
     audiences: {
-      interests: ["Online shopping", "Fashion"],
+      interests: ["Online Shopping", "Fashion"],
       interest_reasoning: "Broad fashion interest targeting is the most reliable way to feed early-stage customer data to the Meta pixel.",
       behaviours: ["Engaged Shoppers"]
     },
@@ -538,7 +541,7 @@ export async function generateRecommendations(
         age_reasoning: "We need at least 20 orders to infer target age range.",
         gender: "all",
         gender_reasoning: "We recommend starting with broad gender targeting to let Meta's pixel learn your buyer profile.",
-        interests: ["Online shopping", "Fashion"],
+        interests: ["Online Shopping", "Fashion"],
         behaviours: ["Engaged Shoppers"],
         interest_reasoning: "Starting with broad interest targeting is recommended for stores with low order volume.",
       },
@@ -701,7 +704,7 @@ export async function generateRecommendations(
   
   const locations = profile.locations;
   const interests = profile.audiences.interests;
-  const behaviours = profile.audiences.behaviours || (profile.audiences as any).behaviors || ["Engaged Shoppers"];
+  const behaviours = (profile.audiences.behaviours || (profile.audiences as any).behaviors || ["Engaged Shoppers"]).filter((b: string) => b !== "Online Shoppers" && b !== "Online shoppers");
   const interest_reasoning = profile.audiences.interest_reasoning;
 
   // Goal multipliers (applied client-side, stored for reference)

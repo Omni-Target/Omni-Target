@@ -163,7 +163,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     ${field("Interests", interests.length > 0 ? tags(interests) : `<span class="muted">Add manually based on your niche</span>`)}
     ${field("Behaviours", behaviours.length > 0
       ? tags(behaviours, "#4ade80", "rgba(74,222,128,0.1)", "rgba(74,222,128,0.25)")
-      : tags(["Engaged Shoppers", "Online Shoppers"], "#4ade80", "rgba(74,222,128,0.1)", "rgba(74,222,128,0.25)"))}
+      : tags(["Engaged Shoppers"], "#4ade80", "rgba(74,222,128,0.1)", "rgba(74,222,128,0.25"))}
   `);
 
   // ── Budget Card ──

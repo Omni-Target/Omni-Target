@@ -470,7 +470,7 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
   if (behaviours.length > 0) {
     targetItems.push({ text: behaviours.join("  ·  "), size: 10, gapAfter: 2 });
   } else {
-    targetItems.push({ text: "Engaged Shoppers  ·  Online shoppers", size: 10, gapAfter: 2 });
+    targetItems.push({ text: "Engaged Shoppers", size: 10, gapAfter: 2 });
   }
 
   renderCard("Audience Targeting", targetItems);
