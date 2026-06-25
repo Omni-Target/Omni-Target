@@ -29,6 +29,7 @@ const BOTTOM_SAFE = PH - 22;
 export interface BriefPDFParams {
   brandName: string;
   productName: string;
+  productUrl?: string;
   campaignGoal: string;
   copy: {
     headline: string;
@@ -38,7 +39,7 @@ export interface BriefPDFParams {
     copywriterNote: string;
   };
   targeting: {
-    locations?: { name: string; source: string }[];
+    locations?: { name?: string; city?: string; source?: string }[];
     age_min?: number;
     age_max?: number;
     gender?: string;
@@ -84,6 +85,7 @@ export interface BriefPDFParams {
     storeAov: number;
     storeBaseFtb: number;
   };
+  isNewLaunch?: boolean;
 }
 
 // ─── Generator ───────────────────────────────────────────────────────────────
@@ -95,6 +97,28 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
   // ── Utilities ────────────────────────────────────────────────────────────
 
   type RGB = readonly [number, number, number];
+
+  // Helper to sanitize unsupported Unicode and currency symbols for standard jsPDF fonts
+  const sanitize = (text: string): string => {
+    if (!text) return "";
+    return text
+      .replace(/₦/g, "NGN ")
+      .replace(/GH₵/g, "GHS ")
+      .replace(/₹/g, "INR ")
+      .replace(/₺/g, "TRY ")
+      .replace(/₽/g, "RUB ")
+      .replace(/₱/g, "PHP ")
+      .replace(/₪/g, "ILS ")
+      .replace(/€/g, "EUR ")
+      .replace(/₩/g, "KRW ")
+      .replace(/₫/g, "VND ")
+      .replace(/₴/g, "UAH ")
+      .replace(/৳/g, "BDT ")
+      .replace(/฿/g, "THB ")
+      .replace(/\s*·\s*/g, " | ")
+      .replace(/\s*⚠\s*/g, " [!] ")
+      .replace(/—/g, "-");
+  };
 
   const fillBg = () => {
     doc.setFillColor(...PAGE_BG);
@@ -127,7 +151,7 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
 
   const measure = (text: string, size: number, w: number): string[] => {
     doc.setFontSize(size);
-    return doc.splitTextToSize(text, w);
+    return doc.splitTextToSize(sanitize(text), w);
   };
 
   const lh = (size: number, lineCount: number) => lineCount * size * 0.45;
@@ -248,15 +272,30 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
   y += lh(18, productLines.length) + 3;
 
   font(11, "normal", TEXT_2);
-  doc.text(`by ${params.brandName}`, MX, y);
+  doc.text(sanitize(`by ${params.brandName}`), MX, y);
   y += 8;
 
   // Goal with accent bar
   doc.setFillColor(...ACCENT);
   doc.roundedRect(MX, y - 3, 2, 12, 1, 1, "F");
   font(10, "normal", ACCENT_T);
-  doc.text(params.campaignGoal, MX + 8, y + 4);
+  doc.text(sanitize(params.campaignGoal), MX + 8, y + 4);
   y += 18;
+
+  // NEW LAUNCH badge
+  if (params.isNewLaunch) {
+    const NEW_LAUNCH_BG = [16, 50, 35] as const;
+    const NEW_LAUNCH_T = [52, 211, 153] as const;
+    const badgeW = 38;
+    const badgeH = 8;
+    doc.setFillColor(...NEW_LAUNCH_BG);
+    doc.roundedRect(MX, y, badgeW, badgeH, 1.5, 1.5, "F");
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...NEW_LAUNCH_T);
+    doc.text("NEW LAUNCH", MX + 3, y + 5.5);
+    y += 14;
+  }
 
   // ── Gateway Insight Section ───────────────────────────────────────────────
 
@@ -265,19 +304,25 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
     const isGateway = gi.currentProductClassification === "Gateway";
     const isConsideration = gi.currentProductClassification === "Consideration";
     const classificationLabel = isGateway ? "GATEWAY PRODUCT" : isConsideration ? "CONSIDERATION PRODUCT" : "HYBRID PRODUCT";
-    const formatPrescription = isGateway ? "UGC Video (Product in use)" : isConsideration ? "Carousel or Founder-led Video" : "A/B Test UGC vs Carousel";
+    const formatPrescription = isGateway 
+      ? "We recommend leading with a UGC video showing the product in use." 
+      : isConsideration 
+        ? "We recommend a Carousel or a Founder-Led video to build trust." 
+        : "We recommend testing a UGC video against a Carousel to see what resonates.";
     let insightText = "";
     const isCurrentTopGateway = gi.currentProductName === gi.topGatewayName;
     const isCurrentBestseller = gi.currentProductName === gi.bestsellerName;
 
-    if (isCurrentTopGateway && isCurrentBestseller) {
+    if (params.isNewLaunch) {
+      insightText = "New product — targeting built from your store's buyer profile";
+    } else if (isCurrentTopGateway && isCurrentBestseller) {
       insightText = `This product is both your organic bestseller and your strongest cold-traffic converter.`;
     } else if (isCurrentTopGateway) {
       insightText = `While your organic bestseller is ${gi.bestsellerName || "another product"}, this product is your true Gateway Product and strongest cold-traffic converter.`;
     } else if (isCurrentBestseller) {
       insightText = `This product is your organic bestseller, but your top Gateway Product for cold traffic is ${gi.topGatewayName || "another product"}.`;
     } else {
-      const cls = isGateway ? "Gateway" : isConsideration ? "Consideration" : "Hybrid";
+      const cls = isGateway ? "Gateway" : isConsideration ? "Consideration" : gi.currentProductClassification === "Insufficient Data" ? "Insufficient Data" : "Hybrid";
       insightText = `This product is a ${cls} Product. Note that your organic bestseller is ${gi.bestsellerName || "another product"}, and your top Gateway Product is ${gi.topGatewayName || "another product"}.`;
     }
 
@@ -295,7 +340,8 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
 
     if (gi.currentProductImage) {
       try {
-        const res = await fetch(gi.currentProductImage);
+        const proxyUrl = `/api/media/proxy?url=${encodeURIComponent(gi.currentProductImage)}`;
+        const res = await fetch(proxyUrl);
         if (res.ok) {
           const buffer = await res.arrayBuffer();
           // Find format from content type
@@ -352,7 +398,7 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
   // ── Copywriter's Note (special styling) ─────────────────────────────────
 
   const noteItems: TItem[] = [
-    { text: `"${params.copy.copywriterNote}"`, size: 9.5, style: "italic", color: TEXT_2, indent: 6, gapAfter: 2 },
+    { text: `"${params.copy.copywriterNote}"`, size: 9.5, style: "italic", color: TEXT_2, indent: 22, gapAfter: 2 },
   ];
   const noteH = cardH("Copywriter's Note", noteItems);
   ensureSpace(noteH);
@@ -390,9 +436,10 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
 
   // Locations
   targetItems.push({ text: "LOCATIONS", size: 7.5, style: "bold", color: TEXT_3, gapAfter: 1 });
-  if (locations.length > 0) {
+  const safeLocations = Array.isArray(locations) ? locations : [];
+  if (safeLocations.length > 0) {
     targetItems.push({
-      text: locations.map(l => `${l.name} (${l.source === "from_data" ? "from orders" : "recommended"})`).join("  ·  "),
+      text: safeLocations.map(l => `${(l?.name || l?.city || "").split(',')[0].trim()} (${l?.source === "from_data" ? "from orders" : "recommended"})`).filter(Boolean).join("  ·  "),
       size: 10, gapAfter: 6,
     });
   } else {
@@ -423,7 +470,7 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
   if (behaviours.length > 0) {
     targetItems.push({ text: behaviours.join("  ·  "), size: 10, gapAfter: 2 });
   } else {
-    targetItems.push({ text: "Engaged Shoppers  ·  Online shoppers", size: 10, gapAfter: 2 });
+    targetItems.push({ text: "Engaged Shoppers", size: 10, gapAfter: 2 });
   }
 
   renderCard("Audience Targeting", targetItems);
@@ -480,7 +527,7 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
   if (params.budget.breakdown) {
     budgetItems.push({ text: "HOW THIS WAS CALCULATED", size: 7.5, style: "bold", color: TEXT_3, gapAfter: 1 });
     budgetItems.push({
-      text: `Revenue signal: ${formatCurrency(params.budget.breakdown.revenue_based, currency, symbol)}/day  ·  AOV signal: ${formatCurrency(params.budget.breakdown.aov_based, currency, symbol)}${params.budget.goal_label ? `  ·  Adjusted for ${params.budget.goal_label}` : ""}`,
+      text: `Revenue signal: ${formatCurrency(params.budget.breakdown.revenue_based, currency, symbol)}/month  ·  AOV signal: ${formatCurrency(params.budget.breakdown.aov_based, currency, symbol)}${params.budget.goal_label ? `  ·  Adjusted for ${params.budget.goal_label}` : ""}`,
       size: 9, color: TEXT_2, gapAfter: 6,
     });
   }
@@ -525,7 +572,20 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
     renderCard("Before You Launch", warnItems);
   }
 
-  // ── Footer on every page ────────────────────────────────────────────────
+  // NEW LAUNCH footer note
+  if (params.isNewLaunch) {
+    renderCard("New Launch Note", [
+      {
+        text: "Targeting built from your store's buyer profile — refine after your first 10 orders",
+        size: 9.5,
+        style: "italic" as const,
+        color: [52, 211, 153] as unknown as typeof TEXT_2,
+        gapAfter: 2,
+      },
+    ]);
+  }
+
+  // Footer on every page
 
   const pageCount = (doc.internal as any).pages.length - 1;
   for (let i = 1; i <= pageCount; i++) {
@@ -541,7 +601,7 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
     doc.setFont("helvetica", "normal");
     doc.setTextColor(...TEXT_3);
     doc.text(
-      "Generated by Omni Target  ·  omnitarget.co",
+      sanitize("Generated by Omni Target  ·  omnitarget.co"),
       PW / 2,
       PH - 11,
       { align: "center" }

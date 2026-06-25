@@ -21,6 +21,22 @@ export default function ProductsPage() {
       .catch(() => setLoading(false));
   }, []);
 
+  const storeCurrency: string = storeData?.store?.currency || "USD";
+
+  const formatPrice = (price: number) => {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: storeCurrency,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(price);
+    } catch {
+      // Fallback if currency code is unrecognised
+      return `${storeCurrency} ${price.toLocaleString()}`;
+    }
+  };
+
   const inStockProducts = storeData?.products?.filter((p: any) => p.in_stock) || [];
   const outOfStockProducts = storeData?.products?.filter((p: any) => !p.in_stock) || [];
 
@@ -121,18 +137,9 @@ export default function ProductsPage() {
                         <h3 className="text-sm font-semibold text-white mb-1">
                           {product.name}
                         </h3>
-                        {product.has_partial_stock && (
-                          <p className="text-xs text-amber-400 flex items-start gap-1 mt-1 mb-1">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mt-0.5 shrink-0">
-                              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-                              <line x1="12" y1="9" x2="12" y2="13"/>
-                              <line x1="12" y1="17" x2="12.01" y2="17"/>
-                            </svg>
-                            <span>{product.in_stock_variant_count} of {product.total_variant_count} variants in stock — brief will only show available sizes</span>
-                          </p>
-                        )}
+
                         <p className="text-xs text-white/40 mb-2">
-                          ₦{product.price?.toLocaleString()}
+                          {formatPrice(product.price)}
                         </p>
                         
                         {/* AI context */}
@@ -158,9 +165,11 @@ export default function ProductsPage() {
                           sessionStorage.setItem("campaign_draft", JSON.stringify({
                             product_name: product.name,
                             product_description: product.description || product.name,
-                            product_price: product.price,
+                            // product_price is intentionally excluded — price flows to the AI
+                            // only as a qualitative tier, never as a raw number in copy.
                             product_image: product.image_url || "",
-                            product_variants: product.has_partial_stock && product.in_stock_variant_names ? product.in_stock_variant_names.join(', ') : ""
+                            product_variants: product.has_partial_stock && product.in_stock_variant_names ? product.in_stock_variant_names.join(', ') : "",
+                            is_new_launch: (product.units_sold ?? 0) < 3,
                           }));
                           router.push("/campaigns");
                         }}

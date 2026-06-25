@@ -7,6 +7,7 @@ export interface StoreLocation {
 export interface StoreProduct {
   id: string;
   name: string;
+  handle?: string;
   revenue: number;
   units_sold: number;
   in_stock: boolean;
@@ -26,6 +27,8 @@ export interface StoreProduct {
   order_velocity?: number;
   repeat_purchase_rate?: number;
   gateway_classification?: "Gateway" | "Consideration" | "Hybrid" | "Insufficient Data";
+  created_at?: string;
+  order_count?: number;
 }
 
 export interface StoreData {
@@ -47,6 +50,7 @@ export interface StoreData {
     repeat_customer_rate: number;
     revenue_last_30_days: number;
     orders_last_30_days: number;
+    oldest_order_date?: string;
   };
   products: StoreProduct[];
   customers: {

@@ -1,15 +1,16 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, Suspense, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { SignOutButton, useUser } from "@clerk/nextjs";
 import { MediaValidationResult } from "@/lib/meta-specs";
-import { generateBriefPDF } from "@/lib/generate-brief-pdf";
+import type { BriefPDFParams } from "@/lib/generate-brief-pdf";
 import { formatCurrency, getCurrencySymbol } from "@/lib/currency";
 import { useCredits } from "@/hooks/useCredits";
 import { Logo } from "@/components/Logo";
+import { MobileNav } from "@/components/MobileNav";
 
 type CampaignState = "selection" | "media" | "input" | "generating" | "review" | "brief";
 
@@ -27,17 +28,12 @@ function CampaignsContent() {
   const { user } = useUser();
   const storeUrl = user?.publicMetadata?.shopifyStoreUrl as string || "";
 
-  // Extract clean domain for display:
-  const storeDomain = storeUrl
-    ? new URL(
-        storeUrl.startsWith("http") 
-          ? storeUrl 
-          : `https://${storeUrl}`
-      ).hostname.replace("www.", "")
-    : "yourstore.com";
+  const [previewPlatform, setPreviewPlatform] = useState<"facebook" | "instagram">("facebook");
 
   // Overall State
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [viewState, setViewState] = useState<CampaignState>("selection");
+  const [loadingDraft, setLoadingDraft] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
   const [showBuyCredits, setShowBuyCredits] = useState(false);
 
@@ -74,6 +70,9 @@ function CampaignsContent() {
           if (draft.product_variants) {
             setProductVariants(draft.product_variants);
           }
+          if (draft.is_new_launch) {
+            setIsNewLaunch(true);
+          }
           
           setViewState("input");
           
@@ -84,6 +83,7 @@ function CampaignsContent() {
         console.error("Failed to parse campaign draft", e);
       }
     }
+    setLoadingDraft(false);
   }, []);
 
   // Form State
@@ -100,6 +100,7 @@ function CampaignsContent() {
 
   // Review State
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [selectedCta, setSelectedCta] = useState<string>("");
 
   const [storeInsights, setStoreInsights] = useState<any>(null);
@@ -107,10 +108,16 @@ function CampaignsContent() {
   const [aiInsights, setAiInsights] = useState<any>(null);
   const [loadingAiInsights, setLoadingAiInsights] = useState(false);
   const [gatewayInsight, setGatewayInsight] = useState<any>(null);
-  const [selectedStrategyIndex, setSelectedStrategyIndex] = useState(1); // 0=Performance, 1=Balanced, 2=Conservative
+  const [selectedStrategyIndex, setSelectedStrategyIndex] = useState(1); // 0=Dip Your Toe, 1=Sweet Spot, 2=Full Send
   const [selectedDuration, setSelectedDuration] = useState<7 | 14 | 30>(14);
+  const [isNewLaunch, setIsNewLaunch] = useState(false);
+  const [regenerateCount, setRegenerateCount] = useState(0);
 
   const { credits, isUnlimited } = useCredits();
+
+  const resolvedStoreDomain = storeInsights?.store?.domain 
+    ? new URL(storeInsights.store.domain.startsWith("http") ? storeInsights.store.domain : `https://${storeInsights.store.domain}`).hostname.replace("www.", "")
+    : (storeUrl ? new URL(storeUrl.startsWith("http") ? storeUrl : `https://${storeUrl}`).hostname.replace("www.", "") : "yourstore.com");
 
   useEffect(() => {
     setLoadingInsights(true);
@@ -139,6 +146,31 @@ function CampaignsContent() {
       .catch(() => setLoadingInsights(false));
   }, []);
 
+  // Prevent accidental navigation during generation
+  useEffect(() => {
+    if (viewState === "generating") {
+      const handlePopState = (e: PopStateEvent) => {
+        // Push the state back to stay on the page
+        window.history.pushState(null, "", window.location.href);
+      };
+      
+      // Push an extra state so the first back click pops it instead of navigating
+      window.history.pushState(null, "", window.location.href);
+      window.addEventListener("popstate", handlePopState);
+      
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        e.preventDefault();
+        e.returnValue = "";
+      };
+      window.addEventListener("beforeunload", handleBeforeUnload);
+      
+      return () => {
+        window.removeEventListener("popstate", handlePopState);
+        window.removeEventListener("beforeunload", handleBeforeUnload);
+      };
+    }
+  }, [viewState]);
+
   const handleCopy = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
     setCopiedField(field);
@@ -146,7 +178,7 @@ function CampaignsContent() {
   };
 
   const isVideo = (mediaFile?.type.startsWith("video/") ?? false) 
-    || (mediaCloudUrl?.includes("/video/upload/") ?? false);
+    || (mediaCloudUrl?.match(/\.(mp4|mov|webm)(\?|$)/i) !== null);
 
   const handleMediaSelect = async (
     e: React.ChangeEvent<HTMLInputElement>
@@ -166,78 +198,95 @@ function CampaignsContent() {
     
     setIsUploading(true);
     try {
-      if (isVideoFile) {
-        // Upload videos DIRECTLY to Cloudinary from the browser
-        // This bypasses the Next.js API body size limit
-        const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
-        
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("upload_preset", "omni_unsigned");
-        formData.append("folder", "omni-target/campaigns");
-        
-        const cloudRes = await fetch(
-          `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`,
-          { method: "POST", body: formData }
-        );
-        
-        if (!cloudRes.ok) {
-          const err = await cloudRes.json();
-          setUploadError(err?.error?.message || "Video upload failed. Please try again.");
-          setMediaFile(null);
-          setMediaPreviewUrl("");
-          return;
-        }
-        
-        const data = await cloudRes.json();
-        setMediaCloudUrl(data.secure_url);
-        
-        // Validate against Meta specs
-        const { validateMetaAdMedia } = await import("@/lib/meta-specs");
-        const validation = validateMetaAdMedia({
-          width: data.width,
-          height: data.height,
-          duration: data.duration,
-          format: data.format,
-          resourceType: "video",
-        });
-        setMediaValidation(validation);
-        
-      } else {
-        // Images go through the API route (small enough)
-        const formData = new FormData();
-        formData.append("file", file);
-        
-        const res = await fetch("/api/media/upload", {
-          method: "POST",
-          body: formData,
-        });
-        
-        if (!res.ok) {
-          const err = await res.json();
-          setUploadError(err.error || "Upload failed. Please try again.");
-          setMediaFile(null);
-          setMediaPreviewUrl("");
-          return;
-        }
-        
-        const data = await res.json();
-        setMediaCloudUrl(data.url);
-        
-        // Validate against Meta specs
-        const { validateMetaAdMedia } = await import("@/lib/meta-specs");
-        const validation = validateMetaAdMedia({
-          width: data.width,
-          height: data.height,
-          duration: data.duration,
-          format: data.format,
-          resourceType: data.resourceType,
-        });
-        setMediaValidation(validation);
+      // 1. Get Presigned URL
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: file.type,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        setUploadError(err.error || "Failed to get upload URL. Please try again.");
+        setMediaFile(null);
+        setMediaPreviewUrl("");
+        return;
       }
+
+      const { presignedUrl, publicUrl } = await res.json();
+
+      // 2. Upload directly to Cloudflare R2
+      const uploadRes = await fetch(presignedUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": file.type,
+        },
+        body: file,
+      });
+
+      if (!uploadRes.ok) {
+        setUploadError("Failed to upload file. Please try again.");
+        setMediaFile(null);
+        setMediaPreviewUrl("");
+        return;
+      }
+
+      setMediaCloudUrl(publicUrl);
+
+      // 3. Validate against Meta specs using local file properties
+      const getMediaDimensions = (): Promise<{width: number, height: number, duration?: number}> => {
+        return new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error("Media metadata extraction timed out. Please check if the file format/codec is supported."));
+          }, 10000); // 10 second timeout
+
+          if (isVideoFile) {
+            const video = document.createElement("video");
+            video.preload = "metadata";
+            video.onloadedmetadata = () => {
+              clearTimeout(timeout);
+              resolve({ width: video.videoWidth, height: video.videoHeight, duration: video.duration });
+              URL.revokeObjectURL(video.src);
+            };
+            video.onerror = () => {
+              clearTimeout(timeout);
+              reject(new Error("Failed to load video metadata. Unsupported codec or corrupted file."));
+              URL.revokeObjectURL(video.src);
+            };
+            video.src = URL.createObjectURL(file);
+          } else {
+            const img = new window.Image();
+            img.onload = () => {
+              clearTimeout(timeout);
+              resolve({ width: img.width, height: img.height });
+              URL.revokeObjectURL(img.src);
+            };
+            img.onerror = () => {
+              clearTimeout(timeout);
+              reject(new Error("Failed to load image. Unsupported format or corrupted file."));
+              URL.revokeObjectURL(img.src);
+            };
+            img.src = URL.createObjectURL(file);
+          }
+        });
+      };
+
+      const dimensions = await getMediaDimensions();
+      const { validateMetaAdMedia } = await import("@/lib/meta-specs");
+      const validation = validateMetaAdMedia({
+        width: dimensions.width,
+        height: dimensions.height,
+        duration: dimensions.duration,
+        format: file.type.split('/')[1],
+        resourceType: isVideoFile ? "video" : "image",
+      });
+      setMediaValidation(validation);
       
-    } catch {
-      setUploadError("Upload failed. Please try again.");
+    } catch (err: any) {
+      setUploadError(err.message || "Upload failed. Please try again.");
       setMediaFile(null);
       setMediaPreviewUrl("");
     } finally {
@@ -245,7 +294,7 @@ function CampaignsContent() {
     }
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (isRegeneration = false) => {
     const errors: string[] = [];
 
     if (!brandName.trim()) errors.push("Brand name is required");
@@ -272,7 +321,9 @@ function CampaignsContent() {
         ? [...gatewayProducts].sort((a: any, b: any) => b.revenue - a.revenue)[0] 
         : null;
 
-      const currentProduct = products.find((p: any) => p.name === productName);
+      const normalizeStr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normalizedInput = normalizeStr(productName);
+      const currentProduct = products.find((p: any) => normalizeStr(p.name) === normalizedInput);
 
       currentGatewayInsight = {
         currentProductClassification: currentProduct?.gateway_classification || "Unknown",
@@ -294,6 +345,12 @@ function CampaignsContent() {
       };
     }
 
+    // Collect all catalog prices so the API can derive quartile-based tier
+    // boundaries from the store's own distribution — no hardcoded thresholds.
+    const storePrices: number[] = (storeInsights?.products ?? [])
+      .map((p: any) => Number(p.price))
+      .filter((p: number) => p > 0);
+
     try {
       const res = await fetch("/api/campaigns/generate", {
         method: "POST",
@@ -306,10 +363,19 @@ function CampaignsContent() {
           tonePreference: tone,
           mediaUrl: mediaCloudUrl || mediaPreviewUrl || null,
           imageUrl: mediaCloudUrl || null,
+          // productPrice is sent for tier classification only — the API converts
+          // it to a qualitative tier (e.g. "Premium") using catalog quartiles.
+          // The raw number never appears in the AI prompt or generated copy.
           productPrice: productPrice || null,
+          storeAov: storeInsights?.orders?.average_order_value ?? null,
+          storePrices,
           productVariants: productVariants || null,
           gatewayInsight: currentGatewayInsight,
           storeDataForApi,
+          isNewLaunch,
+          isRegeneration,
+          shopifyStoreCountry: storeInsights?.store?.country || null,
+          topCustomerLocations: storeInsights?.orders?.top_locations || null,
         }),
       });
 
@@ -323,12 +389,17 @@ function CampaignsContent() {
       }
 
       if (!res.ok) {
-        throw new Error(data.error || "API returned an error");
+        const errorDetail = typeof data.error === 'object' ? (data.error.message || JSON.stringify(data.error)) : data.error;
+        throw new Error(errorDetail || "API returned an error");
       }
 
       const generatedCopyData: GeneratedCopy = data;
       setGeneratedCopy(generatedCopyData);
       setSelectedCta(generatedCopyData.cta);
+      
+      if (isRegeneration) {
+        setRegenerateCount(prev => prev + 1);
+      }
       
       setViewState("review");
     } catch (err: any) {
@@ -338,7 +409,8 @@ function CampaignsContent() {
     }
   };
 
-  const handleStartOver = () => {
+  const handleStartOver = (targetState?: CampaignState | React.MouseEvent) => {
+    const finalState = typeof targetState === "string" ? targetState : "media";
     setBrandName("");
     setProductName("");
     setDescription("");
@@ -348,15 +420,24 @@ function CampaignsContent() {
     setErrorMsg("");
     setShowBuyCredits(false);
     setAutoFilledFromStore(false);
+    setRegenerateCount(0);
     setMediaPreviewUrl("");
     setMediaCloudUrl("");
     setMediaFile(null);
     setMediaValidation(null);
-    setViewState("media");
+    setViewState(finalState);
   };
 
+  if (loadingDraft) {
+    return (
+      <div className="min-h-screen bg-[var(--background)] flex items-center justify-center text-white/50">
+        <div className="w-8 h-8 rounded-full border-2 border-brand-500/20 border-t-brand-500 animate-spin" />
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] relative overflow-hidden flex flex-col">
+    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] relative overflow-hidden flex flex-col pb-28 sm:pb-0">
       {/* Top nav bar */}
       <nav className="border-b border-border-subtle bg-surface/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
@@ -380,9 +461,20 @@ function CampaignsContent() {
               </span>
             )}
             
-            <Link href="/settings" className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Settings</Link>
+            <Link href="/settings" target="_self" prefetch={true} className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Settings</Link>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4 sm:gap-6">
+            {/* Show credits on mobile too */}
+            <div className="sm:hidden flex items-center">
+              {isUnlimited ? (
+                <span className="text-[10px] text-brand-400 font-bold bg-brand-500/10 px-2 py-1 rounded-md uppercase tracking-wider">Unlimited</span>
+              ) : credits !== null && (
+                <span className={`text-xs font-medium px-2 py-1 rounded-md ${credits === 0 ? "text-error-400 bg-error-500/10" : "text-white/70 bg-white/5"}`}>
+                  {credits} left
+                </span>
+              )}
+            </div>
+
             <SignOutButton>
               <button className="text-xs font-medium text-white/40 hover:text-white/80 transition-colors cursor-pointer bg-transparent border-none p-0">
                 Sign Out
@@ -468,6 +560,27 @@ function CampaignsContent() {
       {viewState === "media" && (
         <main className="max-w-2xl mx-auto px-4 sm:px-6 py-10 relative flex-1">
           <div className="mb-8 animate-fade-in-up">
+            {autoFilledFromStore ? (
+              <button 
+                onClick={() => setViewState("input")}
+                className="flex items-center gap-2 text-xs font-medium text-white/40 hover:text-white/80 transition-colors mb-6 cursor-pointer bg-transparent border-none p-0"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+                Back to Campaign Details (Keep Catalog Image)
+              </button>
+            ) : (
+              <button 
+                onClick={() => setViewState("selection")}
+                className="flex items-center gap-2 text-xs font-medium text-white/40 hover:text-white/80 transition-colors mb-6 cursor-pointer bg-transparent border-none p-0"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+                Back to Options
+              </button>
+            )}
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-2">
               Upload Ad Creative
             </h1>
@@ -477,12 +590,16 @@ function CampaignsContent() {
           </div>
 
           <div className="mb-8 animate-fade-in-up-delay-1">
-            <div className="relative rounded-2xl border-2 border-dashed border-border-subtle hover:border-brand-500/50 transition-colors bg-white/[0.02] overflow-hidden flex flex-col items-center justify-center min-h-[300px] text-center p-6">
+            <div 
+              className="relative rounded-2xl border-2 border-dashed border-border-subtle hover:border-brand-500/50 transition-colors bg-white/[0.02] overflow-hidden flex flex-col items-center justify-center min-h-[300px] text-center p-6 cursor-pointer group"
+              onClick={() => fileInputRef.current?.click()}
+            >
               <input 
                 type="file" 
+                ref={fileInputRef}
                 accept="image/jpeg,image/png,video/mp4,video/quicktime"
                 onChange={handleMediaSelect}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                className="hidden"
                 disabled={isUploading}
               />
               
@@ -504,12 +621,12 @@ function CampaignsContent() {
                   )}
                   <div className="relative w-full max-w-sm aspect-[4/5] sm:aspect-square mb-4 bg-black/50 rounded-lg overflow-hidden flex items-center justify-center">
                     {mediaFile?.type?.startsWith("video/") ? (
-                      <video src={mediaPreviewUrl} controls className="max-w-full max-h-full object-contain" />
+                      <video src={mediaPreviewUrl} controls className="max-w-full max-h-full object-contain pointer-events-auto" onClick={(e) => e.stopPropagation()} />
                     ) : (
-                      <img src={mediaPreviewUrl} alt="Preview" className="max-w-full max-h-full object-contain" />
+                      <img src={mediaPreviewUrl} alt="Preview" className="max-w-full max-h-full object-contain pointer-events-auto" />
                     )}
                   </div>
-                  <button className="text-xs font-semibold px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors relative z-20 pointer-events-auto cursor-pointer">
+                  <button type="button" className="text-xs font-semibold px-4 py-2 bg-white/10 group-hover:bg-white/20 text-white rounded-lg transition-colors relative z-20 pointer-events-none">
                     {autoFilledFromStore ? "Upload Custom Creative (Video/Image)" : "Change Media"}
                   </button>
                 </div>
@@ -607,17 +724,21 @@ function CampaignsContent() {
       {viewState === "input" && (
         <main className="max-w-2xl mx-auto px-4 sm:px-6 py-10 relative flex-1">
           <div className="mb-8 animate-fade-in-up">
-            {!autoFilledFromStore && (
-              <button 
-                onClick={() => setViewState("media")}
-                className="flex items-center gap-2 text-xs font-medium text-white/40 hover:text-white/80 transition-colors mb-6 cursor-pointer bg-transparent border-none p-0"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M19 12H5M12 19l-7-7 7-7" />
-                </svg>
-                Back to Creative
-              </button>
-            )}
+            <button 
+              onClick={() => {
+                if (autoFilledFromStore) {
+                  handleStartOver("selection");
+                } else {
+                  setViewState("media");
+                }
+              }}
+              className="flex items-center gap-2 text-xs font-medium text-white/40 hover:text-white/80 transition-colors mb-6 cursor-pointer bg-transparent border-none p-0"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+              {autoFilledFromStore ? "Change Product / Ad Type" : "Back to Creative"}
+            </button>
 
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/20 mb-4">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-brand-400">
@@ -653,6 +774,59 @@ function CampaignsContent() {
             </div>
           )}
 
+          {/* Selected Media & Custom Upload Option */}
+          <div className="mb-6 rounded-xl border border-border-subtle bg-surface-raised p-4 animate-fade-in-up">
+            <p className="text-xs font-semibold text-white/50 uppercase tracking-wider mb-3">Ad Creative</p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                {mediaPreviewUrl ? (
+                  <div className="relative w-16 h-16 rounded-lg overflow-hidden border border-white/10 shrink-0 bg-black/40 flex items-center justify-center">
+                    {mediaFile?.type?.startsWith("video/") || mediaPreviewUrl.includes(".mp4") || mediaPreviewUrl.includes(".mov") ? (
+                      <div className="w-full h-full flex items-center justify-center bg-black/30">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-brand-400">
+                          <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                      </div>
+                    ) : (
+                      <img src={mediaPreviewUrl} alt="Ad Creative Preview" className="w-full h-full object-cover" />
+                    )}
+                  </div>
+                ) : (
+                  <div className="w-16 h-16 rounded-lg border border-dashed border-white/10 shrink-0 flex items-center justify-center text-white/20">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                  </div>
+                )}
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-white">
+                      {mediaFile ? "Custom Creative Uploaded" : autoFilledFromStore ? "Shopify Catalog Image" : "Custom Ad Creative"}
+                    </span>
+                    {mediaFile && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-brand-500/10 text-brand-400 border border-brand-500/20">
+                        Custom
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-white/40 mt-0.5">
+                    {mediaFile ? (mediaFile.type.startsWith("video/") ? "Custom video ad file" : "Custom image file") : autoFilledFromStore ? "Automatically synced from Shopify store catalog" : "Upload an image or video for this campaign"}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setViewState("media")}
+                className="px-4 py-2 rounded-lg bg-brand-500/10 border border-brand-500/20 hover:bg-brand-500/20 text-xs font-semibold text-brand-400 transition-all duration-200 cursor-pointer self-start sm:self-center shrink-0 whitespace-nowrap"
+              >
+                {autoFilledFromStore && !mediaFile ? "Use Custom Upload" : "Change Ad Creative"}
+              </button>
+            </div>
+          </div>
+
           <div className="space-y-6 animate-fade-in-up-delay-1 mb-8">
             {/* Brand Name */}
             <div>
@@ -676,12 +850,20 @@ function CampaignsContent() {
               </label>
               <input
                 id="productName"
+                list="store-products-list"
                 type="text"
                 value={productName}
                 onChange={(e) => setProductName(e.target.value)}
                 placeholder="e.g. Adire Maxi Dress"
                 className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-border-subtle text-sm text-white placeholder:text-white/20 outline-none transition-all duration-200 focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/20"
               />
+              {storeInsights?.products && storeInsights.products.length > 0 && (
+                <datalist id="store-products-list">
+                  {storeInsights.products.map((p: any) => (
+                    <option key={p.id} value={p.name} />
+                  ))}
+                </datalist>
+              )}
             </div>
 
             {/* Product Description */}
@@ -779,7 +961,7 @@ function CampaignsContent() {
 
           <button
             id="generate-btn"
-            onClick={handleGenerate}
+            onClick={() => handleGenerate(false)}
             className="group relative w-full py-4 px-6 rounded-xl font-semibold text-sm transition-all duration-300 animate-fade-in-up-delay-2 cursor-pointer z-0"
           >
             <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 transition-all duration-300 group-hover:from-brand-500 group-hover:to-brand-400" />
@@ -836,68 +1018,85 @@ function CampaignsContent() {
               
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* PART A: Meta Mockup */}
-                <div className="flex justify-center">
-                  <div className="w-full max-w-[400px] h-fit bg-white rounded-xl shadow-xl overflow-hidden text-black/90 font-sans border border-black/10">
-                    {/* Header */}
-                    <div className="flex items-center justify-between p-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-500 uppercase overflow-hidden">
-                          {brandName.slice(0, 2) || "BR"}
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-sm font-semibold">{brandName || "Your Brand"}</span>
-                          <span className="text-[11px] text-black/50">Sponsored</span>
-                        </div>
-                      </div>
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="text-black/40">
-                        <path d="M12 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm-7 0c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm14 0c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
-                      </svg>
-                    </div>
+                <div className="flex flex-col items-center">
+                  <div className="flex items-center bg-white/[0.03] p-1 rounded-lg mb-6 self-center border border-white/5 relative z-10">
+                    <button 
+                      onClick={() => setPreviewPlatform("facebook")}
+                      className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${previewPlatform === 'facebook' ? 'bg-[#1877F2] text-white shadow-md' : 'text-white/40 hover:text-white/80 hover:bg-white/5'}`}
+                    >
+                      Facebook
+                    </button>
+                    <button 
+                      onClick={() => setPreviewPlatform("instagram")}
+                      className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${previewPlatform === 'instagram' ? 'bg-gradient-to-tr from-[#f09433] via-[#dc2743] to-[#bc1888] text-white shadow-md' : 'text-white/40 hover:text-white/80 hover:bg-white/5'}`}
+                    >
+                      Instagram
+                    </button>
+                  </div>
 
-                    {/* Media Area */}
-                    <div className="w-full aspect-square bg-[#f0f2f5] flex items-center justify-center relative border-y border-black/5 overflow-hidden">
-                      {mediaCloudUrl ? (
-                        isVideo ? (
-                          <video 
-                            src={mediaCloudUrl}
-                            className="w-full aspect-square object-cover"
-                            muted
-                            playsInline
-                          />
+                  {/* Facebook Mockup */}
+                  {previewPlatform === 'facebook' && (
+                    <div className="w-full max-w-[400px] h-fit bg-white rounded-xl shadow-xl overflow-hidden text-black/90 font-sans border border-black/10 animate-fade-in-up">
+                      {/* Header */}
+                      <div className="flex items-center justify-between p-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-500 uppercase overflow-hidden">
+                            {brandName.slice(0, 2) || "BR"}
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-semibold">{brandName || "Your Brand"}</span>
+                            <span className="text-[11px] text-black/50">Sponsored</span>
+                          </div>
+                        </div>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="text-black/40">
+                          <path d="M12 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm-7 0c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm14 0c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+                        </svg>
+                      </div>
+
+                      {/* Media Area */}
+                      <div className="w-full aspect-square bg-[#f0f2f5] flex items-center justify-center relative border-y border-black/5 overflow-hidden">
+                        {mediaCloudUrl ? (
+                          isVideo ? (
+                            <video 
+                              src={mediaCloudUrl}
+                              className="w-full aspect-square object-cover"
+                              muted
+                              playsInline
+                            />
+                          ) : (
+                            <img 
+                              src={mediaCloudUrl}
+                              alt="Ad creative"
+                              className="w-full aspect-square object-cover"
+                            />
+                          )
                         ) : (
-                          <img 
-                            src={mediaCloudUrl}
-                            alt="Ad creative"
-                            className="w-full aspect-square object-cover"
-                          />
-                        )
-                      ) : (
-                        <div className="w-full aspect-square bg-white/5 flex flex-col items-center justify-center gap-2">
-                          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-white/20">
-                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                            <circle cx="8.5" cy="8.5" r="1.5" />
-                            <polyline points="21 15 16 10 5 21" />
-                          </svg>
-                          <span className="text-xs text-white/30">
-                            No creative uploaded
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Content Area */}
-                    <div className="p-3">
-                      {/* Primary Text */}
-                      <div className="text-[13.5px] mb-3 leading-snug relative text-black overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>
-                        {generatedCopy.primaryText}
+                          <div className="w-full aspect-square bg-white/5 flex flex-col items-center justify-center gap-2">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-black/20">
+                              <rect x="3" y="3" width="18" height="18" rx="2" />
+                              <circle cx="8.5" cy="8.5" r="1.5" />
+                              <polyline points="21 15 16 10 5 21" />
+                            </svg>
+                            <span className="text-xs text-black/30">
+                              No creative uploaded
+                            </span>
+                          </div>
+                        )}
                       </div>
 
-                      <div className="bg-[#f0f2f5] p-3 -mx-3 mb-1 border-t border-black/5">
-                        <div className="flex items-center justify-between gap-4">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[11px] text-black/50 uppercase tracking-widest mb-1 truncate">
-                              {storeDomain.toUpperCase()}
-                            </p>
+                      {/* Content Area */}
+                      <div className="p-3">
+                        {/* Primary Text */}
+                        <div className="text-[13.5px] mb-3 leading-snug relative text-black overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>
+                          {generatedCopy.primaryText}
+                        </div>
+
+                        <div className="bg-[#f0f2f5] p-3 -mx-3 mb-1 border-t border-black/5">
+                          <div className="flex items-center justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11px] text-black/50 uppercase tracking-widest mb-1 truncate">
+                                {resolvedStoreDomain.toUpperCase()}
+                              </p>
                             <h4 className="text-[15px] font-semibold text-black leading-tight mb-0.5 truncate">
                               {generatedCopy.headline}
                             </h4>
@@ -930,8 +1129,87 @@ function CampaignsContent() {
                           <span className="text-sm font-medium">Share</span>
                         </div>
                       </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                {/* Instagram Mockup */}
+                  {previewPlatform === 'instagram' && (
+                    <div className="w-full max-w-[400px] h-fit bg-white rounded-xl shadow-xl overflow-hidden text-black/90 font-sans border border-black/10 animate-fade-in-up">
+                      {/* Header */}
+                      <div className="flex items-center justify-between p-3 border-b border-black/5">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-500 uppercase overflow-hidden text-xs">
+                            {brandName.slice(0, 2) || "BR"}
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-[13px] font-semibold tracking-tight">{brandName || "Your Brand"}</span>
+                            <span className="text-[11px] text-black/50 font-normal">Sponsored</span>
+                          </div>
+                        </div>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="text-black/60">
+                          <circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>
+                        </svg>
+                      </div>
+
+                      {/* Media Area */}
+                      <div className="w-full aspect-[4/5] bg-[#fafafa] flex items-center justify-center relative overflow-hidden">
+                        {mediaCloudUrl ? (
+                          isVideo ? (
+                            <video 
+                              src={mediaCloudUrl}
+                              className="w-full h-full object-cover"
+                              muted
+                              playsInline
+                            />
+                          ) : (
+                            <img 
+                              src={mediaCloudUrl}
+                              alt="Ad creative"
+                              className="w-full h-full object-cover"
+                            />
+                          )
+                        ) : (
+                          <div className="w-full h-full bg-white/5 flex flex-col items-center justify-center gap-2">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-black/20">
+                              <rect x="3" y="3" width="18" height="18" rx="2" />
+                              <circle cx="8.5" cy="8.5" r="1.5" />
+                              <polyline points="21 15 16 10 5 21" />
+                            </svg>
+                            <span className="text-xs text-black/30">
+                              No creative uploaded
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* IG CTA Bar */}
+                      <div className="w-full bg-[#3897f0] flex items-center justify-between px-4 py-3 cursor-pointer">
+                        <span className="text-white text-[13px] font-semibold">{selectedCta || generatedCopy.cta}</span>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+                          <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
+                      </div>
+
+                      {/* Content Area */}
+                      <div className="p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-4 text-black/80">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                          </div>
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-black/80"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+                        </div>
+                        <p className="text-[13px] font-semibold mb-1 text-black">1,234 likes</p>
+                        
+                        <div className="text-[13.5px] leading-snug relative text-black" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                          <span className="font-semibold mr-1.5">{brandName || "Your Brand"}</span>
+                          {generatedCopy.primaryText}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* PART B: Copy Details Panel */}
@@ -1001,7 +1279,7 @@ function CampaignsContent() {
                         {[
                           "Shop Now",
                           "Learn More",
-                          "See Collection",
+                          "Order Now",
                           "Get Offer",
                           "Sign Up",
                           "Book Now",
@@ -1061,17 +1339,19 @@ function CampaignsContent() {
                     Upload Different Creative
                   </button>
 
-                  <button
-                    onClick={handleGenerate}
-                    className="w-full py-2.5 px-4 rounded-lg bg-white/[0.05] border border-white/10 text-sm font-medium text-white hover:bg-white/[0.08] transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="1 4 1 10 7 10" />
-                      <polyline points="23 20 23 14 17 14" />
-                      <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
-                    </svg>
-                    Generate Another Variation
-                  </button>
+                  {regenerateCount < 3 && (
+                    <button
+                      onClick={() => handleGenerate(true)}
+                      className="w-full py-2.5 px-4 rounded-lg bg-white/[0.05] border border-white/10 text-sm font-medium text-white hover:bg-white/[0.08] transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="1 4 1 10 7 10" />
+                        <polyline points="23 20 23 14 17 14" />
+                        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
+                      </svg>
+                      Generate Another Variation ({3 - regenerateCount} free left)
+                    </button>
+                  )}
 
                   <button
                     onClick={handleStartOver}
@@ -1103,18 +1383,6 @@ function CampaignsContent() {
                 </svg>
                 Generate Campaign Brief →
               </span>
-            </button>
-
-            <button
-              onClick={handleGenerate}
-              className="w-full mt-3 py-3 px-6 rounded-xl border border-border-subtle text-white/60 font-medium text-sm hover:text-white hover:border-white/20 transition-colors cursor-pointer bg-transparent flex items-center justify-center gap-2"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="1 4 1 10 7 10" />
-                <polyline points="23 20 23 14 17 14" />
-                <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
-              </svg>
-              Generate Another Variation
             </button>
 
             <p className="text-center text-xs text-white/20 mt-4">
@@ -1186,9 +1454,9 @@ function CampaignsContent() {
                     <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Locations</span>
                     <p className="text-sm text-white/80 mt-1">
                       {aiInsights?.targeting?.locations?.length > 0
-                        ? aiInsights.targeting.locations.map((l: any) => l.name).join(" · ")
+                        ? aiInsights.targeting.locations.map((l: any) => (l?.name || l?.city || "").split(',')[0].trim()).filter(Boolean).join(" · ")
                         : storeInsights.orders?.top_locations?.length > 0
-                          ? storeInsights.orders.top_locations.map((l: any) => `${l.city}`).join(" · ")
+                          ? storeInsights.orders.top_locations.map((l: any) => `${l.city}`).filter(Boolean).join(" · ")
                           : "No order data yet — add locations manually based on your target market"}
                     </p>
                   </div>
@@ -1236,7 +1504,7 @@ function CampaignsContent() {
                   <div>
                     <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Behaviours to Add</span>
                     <div className="flex flex-wrap gap-2 mt-2">
-                      {(aiInsights?.targeting?.behaviours || ["Engaged Shoppers", "Online Shoppers"]).map((b: string) => (
+                      {(aiInsights?.targeting?.behaviours || ["Engaged Shoppers"]).map((b: string) => (
                         <span key={b} className="px-3 py-1 rounded-full text-xs font-medium bg-success-500/10 border border-success-500/20 text-success-400">{b}</span>
                       ))}
                     </div>
@@ -1271,24 +1539,40 @@ function CampaignsContent() {
                 const adjustedDaily = Math.round(baseDaily * adSets * goalMult);
                 const curr = aiInsights.budget.currency;
 
+                let dynamicBudgetReasoning = aiInsights.budget.reasoning;
+                const originalDaily = aiInsights.budget.recommended_daily;
+                const adjustedPerAdSet = Math.round(baseDaily * goalMult);
+                
+                if (originalDaily && originalDaily !== adjustedPerAdSet) {
+                  const oldStr = formatCurrency(originalDaily, curr, aiInsights.budget.currency_symbol);
+                  const newStr = formatCurrency(adjustedPerAdSet, curr, aiInsights.budget.currency_symbol);
+                  dynamicBudgetReasoning = dynamicBudgetReasoning.replace(oldStr, newStr);
+                }
+
                 return (
                   <div className="space-y-6">
                     {/* Strategy Toggles */}
                     <div className="grid grid-cols-3 gap-2">
-                      {strategies.map((s: any, idx: number) => (
-                        <button
-                          key={s.label}
-                          onClick={() => setSelectedStrategyIndex(idx)}
-                          className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all duration-300 ${
-                            selectedStrategyIndex === idx 
-                              ? "bg-brand-500/10 border-brand-500/40 text-white" 
-                              : "bg-white/[0.02] border-white/5 text-white/40 hover:bg-white/[0.05]"
-                          }`}
-                        >
-                          <span className="text-[10px] font-bold uppercase tracking-tighter text-center">{s.label.split(" ")[0]}</span>
-                          <span className="text-xs font-bold mt-1">{formatCurrency(s.total_daily, curr, aiInsights.budget.currency_symbol)}</span>
-                        </button>
-                      ))}
+                      {strategies.map((s: any, idx: number) => {
+                        const sAdjustedDaily = Math.round(s.daily * adSets * goalMult);
+                        return (
+                          <button
+                            key={s.label}
+                            onClick={() => setSelectedStrategyIndex(idx)}
+                            className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all duration-300 relative ${
+                              selectedStrategyIndex === idx 
+                                ? "bg-brand-500/10 border-brand-500/40 text-white" 
+                                : "bg-white/[0.02] border-white/5 text-white/40 hover:bg-white/[0.05]"
+                            }`}
+                          >
+                            {s.label === "Sweet Spot" && (
+                              <div className="absolute -top-2 bg-brand-500 text-black text-[8px] font-black uppercase px-2 py-0.5 rounded-full shadow-lg border border-white/20 whitespace-nowrap z-10">RECOMMENDED</div>
+                            )}
+                            <span className="text-[10px] font-bold uppercase tracking-tighter text-center">{s.label}</span>
+                            <span className="text-xs font-bold mt-1">{formatCurrency(sAdjustedDaily, curr, aiInsights.budget.currency_symbol)}</span>
+                          </button>
+                        );
+                      })}
                     </div>
 
                     {/* Timeline Toggles */}
@@ -1359,14 +1643,30 @@ function CampaignsContent() {
                           </div>
                           <div>
                             <p className="text-xs font-bold text-white/90 uppercase tracking-wider mb-1">{currentStrategy.label}</p>
-                            <p className="text-xs leading-relaxed text-white/60">{currentStrategy.description}</p>
+                            <p className="text-xs leading-relaxed text-white/60">
+                              {(() => {
+                                let desc = currentStrategy.description;
+                                if (goalMult !== 1) {
+                                  const oldDailyStr = formatCurrency(currentStrategy.daily, curr, aiInsights.budget.currency_symbol);
+                                  const newDailyStr = formatCurrency(Math.round(currentStrategy.daily * goalMult), curr, aiInsights.budget.currency_symbol);
+                                  const oldTotalStr = formatCurrency(currentStrategy.total_daily, curr, aiInsights.budget.currency_symbol);
+                                  const newTotalStr = formatCurrency(Math.round(currentStrategy.total_daily * goalMult), curr, aiInsights.budget.currency_symbol);
+                                  
+                                  desc = desc.replace(oldDailyStr, newDailyStr);
+                                  if (oldTotalStr !== oldDailyStr) {
+                                    desc = desc.replace(oldTotalStr, newTotalStr);
+                                  }
+                                }
+                                return desc;
+                              })()}
+                            </p>
                           </div>
                         </div>
                       </div>
 
                       <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
                         <p className="text-xs italic text-white/40 leading-relaxed">
-                          {aiInsights.budget.reasoning}
+                          {dynamicBudgetReasoning}
                         </p>
                       </div>
                     </div>
@@ -1396,49 +1696,136 @@ function CampaignsContent() {
 
             {/* SECTION: Actions */}
             <div className="space-y-3 pt-4 pb-10">
-              {/* PRIMARY: Download PDF */}
+              {/* PRIMARY: Download PDF (Puppeteer server-render) */}
               <button
-                onClick={() =>
-                  generateBriefPDF({
-                    brandName,
-                    productName,
-                    campaignGoal: goal,
-                    copy: {
-                      headline: generatedCopy.headline,
-                      primaryText: generatedCopy.primaryText,
-                      description: generatedCopy.description,
-                      cta: selectedCta || generatedCopy.cta,
-                      copywriterNote: generatedCopy.copywriterNote,
-                    },
-                    targeting: aiInsights?.targeting ?? {},
-                    budget: {
-                      ...aiInsights?.budget ?? {},
-                      recommended_duration_days: selectedDuration,
-                      recommended_daily: aiInsights?.budget?.strategies?.[selectedStrategyIndex]?.daily ?? aiInsights?.budget?.recommended_daily,
-                      goal_adjusted_daily: aiInsights?.budget
-                        ? Math.round((aiInsights.budget.strategies?.[selectedStrategyIndex]?.daily ?? aiInsights.budget.recommended_daily) * (aiInsights.budget.ad_sets || 1) * (aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1))
-                        : undefined,
-                      goal_label: (aiInsights?.budget?.breakdown?.goal_multipliers?.[goal] ?? 1) !== 1 ? goal.toLowerCase() : undefined,
-                      tier: aiInsights?.budget?.strategies?.[selectedStrategyIndex]?.label ?? aiInsights?.budget?.tier,
-                    },
-                    timing: aiInsights?.timing ?? {},
-                    warnings: aiInsights?.warnings ?? [],
-                    generatedAt: new Date().toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "long",
-                      year: "numeric",
-                    }),
-                    gatewayInsight,
-                  })
-                }
-                className="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-300 cursor-pointer"
+                disabled={isDownloadingPdf}
+                onClick={async () => {
+                  setIsDownloadingPdf(true);
+                  try {
+                    let productUrl = undefined;
+                    if (storeInsights?.store?.domain) {
+                      const cp = storeInsights.products?.find((p: any) => p.name === productName);
+                      if (cp?.handle) {
+                        productUrl = `https://${storeInsights.store.domain}/products/${cp.handle}`;
+                      }
+                    }
+
+                    const payload: BriefPDFParams = {
+                      brandName,
+                      productName,
+                      productUrl,
+                      campaignGoal: goal,
+                      copy: {
+                        headline: generatedCopy.headline,
+                        primaryText: generatedCopy.primaryText,
+                        description: generatedCopy.description,
+                        cta: selectedCta || generatedCopy.cta,
+                        copywriterNote: generatedCopy.copywriterNote,
+                      },
+                      targeting: aiInsights?.targeting ?? {},
+                      budget: {
+                        ...aiInsights?.budget ?? {},
+                        recommended_duration_days: selectedDuration,
+                        recommended_daily: aiInsights?.budget?.strategies?.[selectedStrategyIndex]?.daily ?? aiInsights?.budget?.recommended_daily,
+                        goal_adjusted_daily: aiInsights?.budget
+                          ? Math.round((aiInsights.budget.strategies?.[selectedStrategyIndex]?.daily ?? aiInsights.budget.recommended_daily) * (aiInsights.budget.ad_sets || 1) * (aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1))
+                          : undefined,
+                        goal_label: (aiInsights?.budget?.breakdown?.goal_multipliers?.[goal] ?? 1) !== 1 ? goal.toLowerCase() : undefined,
+                        tier: aiInsights?.budget?.strategies?.[selectedStrategyIndex]?.label ?? aiInsights?.budget?.tier,
+                        reasoning: typeof window !== 'undefined' ? 
+                          (() => {
+                            const strategies = aiInsights.budget.strategies || [];
+                            const currentStrategy = strategies[selectedStrategyIndex] || strategies[1];
+                            const baseDaily = currentStrategy.daily;
+                            const goalMult = aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1;
+                            const adjustedPerAdSet = Math.round(baseDaily * goalMult);
+                            const originalDaily = aiInsights.budget.recommended_daily;
+                            let res = aiInsights.budget.reasoning;
+                            if (originalDaily && originalDaily !== adjustedPerAdSet) {
+                              const curr = aiInsights.budget.currency;
+                              const oldStr = formatCurrency(originalDaily, curr, aiInsights.budget.currency_symbol);
+                              const newStr = formatCurrency(adjustedPerAdSet, curr, aiInsights.budget.currency_symbol);
+                              res = res.replace(oldStr, newStr);
+                            }
+                            return res;
+                          })() : aiInsights?.budget?.reasoning,
+                      },
+                      timing: aiInsights?.timing ?? {},
+                      warnings: (() => {
+                        const cp = storeInsights?.products?.find((p: any) => p.name === productName);
+                        const descLength = cp?.description?.trim().length ?? 0;
+                        const tagCount = cp?.tags?.length ?? 0;
+                        const orderCount = cp?.order_count ?? cp?.units_sold ?? 0;
+                        const storeOrderCount = storeInsights?.orders?.order_count ?? storeInsights?.orders?.orders_last_30_days ?? 0;
+
+                        const w = [...(aiInsights?.warnings ?? [])];
+                        if (descLength < 30 || tagCount < 2 || orderCount < 5 || storeOrderCount < 20) {
+                          const warningMsg = "Limited product data detected — review interests before launching.";
+                          if (!w.includes(warningMsg)) {
+                            w.push(warningMsg);
+                          }
+                        }
+                        return w;
+                      })(),
+                      generatedAt: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }),
+                      gatewayInsight,
+                      isNewLaunch,
+                    };
+                    const res = await fetch("/api/campaigns/pdf", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(payload),
+                    });
+                    if (!res.ok) {
+                      const errData = await res.json().catch(() => ({}));
+                      throw new Error(errData.detail || errData.error || `Brief generation failed with status ${res.status}`);
+                    }
+                    
+                    const htmlString = await res.text();
+                    
+                    // Open the popup immediately to avoid blockers
+                    const printWindow = window.open("", "_blank");
+                    if (!printWindow) {
+                      throw new Error("Pop-up blocked. Please allow pop-ups for this site and try again.");
+                    }
+                    
+                    // Convert the HTML string into a Blob URL
+                    // This is much more reliable on mobile browsers (like Android Brave/Chrome)
+                    // than using document.write() on an about:blank page, which often blocks window.print()
+                    const blob = new Blob([htmlString], { type: "text/html;charset=utf-8" });
+                    const blobUrl = URL.createObjectURL(blob);
+                    
+                    // Navigate the popup to the Blob URL
+                    printWindow.location.href = blobUrl;
+                    
+                    // The HTML template now contains a self-executing window.onload script
+                    // that automatically triggers window.print() once the fonts load.
+                  } catch (err: any) {
+                    console.error("PDF error:", err);
+                    alert(`Could not generate PDF.\n\nError: ${err.message || String(err)}\n\nPlease try again.`);
+                  } finally {
+                    setIsDownloadingPdf(false);
+                  }
+                }}
+                className="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-300 cursor-pointer"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-                Download PDF Brief
+                {isDownloadingPdf ? (
+                  <>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                    </svg>
+                    Generating Premium PDF...
+                  </>
+                ) : (
+                  <>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Download PDF Brief
+                  </>
+                )}
               </button>
 
               {/* SECONDARY: Copy to clipboard */}
@@ -1465,7 +1852,7 @@ function CampaignsContent() {
                     `Age: ${aiInsights?.targeting?.age_min || 25} — ${aiInsights?.targeting?.age_max || 44}`,
                     `Gender: ${aiInsights?.targeting?.gender || "All"}`,
                     `Interests: ${aiInsights?.targeting?.interests?.join(", ") || "Set manually"}`,
-                    `Behaviours: ${(aiInsights?.targeting?.behaviours || ["Engaged Shoppers", "Online Shoppers"]).join(", ")}`,
+                    `Behaviours: ${(aiInsights?.targeting?.behaviours || ["Engaged Shoppers"]).join(", ")}`,
                     "",
                     "── BUDGET ──",
                     aiInsights?.budget
@@ -1524,6 +1911,7 @@ function CampaignsContent() {
                   setGeneratedCopy(null);
                   setGatewayInsight(null);
                   setSelectedCta("");
+                  setRegenerateCount(0);
                   setViewState("media");
                 }}
                 className="w-full py-3 px-6 rounded-xl border border-border-subtle/50 text-white/30 font-medium text-sm hover:text-white/60 hover:border-white/10 transition-colors cursor-pointer bg-transparent"
@@ -1534,6 +1922,8 @@ function CampaignsContent() {
           </div>
         </main>
       )}
+
+      <MobileNav />
     </div>
   );
 }

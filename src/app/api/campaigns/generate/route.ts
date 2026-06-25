@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { queryUserIntegrationSelect, updateUserIntegration, insertCreditUsage, logApiUsage } from "@/lib/db";
 import sharp from "sharp";
+import { getPriceTier, getPriceTierPromptHint } from "@/lib/price-tier";
+
+import { detectColumns } from "@/lib/billing-db";
 
 // Credit-gating: check balance before generation
 
@@ -28,6 +31,12 @@ interface GenerateRequest {
   productVariants?: string | null;
   gatewayInsight?: any;
   storeDataForApi?: any;
+  storeAov?: number | null;
+  storePrices?: number[];
+  isNewLaunch?: boolean;
+  isRegeneration?: boolean;
+  shopifyStoreCountry?: string | null;
+  topCustomerLocations?: any[] | null;
 }
 
 /**
@@ -38,63 +47,41 @@ interface GenerateRequest {
 export async function POST(request: Request) {
   const { userId } = await auth();
 
-  const { data: integration } = await supabaseAdmin
-    .from("user_integrations")
-    .select("store_snapshot, credits_balance, credits_unlimited_until")
-    .eq("clerk_user_id", userId!)
-    .single();
+  const cols = await detectColumns();
+  const selectQuery = [
+    "store_snapshot",
+    cols.hasCredits ? "credits" : "credits_balance",
+    "credits_balance",
+    "credits_unlimited_until"
+  ].join(", ");
+
+  const integration = await queryUserIntegrationSelect(userId!, selectQuery);
 
   // Credit gate: check if user has credits or unlimited access
   const hasUnlimited =
     integration?.credits_unlimited_until &&
     new Date(integration.credits_unlimited_until) > new Date();
 
-  const hasCredits =
-    (integration?.credits_balance || 0) > 0;
+  const currentCredits = integration
+    ? (cols.hasCredits ? integration.credits : integration.credits_balance) ?? integration.credits_balance ?? 0
+    : 0;
 
-  if (!hasUnlimited && !hasCredits) {
-    return NextResponse.json({
-      error: "no_credits",
-      message: "You have no briefs remaining. Purchase a pack to continue.",
-      redirect: "/pricing"
-    }, { status: 402 });
-  }
-
-  const currency = integration?.store_snapshot?.store?.currency || "USD";
-
-  const CURRENCY_TO_REGION: Record<string, string> = {
-    "NGN": "NG",
-    "GBP": "GB",
-    "EUR": "EU",
-    "AED": "AE",
-    "USD": "US",
-    "CAD": "CA",
-    "AUD": "AU",
-    "GHS": "GH",
-    "KES": "KE",
-    "ZAR": "ZA",
-  };
-
-  const storeRegion = CURRENCY_TO_REGION[currency] || "OTHER";
-
-  console.log("Key check:", 
-    process.env.ANTHROPIC_API_KEY?.slice(0,14))
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  console.log("API Key loaded:", !!apiKey, 
-    "| Prefix:", apiKey?.slice(0, 14));
-
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "Anthropic API key not configured" },
-      { status: 500 }
-    );
-  }
-  const client = new Anthropic({ 
-    apiKey: process.env.ANTHROPIC_API_KEY || "" 
-  });
+  const hasCredits = currentCredits > 0;
 
   try {
     const body: Partial<GenerateRequest> = await request.json();
+
+    // Extract isRegeneration early — regenerations bypass the credit gate entirely.
+    const isRegeneration = body.isRegeneration ?? false;
+
+    // Credit gate: block only if user has no credits AND it's not a free regeneration
+    if (!hasUnlimited && !hasCredits && !isRegeneration) {
+      return NextResponse.json({
+        error: "no_credits",
+        message: "You have no briefs remaining. Purchase a pack to continue.",
+        redirect: "/pricing"
+      }, { status: 402 });
+    }
 
     const {
       brandName,
@@ -110,7 +97,47 @@ export async function POST(request: Request) {
       productVariants,
       gatewayInsight,
       storeDataForApi,
+      storeAov,
+      storePrices,
+      isNewLaunch,
+      shopifyStoreCountry,
+      topCustomerLocations,
     } = body;
+
+    const currency = integration?.store_snapshot?.store?.currency || "USD";
+
+    const CURRENCY_TO_REGION: Record<string, string> = {
+      "NGN": "NG",
+      "GBP": "GB",
+      "EUR": "EU",
+      "AED": "AE",
+      "USD": "US",
+      "CAD": "CA",
+      "AUD": "AU",
+      "GHS": "GH",
+      "KES": "KE",
+      "ZAR": "ZA",
+    };
+
+    const storeRegion = CURRENCY_TO_REGION[currency] || "OTHER";
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "Anthropic API key not configured" },
+        { status: 500 }
+      );
+    }
+    const client = new Anthropic({ apiKey });
+
+    // Derive a qualitative price tier from the store's own catalog distribution.
+    // Thresholds are computed from the data — no hardcoded currency amounts.
+    const priceTier = getPriceTier(
+      productPrice,
+      storePrices ?? [],
+      storeAov ?? gatewayInsight?.storeAov
+    );
+    const priceTierHint = priceTier ? getPriceTierPromptHint(priceTier) : null;
 
     // Validate required fields
     if (!brandName || !productName || !productDescription) {
@@ -126,123 +153,69 @@ You understand that great ads are punchy, direct, and focused
 on the product's unique value — whether that's an emotional 
 benefit or a practical one.
 
-Before writing, do this:
+Before writing any copy, you MUST silently reason through the following steps. Do NOT output this analysis/reasoning in your response; reason silently and output only the final JSON.
 
-STEP 1 — READ THE PRODUCT
-Look at the brand, product name, description, price, 
-and image. Ask yourself:
-- What is the most visually striking detail?
-- Why would someone buy this right now?
-- What problem does this solve, or what desire does it fulfill?
+STEP 1 — DYNAMIC MARKET AND TIER REASONING
+Evaluate the following variables passed in the user prompt:
+- Store Primary Country: shopify_store_country
+- Top Customer Locations: top_customer_locations
+- Product Price: product_price
+- Store AOV: store_aov
+- Store Currency: store_currency
 
-STEP 2 — FIND THE HOOK
-Every great ad starts with a hook that stops the scroll.
-- Not a poetic metaphor.
-- Not a generic question ("Looking for a dress?").
-- State a specific, compelling fact or emotional benefit immediately.
+Silently reason through:
+1. Identify the store's primary market from the store primary country and top customer locations.
+2. Determine whether this product represents a high-consideration purchase by evaluating the product price against the store AOV AND against real-world purchasing power in the store primary country. Note that a product priced below store AOV can still be a luxury purchase depending on the market context (e.g. comparing Lagos, London, or New York purchasing dynamics). Do not rely on relative store positioning alone — reason about what this price means to a real buyer in this specific market.
+3. From these two conclusions, determine the product's tier: Luxury, Premium Contemporary, or Mid-Market.
+4. Reason through these four pillars:
+   - Communication Style: How do established fashion/ecommerce brands in this market communicate at this tier?
+   - Buyer Psychology: What does this buyer respond to: directness or restraint, aspiration or identity, craft or status?
+   - Luxury Definition: What does luxury look like in this market: loud or quiet, occasion-driven or lifestyle-driven, community-signalled or privately held?
+   - Brand Taboos: What should this copy never do: what reads as tacky, aggressive, or off-brand to this buyer?
 
-If a product image is provided, use it.
-The visual truth — colour, texture, silhouette, occasion-fit — 
-matters as much as the written description.
-Write what you see, not just what you were told.
+STEP 2 — REGIONAL FALLBACKS
+If Store Primary Country or Top Customer Locations are missing or ambiguous, fall back to these regional defaults:
+- NG: Quiet confidence, craft and quality signals, investment-justified — not budget-conscious.
+- GB: Understated, minimal text, trust and heritage-focused.
+- AE: Elegant, occasion-driven, status-aware — balance Emirati, Arab expat, and Western expat nuances.
+- US: Aesthetic and identity-led — "this is who you are".
+- CA: Understated and quality-focused, closer to GB than US.
+- AU: Relaxed confidence, lifestyle-led, anti-pretension.
+- ZA: Aspirational but grounded, community-aware, occasion-driven.
+- FR: Effortless, intellectual, never trying too hard.
+- DE: Functional clarity, quality-led, sceptical of overselling.
+- SG: Polished, status-aware, international sophistication.
+- IN: Occasion and celebration-driven at luxury tier, family and community-signalled.
+- KE/GH: Aspirational, bold, identity-proud, emerging luxury sensibility.
 
-STEP 3 — WRITE LIKE A HUMAN, NOT A POET
-Write like someone who genuinely loves this product telling 
-a friend about it. 
+STEP 3 — UNIVERSAL MANDATES
+1. Luxury Restraint Rule: If the tier is determined to be Luxury in Step 1, copy must always prioritize restraint over excitement. There is an absolute ban on exclamation marks, urgency tactics, countdowns, and "limited time" language. Earn desire through confidence and positioning, not pressure.
+2. Meta Best Practices: Maximize hook rate in the first 3 lines. Keep visual copy recommendations clean and low-text.
+3. Campaign Objective Adaptation:
+   - "Drive Website Sales": The copy's last line must always be a direct, clear call to action encouraging purchase.
+   - "Grow Brand Awareness": Focus heavily on the brand's unique aesthetic, craft, mission, or identity.
+   - "Promote a New Collection": Lead with the newness or first-look framing, creating excitement without appearing desperate.
+   - "Retarget Past Visitors": Assume the reader is already familiar with the brand. Remind them of the core benefit or address returning buyer consideration directly.
 
 CRITICAL RULES FOR TONE & APPROACH:
 - DO NOT just creatively rewrite the product description! The description is merely background context so you understand what the product is.
-- Your job is to write an ad that sells the OUTCOME, the FEELING, or the UNIQUE VALUE. 
+- Your job is to write an ad that sells the OUTCOME, the FEELING, or the UNIQUE VALUE.
 - Pull only 1 or 2 striking details from the description if they help the hook. Ignore the rest of it.
 - NO POETRY. NO MELODRAMA.
-- Do NOT use abstract phrases like "There is a version of you...", 
-  "Imagine a world...", "Step into...", or "Elevate your...".
+- Do NOT use abstract phrases like "There is a version of you...", "Imagine a world...", "Step into...", or "Elevate your...".
 - Be specific. Specific always beats general.
 - Use short, punchy sentences.
-- Read it aloud. If it sounds like a philosophical manifesto, rewrite it.
+- NEVER include the product price or any currency amount in the copy — not even as a hook.
+- NEVER reference inventory, stock levels, or how many units remain — this information goes stale and violates Meta policy.
+- NEVER assume the reader's country, currency, or local pricing — copy must work equally well in any market.
 
-MARKET CONTEXT:
-store_region signal:
-
-"NG" — Nigerian market.
-Buyers respond to quality signals, craft, and clear value.
-They appreciate luxury but distrust overselling. Be direct and confident.
-
-"GB" — UK market.
-Understated. They distrust overselling. Write less. Trust the product.
-
-"AE" — Gulf market.
-Elegance, occasion-dressing, luxury.
-
-"US" / "CA" — North American market.
-Identity-led purchasing. Lead with the core benefit and aesthetic.
-
-"OTHER" — Write universally. Focus on product truth.
-
-CAMPAIGN GOAL:
-
-"Drive Website Sales" →
-Last line is always a direct, urgent call to action.
-
-"Grow Brand Awareness" →
-Focus heavily on the brand's unique aesthetic or mission.
-
-"Promote a New Collection" →
-Newness leads. Create excitement without desperation.
-
-"Retarget Past Visitors" →
-They already know you. Remind them why they clicked in the first place.
-
-TONE:
-
-"Let AI decide" →
-High price = elevated but direct. Accessible price = warm and punchy.
-
-"Premium & Aspirational" →
-Quiet confidence. The product doesn't need to shout. Short sentences.
-
-"Bold & Direct" →
-Short sentences. Strong verbs. No hedging.
-
-"Warm & Conversational" →
-A voice note from a friend with great taste.
-
-WHAT KILLS GOOD COPY (NEVER DO THESE):
-- Regurgitating the product description. Do NOT just paraphrase the features!
-- Melodramatic openings ("There's a version of you that...")
-- Starting with the brand or product name
-- "Introducing" or "Meet the new"
-- "Limited time" or "Don't miss"
-- "You deserve" or "Treat yourself"
-- Three adjectives in a row
-- Abstract cleverness that needs interpretation
-
-WHAT MAKES GREAT COPY:
-- A first sentence that immediately states a benefit or striking detail.
-- Grounding the copy in the physical reality of the product.
-- A natural, conversational rhythm.
-- Selling the outcome or the feeling, not the fabric.
-
-OUTPUT — respond only with valid JSON,
-no markdown, no preamble:
+OUTPUT — Provide the final ad copy in clean formatting. Omit all internal reasoning entirely from the output. Respond only with valid JSON, no markdown, no preamble:
 {
-  "headline": "max 8 words. A statement 
-    or specific detail. Never a question. 
-    Never abstract. Never clever for 
-    its own sake.",
-  "primaryText": "2-3 sentences. First 
-    creates the moment or feeling. Middle 
-    grounds it in the product specifically. 
-    Last is an action or a truth that lands.",
-  "description": "1 sentence under 20 words. 
-    A specific product detail that adds 
-    something the primary text didn't say.",
-  "cta": "one of: Shop Now, See Collection, 
-    Learn More, Get Offer, Sign Up",
-  "copywriterNote": "1-2 sentences. Name 
-    the specific human truth this copy 
-    is built on and why it fits this 
-    exact audience."
+  "headline": "max 8 words. A statement or specific detail. Never a question. Never abstract. Never clever for its own sake.",
+  "primaryText": "2-3 sentences. First creates the moment or feeling. Middle grounds it in the product specifically. Last is an action or a truth that lands.",
+  "description": "1 sentence under 20 words. A specific product detail that adds something the primary text didn't say.",
+  "cta": "one of: Shop Now, Learn More, Order Now, Get Offer, Sign Up, Book Now, Contact Us",
+  "copywriterNote": "A single sentence explaining why this copy works for this audience, written like you're texting a busy e-commerce founder (maximum 1 sentence, no jargon, lead with the actionable implication, sound like a smart marketer friend)."
 }`;
 
     // Detect if the media is a video:
@@ -258,20 +231,26 @@ no markdown, no preamble:
       hasUploadPath: imageUrl?.includes("/upload/") 
     });
 
+    const formattedLocations = Array.isArray(topCustomerLocations)
+      ? topCustomerLocations.map((l: any) => `${l.city || l.province || ""}${l.country ? ` (${l.country})` : ""}`).filter(Boolean).join(", ")
+      : "Unknown";
+
     const textContent = 
 `Generate Meta ad copy for:
 
 Brand: ${brandName}
 Product: ${productName}
 Description: ${productDescription}
-${productPrice ? 
-  `Price: ${productPrice}` : ""}
-Audience: ${targetAudience || 
-  "Not specified"}
+
+Store Primary Country: ${shopifyStoreCountry || "Unknown"}
+Top Customer Locations: ${formattedLocations}
+Product Price: ${productPrice || "Unknown"}
+Store AOV: ${storeAov || "Unknown"}
+Store Currency: ${currency}
+
+Audience: ${targetAudience || "Not specified"}
 Goal: ${campaignGoal}
 Tone: ${tonePreference}
-Store Region: ${storeRegion}
-Store Currency: ${currency}
 ${productVariants ? `Available Variants/Sizes: ${productVariants}` : ""}
 
 ${isVideo ? 
@@ -302,7 +281,16 @@ ${gatewayInsight?.currentProductClassification === "Gateway" ?
   : gatewayInsight?.currentProductClassification === "Consideration" ?
   `CRITICAL: This product is classified as a CONSIDERATION PRODUCT. It converts warm or returning traffic.
   Your hook MUST be derived from its premium attributes and the fact that it is a high-consideration purchase. Address the quality and investment value.`
-  : ""}`;
+  : ""}
+
+${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — there is no purchase history to reference.
+  CRITICAL for New Launches:
+  - Frame this as a first look or early access moment — not a proven bestseller.
+  - NEVER use social proof phrases like "loved by thousands", "our best-seller", or "customers say".
+  - NEVER use scarcity tactics like "selling fast" or "only X left" — there is no history to back this up.
+  - Recommended angles: UGC-style discovery, founder introduction, early adopter framing ("Be the first", "Before everyone else").
+  - Write copy that builds desire and curiosity rather than urgency or proof.
+  - Use the product's design, materials, and category to sell the vision, not the track record.` : ""}`;
 
     const messageContent: any[] = [];
 
@@ -453,16 +441,32 @@ ${gatewayInsight?.currentProductClassification === "Gateway" ?
 
     messageContent.push({
       type: "text",
-      text: textContent
+      text: textContent,
+      cache_control: { type: "ephemeral" }
     });
 
     // Call the Anthropic API
     const message = await client.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 1024,
-      system: systemPrompt,
+      system: [
+        {
+          type: "text",
+          text: systemPrompt,
+          cache_control: { type: "ephemeral" }
+        }
+      ],
       messages: [{ role: "user", content: messageContent }],
     });
+
+    if (userId) {
+      logApiUsage(
+        userId,
+        "brief_generation",
+        message.usage.input_tokens,
+        message.usage.output_tokens
+      );
+    }
 
     // Check if we received text content
     const responseBlock = message.content.find((block) => block.type === "text");
@@ -472,13 +476,17 @@ ${gatewayInsight?.currentProductClassification === "Gateway" ?
 
     let parsedResponse;
     try {
-      // Strip markdown code fences if Claude
-      // wraps the JSON in json ... 
-      const cleaned = responseBlock.text
-        .replace(/^```json\s*/i, "")
-        .replace(/^```\s*/i, "")
-        .replace(/```\s*$/i, "")
-        .trim();
+      let cleaned = responseBlock.text.trim();
+      const jsonMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+      if (jsonMatch) {
+        cleaned = jsonMatch[1].trim();
+      } else {
+        const start = cleaned.indexOf('{');
+        const end = cleaned.lastIndexOf('}');
+        if (start !== -1 && end !== -1 && end > start) {
+          cleaned = cleaned.substring(start, end + 1);
+        }
+      }
       parsedResponse = JSON.parse(cleaned);
     } catch (parseError) {
       console.error("JSON Parsing Error:", parseError);
@@ -488,25 +496,51 @@ ${gatewayInsight?.currentProductClassification === "Gateway" ?
       );
     }
 
-    // Deduct credit after successful generation
-    if (!hasUnlimited) {
-      await supabaseAdmin
-        .from("user_integrations")
-        .update({
-          credits_balance: Math.max(
-            0,
-            (integration?.credits_balance || 0) - 1
-          )
-        })
-        .eq("clerk_user_id", userId!);
+    // Deduct credit after successful generation, ONLY if it's not a free regeneration
+    if (!hasUnlimited && !isRegeneration) {
+      const newCredits = Math.max(0, currentCredits - 1);
+      const updateData: Record<string, any> = {};
+      if (cols.hasCredits) {
+        updateData.credits = newCredits;
+      }
+      updateData.credits_balance = newCredits;
 
-      await supabaseAdmin
-        .from("credit_usage")
-        .insert({
-          clerk_user_id: userId!,
-          credits_used: 1,
-          action: "brief_generated",
-        });
+      await updateUserIntegration(userId!, updateData);
+      await insertCreditUsage(userId!, 1, "brief_generated");
+
+      if (newCredits === 1 || newCredits === 0) {
+        try {
+          const { clerkClient } = await import("@clerk/nextjs/server");
+          const user = await (await clerkClient()).users.getUser(userId!);
+          const email = user.emailAddresses[0]?.emailAddress;
+          
+          if (email) {
+            const { sendEmail } = await import("@/lib/email");
+            
+            if (newCredits === 1) {
+              const { creditLowEmailHtml } = await import("@/emails/credit-low");
+              await sendEmail({
+                to: email,
+                subject: "1 brief credit left",
+                html: creditLowEmailHtml(),
+                userId: userId!,
+                templateName: "credit-low"
+              });
+            } else if (newCredits === 0) {
+              const { creditExhaustedEmailHtml } = await import("@/emails/credit-exhausted");
+              await sendEmail({
+                to: email,
+                subject: "You've used all your credits",
+                html: creditExhaustedEmailHtml(),
+                userId: userId!,
+                templateName: "credit-exhausted"
+              });
+            }
+          }
+        } catch (emailErr) {
+          console.error("Failed to send credit alert email:", emailErr);
+        }
+      }
     }
 
     // Return the successfully parsed JSON output

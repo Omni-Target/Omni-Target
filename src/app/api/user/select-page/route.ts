@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { updateUserIntegration } from "@/lib/db";
 
 export async function POST(request: Request) {
   const { userId } = await auth();
@@ -12,13 +12,10 @@ export async function POST(request: Request) {
 
   const { meta_page_id, meta_page_name } = await request.json();
 
-  await supabaseAdmin
-    .from("user_integrations")
-    .update({ 
-      meta_page_id,
-      meta_page_name
-    })
-    .eq("clerk_user_id", userId);
+  await updateUserIntegration(userId, { 
+    meta_page_id,
+    meta_page_name
+  });
 
   return Response.json({ success: true });
 }

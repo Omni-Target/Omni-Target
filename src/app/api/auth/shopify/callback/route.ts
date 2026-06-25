@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getExistingIntegrationByStore, upsertUserIntegration, updateUserIntegration } from "@/lib/db";
 import { createHmac } from "crypto";
 
 export async function GET(request: Request) {
@@ -112,6 +112,7 @@ export async function GET(request: Request) {
       access_token: accessToken, // explicitly set access_token
       shopify_refresh_token: refreshToken,
       shopify_token_expires_at: tokenExpiresAt,
+      shopify_scopes: tokenData.scope,
     };
 
     // Populate new schema columns if they exist (backward compatibility / redundancy check)
@@ -124,13 +125,7 @@ export async function GET(request: Request) {
       shopifyData.access_token = accessToken;
     }
 
-    const { data: existingByStore } = await 
-      supabaseAdmin
-        .from("user_integrations")
-        .select("clerk_user_id")
-        .eq("shopify_store_url", shop)
-        .neq("clerk_user_id", userId!)
-        .single();
+    const existingByStore = await getExistingIntegrationByStore(shop, userId!);
 
     if (existingByStore) {
       console.warn(
@@ -143,24 +138,40 @@ export async function GET(request: Request) {
 
     // Upsert the integration row matched by the current Clerk user ID
     console.log("Upserting user integration for Clerk user:", userId);
-    const { error: upsertError } = await supabaseAdmin
-      .from("user_integrations")
-      .upsert({
-        clerk_user_id: userId,
-        ...shopifyData,
-      }, {
-        onConflict: "clerk_user_id"
-      });
-
-    if (upsertError) {
-      console.error("Shopify upsert error:", upsertError);
-      throw upsertError;
-    }
+    await upsertUserIntegration(userId!, shopifyData);
 
     console.log("Shopify upsert success");
 
     // Give 1 free credit on install if free_credit_used is false
+    const { getUserIntegration } = await import("@/lib/db");
+    const userIntegration = await getUserIntegration(userId!);
+    const freeCreditUsedBefore = cols.hasFreeCreditUsed ? !!userIntegration?.free_credit_used : false;
+
     await handleFreeCreditOnInstall(userId!);
+
+    if (!freeCreditUsedBefore) {
+      try {
+        const { clerkClient } = await import("@clerk/nextjs/server");
+        const user = await (await clerkClient()).users.getUser(userId!);
+        const email = user.emailAddresses[0]?.emailAddress;
+        
+        if (email) {
+          const { sendEmail } = await import('@/lib/email');
+          const { welcomeEmailHtml } = await import('@/emails/welcome');
+          
+          await sendEmail({
+            to: email,
+            subject: "Your free brief is waiting",
+            html: welcomeEmailHtml(),
+            userId: userId!,
+            templateName: "welcome"
+          });
+          console.log("Welcome email sent to", email);
+        }
+      } catch (err) {
+        console.error("Failed to send welcome email:", err);
+      }
+    }
 
     // Register the orders/paid webhook so confirmed purchases
     // are forwarded to Meta CAPI for attribution
@@ -196,13 +207,17 @@ export async function GET(request: Request) {
 
     // Store the webhook ID so we can delete it if the user disconnects
     if (webhookData.webhook?.id) {
-      await supabaseAdmin
-        .from("user_integrations")
-        .update({
-          shopify_webhook_id: String(webhookData.webhook.id),
-        })
-        .eq("clerk_user_id", userId);
+      await updateUserIntegration(userId!, {
+        shopify_webhook_id: String(webhookData.webhook.id),
+      });
     }
+
+    // Check if user has already completed onboarding
+    const { clerkClient } = await import("@clerk/nextjs/server");
+    const user = await (await clerkClient()).users.getUser(userId!);
+    const currentOnboardingStep = (user.publicMetadata as { onboardingStep?: string })?.onboardingStep;
+    const isAlreadyComplete = currentOnboardingStep === "complete";
+    const shouldSkipAudit = isFromDashboard || isAlreadyComplete;
 
     // Update Clerk metadata
     await fetch(
@@ -215,14 +230,14 @@ export async function GET(request: Request) {
         },
         body: JSON.stringify({ 
           shopifyStoreUrl: shop,
-          onboardingStep: isFromDashboard ? "complete" : "audit"
+          onboardingStep: shouldSkipAudit ? "complete" : "audit"
         }),
       }
     );
 
-    // Redirect to next onboarding step
-    const redirectUrl = isFromDashboard
-      ? `${process.env.NEXT_PUBLIC_APP_URL}/onboarding/audit?from=dashboard`
+    // Redirect to dashboard directly if skipping audit, otherwise next onboarding step
+    const redirectUrl = shouldSkipAudit
+      ? `${process.env.NEXT_PUBLIC_APP_URL}/dashboard`
       : `${process.env.NEXT_PUBLIC_APP_URL}/onboarding/audit`;
 
     return Response.redirect(redirectUrl);

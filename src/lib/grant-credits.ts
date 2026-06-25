@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "./supabase";
+import { getUserIntegration, updateUserIntegration, updatePayment } from "./db";
 import { CreditPack } from "./credit-packs";
 
 export async function grantCredits(
@@ -8,13 +8,10 @@ export async function grantCredits(
   providerReference: string
 ) {
   // Update payment status
-  await supabaseAdmin
-    .from("payments")
-    .update({
-      status: "success",
-      provider_reference: providerReference,
-    })
-    .eq("id", paymentId);
+  await updatePayment(paymentId, {
+    status: "success",
+    provider_reference: providerReference,
+  });
 
   if (pack.unlimited_days > 0) {
     // Agency pack — set unlimited expiry
@@ -23,36 +20,17 @@ export async function grantCredits(
       expiresAt.getDate() + pack.unlimited_days
     );
 
-    await supabaseAdmin
-      .from("user_integrations")
-      .update({
-        credits_unlimited_until:
-          expiresAt.toISOString(),
-      })
-      .eq("clerk_user_id", userId);
+    await updateUserIntegration(userId, {
+      credits_unlimited_until: expiresAt.toISOString(),
+    });
   } else {
     // Credit pack — add credits
-    const { data: current } = await
-      supabaseAdmin
-        .from("user_integrations")
-        .select(
-          "credits_balance, " +
-          "credits_total_purchased"
-        )
-        .eq("clerk_user_id", userId)
-        .single() as { data: { credits_balance: number; credits_total_purchased: number } | null };
+    const current = await getUserIntegration(userId);
 
-    await supabaseAdmin
-      .from("user_integrations")
-      .update({
-        credits_balance:
-          (current?.credits_balance || 0) +
-          pack.credits,
-        credits_total_purchased:
-          (current?.credits_total_purchased
-            || 0) + pack.credits,
-      })
-      .eq("clerk_user_id", userId);
+    await updateUserIntegration(userId, {
+      credits_balance: (current?.credits_balance || 0) + pack.credits,
+      credits_total_purchased: (current?.credits_total_purchased || 0) + pack.credits,
+    });
   }
 
   console.log(

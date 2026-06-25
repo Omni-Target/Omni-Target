@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
 import { Logo } from "@/components/Logo";
+import { MobileNav } from "@/components/MobileNav";
 import { formatCurrency } from "@/lib/currency";
 import { useCredits } from "@/hooks/useCredits";
 
@@ -14,6 +15,7 @@ interface StoreDataResponse {
   message?: string;
   credits_balance?: number;
   credits_unlimited_until?: string | null;
+  needsReauthForOrders?: boolean;
 }
 
 const SHOPIFY_PLANS = [
@@ -22,13 +24,13 @@ const SHOPIFY_PLANS = [
     name: "Starter Pack",
     credits: 5,
     price: 39,
-    description: "Perfect for testing new campaigns and finding winning ads.",
+    description: "Perfect for testing your first collection and identifying initial winners.",
     highlight: false,
     features: [
       "5 Campaign Briefs",
       "Store Intelligence Insights",
-      "AI-Powered Copywriter",
-      "Valid for 6 months",
+      "Creative Angle Blueprints",
+      "Valid for 12 months",
     ],
   },
   {
@@ -36,13 +38,13 @@ const SHOPIFY_PLANS = [
     name: "Growth Pack",
     credits: 15,
     price: 99,
-    description: "For scaling brands running multiple products and tests.",
+    description: "For growing brands scaling multiple styles and running weekly tests.",
     highlight: true,
     features: [
       "15 Campaign Briefs",
       "Everything in Starter Pack",
-      "Priority AI Processing",
-      "Advanced Targeting Audiences",
+      "Ideal for testing 3+ products",
+      "Save 15% per brief ($6.60 / brief)",
     ],
   },
   {
@@ -50,12 +52,12 @@ const SHOPIFY_PLANS = [
     name: "Scale Pack",
     credits: 30,
     price: 179,
-    description: "High volume briefs for rapid scaling and continuous optimization.",
+    description: "High volume for massive collection drops and rapid creative testing.",
     highlight: false,
     features: [
       "30 Campaign Briefs",
       "Everything in Growth Pack",
-      "Highest Priority Generation",
+      "Ideal for full catalog coverage",
       "Best Value ($5.96 / brief)",
     ],
   },
@@ -65,10 +67,12 @@ function DashboardContent() {
   const [storeData, setStoreData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
+  const [needsReauth, setNeedsReauth] = useState(false);
   const [showPaymentToast, setShowPaymentToast] = useState(false);
   const [showBillingToast, setShowBillingToast] = useState(false);
   const [shop, setShop] = useState<string | null>(null);
   const [purchaseLoading, setPurchaseLoading] = useState<string | null>(null);
+  const [showRestocking, setShowRestocking] = useState(false);
 
   useEffect(() => {
     fetch("/api/user/credits")
@@ -120,6 +124,7 @@ function DashboardContent() {
 
   const { credits, isUnlimited } = useCredits();
 
+  const router = useRouter();
   const searchParams = useSearchParams();
   const paymentSuccess = searchParams.get("payment");
   const packId = searchParams.get("pack");
@@ -152,6 +157,9 @@ function DashboardContent() {
       .then((res) => res.json())
       .then((data: StoreDataResponse) => {
         setConnected(data.connected);
+        if (data.needsReauthForOrders) {
+          setNeedsReauth(true);
+        }
         if (data.connected && data.data) {
           setStoreData(data.data);
         }
@@ -184,29 +192,29 @@ function DashboardContent() {
       color: "bg-success-500",
       textColor: "text-success-400",
       icon: "✓",
-      title: "Ready to advertise",
-      subtext: "Your store has active products and recent sales. Good time to run campaigns."
+      title: "You're good to go",
+      subtext: "Active products, recent sales — everything Meta needs to start learning. Let's run something."
     },
     ready_with_warnings: {
       color: "bg-amber-500",
       textColor: "text-amber-400",
       icon: "!",
-      title: "Ready — with caveats",
-      subtext: "Some products are out of stock. Stick to in-stock items when creating briefs."
+      title: "Ready to go",
+      subtext: "Check Pre-Spend Intelligence below — we've flagged the best products to run right now."
     },
     caution: {
       color: "bg-error-500",
       textColor: "text-error-400",
       icon: "×",
-      title: "Not ready to advertise",
-      subtext: !hasRecentOrders ? "No recent orders. Drive organic traffic first." : "High out of stock rate. Restock before advertising."
+      title: "Not quite yet",
+      subtext: !hasRecentOrders ? "No recent orders yet. Build some organic momentum first, then come back." : "Most of your stock is out. Restock your winners and you'll be ready to go."
     },
     not_ready: {
       color: "bg-white/20",
       textColor: "text-white/60",
       icon: "?",
-      title: "Connect your store first",
-      subtext: "We need data to assess readiness."
+      title: "Store data out of sync",
+      subtext: "We couldn't load your products. Click 'Sync now' or 'Reconnect' to refresh your store data."
     }
   }[adReadiness];
 
@@ -233,15 +241,7 @@ function DashboardContent() {
     });
   }
   
-  if (outOfStockRatio > 0.5) {
-    insights.push({
-      icon: "⚠️",
-      title: "Stock up before running ads",
-      detail: `${Math.round(outOfStockRatio * 100)}% of your products are out of stock. Running ads to unavailable products wastes budget and frustrates buyers.`,
-      action: "See in-stock products",
-      actionHref: "/products"
-    });
-  }
+
   
   if (peakDays.includes("Saturday") || peakDays.includes("Sunday")) {
     insights.push({
@@ -259,13 +259,42 @@ function DashboardContent() {
     });
   }
 
-  const validLocations = (orders.top_locations || []).filter((loc: any) => {
-    const isNigeria = loc.country === 'Nigeria' || loc.country === 'NG' || !loc.country; 
-    return isNigeria || loc.percentage >= 15;
-  });
-  const locationText = validLocations.length > 0 
-    ? validLocations.map((l: any) => l.city).join(", ")
-    : "Order location data still building";
+  const COUNTRY_CODES: Record<string, string> = { NG: "Nigeria", GB: "United Kingdom", US: "United States", AE: "UAE", GH: "Ghana", KE: "Kenya", ZA: "South Africa", CA: "Canada", AU: "Australia", HU: "Hungary", DE: "Germany", FR: "France", IT: "Italy", ES: "Spain", NL: "Netherlands", BE: "Belgium", SE: "Sweden", NO: "Norway", DK: "Denmark", FI: "Finland", PL: "Poland", RO: "Romania", CZ: "Czech Republic", PT: "Portugal", AT: "Austria", CH: "Switzerland", IN: "India", CN: "China", JP: "Japan", KR: "South Korea", BR: "Brazil", MX: "Mexico", AR: "Argentina" };
+  // Universal rule: the Shopify connector stores country as city when no city data exists.
+  // Detect this by checking if city === country (or city === country code), which is always wrong data.
+  const isFallbackCountryEntry = (loc: any): boolean => {
+    const city = loc.city?.trim() || "";
+    const country = loc.country?.trim() || "";
+    if (!city) return true;
+    // City matches the country name directly
+    if (city.toLowerCase() === country.toLowerCase()) return true;
+    // City is a 2-letter country code
+    if (/^[A-Z]{2}$/.test(city)) return true;
+    // City resolves to the same country name (e.g. "Hungary" city → "Hungary" country)
+    const resolvedCountry = COUNTRY_CODES[country] || country;
+    if (city.toLowerCase() === resolvedCountry.toLowerCase()) return true;
+    return false;
+  };
+  const validLocations = (orders.top_locations || [])
+    .filter((loc: any) => !isFallbackCountryEntry(loc))
+    .slice(0, 3);
+  const formatLocation = (l: any) => {
+    const countryDisplay = COUNTRY_CODES[l.country] || l.country || "";
+    return countryDisplay && countryDisplay.toLowerCase() !== l.city?.toLowerCase()
+      ? `${l.city}, ${countryDisplay}`
+      : l.city;
+  };
+  // If no city-level data, fall back to deduplicated country names
+  const countryFallback = validLocations.length === 0
+    ? [...new Set((orders.top_locations || [])
+        .map((l: any) => COUNTRY_CODES[l.country] || COUNTRY_CODES[l.city] || l.country || l.city || "")
+        .filter(Boolean))]
+        .slice(0, 3)
+        .join(" · ")
+    : "";
+  const locationText = validLocations.length > 0
+    ? validLocations.map(formatLocation).join(" · ")
+    : countryFallback || "Order location data still building";
 
   const refreshStoreData = () => {
     setLoading(true);
@@ -273,6 +302,9 @@ function DashboardContent() {
       .then((res) => res.json())
       .then((data: StoreDataResponse) => {
         setConnected(data.connected);
+        if (data.needsReauthForOrders) {
+          setNeedsReauth(true);
+        }
         if (data.connected && data.data) {
           setStoreData(data.data);
         }
@@ -306,9 +338,20 @@ function DashboardContent() {
               </span>
             )}
             
-            <Link href="/settings" className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Settings</Link>
+            <Link href="/settings" target="_self" prefetch={true} className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors">Settings</Link>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4 sm:gap-6">
+            {/* Show credits on mobile too */}
+            <div className="sm:hidden flex items-center">
+              {isUnlimited ? (
+                <span className="text-[10px] text-brand-400 font-bold bg-brand-500/10 px-2 py-1 rounded-md uppercase tracking-wider">Unlimited</span>
+              ) : credits !== null && (
+                <span className={`text-xs font-medium px-2 py-1 rounded-md ${credits === 0 ? "text-error-400 bg-error-500/10" : "text-white/70 bg-white/5"}`}>
+                  {credits} left
+                </span>
+              )}
+            </div>
+
             <SignOutButton>
               <button className="text-xs font-medium text-white/40 hover:text-white/80 transition-colors cursor-pointer bg-transparent border-none p-0">
                 Sign Out
@@ -332,7 +375,7 @@ function DashboardContent() {
       <div className="fixed top-0 left-1/4 w-[500px] h-[500px] bg-brand-600/5 rounded-full blur-[120px] pointer-events-none" />
       <div className="fixed bottom-0 right-1/3 w-[400px] h-[400px] bg-success-500/3 rounded-full blur-[100px] pointer-events-none" />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 relative">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 pb-28 sm:pb-8 relative">
         {/* Success Toast */}
         {showPaymentToast && (
           <div className="mb-6 px-4 py-3 rounded-xl bg-success-500/10 border border-success-500/20 text-sm text-success-400 flex items-center gap-2 animate-fade-in-up">
@@ -366,6 +409,21 @@ function DashboardContent() {
         </div>
 
         {/* Quick Actions */}
+        {!loading && connected && needsReauth && (
+          <div className="bg-brand-500/10 border border-brand-500/20 text-brand-300 rounded-xl p-4 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in-up">
+            <div>
+              <h3 className="text-sm font-semibold mb-1 text-brand-300">Unlock Full Order History</h3>
+              <p className="text-xs text-brand-300/70">Full order history gives you more accurate recommendations. We recently updated our permissions.</p>
+            </div>
+            <Link
+              href="/api/auth/shopify/connect?from=dashboard"
+              className="bg-brand-500/20 hover:bg-brand-500/30 border border-brand-500/20 text-brand-300 px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+            >
+              Reconnect Store
+            </Link>
+          </div>
+        )}
+
         {!loading && connected && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 animate-fade-in-up">
             <Link
@@ -393,7 +451,10 @@ function DashboardContent() {
                   })() : 'Unknown'}
                 </p>
               </div>
-              <button onClick={refreshStoreData} className="text-white/80 hover:text-white text-sm font-medium mt-4 text-left cursor-pointer bg-transparent border-none p-0">Sync now</button>
+              <div className="flex items-center gap-4 mt-4">
+                <button onClick={refreshStoreData} className="text-white/80 hover:text-white text-sm font-medium text-left cursor-pointer bg-transparent border-none p-0">Sync now</button>
+                <Link href="/api/auth/shopify/connect?from=dashboard" className="text-white/40 hover:text-white/60 text-xs font-medium transition-colors no-underline">Reconnect</Link>
+              </div>
             </div>
           </div>
         )}
@@ -423,16 +484,18 @@ function DashboardContent() {
               </svg>
             </div>
             <h2 className="text-xl font-semibold text-white mb-3">
-              Connect Your Shopify Store
+              {shop ? "Reconnect Your Shopify Store" : "Connect Your Shopify Store"}
             </h2>
             <p className="text-white/40 text-sm mb-6 max-w-md mx-auto">
-              We&apos;ll read your store data to generate personalised campaign briefs, audience insights, and product recommendations.
+              {shop 
+                ? "Your store connection has expired. Please reconnect to continue syncing orders and generating briefs." 
+                : "We'll read your store data to generate personalised campaign briefs, audience insights, and product recommendations."}
             </p>
             <Link
-              href="/onboarding/connect-shopify?from=dashboard"
+              href={shop ? "/api/auth/shopify/connect?from=dashboard" : "/onboarding/connect-shopify?from=dashboard"}
               className="inline-flex px-6 py-3 rounded-xl bg-brand-500 text-white text-sm font-medium transition-colors hover:bg-brand-400 no-underline"
             >
-              Connect Shopify Store →
+              {shop ? "Reconnect Store →" : "Connect Shopify Store →"}
             </Link>
           </div>
         ) : (
@@ -446,7 +509,7 @@ function DashboardContent() {
                 <div>
                   <p className="text-xs text-white/40 uppercase tracking-widest mb-1 font-semibold">Ad Readiness</p>
                   <p className={`text-lg font-bold mb-1 ${adReadinessDisplay.textColor}`}>{adReadinessDisplay.title}</p>
-                  <p className="text-sm text-white/60">{adReadinessDisplay.subtext}</p>
+                  {adReadinessDisplay.subtext && <p className="text-sm text-white/60">{adReadinessDisplay.subtext}</p>}
                 </div>
               </div>
 
@@ -492,17 +555,10 @@ function DashboardContent() {
                 <p className="text-xs text-white/40 uppercase tracking-widest mb-4 font-semibold">What this means for your ads</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {insights.map((insight, i) => (
-                    <div key={i} className="rounded-xl bg-surface-raised border border-border-subtle p-5 flex flex-col justify-between">
-                      <div>
-                        <div className="text-2xl mb-3">{insight.icon}</div>
-                        <p className="text-sm font-bold text-white mb-2">{insight.title}</p>
-                        <p className="text-xs text-white/60 mb-4 leading-relaxed">{insight.detail}</p>
-                      </div>
-                      {insight.action && insight.actionHref && (
-                        <Link href={insight.actionHref} className="text-xs font-medium text-brand-400 hover:text-brand-300 no-underline inline-block">
-                          {insight.action} →
-                        </Link>
-                      )}
+                    <div key={i} className="rounded-xl bg-surface-raised border border-border-subtle p-5">
+                      <div className="text-2xl mb-3">{insight.icon}</div>
+                      <p className="text-sm font-bold text-white mb-2">{insight.title}</p>
+                      <p className="text-xs text-white/60 leading-relaxed">{insight.detail}</p>
                     </div>
                   ))}
                 </div>
@@ -513,40 +569,39 @@ function DashboardContent() {
             <div className="mb-8 animate-fade-in-up-delay-2" id="advertise-now">
               <div className="mb-4">
                 <p className="text-xs text-white/40 uppercase tracking-widest font-semibold mb-1">Pre-Spend Intelligence</p>
-                <p className="text-sm text-white/60">High-signal products mapped by behavioral velocity and acquisition potential.</p>
+                <p className="text-sm text-white/60">Best products to advertise right now</p>
               </div>
+
+              {/* Actionable in-stock products list */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {(storeData?.products || [])
+                  .filter((p: any) => p.in_stock)
                   .sort((a: any, b: any) => b.revenue - a.revenue)
                   .slice(0, 6)
                   .map((product: any, index: number) => {
                     let subtext = "";
-                    if (!product.in_stock) {
-                      subtext = "Out of stock — restock before advertising";
+                    let primaryMetric = "";
+                    
+                    if (product.gateway_classification === "Gateway" && product.first_time_buyer_ratio) {
+                      primaryMetric = `${Math.round(product.first_time_buyer_ratio * 100)}% new buyers`;
+                    } else if (product.gateway_classification === "Consideration" && product.repeat_purchase_rate) {
+                      primaryMetric = `${Math.round(product.repeat_purchase_rate * 100)}% repeat rate`;
+                    } else if (product.order_velocity) {
+                      primaryMetric = `${Math.round(product.order_velocity)} units/mo velocity`;
+                    } else if (product.first_time_buyer_ratio) {
+                      primaryMetric = `${Math.round(product.first_time_buyer_ratio * 100)}% new buyers`;
+                    }
+
+                    if (product.gateway_classification === "Insufficient Data") {
+                      subtext = "Too early to classify — keep selling";
+                    } else if (product.gateway_classification === "Gateway") {
+                      subtext = "Great for cold traffic — most buyers are first-timers";
+                    } else if (product.gateway_classification === "Consideration") {
+                      subtext = "High consideration builder — drives high repeat purchase rates";
+                    } else if (product.gateway_classification === "Hybrid") {
+                      subtext = "Balanced shopper response — mixed signals across new and repeat buyers";
                     } else {
-                      const signals = [];
-                      if (product.first_time_buyer_ratio) {
-                        signals.push(`${Math.round(product.first_time_buyer_ratio * 100)}% new buyers`);
-                      }
-                      if (product.repeat_purchase_rate) {
-                        signals.push(`${Math.round(product.repeat_purchase_rate * 100)}% repeat rate`);
-                      }
-                      if (product.order_velocity) {
-                        signals.push(`${Math.round(product.order_velocity)} units/mo velocity`);
-                      }
-                      
-                      const metricsText = signals.length > 0 ? ` (${signals.join(" · ")})` : "";
-                      if (product.gateway_classification === "Insufficient Data") {
-                        subtext = "Awaiting initial purchase volume to map cohort signals." + metricsText;
-                      } else if (product.gateway_classification === "Gateway") {
-                        subtext = "High acquisition signal: lowers customer acquisition cost by attracting new shoppers." + metricsText;
-                      } else if (product.gateway_classification === "Consideration") {
-                        subtext = "High consideration/loyalty builder: drives high repeat customer rates and customer value." + metricsText;
-                      } else if (product.gateway_classification === "Hybrid") {
-                        subtext = "Balanced shopper response: shows stable, mixed signals across new and repeat buyers." + metricsText;
-                      } else {
-                        subtext = "Consistent behavioral performance across core acquisition metrics." + metricsText;
-                      }
+                      subtext = "Consistent behavioral performance across core acquisition metrics";
                     }
 
                     const isGateway = product.gateway_classification === "Gateway";
@@ -555,11 +610,7 @@ function DashboardContent() {
                     return (
                       <div
                         key={product.id}
-                        className={`rounded-xl border p-4 transition-colors ${
-                          product.in_stock && product.should_advertise
-                            ? "bg-surface-raised border-border-subtle hover:border-brand-500/30"
-                            : "bg-surface-raised/30 border-border-subtle/50 opacity-60 grayscale"
-                        }`}
+                        className="rounded-xl border p-4 bg-surface-raised border-border-subtle hover:border-brand-500/30 transition-colors"
                       >
                         <div className="flex items-start gap-3 mb-3">
                           {product.image_url ? (
@@ -580,13 +631,9 @@ function DashboardContent() {
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-semibold text-white truncate">{product.name}</p>
                             <div className="flex items-center flex-wrap gap-2 mt-1">
-                              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                                product.in_stock
-                                  ? "bg-success-500/10 text-success-400"
-                                  : "bg-error-500/10 text-error-400"
-                              }`}>
-                                <span className={`w-1 h-1 rounded-full ${product.in_stock ? "bg-success-400" : "bg-error-400"}`} />
-                                {product.in_stock ? "In stock" : "Out of stock"}
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-success-500/10 text-success-400">
+                                <span className="w-1 h-1 rounded-full bg-success-400" />
+                                In stock
                               </span>
                               
                               {product.gateway_classification && (
@@ -596,11 +643,11 @@ function DashboardContent() {
                                     : isConsideration
                                     ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
                                     : product.gateway_classification === "Insufficient Data"
-                                    ? "bg-white/5 text-white/40 border-white/10"
+                                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                                     : "bg-purple-500/10 text-purple-400 border-purple-500/20"
                                 }`}>
                                   {product.gateway_classification === "Insufficient Data"
-                                    ? "Insufficient data — more orders needed for classification"
+                                    ? "New Launch Brief"
                                     : product.gateway_classification}
                                 </span>
                               )}
@@ -608,9 +655,10 @@ function DashboardContent() {
                           </div>
                         </div>
 
-                        {subtext && (
+                        {(subtext || primaryMetric) && (
                           <div className="mb-3 px-2 py-1.5 bg-white/5 rounded-md">
-                            <p className="text-[11px] text-white/70 italic">{subtext}</p>
+                            {subtext && <p className="text-[11px] text-white/70 italic">{subtext}</p>}
+                            {primaryMetric && <p className="text-[11px] text-white mt-1 font-medium">{primaryMetric}</p>}
                           </div>
                         )}
 
@@ -618,22 +666,23 @@ function DashboardContent() {
                           <span className="text-white/40">
                             {product.units_sold} sold · {formatCurrency(Math.round(product.revenue), storeData?.store?.currency || "USD")}
                           </span>
-                          {product.in_stock && product.should_advertise ? (
-                            <Link
-                              href={`/campaigns?` +
-                                `product_name=${encodeURIComponent(product.name)}&` +
-                                `product_description=${encodeURIComponent(product.description || product.name)}&` +
-                                `product_type=${encodeURIComponent(product.product_type || "")}&` +
-                                `product_tags=${encodeURIComponent(product.tags?.join(",") || "")}&` +
-                                `product_price=${product.price}&` +
-                                `product_image=${encodeURIComponent(product.image_url || "")}`
-                              }
-                              className="text-brand-400 hover:text-brand-300 font-medium transition-colors no-underline"
+                          {product.should_advertise ? (
+                            <button
+                              onClick={() => {
+                                sessionStorage.setItem("campaign_draft", JSON.stringify({
+                                  product_name: product.name,
+                                  product_description: product.description || product.name,
+                                  product_type: product.product_type || "",
+                                  product_tags: product.tags?.join(",") || "",
+                                  product_price: product.price,
+                                  product_image: product.image_url || ""
+                                }));
+                                router.push("/campaigns");
+                              }}
+                              className="text-brand-400 hover:text-brand-300 font-medium transition-colors cursor-pointer bg-transparent border-none p-0"
                             >
                               Create a Campaign Brief →
-                            </Link>
-                          ) : !product.in_stock ? (
-                            <span className="text-error-400/70 text-[10px]">Cannot advertise</span>
+                            </button>
                           ) : (
                             <span className="text-white/30 text-[10px]">Low conversion probability</span>
                           )}
@@ -642,6 +691,197 @@ function DashboardContent() {
                     );
                   })}
               </div>
+
+              {/* New Launches Section */}
+              {(() => {
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                const newLaunches = (storeData?.products || [])
+                  .filter((p: any) => {
+                    const orderCount = (p.order_count ?? p.units_sold ?? 0);
+                    const isRecentAndLow = p.created_at && new Date(p.created_at) >= thirtyDaysAgo && orderCount < 3;
+                    const isZero = orderCount === 0;
+                    return p.in_stock && (isRecentAndLow || isZero);
+                  })
+                  .slice(0, 6);
+
+                if (newLaunches.length === 0) return null;
+
+                return (
+                  <div className="mt-8">
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="text-xs text-white/40 uppercase tracking-widest font-semibold">New Launches</p>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          {newLaunches.length} products
+                        </span>
+                      </div>
+                      <p className="text-sm text-white/60">Just added — build your launch brief before the first sale</p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {newLaunches.map((product: any) => (
+                        <div
+                          key={`new-${product.id}`}
+                          className="rounded-xl border p-4 bg-surface-raised border-emerald-500/20 hover:border-emerald-500/40 transition-colors"
+                        >
+                          <div className="flex items-start gap-3 mb-3">
+                            {product.image_url ? (
+                              <img
+                                src={product.image_url}
+                                alt={product.name}
+                                className="w-12 h-12 rounded-lg object-cover shrink-0"
+                              />
+                            ) : (
+                              <div className="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-400/60">
+                                  <path d="M12 5v14M5 12l7-7 7 7" />
+                                </svg>
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-semibold text-white truncate">{product.name}</p>
+                              <div className="flex items-center flex-wrap gap-2 mt-1">
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                  ✦ New Launch
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mb-3 px-2 py-1.5 bg-emerald-500/5 rounded-md border border-emerald-500/10">
+                            <p className="text-[11px] text-white/60 italic">New product — launch brief available</p>
+                          </div>
+
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-white/40">
+                              {product.units_sold} sold · {formatCurrency(Math.round(product.price), storeData?.store?.currency || "USD")}
+                            </span>
+                            <button
+                              onClick={() => {
+                                sessionStorage.setItem("campaign_draft", JSON.stringify({
+                                  product_name: product.name,
+                                  product_description: product.description || product.name,
+                                  product_type: product.product_type || "",
+                                  product_tags: product.tags?.join(",") || "",
+                                  product_price: product.price,
+                                  product_image: product.image_url || "",
+                                  is_new_launch: true,
+                                }));
+                                router.push("/campaigns");
+                              }}
+                              className="text-emerald-400 hover:text-emerald-300 font-medium transition-colors cursor-pointer bg-transparent border-none p-0"
+                            >
+                              Create Launch Brief →
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Collapsed Restocking Opportunities Section */}
+              {(() => {
+                const restockingProducts = (storeData?.products || [])
+                  .filter((p: any) => !p.in_stock && p.units_sold > 0)
+                  .sort((a: any, b: any) => b.revenue - a.revenue);
+
+                if (restockingProducts.length === 0) return null;
+
+                return (
+                  <div className="mt-6 border border-border-subtle bg-surface/30 rounded-xl overflow-hidden">
+                    <button
+                      onClick={() => setShowRestocking(!showRestocking)}
+                      className="w-full flex items-center justify-between px-5 py-4 text-left transition-colors hover:bg-white/[0.02] cursor-pointer border-none bg-transparent"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-semibold text-white/75">Restocking Opportunities</h3>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-400">
+                            {restockingProducts.length} items
+                          </span>
+                        </div>
+                        <p className="text-xs text-white/40 mt-1">Restock these before running ads</p>
+                      </div>
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className={`text-white/40 transition-transform duration-200 ${showRestocking ? "rotate-180" : ""}`}
+                      >
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </button>
+
+                    {showRestocking && (
+                      <div className="px-5 pb-5 border-t border-border-subtle/50 pt-4 animate-fade-in">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {restockingProducts.map((product: any) => {
+                            const isGateway = product.gateway_classification === "Gateway";
+                            const isConsideration = product.gateway_classification === "Consideration";
+                            return (
+                              <div
+                                key={product.id}
+                                className="rounded-xl border p-4 bg-surface-raised/50 border-border-subtle/50 opacity-75 grayscale hover:grayscale-0 hover:opacity-100 transition-all duration-300"
+                              >
+                                <div className="flex items-start gap-3 mb-3">
+                                  {product.image_url ? (
+                                    <img
+                                      src={product.image_url}
+                                      alt={product.name}
+                                      className="w-12 h-12 rounded-lg object-cover shrink-0"
+                                    />
+                                  ) : (
+                                    <div className="w-12 h-12 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/20">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                                        <circle cx="8.5" cy="8.5" r="1.5" />
+                                        <polyline points="21 15 16 10 5 21" />
+                                      </svg>
+                                    </div>
+                                  )}
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-semibold text-white truncate">{product.name}</p>
+                                    <div className="flex items-center flex-wrap gap-2 mt-1">
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-error-500/10 text-error-400">
+                                        <span className="w-1 h-1 rounded-full bg-error-400" />
+                                        Out of stock
+                                      </span>
+                                      {product.gateway_classification && (
+                                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${
+                                          isGateway
+                                            ? "bg-brand-500/10 text-brand-400 border-brand-500/20"
+                                            : isConsideration
+                                            ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                            : "bg-purple-500/10 text-purple-400 border-purple-500/20"
+                                        }`}>
+                                          {product.gateway_classification}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-white/40">
+                                    {product.units_sold} sold · {formatCurrency(Math.round(product.revenue), storeData?.store?.currency || "USD")}
+                                  </span>
+                                  <span className="text-amber-400/80 text-[10px] font-medium">Restock opportunity</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Shopify Billing Credit Purchase Section */}
@@ -719,13 +959,15 @@ function DashboardContent() {
                 </div>
                 
                 <div className="mt-4 text-center text-[10px] text-white/30">
-                  Secured and verified via Shopify Billing API. Credits never expire within 6 months of purchase.
+                  All charges are billed safely in USD via the official Shopify Billing API. Credits are subject to a 12-month dormancy policy.
                 </div>
               </div>
             )}
           </>
         )}
       </main>
+
+      <MobileNav />
     </div>
   );
 }

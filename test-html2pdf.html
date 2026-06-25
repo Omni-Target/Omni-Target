@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+<body>
+  <div id="content"><h1>Hello World</h1><p>This is a PDF test.</p></div>
+  <button onclick="generate()">Download</button>
+  <script>
+    function generate() {
+      const html = document.getElementById('content').outerHTML;
+      html2pdf().from(html).save('test.pdf');
+    }
+  </script>
+</body>
+</html>

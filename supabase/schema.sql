@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS user_integrations (
   shopify_store_url TEXT,
   shopify_access_token TEXT,
   shopify_webhook_id TEXT,
+  shopify_refresh_token TEXT,
+  shopify_token_expires_at TIMESTAMPTZ,
+  refresh_token TEXT,
+  token_expires_at TIMESTAMPTZ,
   
   -- Meta
   meta_access_token TEXT,
@@ -118,3 +122,22 @@ ADD COLUMN IF NOT EXISTS meta_selected_account_id TEXT,
 ADD COLUMN IF NOT EXISTS meta_pages JSONB,
 ADD COLUMN IF NOT EXISTS meta_page_access_token TEXT,
 ADD COLUMN IF NOT EXISTS shopify_custom_domain TEXT;
+
+-- Cache for exchange rates
+CREATE TABLE IF NOT EXISTS exchange_rate_cache (
+  id INT PRIMARY KEY DEFAULT 1,
+  rates JSONB NOT NULL,
+  fetched_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT one_row CHECK (id = 1)
+);
+
+-- Stores token usage for Anthropic API calls
+CREATE TABLE IF NOT EXISTS api_usage_log (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id TEXT,
+  feature TEXT,
+  input_tokens INT,
+  output_tokens INT,
+  total_tokens INT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);

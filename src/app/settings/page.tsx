@@ -1,9 +1,11 @@
 import { auth } from "@clerk/nextjs/server";
 import { SignOutButton } from "@clerk/nextjs";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getUserIntegration } from "@/lib/db";
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { SyncButton } from "@/components/SyncButton";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
+import { MobileNav } from "@/components/MobileNav";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -14,15 +16,15 @@ export default async function SettingsPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { userId } = await auth();
+  
+  if (!userId) {
+    redirect("/login");
+  }
+
   const params = await searchParams;
   const metaStatus = params.meta as string | undefined;
   
-  const { data: integration } = await 
-    supabaseAdmin
-      .from("user_integrations")
-      .select("*")
-      .eq("clerk_user_id", userId)
-      .single();
+  const integration = await getUserIntegration(userId);
 
   console.log("Integration data:", JSON.stringify(integration));
 
@@ -32,7 +34,7 @@ export default async function SettingsPage({
   const storeDomain = integration?.shopify_custom_domain || integration?.shopify_store_url || 'your store';
 
   return (
-    <div className="min-h-screen bg-[var(--background)] px-4 py-12 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-[var(--background)] px-4 py-12 pb-28 sm:pb-12 sm:px-6 lg:px-8">
       <div className="max-w-2xl mx-auto">
         <div className="mb-6">
           <Link 
@@ -120,6 +122,7 @@ export default async function SettingsPage({
         </div>
       </div>
 
+      <MobileNav />
     </div>
   );
 }
