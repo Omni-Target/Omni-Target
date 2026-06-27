@@ -19,7 +19,14 @@ optional_scopes = [ ]
 use_legacy_install_flow = true
 
 [auth]
-redirect_urls = [ "https://app.omnitarget.co/api/auth/shopify/callback" ]
+redirect_urls = [
+  "https://app.omnitarget.co/api/auth/shopify/callback",
+  "http://localhost:3000/api/auth/shopify/callback",
+]
+
+[build]
+automatically_update_urls_on_dev = true
+# dev_store_url = "your-dev-store.myshopify.com"   # optional: skips the store prompt
 
 [pos]
 embedded = false

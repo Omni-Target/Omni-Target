@@ -1,10 +1,11 @@
 import React from "react";
-import OnboardingLayout from "@/components/onboarding-layout";
 
+// Each onboarding page renders its own <OnboardingShell> so the progress rail
+// can reflect the current step. This layout is a thin pass-through.
 export default function OnboardingGroupLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <OnboardingLayout>{children}</OnboardingLayout>;
+  return <>{children}</>;
 }

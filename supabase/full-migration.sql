@@ -29,6 +29,10 @@ CREATE TABLE IF NOT EXISTS user_integrations (
   access_token TEXT,
   shopify_refresh_token TEXT,
   shopify_token_expires_at TIMESTAMPTZ,
+  shopify_scopes TEXT,
+  -- Legacy token-exchange columns (still read by app)
+  refresh_token TEXT,
+  token_expires_at TIMESTAMPTZ,
 
   -- Meta
   meta_access_token TEXT,
@@ -68,6 +72,8 @@ CREATE INDEX IF NOT EXISTS idx_user_integrations_shop_domain
   ON user_integrations(shop_domain);
 CREATE INDEX IF NOT EXISTS idx_user_integrations_shopify_store_url
   ON user_integrations(shopify_store_url);
+CREATE INDEX IF NOT EXISTS idx_user_integrations_token_expires_at
+  ON user_integrations(token_expires_at);
 
 -- =====================
 -- 2. CAMPAIGNS
@@ -176,7 +182,52 @@ CREATE TABLE IF NOT EXISTS credit_usage (
 );
 
 -- =====================
--- 6. TRIGGERS
+-- 6. EXCHANGE RATE CACHE
+-- =====================
+-- Single-row cache of currency exchange rates
+
+CREATE TABLE IF NOT EXISTS exchange_rate_cache (
+  id INT PRIMARY KEY DEFAULT 1,
+  rates JSONB NOT NULL,
+  fetched_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT one_row CHECK (id = 1)
+);
+
+-- =====================
+-- 7. API USAGE LOG
+-- =====================
+-- Tracks token usage for Anthropic API calls
+
+CREATE TABLE IF NOT EXISTS api_usage_log (
+  id UUID DEFAULT gen_random_uuid()
+    PRIMARY KEY,
+  user_id TEXT,
+  feature TEXT,
+  input_tokens INT,
+  output_tokens INT,
+  total_tokens INT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =====================
+-- 8. EMAIL LOG
+-- =====================
+-- Tracks transactional emails sent per user
+-- to prevent duplicate sends
+
+CREATE TABLE IF NOT EXISTS email_log (
+  id UUID DEFAULT gen_random_uuid()
+    PRIMARY KEY,
+  user_id TEXT,
+  template TEXT,
+  sent_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_log_user_template
+  ON email_log(user_id, template);
+
+-- =====================
+-- 9. TRIGGERS
 -- =====================
 -- Auto-update updated_at on any row change
 

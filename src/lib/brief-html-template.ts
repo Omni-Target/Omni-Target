@@ -5,75 +5,124 @@ import path from "path";
 
 function esc(s: string | undefined | null): string {
   if (!s) return "";
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function fmt(amount: number, currency: string, symbol?: string): string {
   return formatCurrency(amount, currency, symbol);
 }
 
-function tags(items: string[], color = "#7c3aed", bg = "rgba(124,58,237,0.12)", border = "rgba(124,58,237,0.25)"): string {
-  return items.map(i => `<span class="tag" style="color:${color};background:${bg};border-color:${border}">${esc(i)}</span>`).join("");
+// ── Inline icon set (stroke = currentColor) ──────────────────────────────────
+const ICONS = {
+  intel: '<path d="M12 3v1.5M12 19.5V21M4.2 7.5l1.3.75M18.5 15.75l1.3.75M3 12h1.5M19.5 12H21M4.2 16.5l1.3-.75M18.5 8.25l1.3-.75"/><circle cx="12" cy="12" r="3.5"/>',
+  copy: '<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H14l6 6v7.5A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5z"/><path d="M14 4v6h6"/><path d="M8.5 13.5h7M8.5 16.5h4"/>',
+  target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+  budget: '<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6.5 9.5h.01M17.5 14.5h.01"/>',
+  timing: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 1.8"/>',
+  warning: '<path d="M10.3 3.9 2 18.2A2 2 0 0 0 3.7 21h16.6a2 2 0 0 0 1.7-2.8L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4.5M12 17h.01"/>',
+  guide: '<path d="M9 4.5h9M9 12h9M9 19.5h9"/><path d="M4 4.2l1.2 1.2 2-2.4M4 11.7l1.2 1.2 2-2.4M4 19.2l1.2 1.2 2-2.4"/>',
+  spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
+  gauge: '<path d="M4 14a8 8 0 0 1 16 0"/><path d="M12 14l3.5-3"/><circle cx="12" cy="14" r="1.2"/>',
+  rocket: '<path d="M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2"/><path d="M9 13.5 5.5 12a13 13 0 0 1 9-9l4 .5.5 4a13 13 0 0 1-9 9z"/><circle cx="14.5" cy="9.5" r="1.4"/>',
+} as const;
+
+type Tone = "neutral" | "success" | "info" | "warning";
+
+const TONE: Record<Tone, { fg: string; bg: string; bd: string }> = {
+  neutral: { fg: "#09090f", bg: "#f4f4f5", bd: "#e4e4e7" },
+  success: { fg: "#15803d", bg: "#f0fdf4", bd: "#c6f0d2" },
+  info: { fg: "#1d4ed8", bg: "#eff6ff", bd: "#cfe0fd" },
+  warning: { fg: "#b45309", bg: "#fffaeb", bd: "#fbe6bf" },
+};
+
+function tagList(items: string[], tone: Tone = "neutral"): string {
+  const t = TONE[tone];
+  return items
+    .map(
+      (i) =>
+        `<span class="tag" style="color:${t.fg};background:${t.bg};border-color:${t.bd}">${esc(i)}</span>`,
+    )
+    .join("");
 }
 
-function card(title: string, content: string, accentColor = "#7c3aed"): string {
-  return `
-  <div class="card" style="--accent:${accentColor}">
-    <div class="card-accent-bar"></div>
-    <div class="card-label">${esc(title)}</div>
-    <div class="card-body">${content}</div>
-  </div>`;
+function field(label: string, value: string, large = false): string {
+  return `<div class="field"><div class="field-label">${esc(label)}</div><div class="field-value${large ? " field-value-lg" : ""}">${value}</div></div>`;
 }
 
 function row(label: string, value: string): string {
   return `<div class="row"><span class="row-label">${esc(label)}</span><span class="row-value">${value}</span></div>`;
 }
 
-function field(label: string, value: string, large = false): string {
+function card(
+  label: string,
+  content: string,
+  icon: string = ICONS.spark,
+  tone: Tone = "neutral",
+  n?: number,
+): string {
+  const t = TONE[tone];
   return `
-  <div class="field">
-    <div class="field-label">${esc(label)}</div>
-    <div class="field-value${large ? " field-value-large" : ""}">${value}</div>
-  </div>`;
+  <section class="card">
+    <div class="card-head">
+      <span class="card-icon" style="color:${t.fg};background:${t.bg};border-color:${t.bd}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${icon}</svg>
+      </span>
+      <span class="card-label">${esc(label)}</span>
+      ${n ? `<span class="card-num">${String(n).padStart(2, "0")}</span>` : ""}
+    </div>
+    <div class="card-body">${content}</div>
+  </section>`;
 }
 
 export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
-  // Load Inter font weights from disk — guarantees offline rendering, no Google Fonts CDN needed
+  // Load Inter font weights from disk — guarantees offline rendering.
   const fontsDir = path.join(process.cwd(), "public", "fonts");
   const loadFont = (file: string) => {
-    try { return fs.readFileSync(path.join(fontsDir, file)).toString("base64"); }
-    catch { return ""; }
+    try {
+      return fs.readFileSync(path.join(fontsDir, file)).toString("base64");
+    } catch {
+      return "";
+    }
   };
   const inter400 = loadFont("inter-400.woff2");
   const inter600 = loadFont("inter-600.woff2");
   const inter700 = loadFont("inter-700.woff2");
   const inter800 = loadFont("inter-800.woff2");
   const fontFaceCSS = [
-    inter400 && `@font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; src: url('data:font/woff2;base64,${inter400}') format('woff2'); }`,
-    inter600 && `@font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; src: url('data:font/woff2;base64,${inter600}') format('woff2'); }`,
-    inter700 && `@font-face { font-family: 'Inter'; font-style: normal; font-weight: 700; src: url('data:font/woff2;base64,${inter700}') format('woff2'); }`,
-    inter800 && `@font-face { font-family: 'Inter'; font-style: normal; font-weight: 800; src: url('data:font/woff2;base64,${inter800}') format('woff2'); }`,
-  ].filter(Boolean).join("\n  ");
+    inter400 && `@font-face{font-family:'Inter';font-style:normal;font-weight:400;src:url('data:font/woff2;base64,${inter400}') format('woff2');}`,
+    inter600 && `@font-face{font-family:'Inter';font-style:normal;font-weight:600;src:url('data:font/woff2;base64,${inter600}') format('woff2');}`,
+    inter700 && `@font-face{font-family:'Inter';font-style:normal;font-weight:700;src:url('data:font/woff2;base64,${inter700}') format('woff2');}`,
+    inter800 && `@font-face{font-family:'Inter';font-style:normal;font-weight:800;src:url('data:font/woff2;base64,${inter800}') format('woff2');}`,
+  ]
+    .filter(Boolean)
+    .join("\n  ");
 
+  // ── Data extraction (unchanged contract) ──
   const gi = params.gatewayInsight ?? null;
-  const budget = params.budget ?? {};
-  const targeting = params.targeting ?? {};
-  const copy = params.copy ?? {};
-  const currency = (budget as any).currency || "USD";
-  const symbol = (budget as any).currency_symbol || getCurrencySymbol(currency);
-  const daily = (budget as any).goal_adjusted_daily ?? (budget as any).recommended_daily ?? null;
-  const duration = (budget as any).recommended_duration_days ?? 14;
-  const adSets = (budget as any).ad_sets || 1;
-  const locations = Array.isArray((targeting as any).locations) ? (targeting as any).locations : [];
-  const interests = Array.isArray((targeting as any).interests) ? (targeting as any).interests : [];
-  const behaviours = Array.isArray((targeting as any).behaviours) ? (targeting as any).behaviours : [];
-  const ageMin = (targeting as any).age_min ?? 25;
-  const ageMax = (targeting as any).age_max ?? 44;
-  const gender = (targeting as any).gender ?? "all";
-  const genderLabel = gender === "female" ? "Women" : gender === "male" ? "Men" : "All Genders";
+  const budget = params.budget ?? ({} as BriefPDFParams["budget"]);
+  const targeting = params.targeting ?? ({} as BriefPDFParams["targeting"]);
+  const copy = params.copy ?? ({} as BriefPDFParams["copy"]);
+  const timing = params.timing ?? ({} as BriefPDFParams["timing"]);
+  const currency = budget.currency || "USD";
+  const symbol = budget.currency_symbol || getCurrencySymbol(currency);
+  const daily = budget.goal_adjusted_daily ?? budget.recommended_daily ?? null;
+  const duration = budget.recommended_duration_days ?? 14;
+  const adSets = budget.ad_sets || 1;
+  const locations = Array.isArray(targeting.locations) ? targeting.locations : [];
+  const interests = Array.isArray(targeting.interests) ? targeting.interests : [];
+  const behaviours = Array.isArray(targeting.behaviours) ? targeting.behaviours : [];
+  const ageMin = targeting.age_min ?? 25;
+  const ageMax = targeting.age_max ?? 44;
+  const gender = targeting.gender ?? "all";
+  const genderLabel = gender === "female" ? "Women" : gender === "male" ? "Men" : "All genders";
   const warnings: string[] = Array.isArray(params.warnings) ? params.warnings : [];
+  const peakDays: string[] = Array.isArray(timing.peak_days) ? timing.peak_days : [];
 
-  // ── Fetch product image as base64 via server-side proxy ──
+  // ── Product image as base64 ──
   let productImgSrc = "";
   if (gi?.currentProductImage) {
     try {
@@ -81,27 +130,33 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
       if (res.ok) {
         const buf = await res.arrayBuffer();
         const ct = res.headers.get("content-type") || "image/jpeg";
-        const b64 = Buffer.from(buf).toString("base64");
-        productImgSrc = `data:${ct};base64,${b64}`;
+        productImgSrc = `data:${ct};base64,${Buffer.from(buf).toString("base64")}`;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
-  // ── Gateway Intelligence Card ──
+  // ── Store Intelligence content ──
   let gatewayCardHTML = "";
   if (gi) {
     const isGateway = gi.currentProductClassification === "Gateway";
-    const classColor = isGateway ? "#4ade80" : "#9b73ff";
-    const classLabel = isGateway ? "Gateway Product" : gi.currentProductClassification === "Consideration" ? "Consideration Product" : "Hybrid Product";
-    const formatPrescription = isGateway 
-      ? "We recommend leading with a UGC video showing the product in use." 
-      : gi.currentProductClassification === "Consideration" 
-        ? "We recommend a Carousel or a Founder-Led video to build trust." 
+    const isConsideration = gi.currentProductClassification === "Consideration";
+    const classTone: Tone = isGateway ? "success" : "neutral";
+    const classLabel = isGateway
+      ? "Gateway Product"
+      : isConsideration
+        ? "Consideration Product"
+        : "Hybrid Product";
+    const formatPrescription = isGateway
+      ? "We recommend leading with a UGC video showing the product in use."
+      : isConsideration
+        ? "We recommend a Carousel or a Founder-Led video to build trust."
         : "We recommend testing a UGC video against a Carousel to see what resonates.";
 
     let insightText = "";
     if (params.isNewLaunch) {
-      insightText = "New product — targeting built from your store's buyer profile";
+      insightText = "New product — targeting built from your store's buyer profile.";
     } else if (gi.currentProductName === gi.topGatewayName && gi.currentProductName === gi.bestsellerName) {
       insightText = "This product is both your organic bestseller and your strongest cold-traffic converter.";
     } else if (gi.currentProductName === gi.topGatewayName) {
@@ -109,167 +164,208 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     } else if (gi.currentProductName === gi.bestsellerName) {
       insightText = `This is your organic bestseller, but your top cold-traffic Gateway Product is ${gi.topGatewayName || "another product"}.`;
     } else {
-      const clsName = gi.currentProductClassification === "Insufficient Data" ? "Insufficient Data" : 
-                      (gi.currentProductClassification === "Unknown" || !gi.currentProductClassification ? "Hybrid" : gi.currentProductClassification);
-      const article = (clsName === "Insufficient Data" || clsName === "Unknown") ? "an" : "a";
+      const clsName =
+        gi.currentProductClassification === "Insufficient Data"
+          ? "Insufficient Data"
+          : gi.currentProductClassification === "Unknown" || !gi.currentProductClassification
+            ? "Hybrid"
+            : gi.currentProductClassification;
+      const article = clsName === "Insufficient Data" || clsName === "Unknown" ? "an" : "a";
       insightText = `This is ${article} ${clsName} Product. Your bestseller is ${gi.bestsellerName || "another product"}, and your top Gateway Product is ${gi.topGatewayName || "another product"}.`;
     }
 
-    const imgBlock = productImgSrc
-      ? `<img class="product-img" src="${productImgSrc}" alt="Product"/>`
-      : "";
-
-    gatewayCardHTML = card("Store Intelligence", `
-      <div class="intel-layout">
-        <div class="intel-content">
-          <div class="classification-badge" style="color:${classColor};border-color:${classColor}40;background:${classColor}12">${esc(classLabel)}</div>
-          ${field("Strategy Insight", `<p class="prose">${esc(insightText)}</p>`)}
-          ${field("Creative Direction", `<span class="highlight">${esc(formatPrescription)}</span>`)}
+    const ct = TONE[classTone];
+    gatewayCardHTML = card(
+      "Store intelligence",
+      `
+      <div class="intel">
+        <div class="intel-main">
+          <span class="pill" style="color:${ct.fg};background:${ct.bg};border-color:${ct.bd}">${esc(classLabel)}</span>
+          ${field("Strategy insight", `<p class="prose">${esc(insightText)}</p>`)}
+          <div class="callout callout-info">
+            <div class="callout-label">Creative direction</div>
+            <p>${esc(formatPrescription)}</p>
+          </div>
         </div>
-        ${imgBlock ? `<div class="intel-img">${imgBlock}</div>` : ""}
-      </div>
-    `, "#9b73ff");
+        ${productImgSrc ? `<div class="intel-img"><img src="${productImgSrc}" alt="Product"/></div>` : ""}
+      </div>`,
+      ICONS.intel,
+      "neutral",
+      1,
+    );
   }
 
-  // ── Ad Copy Card ──
-  const adCopyHTML = card("Ad Copy", `
-    ${field("Headline", `<p class="prose prose-white prose-xl">${esc((copy as any).headline)}</p>`, true)}
-    ${field("Primary Text", `<p class="prose">${esc((copy as any).primaryText)}</p>`)}
-    ${field("Link Description", `<p class="prose">${esc((copy as any).description)}</p>`)}
-    ${field("Call to Action", `<span class="cta-badge">${esc((copy as any).cta)}</span>`)}
-  `);
+  // ── At-a-glance summary ──
+  const stat = (label: string, value: string, sub = "") =>
+    `<div class="stat"><div class="stat-value">${value}</div><div class="stat-label">${esc(label)}</div>${sub ? `<div class="stat-sub">${esc(sub)}</div>` : ""}</div>`;
+  const summaryTiles = [
+    daily ? stat("Daily budget", fmt(daily, currency, symbol), budget.tier ? `${budget.tier} strategy` : "") : "",
+    stat("Test window", `${duration} days`, daily ? `Total ${fmt(daily * duration, currency, symbol)}` : ""),
+    stat("Audience", `${ageMin}–${ageMax}`, genderLabel),
+    budget.optimization_event ? stat("Optimize for", esc(budget.optimization_event.event)) : stat("Ad sets", `${adSets}`),
+  ]
+    .filter(Boolean)
+    .join("");
+  const summaryHTML = `
+  <section class="summary">
+    <div class="summary-head">
+      <span class="summary-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICONS.gauge}</svg></span>
+      <span>Campaign at a glance</span>
+    </div>
+    <div class="stat-grid">${summaryTiles}</div>
+  </section>`;
 
-  // ── Copywriter's Note ──
+  // ── Ad Copy ──
+  const adCopyHTML = card(
+    "Ad copy",
+    `
+    ${field("Headline", `<p class="prose headline">${esc(copy.headline)}</p>`, true)}
+    <div class="hr"></div>
+    ${field("Primary text", `<p class="prose">${esc(copy.primaryText)}</p>`)}
+    ${field("Link description", `<p class="prose">${esc(copy.description)}</p>`)}
+    ${field("Call to action", `<span class="cta-badge">${esc(copy.cta)}</span>`)}`,
+    ICONS.copy,
+    "neutral",
+    2,
+  );
+
+  // ── Copywriter's Note (quote block) ──
   const noteHTML = `
-  <div class="note-card">
-    <div class="note-bar"></div>
-    <div class="note-inner">
-      <div class="note-label">Copywriter's Note</div>
-      <p class="note-text">"${esc((copy as any).copywriterNote)}"</p>
+  <section class="quote">
+    <span class="quote-mark">&ldquo;</span>
+    <div class="quote-body">
+      <div class="quote-label">Copywriter's note</div>
+      <p class="quote-text">${esc(copy.copywriterNote)}</p>
     </div>
-  </div>`;
+  </section>`;
 
-  // ── Targeting Card ──
-  const safeLocations = Array.isArray(locations) ? locations : [];
-  const targetingHTML = card("Audience Targeting", `
-    ${field("Locations", safeLocations.length > 0
-      ? tags(safeLocations.map(l => `${(l?.name || l?.city || "").split(',')[0].trim()}${l?.source === "from_data" ? " ✓" : ""}`).filter(Boolean))
-      : `<span class="muted">Set manually in Meta Ads Manager</span>`)}
+  // ── Targeting ──
+  const targetingHTML = card(
+    "Audience targeting",
+    `
+    ${field(
+      "Locations",
+      locations.length > 0
+        ? tagList(
+            locations
+              .map((l) => `${(l?.name || l?.city || "").split(",")[0].trim()}${l?.source === "from_data" ? " ✓" : ""}`)
+              .filter(Boolean),
+          )
+        : `<span class="muted">Set manually in Meta Ads Manager</span>`,
+    )}
     <div class="two-col">
-      ${field("Age Range", `<span class="stat">${ageMin}–${ageMax}</span>`)}
-      ${field("Gender", `<span class="stat">${genderLabel}</span>`)}
+      ${field("Age range", `<span class="stat-inline">${ageMin}–${ageMax}</span>`)}
+      ${field("Gender", `<span class="stat-inline">${genderLabel}</span>`)}
     </div>
-    ${(targeting as any).age_reasoning ? `<p class="reasoning">${esc((targeting as any).age_reasoning)}</p>` : ""}
-    ${field("Interests", interests.length > 0 ? tags(interests) : `<span class="muted">Add manually based on your niche</span>`)}
-    ${field("Behaviours", behaviours.length > 0
-      ? tags(behaviours, "#4ade80", "rgba(74,222,128,0.1)", "rgba(74,222,128,0.25)")
-      : tags(["Engaged Shoppers"], "#4ade80", "rgba(74,222,128,0.1)", "rgba(74,222,128,0.25"))}
-  `);
+    ${targeting.age_reasoning ? `<p class="reasoning">${esc(targeting.age_reasoning)}</p>` : ""}
+    ${field("Interests", interests.length > 0 ? tagList(interests) : `<span class="muted">Add manually based on your niche</span>`)}
+    ${field("Behaviours", tagList(behaviours.length > 0 ? behaviours : ["Engaged Shoppers"], "success"))}`,
+    ICONS.target,
+    "neutral",
+    3,
+  );
 
-  // ── Budget Card ──
-  const budgetHTML = card("Budget & Strategy", `
+  // ── Budget ──
+  const budgetHTML = card(
+    "Budget & strategy",
+    `
     <div class="budget-hero">
       <div>
-        <div class="field-label">Daily Budget</div>
-        <div class="budget-amount">${daily ? fmt(daily, currency, symbol) : "Set Manually"}<span class="budget-unit">/day</span></div>
-        ${(budget as any).tier ? `<div class="budget-tier">${esc((budget as any).tier)} Strategy</div>` : ""}
+        <div class="field-label">Daily budget</div>
+        <div class="budget-amount">${daily ? fmt(daily, currency, symbol) : "Set manually"}<span class="budget-unit">/day</span></div>
+        ${budget.tier ? `<div class="budget-tier">${esc(budget.tier)} strategy</div>` : ""}
       </div>
       <div class="budget-meta">
         ${row("Duration", `${duration} days`)}
-        ${daily ? row("Total Test Spend", fmt(daily * duration, currency, symbol)) : ""}
-        ${row("Ad Sets", `${adSets} max`)}
+        ${daily ? row("Total test spend", fmt(daily * duration, currency, symbol)) : ""}
+        ${row("Ad sets", `${adSets} max`)}
       </div>
     </div>
-    ${(budget as any).optimization_event ? `
-      ${field("Optimization Event", `<span class="highlight">${esc((budget as any).optimization_event.event)}</span>`)}
-      <p class="reasoning">${esc((budget as any).optimization_event.reasoning)}</p>
-    ` : ""}
-    ${(budget as any).breakdown ? `
-      ${field("How This Was Calculated", `
-        <div class="breakdown-grid">
-          ${row("Revenue Signal", fmt((budget as any).breakdown.revenue_based, currency, symbol) + "/month")}
-          ${row("AOV Signal", fmt((budget as any).breakdown.aov_based, currency, symbol))}
-          ${(budget as any).goal_label ? row("Goal Adjustment", `Adjusted for ${(budget as any).goal_label}`) : ""}
-        </div>
-      `)}
-    ` : ""}
-    ${(budget as any).reasoning ? field("Strategy Context", `<p class="prose muted-prose">${esc((budget as any).reasoning)}</p>`) : ""}
-  `);
+    ${
+      budget.optimization_event
+        ? `<div class="callout callout-info"><div class="callout-label">Optimization event · ${esc(budget.optimization_event.event)}</div><p>${esc(budget.optimization_event.reasoning)}</p></div>`
+        : ""
+    }
+    ${
+      budget.breakdown
+        ? field(
+            "How this was calculated",
+            `<div class="breakdown">
+          ${row("Revenue signal", fmt(budget.breakdown.revenue_based, currency, symbol) + "/month")}
+          ${row("AOV signal", fmt(budget.breakdown.aov_based, currency, symbol))}
+          ${budget.goal_label ? row("Goal adjustment", `Adjusted for ${esc(budget.goal_label)}`) : ""}
+        </div>`,
+          )
+        : ""
+    }
+    ${budget.reasoning ? field("Strategy context", `<p class="prose muted-prose">${esc(budget.reasoning)}</p>`) : ""}`,
+    ICONS.budget,
+    "neutral",
+    4,
+  );
 
-  // ── Timing Card ──
-  const timing = params.timing ?? {};
-  const peakDays: string[] = Array.isArray((timing as any).peak_days) ? (timing as any).peak_days : [];
+  // ── Timing ──
   let timingHTML = "";
-  if (peakDays.length > 0 || (timing as any).launch_recommendation) {
-    timingHTML = card("Timing", `
-      ${(timing as any).launch_recommendation ? field("Launch Recommendation", `<p class="prose">${esc((timing as any).launch_recommendation)}</p>`) : ""}
-      ${peakDays.length > 0 ? field("Best Days to Run", tags(peakDays, "#60a5fa", "rgba(96,165,250,0.1)", "rgba(96,165,250,0.25)")) : ""}
-    `, "#3b82f6");
+  if (peakDays.length > 0 || timing.launch_recommendation) {
+    timingHTML = card(
+      "Timing",
+      `
+      ${timing.launch_recommendation ? field("Launch recommendation", `<p class="prose">${esc(timing.launch_recommendation)}</p>`) : ""}
+      ${peakDays.length > 0 ? field("Best days to run", tagList(peakDays, "info")) : ""}`,
+      ICONS.timing,
+      "info",
+      5,
+    );
   }
 
-  // Warnings
+  // ── Warnings ──
   let warningsHTML = "";
   if (warnings.length > 0) {
-    warningsHTML = card("Targeting Warnings & Notes", `
-      <div class="warn-list">
-        ${warnings.map(w => `
-          <div class="warn-item">
-            <span class="warn-icon">!</span>
-            <span>${esc(w)}</span>
-          </div>
-        `).join("")}
-      </div>
-    `, "#f59e0b");
+    warningsHTML = card(
+      "Before you launch",
+      `<div class="warn-list">${warnings
+        .map(
+          (w) =>
+            `<div class="warn-item"><span class="warn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS.warning}</svg></span><span>${esc(w)}</span></div>`,
+        )
+        .join("")}</div>`,
+      ICONS.warning,
+      "warning",
+    );
   }
 
-  // New Launch note card
-  const newLaunchNoteHTML = params.isNewLaunch ? card(
-    "New Launch",
-    `<p class="prose" style="color:#34d399;font-style:italic">Targeting built from your store's buyer profile &mdash; refine after your first 10 orders</p>`,
-    "#10b981"
-  ) : "";
+  // ── New launch note ──
+  const newLaunchNoteHTML = params.isNewLaunch
+    ? `<div class="callout callout-success callout-standalone"><span class="callout-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICONS.rocket}</svg></span><div><div class="callout-label">New launch</div><p>Targeting is built from your store's buyer profile — refine it after your first 10 orders.</p></div></div>`
+    : "";
 
-  // Implementation Guide for Beginners
+  // ── Implementation guide ──
+  const steps = [
+    {
+      t: "Campaign level",
+      d: `Go to Meta Ads Manager, click <strong>Create</strong>, and choose the <strong>Sales</strong> objective.`,
+    },
+    {
+      t: "Ad set level",
+      d: `Paste your <strong>locations, age, gender, and interests</strong> from the Audience section. Set your optimization event to <strong>${esc(budget.optimization_event?.event || "Purchases")}</strong> and enter your budget.`,
+    },
+    {
+      t: "Ad level",
+      d: `Upload your <strong>creative assets</strong> (UGC video or product images). Paste the <strong>primary text, headline, and link description</strong>, then add your product link to the destination URL.`,
+    },
+  ];
   const implementationGuideHTML = card(
-    "Meta Ads Implementation Guide",
-    `
-    <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 6px;">
-      <!-- Step 1 -->
-      <div style="display: flex; gap: 12px; align-items: flex-start; background: rgba(255,255,255,0.03); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);">
-        <div style="background: rgba(56, 189, 248, 0.1); padding: 6px; border-radius: 6px; color: #38bdf8; flex-shrink: 0;">
-          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-        </div>
-        <div>
-          <div style="color: var(--text-1); font-weight: bold; font-size: 12.5px; margin-bottom: 2px;">1. Campaign Level</div>
-          <div style="color: var(--text-2); font-size: 11.5px; line-height: 1.4;">Go to Meta Ads Manager, click <strong>Create</strong>, and choose the <strong>Sales</strong> objective.</div>
-        </div>
-      </div>
-
-      <!-- Step 2 -->
-      <div style="display: flex; gap: 12px; align-items: flex-start; background: rgba(255,255,255,0.03); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);">
-        <div style="background: rgba(56, 189, 248, 0.1); padding: 6px; border-radius: 6px; color: #38bdf8; flex-shrink: 0;">
-          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-        </div>
-        <div>
-          <div style="color: var(--text-1); font-weight: bold; font-size: 12.5px; margin-bottom: 2px;">2. Ad Set Level</div>
-          <div style="color: var(--text-2); font-size: 11.5px; line-height: 1.4;">Paste your <strong>Locations, Age, Gender, and Interests</strong> from the Audience section. Set your optimization event to <strong>${esc((budget as any).optimization_event?.event || 'Purchases')}</strong> and enter your budget.</div>
-        </div>
-      </div>
-
-      <!-- Step 3 -->
-      <div style="display: flex; gap: 12px; align-items: flex-start; background: rgba(255,255,255,0.03); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);">
-        <div style="background: rgba(56, 189, 248, 0.1); padding: 6px; border-radius: 6px; color: #38bdf8; flex-shrink: 0;">
-          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-        </div>
-        <div>
-          <div style="color: var(--text-1); font-weight: bold; font-size: 12.5px; margin-bottom: 2px;">3. Ad Level</div>
-          <div style="color: var(--text-2); font-size: 11.5px; line-height: 1.4;">Upload your own <strong>creative visual assets (UGC video or product images)</strong>. Copy and paste the <strong>Primary Text, Headline, and Link Description</strong>. Finally, paste your Product Link into the Destination URL field.</div>
-        </div>
-      </div>
-    </div>
-    <p style="margin-top: 12px; font-style: italic; color: var(--text-3); font-size: 11px; text-align: center;">This brief is designed to be directly copy-pasted into Meta Ads Manager to eliminate guesswork.</p>
-    `,
-    "#38bdf8"
+    "Meta Ads implementation guide",
+    `<div class="steps">${steps
+      .map(
+        (s, i) =>
+          `<div class="step"><span class="step-num">${i + 1}</span><div><div class="step-title">${s.t}</div><div class="step-desc">${s.d}</div></div></div>`,
+      )
+      .join("")}</div>
+    <p class="guide-foot">Designed to be copied straight into Meta Ads Manager — no guesswork.</p>`,
+    ICONS.guide,
+    "neutral",
+    6,
   );
 
   return `<!DOCTYPE html>
@@ -280,296 +376,211 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
 <title>Campaign Brief — ${esc(params.productName)}</title>
 <style>
   ${fontFaceCSS}
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  :root{
+    --ink:#09090f; --ink-2:#2c2c34;
+    --text-1:#18181b; --text-2:#52525b; --text-3:#8a8a94;
+    --bg:#eef0f3; --sheet:#ffffff; --subtle:#f6f7f9; --subtle-2:#f1f2f4;
+    --border:#e6e7ea; --border-2:#dcdde1;
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  }
+  @page{ size:auto; margin:14mm 0; }
+  html{ -webkit-print-color-adjust:exact!important; print-color-adjust:exact!important; background:var(--bg); }
+  body{ font-family:var(--font); background:var(--bg); color:var(--text-1); font-size:11.5px; line-height:1.6; padding:32px 0 64px; }
 
-  :root {
-    --bg: #0a0a0f;
-    --surface: #111118;
-    --card: #131320;
-    --border: #22223a;
-    --accent: #7c3aed;
-    --accent-glow: rgba(124,58,237,0.15);
-    --text-1: #ffffff;
-    --text-2: #a1a1aa;
-    --text-3: #8b8b9e;
-    --white: #ffffff;
-    --success: #4ade80;
-    --warning: #f59e0b;
-    --info: #60a5fa;
-    --font: 'Inter', -apple-system, sans-serif;
-  }
+  .sheet{ width:760px; max-width:94%; margin:0 auto; background:var(--sheet); border:1px solid var(--border); border-radius:18px; overflow:hidden; box-shadow:0 24px 60px -24px rgba(9,9,15,.18); }
 
-  @page { size: auto; margin: 0; }
+  /* Header */
+  .header{ position:relative; padding:40px 48px 34px; background:linear-gradient(180deg,#fafafb 0%,#ffffff 100%); border-bottom:1px solid var(--border); }
+  .header::before{ content:''; position:absolute; top:0; left:0; right:0; height:4px; background:linear-gradient(90deg,var(--ink) 0%,var(--ink-2) 60%,transparent 100%); }
+  .header-top{ display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:26px; }
+  .wordmark{ display:flex; align-items:center; gap:9px; font-size:15px; font-weight:800; letter-spacing:-.3px; color:var(--ink); }
+  .logo-badge{ width:26px; height:26px; border-radius:7px; background:var(--ink); display:flex; align-items:center; justify-content:center; }
+  .logo-badge svg{ width:16px; height:16px; }
+  .badge{ font-size:8px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--ink); border:1px solid var(--border-2); background:var(--subtle); padding:6px 12px; border-radius:100px; }
+  .eyebrow{ font-size:9px; font-weight:700; letter-spacing:2.4px; text-transform:uppercase; color:var(--text-3); margin-bottom:10px; }
+  .h1{ font-size:32px; font-weight:800; letter-spacing:-1.2px; line-height:1.08; color:var(--ink); margin-bottom:8px; }
+  .brand{ font-size:12.5px; color:var(--text-2); font-weight:500; }
+  .prod-link{ font-size:11px; color:var(--text-3); text-decoration:none; }
+  .meta-row{ display:flex; flex-wrap:wrap; gap:8px; margin-top:18px; }
+  .chip{ display:inline-flex; align-items:center; gap:7px; font-size:10px; font-weight:600; color:#fff; background:var(--ink); border-radius:8px; padding:7px 13px; }
+  .chip-dot{ width:5px; height:5px; border-radius:50%; background:#fff; opacity:.7; }
+  .chip-soft{ display:inline-flex; align-items:center; gap:6px; font-size:9px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:#15803d; background:#f0fdf4; border:1px solid #c6f0d2; border-radius:100px; padding:6px 12px; }
+  .header-date{ font-size:9px; color:var(--text-3); font-weight:600; margin-top:6px; text-align:right; }
 
-  html {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-    background-color: var(--bg) !important;
-    margin: 0;
-    padding: 0;
-  }
+  /* Content */
+  .content{ padding:28px 48px 44px; }
 
-  body {
-    font-family: var(--font);
-    background-color: var(--bg) !important;
-    color: var(--text-1);
-    font-size: 11px;
-    line-height: 1.6;
-    min-height: 100vh;
-    margin: 0;
-    padding: 0;
-  }
+  /* Summary */
+  .summary{ border:1px solid var(--border); background:var(--subtle); border-radius:14px; padding:18px 20px; margin-bottom:18px; page-break-inside:avoid; }
+  .summary-head{ display:flex; align-items:center; gap:9px; font-size:9px; font-weight:800; letter-spacing:2px; text-transform:uppercase; color:var(--text-2); margin-bottom:14px; }
+  .summary-icon{ color:var(--ink); }
+  .summary-icon svg{ width:15px; height:15px; }
+  .stat-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  .stat{ background:#fff; border:1px solid var(--border); border-radius:10px; padding:13px 14px; }
+  .stat-value{ font-size:18px; font-weight:800; letter-spacing:-.5px; color:var(--ink); line-height:1.1; }
+  .stat-label{ font-size:8.5px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--text-3); margin-top:6px; }
+  .stat-sub{ font-size:9.5px; color:var(--text-2); margin-top:3px; }
 
-  /* ── Header ── */
-  .header {
-    background: linear-gradient(135deg, #0d0d1a 0%, #130e24 50%, #0d0d1a 100%);
-    padding: 40px 48px 36px;
-    position: relative;
-    overflow: hidden;
-    border-bottom: 1px solid var(--border);
-  }
-  .header::before {
-    content: '';
-    position: absolute;
-    top: -60px; right: -80px;
-    width: 300px; height: 300px;
-    background: radial-gradient(circle, rgba(124,58,237,0.18) 0%, transparent 70%);
-    pointer-events: none;
-  }
-  .header-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 32px; }
-  .wordmark { font-size: 18px; font-weight: 800; color: var(--white); letter-spacing: -0.5px; display: flex; align-items: center; gap: 8px; }
-  .header-logo { width: 22px; height: 22px; color: var(--accent); }
-  .header-badge {
-    font-size: 8px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
-    color: var(--accent); border: 1px solid rgba(124,58,237,0.35);
-    background: rgba(124,58,237,0.08); padding: 5px 12px; border-radius: 100px;
-  }
-  .header-date { font-size: 8px; color: var(--text-3); font-weight: 500; margin-top: 4px; }
-  .header-product { font-size: 30px; font-weight: 900; color: var(--white); letter-spacing: -1px; line-height: 1.1; margin-bottom: 10px; }
-  .header-brand { font-size: 12px; color: var(--text-2); font-weight: 500; margin-bottom: 16px; }
-  .header-goal {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: rgba(124,58,237,0.1); border: 1px solid rgba(124,58,237,0.25);
-    border-radius: 8px; padding: 8px 14px;
-  }
-  .header-goal-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-  .header-goal-text { font-size: 10px; font-weight: 600; color: #c4b5fd; }
-  .header-bar { height: 3px; background: linear-gradient(90deg, var(--accent) 0%, #a78bfa 60%, transparent 100%); margin-top: 32px; border-radius: 2px; }
+  /* Card */
+  .card{ background:#fff; border:1px solid var(--border); border-radius:14px; margin-bottom:16px; overflow:hidden; page-break-inside:avoid; }
+  .card-head{ display:flex; align-items:center; gap:11px; padding:16px 20px; border-bottom:1px solid var(--subtle-2); }
+  .card-icon{ width:30px; height:30px; border-radius:8px; border:1px solid; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .card-icon svg{ width:16px; height:16px; }
+  .card-label{ font-size:11px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; color:var(--text-1); }
+  .card-num{ margin-left:auto; font-size:11px; font-weight:800; color:var(--text-3); letter-spacing:1px; }
+  .card-body{ padding:18px 20px; }
 
-  /* ── Content ── */
-  .content { padding: 40px 48px 60px; }
-  .section-gap { height: 16px; }
+  /* Fields */
+  .field{ margin-bottom:15px; } .field:last-child{ margin-bottom:0; }
+  .field-label{ font-size:8.5px; font-weight:700; letter-spacing:1.6px; text-transform:uppercase; color:var(--text-3); margin-bottom:6px; }
+  .field-value{ font-size:11.5px; color:var(--text-1); line-height:1.65; }
+  .headline{ font-size:17px; font-weight:800; letter-spacing:-.4px; color:var(--ink); line-height:1.25; }
+  .two-col{ display:flex; gap:24px; } .two-col .field{ flex:1; }
+  .hr{ height:1px; background:var(--subtle-2); margin:4px 0 15px; }
 
-  /* ── Cards ── */
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    overflow: hidden;
-    margin-bottom: 16px;
-    position: relative;
-    page-break-inside: avoid;
-  }
-  .card-accent-bar {
-    height: 3px;
-    background: linear-gradient(90deg, var(--accent) 0%, rgba(124,58,237,0.2) 100%);
-  }
-  .card-label {
-    font-size: 8.5px; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase;
-    color: var(--text-2); padding: 16px 20px 0;
-  }
-  .card-body { padding: 12px 20px 20px; }
+  .prose{ font-size:11.5px; line-height:1.7; color:var(--text-1); }
+  .muted{ color:var(--text-3); font-style:italic; }
+  .muted-prose{ color:var(--text-2); }
+  .reasoning{ font-size:10px; color:var(--text-3); line-height:1.6; margin:-8px 0 14px; }
+  .stat-inline{ font-size:15px; font-weight:800; color:var(--ink); letter-spacing:-.3px; }
 
-  /* ── Fields ── */
-  .field { margin-bottom: 16px; }
-  .field:last-child { margin-bottom: 0; }
-  .field-label {
-    font-size: 8px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
-    color: var(--text-2); margin-bottom: 5px;
-  }
-  .field-value { font-size: 11.5px; color: var(--text-1); line-height: 1.6; }
-  .field-value-large .prose-xl { font-size: 15px !important; font-weight: 700 !important; color: var(--white) !important; }
+  /* Tags */
+  .tag{ display:inline-block; font-size:9.5px; font-weight:600; border:1px solid; border-radius:7px; padding:4px 10px; margin:0 5px 5px 0; }
+  .pill{ display:inline-block; font-size:9.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; border:1px solid; border-radius:100px; padding:4px 11px; margin-bottom:12px; }
+  .cta-badge{ display:inline-block; font-size:11px; font-weight:700; background:var(--ink); color:#fff; border-radius:8px; padding:7px 15px; letter-spacing:.2px; }
 
-  .two-col { display: flex; gap: 24px; margin-bottom: 0; }
-  .two-col .field { flex: 1; }
+  /* Callout */
+  .callout{ border:1px solid var(--border); background:var(--subtle); border-radius:10px; padding:12px 14px; margin-top:4px; }
+  .callout p{ font-size:11px; color:var(--text-1); line-height:1.6; }
+  .callout-label{ font-size:8.5px; font-weight:800; letter-spacing:1.4px; text-transform:uppercase; color:var(--text-2); margin-bottom:5px; }
+  .callout-info{ background:#f7f8fa; border-color:var(--border); }
+  .callout-success{ background:#f0fdf4; border-color:#c6f0d2; } .callout-success .callout-label{ color:#15803d; }
+  .callout-standalone{ display:flex; gap:12px; align-items:flex-start; margin-bottom:16px; }
+  .callout-ic{ flex-shrink:0; width:30px; height:30px; border-radius:8px; background:#fff; border:1px solid #c6f0d2; color:#15803d; display:flex; align-items:center; justify-content:center; }
+  .callout-ic svg{ width:16px; height:16px; }
 
-  /* ── Text styles ── */
-  .prose { font-size: 11.5px; line-height: 1.7; color: var(--text-1); }
-  .prose-white { color: var(--white); }
-  .muted { color: var(--text-2); font-style: italic; font-size: 11px; }
-  .muted-prose { color: var(--text-2); }
-  .stat { font-size: 15px; font-weight: 700; color: var(--white); }
-  .highlight { font-size: 12.5px; font-weight: 700; color: #ddd6fe; }
-  .reasoning { font-size: 10px; color: var(--text-2); line-height: 1.6; margin-top: 6px; margin-bottom: 12px; }
+  /* Intel */
+  .intel{ display:flex; gap:20px; align-items:flex-start; }
+  .intel-main{ flex:1; min-width:0; }
+  .intel-img img{ width:100px; height:100px; object-fit:cover; border-radius:12px; border:1px solid var(--border); display:block; }
 
-  /* ── Tags ── */
-  .tag {
-    display: inline-block; font-size: 9.5px; font-weight: 600;
-    border: 1px solid; border-radius: 100px;
-    padding: 4px 12px; margin: 2px 3px 2px 0;
-  }
+  /* Quote */
+  .quote{ position:relative; background:var(--ink); color:#fff; border-radius:14px; padding:22px 26px 22px 56px; margin-bottom:16px; overflow:hidden; page-break-inside:avoid; }
+  .quote-mark{ position:absolute; left:18px; top:8px; font-size:54px; font-weight:800; line-height:1; color:rgba(255,255,255,.16); font-family:Georgia,serif; }
+  .quote-label{ font-size:8.5px; font-weight:800; letter-spacing:2px; text-transform:uppercase; color:rgba(255,255,255,.5); margin-bottom:8px; }
+  .quote-text{ font-size:13px; line-height:1.7; color:#fff; font-weight:500; }
 
-  /* ── CTA Badge ── */
-  .cta-badge {
-    display: inline-block; font-size: 11px; font-weight: 700;
-    background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(167,139,250,0.15));
-    border: 1px solid rgba(124,58,237,0.35); border-radius: 8px;
-    padding: 6px 14px; color: #ddd6fe; letter-spacing: 0.3px;
-  }
+  /* Budget */
+  .budget-hero{ display:flex; justify-content:space-between; align-items:flex-start; gap:20px; padding-bottom:16px; margin-bottom:16px; border-bottom:1px solid var(--subtle-2); }
+  .budget-amount{ font-size:30px; font-weight:800; letter-spacing:-1.2px; color:var(--ink); line-height:1; margin-top:4px; }
+  .budget-unit{ font-size:14px; font-weight:600; color:var(--text-3); letter-spacing:0; }
+  .budget-tier{ font-size:8.5px; font-weight:800; letter-spacing:1.4px; text-transform:uppercase; color:var(--text-2); margin-top:7px; }
+  .budget-meta{ min-width:200px; }
+  .row{ display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--subtle-2); }
+  .row:last-child{ border-bottom:none; }
+  .row-label{ font-size:9px; color:var(--text-3); font-weight:700; text-transform:uppercase; letter-spacing:.6px; }
+  .row-value{ font-size:11px; color:var(--text-1); font-weight:700; }
+  .breakdown{ background:var(--subtle); border:1px solid var(--border); border-radius:10px; padding:6px 14px; }
 
-  /* ── Classification Badge ── */
-  .classification-badge {
-    display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 1px;
-    text-transform: uppercase; border: 1px solid; border-radius: 100px;
-    padding: 4px 12px; margin-bottom: 14px;
-  }
+  /* Warnings */
+  .warn-list{ display:flex; flex-direction:column; gap:10px; }
+  .warn-item{ display:flex; align-items:flex-start; gap:11px; }
+  .warn-icon{ flex-shrink:0; width:22px; height:22px; border-radius:7px; background:#fffaeb; border:1px solid #fbe6bf; color:#b45309; display:flex; align-items:center; justify-content:center; }
+  .warn-icon svg{ width:13px; height:13px; }
+  .warn-item span:last-child{ font-size:11px; color:var(--text-1); line-height:1.6; padding-top:2px; }
 
-  /* ── Store Intelligence ── */
-  .intel-layout { display: flex; gap: 20px; align-items: flex-start; }
-  .intel-content { flex: 1; }
-  .intel-img { flex-shrink: 0; }
-  .product-img {
-    width: 90px; height: 90px; object-fit: cover;
-    border-radius: 10px; border: 1px solid var(--border);
-    display: block;
-  }
+  /* Steps */
+  .steps{ display:flex; flex-direction:column; gap:11px; }
+  .step{ display:flex; gap:13px; align-items:flex-start; background:var(--subtle); border:1px solid var(--border); border-radius:10px; padding:13px 15px; }
+  .step-num{ flex-shrink:0; width:24px; height:24px; border-radius:7px; background:var(--ink); color:#fff; font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+  .step-title{ font-size:12px; font-weight:700; color:var(--ink); margin-bottom:3px; }
+  .step-desc{ font-size:11px; color:var(--text-2); line-height:1.55; }
+  .guide-foot{ margin-top:13px; font-size:10.5px; font-style:italic; color:var(--text-3); text-align:center; }
 
-  /* ── Copywriter's Note ── */
-  .note-card {
-    background: #0c0c18; border: 1px solid var(--border);
-    border-radius: 14px; overflow: hidden;
-    margin-bottom: 16px; display: flex;
-    page-break-inside: avoid;
-  }
-  .note-bar { width: 3px; background: linear-gradient(180deg, var(--accent) 0%, #a78bfa 100%); flex-shrink: 0; }
-  .note-inner { padding: 16px 20px 18px; }
-  .note-label {
-    font-size: 8.5px; font-weight: 800; letter-spacing: 2.5px;
-    text-transform: uppercase; color: var(--text-2); margin-bottom: 10px;
-  }
-  .note-text { font-size: 11px; font-style: italic; color: var(--text-2); line-height: 1.8; }
+  /* Footer */
+  .footer{ display:flex; justify-content:space-between; align-items:center; padding:18px 48px; border-top:1px solid var(--border); background:var(--subtle); }
+  .footer-brand{ display:flex; align-items:center; gap:8px; font-size:10px; font-weight:800; color:var(--ink); letter-spacing:-.2px; }
+  .footer-brand .logo-badge{ width:18px; height:18px; border-radius:5px; } .footer-brand .logo-badge svg{ width:11px; height:11px; }
+  .footer-text{ font-size:9px; color:var(--text-3); font-weight:500; }
 
-  /* ── Budget ── */
-  .budget-hero { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
-  .budget-amount { font-size: 28px; font-weight: 900; color: var(--white); letter-spacing: -1px; line-height: 1; margin: 4px 0; }
-  .budget-unit { font-size: 14px; font-weight: 500; color: var(--text-2); }
-  .budget-tier { font-size: 9px; font-weight: 700; color: var(--accent); letter-spacing: 1.5px; text-transform: uppercase; margin-top: 4px; }
-  .budget-meta { text-align: right; }
-  .row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
-  .row:last-child { border-bottom: none; }
-  .row-label { font-size: 9px; color: var(--text-2); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-  .row-value { font-size: 10.5px; color: var(--text-1); font-weight: 600; }
-  .breakdown-grid { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+  /* Toolbar */
+  .toolbar{ position:fixed; top:0; left:0; right:0; z-index:9999; background:#fff; border-bottom:1px solid var(--border); padding:11px 24px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 6px 20px -10px rgba(9,9,15,.2); }
+  .toolbar-text{ font-size:13px; font-weight:600; color:var(--text-1); }
+  .btn{ font-family:var(--font); font-size:12px; font-weight:700; background:var(--ink); color:#fff; border:none; border-radius:9px; padding:10px 22px; cursor:pointer; }
+  .btn:hover{ background:var(--ink-2); }
 
-  /* ── Warnings ── */
-  .warn-list { display: flex; flex-direction: column; gap: 10px; }
-  .warn-item { display: flex; align-items: flex-start; gap: 10px; }
-  .warn-icon {
-    flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%;
-    background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.3);
-    color: #f59e0b; font-size: 9px; font-weight: 900;
-    display: flex; align-items: center; justify-content: center;
-  }
-  .warn-item span:last-child { font-size: 9.5px; color: #fcd34d; line-height: 1.6; padding-top: 1px; }
-
-  /* ── Footer ── */
-  .footer {
-    position: fixed; bottom: 0; left: 0; right: 0;
-    background: var(--bg); border-top: 1px solid var(--border);
-    padding: 10px 48px;
-    display: flex; justify-content: space-between; align-items: center;
-  }
-  .footer-text { font-size: 7px; color: var(--text-3); font-weight: 500; }
-  .footer-brand { font-size: 7px; font-weight: 800; color: var(--text-3); letter-spacing: 1px; text-transform: uppercase; }
-
-  /* ── Print Toolbar ── */
-  .print-toolbar {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-    border-bottom: 1px solid var(--border);
-    padding: 12px 48px;
-    display: flex; justify-content: space-between; align-items: center;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
-  }
-  .print-toolbar-text { font-size: 13px; font-weight: 600; color: var(--text-1); }
-  .print-btn {
-    font-family: var(--font); font-size: 12px; font-weight: 700;
-    background: linear-gradient(135deg, #7c3aed, #a78bfa); color: #fff;
-    border: none; border-radius: 8px; padding: 10px 24px; cursor: pointer;
-    transition: opacity 0.2s;
-  }
-  .print-btn:hover { opacity: 0.85; }
-
-  /* ── Print Overrides ── */
-  @media print {
-    .no-print { display: none !important; }
-    body { padding-top: 0 !important; }
-    .header { margin-top: 0; }
+  @media print{
+    .no-print{ display:none!important; }
+    body{ background:#fff; padding:0; }
+    .sheet{ width:100%; max-width:100%; border:none; border-radius:0; box-shadow:none; }
+    .header,.content{ padding-left:40px; padding-right:40px; }
   }
 </style>
 </head>
 <body>
 
-<header class="header">
-  <div class="header-top">
-    <div>
+<div class="sheet">
+  <header class="header">
+    <div class="header-top">
       <div class="wordmark">
-        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="header-logo">
-          <circle cx="6.5" cy="17.5" r="3.5" stroke="currentColor" stroke-width="2.5" />
-          <circle cx="17.5" cy="6.5" r="3.5" stroke="currentColor" stroke-width="2.5" />
-          <circle cx="6.5" cy="17.5" r="1.5" fill="currentColor" />
-          <circle cx="17.5" cy="6.5" r="1.5" fill="currentColor" />
-          <path d="M 9 15 Q 15 15 15 9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
-        </svg>
+        <span class="logo-badge">
+          <svg viewBox="0 0 32 32" fill="none">
+            <circle cx="16" cy="16" r="9" stroke="#fff" stroke-width="2" stroke-opacity="0.5"/>
+            <path d="M16 7a9 9 0 0 1 9 9" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="16" cy="16" r="4" stroke="#fff" stroke-width="2"/>
+            <circle cx="16" cy="16" r="1.6" fill="#fff"/>
+          </svg>
+        </span>
         Omni Target
       </div>
-      <div class="header-date">${esc(params.generatedAt)}</div>
+      <div>
+        <div class="badge">Campaign Brief</div>
+        <div class="header-date">${esc(params.generatedAt)}</div>
+      </div>
     </div>
-    <div class="header-badge">Campaign Brief</div>
+
+    <div class="eyebrow">AI Marketing Brief</div>
+    <h1 class="h1">${esc(params.productName)}</h1>
+    <div class="brand">by ${esc(params.brandName)}</div>
+    ${params.productUrl ? `<div style="margin-top:6px;"><a class="prod-link" href="${esc(params.productUrl)}" target="_blank">${esc(params.productUrl)}</a></div>` : ""}
+
+    <div class="meta-row">
+      <span class="chip"><span class="chip-dot"></span>${esc(params.campaignGoal)}</span>
+      ${params.isNewLaunch ? `<span class="chip-soft">New launch</span>` : ""}
+    </div>
+  </header>
+
+  <div class="content">
+    ${summaryHTML}
+    ${gatewayCardHTML}
+    ${adCopyHTML}
+    ${noteHTML}
+    ${targetingHTML}
+    ${budgetHTML}
+    ${timingHTML}
+    ${warningsHTML}
+    ${newLaunchNoteHTML}
+    ${implementationGuideHTML}
   </div>
 
-  <div class="header-product">${esc(params.productName)}</div>
-  ${params.productUrl ? `<div style="font-size:12px; margin-bottom:12px; margin-top:-4px;"><a href="${esc(params.productUrl)}" target="_blank" style="color:var(--info);text-decoration:none;">🔗 ${esc(params.productUrl)}</a></div>` : ""}
-  <div class="header-brand">by ${esc(params.brandName)}</div>
-  ${params.isNewLaunch ? `
-  <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:100px;padding:5px 12px;margin-bottom:12px;">
-    <span style="width:6px;height:6px;border-radius:50%;background:#10b981;display:inline-block;"></span>
-    <span style="font-size:8px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#34d399;">New Launch</span>
-  </div>` : ""}
-  <div class="header-goal">
-    <span class="header-goal-dot"></span>
-    <span class="header-goal-text">${esc(params.campaignGoal)}</span>
-  </div>
-  <div class="header-bar"></div>
-</header>
-
-<div class="content">
-  ${gatewayCardHTML}
-  ${adCopyHTML}
-  ${noteHTML}
-  ${targetingHTML}
-  ${budgetHTML}
-  ${timingHTML}
-  ${warningsHTML}
-  ${newLaunchNoteHTML}
-  ${implementationGuideHTML}
+  <footer class="footer">
+    <div class="footer-brand">
+      <span class="logo-badge"><svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="9" stroke="#fff" stroke-width="2.5" stroke-opacity="0.5"/><circle cx="16" cy="16" r="4" stroke="#fff" stroke-width="2.5"/><circle cx="16" cy="16" r="1.8" fill="#fff"/></svg></span>
+      Omni Target
+    </div>
+    <div class="footer-text">omnitarget.co · Confidential campaign brief</div>
+  </footer>
 </div>
 
-<footer class="footer no-print">
-  <div class="footer-brand">Omni Target</div>
-  <div class="footer-text">omnitarget.co — Confidential Campaign Brief</div>
-</footer>
-
-<div class="print-toolbar no-print">
-  <span class="print-toolbar-text">Your campaign brief is ready</span>
-  <button class="print-btn" onclick="window.print()">⬇ Save as PDF</button>
+<div class="toolbar no-print">
+  <span class="toolbar-text">Your campaign brief is ready</span>
+  <button class="btn" onclick="window.print()">Save as PDF</button>
 </div>
 
 <script>
-  window.onload = function() {
-    setTimeout(function() {
-      window.print();
-    }, 800);
+  window.onload = function () {
+    setTimeout(function () { window.print(); }, 800);
   };
 </script>
 </body>

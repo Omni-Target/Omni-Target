@@ -1,16 +1,25 @@
 "use client";
 
+import * as React from "react";
+import { RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+
 export function SyncButton() {
+  const [syncing, setSyncing] = React.useState(false);
   return (
-    <button
-      onClick={() =>
-        fetch("/api/store/data", { cache: "no-store" }).then(() =>
-          window.location.reload()
-        )
-      }
-      className="mt-4 text-xs text-brand-400 hover:text-brand-300 transition-colors"
+    <Button
+      variant="secondary"
+      size="sm"
+      isLoading={syncing}
+      onClick={() => {
+        setSyncing(true);
+        fetch("/api/store/data", { cache: "no-store" })
+          .then(() => window.location.reload())
+          .catch(() => setSyncing(false));
+      }}
     >
-      Force sync now →
-    </button>
+      {!syncing && <RefreshCw className="size-4" />}
+      Force sync now
+    </Button>
   );
 }

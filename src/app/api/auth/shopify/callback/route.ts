@@ -124,6 +124,16 @@ export async function GET(request: Request) {
     if (cols.hasAccessToken) {
       shopifyData.access_token = accessToken;
     }
+    // Keep the non-prefixed columns in sync with the prefixed ones. The token
+    // refresh path reads `refresh_token` first (falling back to
+    // `shopify_refresh_token`), so leaving it null here risks a stale/desynced
+    // value being sent on refresh.
+    if (cols.hasRefreshToken) {
+      shopifyData.refresh_token = refreshToken;
+    }
+    if (cols.hasTokenExpiresAt) {
+      shopifyData.token_expires_at = tokenExpiresAt;
+    }
 
     const existingByStore = await getExistingIntegrationByStore(shop, userId!);
 

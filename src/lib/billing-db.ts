@@ -11,6 +11,8 @@ export interface DBColumns {
   hasAccessToken: boolean;
   hasCredits: boolean;
   hasFreeCreditUsed: boolean;
+  hasRefreshToken: boolean;
+  hasTokenExpiresAt: boolean;
 }
 
 export async function detectColumns(): Promise<DBColumns> {

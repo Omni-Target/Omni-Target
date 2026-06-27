@@ -24,10 +24,22 @@ export async function GET() {
   // Get a valid (auto-refreshed) Shopify token
   const tokenResult = await getValidShopifyToken(userId);
 
-  if (!tokenResult) {
+  if (tokenResult.status === "not_connected") {
     return Response.json({
       connected: false,
       message: "Shopify store not connected",
+      credits_balance: creditsRow?.credits_balance || 0,
+      credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
+    });
+  }
+
+  if (tokenResult.status === "reauth_required") {
+    // The Shopify refresh token is dead (expired or already rotated). The
+    // merchant must reconnect — retrying with the stored token won't help.
+    return Response.json({
+      connected: false,
+      reauthRequired: true,
+      message: "Shopify session expired — please reconnect your store",
       credits_balance: creditsRow?.credits_balance || 0,
       credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
     });
