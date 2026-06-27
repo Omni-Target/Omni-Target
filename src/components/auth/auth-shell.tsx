@@ -12,7 +12,7 @@ const VALUE_PROPS = [
   {
     Icon: Wand2,
     title: "AI ad copy in seconds",
-    body: "Hook-driven Meta ad copy and creatives, tuned to your brand and catalogue.",
+    body: "Hook-driven Meta Ad copy and creatives, tuned to your brand and product catalog.",
   },
   {
     Icon: LineChart,
