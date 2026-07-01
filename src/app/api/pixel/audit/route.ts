@@ -34,7 +34,7 @@ export async function GET() {
     });
   }
 
-  const products: any[] = snapshot.products || [];
+  const products = snapshot.products || [];
   const orders = snapshot.orders || {};
 
   // ── Core metrics ─────────────────────────────────────────────────────────

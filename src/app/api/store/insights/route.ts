@@ -1,4 +1,5 @@
-import { auth } from "@clerk/nextjs/server";
+import { requireUser } from "@/lib/api/require-user";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { getUserIntegration } from "@/lib/db";
 import { generateRecommendations } from "@/lib/insights-engine";
 
@@ -6,13 +7,17 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET() {
-  const { userId } = await auth();
-  if (!userId) {
-    return Response.json(
-      { error: "Unauthorized" },
-      { status: 401 }
-    );
-  }
+  const authResult = await requireUser();
+  if (!authResult.ok) return authResult.response;
+  const { userId } = authResult;
+
+  const limited = await enforceRateLimit({
+    action: "store:insights",
+    identifier: userId,
+    limit: 30,
+    windowSeconds: 3600,
+  });
+  if (!limited.ok) return limited.response;
 
   try {
     // Get cached store snapshot

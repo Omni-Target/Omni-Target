@@ -14,7 +14,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-screen w-full bg-background">
         <Sidebar />
         <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-          <TopBar onMenuClick={() => setMobileOpen(true)} />
+          <TopBar onMenuClick={() => setMobileOpen(true)} menuOpen={mobileOpen} />
           <main className="flex-1">{children}</main>
         </div>
         <MobileNav open={mobileOpen} onOpenChange={setMobileOpen} />

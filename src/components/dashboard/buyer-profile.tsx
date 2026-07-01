@@ -1,5 +1,3 @@
-"use client";
-
 import { MapPin, CalendarClock, Wallet, HeartHandshake } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/currency";

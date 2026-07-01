@@ -2,6 +2,7 @@ import {
   getUserIntegration,
   updateUserIntegration,
   detectDbColumns,
+  supabaseAdmin,
 } from "./db";
 
 /**
@@ -34,6 +35,56 @@ export type ShopifyTokenResult =
  * the next request (the winning instance has already persisted a fresh token).
  */
 const inflightRefreshes = new Map<string, Promise<ShopifyTokenResult>>();
+
+/** Treat a token as needing refresh once it is within this window of expiry. */
+const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+
+/**
+ * Lease length for the cross-instance refresh lock — long enough to cover the
+ * Shopify round-trip + DB write, short enough that a crashed holder frees it
+ * quickly.
+ */
+const REFRESH_LOCK_TTL_SECONDS = 30;
+
+/**
+ * Acquire the distributed refresh lock for a user. Returns true if this instance
+ * may rotate the token, false if another instance holds the lease.
+ *
+ * FAILS OPEN: if the lock RPC is missing (migration 0003 not applied) or errors,
+ * returns true so we degrade to the in-process guard only — the lock layer never
+ * blocks a refresh on its own.
+ */
+async function acquireRefreshLock(userId: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabaseAdmin.rpc("acquire_refresh_lock", {
+      p_user_id: userId,
+      p_ttl_seconds: REFRESH_LOCK_TTL_SECONDS,
+    });
+    if (error) {
+      console.warn(
+        `[shopify-token] acquire_refresh_lock unavailable for ${userId}; proceeding without distributed lock:`,
+        error.message,
+      );
+      return true;
+    }
+    return data === true;
+  } catch (err) {
+    console.warn(
+      `[shopify-token] acquire_refresh_lock error for ${userId}; proceeding:`,
+      err,
+    );
+    return true;
+  }
+}
+
+/** Release the distributed refresh lock. Best-effort; the lease TTL is the backstop. */
+async function releaseRefreshLock(userId: string): Promise<void> {
+  try {
+    await supabaseAdmin.rpc("release_refresh_lock", { p_user_id: userId });
+  } catch {
+    // Best-effort: the lease TTL guarantees the lock is eventually freed.
+  }
+}
 
 /**
  * Ensures the Shopify access token for a given user is still valid.
@@ -71,7 +122,6 @@ export async function getValidShopifyToken(
   }
 
   // Check if token is within 24 hours of expiry
-  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
   const isWithin24HoursOfExpiry = Date.now() > expiresAt - TWENTY_FOUR_HOURS;
 
   if (!isWithin24HoursOfExpiry) {
@@ -111,10 +161,65 @@ export async function getValidShopifyToken(
 }
 
 /**
- * Performs the actual token rotation against Shopify and persists the result.
- * Separated out so it can be wrapped by the single-flight guard above.
+ * Resolves a fresh Shopify token, serialized across serverless instances by a
+ * distributed lease lock so the single-use refresh token rotates exactly once.
+ * The loser of the lock reuses the still-valid current token (it is only within
+ * the 24h window, not yet expired) and picks up the rotated token on a later
+ * request; {@link doRefreshShopifyToken} performs the actual rotation. The
+ * in-process `inflightRefreshes` guard collapses same-instance concurrency
+ * before we ever reach the distributed lock.
  */
 async function refreshShopifyToken(
+  userId: string,
+  shopUrl: string,
+  currentAccessToken: string,
+  refreshToken: string,
+): Promise<ShopifyTokenResult> {
+  const locked = await acquireRefreshLock(userId);
+  if (!locked) {
+    console.log(
+      `[shopify-token] refresh already in progress on another instance for ${userId}; using current token`,
+    );
+    return { status: "ok", accessToken: currentAccessToken, shopUrl };
+  }
+
+  try {
+    // Another instance may have rotated the token between our expiry check and
+    // acquiring the lock — re-read and skip the network call if it is now fresh.
+    const latest = await getUserIntegration(userId);
+    const latestToken = latest?.shopify_access_token || latest?.access_token;
+    const latestRawExpiry =
+      latest?.token_expires_at || latest?.shopify_token_expires_at;
+    const latestExpiry = latestRawExpiry
+      ? new Date(latestRawExpiry).getTime()
+      : null;
+    if (
+      latestToken &&
+      latestExpiry &&
+      Date.now() <= latestExpiry - TWENTY_FOUR_HOURS
+    ) {
+      console.log(
+        `[shopify-token] token already refreshed by another request for ${userId}`,
+      );
+      return { status: "ok", accessToken: latestToken, shopUrl };
+    }
+
+    return await doRefreshShopifyToken(
+      userId,
+      shopUrl,
+      currentAccessToken,
+      refreshToken,
+    );
+  } finally {
+    await releaseRefreshLock(userId);
+  }
+}
+
+/**
+ * Performs the actual token rotation against Shopify and persists the result.
+ * The caller ({@link refreshShopifyToken}) holds the distributed refresh lock.
+ */
+async function doRefreshShopifyToken(
   userId: string,
   shopUrl: string,
   currentAccessToken: string,

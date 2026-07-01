@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   const state = searchParams.get("state") || "";
   const hmac = searchParams.get("hmac");
 
-  const [_, from] = state.split("___");
+  const [, from] = state.split("___");
   const isFromDashboard = from === "dashboard";
 
   // Verify HMAC signature from Shopify
@@ -104,7 +104,7 @@ export async function GET(request: Request) {
     console.log("Shopify myshopify URL:", myshopifyUrl);
 
     // Shopify data payload — store token + refresh token + expiry
-    const shopifyData: Record<string, any> = {
+    const shopifyData: Record<string, unknown> = {
       shopify_store_url: myshopifyUrl,
       shopify_custom_domain: customDomain,
       shopify_access_token: accessToken,

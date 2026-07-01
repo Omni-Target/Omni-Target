@@ -91,14 +91,21 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {children}
       {mounted &&
         createPortal(
-          <div className="pointer-events-none fixed bottom-4 right-4 z-200 flex w-full max-w-sm flex-col gap-2.5">
+          <div
+            role="region"
+            aria-label="Notifications"
+            className="pointer-events-none fixed bottom-4 right-4 z-200 flex w-full max-w-sm flex-col gap-2.5"
+          >
             <AnimatePresence initial={false}>
               {toasts.map((t) => {
                 const Icon = iconMap[t.variant];
+                const assertive = t.variant === "danger" || t.variant === "warning";
                 return (
                   <motion.div
                     key={t.id}
                     layout
+                    role={assertive ? "alert" : "status"}
+                    aria-live={assertive ? "assertive" : "polite"}
                     initial={{ opacity: 0, y: 16, scale: 0.96 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, x: 24, scale: 0.96 }}

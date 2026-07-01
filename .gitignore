@@ -47,3 +47,5 @@ next-env.d.ts
 shopify.app.toml
 shopify.app.*.toml
 /.shopify/
+
+/docs

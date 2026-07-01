@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMounted } from "./use-mounted";
+import { useFocusTrap } from "./use-focus-trap";
 
 export interface DrawerProps {
   open: boolean;
@@ -31,6 +32,9 @@ export function Drawer({
   children,
 }: DrawerProps) {
   const mounted = useMounted();
+  const contentRef = React.useRef<HTMLElement>(null);
+  const titleId = React.useId();
+  const descriptionId = React.useId();
 
   React.useEffect(() => {
     if (!open) return;
@@ -45,6 +49,8 @@ export function Drawer({
       document.body.style.overflow = prev;
     };
   }, [open, onOpenChange]);
+
+  useFocusTrap(open, contentRef);
 
   if (!mounted) return null;
   const offscreen = side === "right" ? "100%" : "-100%";
@@ -62,14 +68,18 @@ export function Drawer({
             onClick={() => onOpenChange(false)}
           />
           <motion.aside
+            ref={contentRef}
             role="dialog"
             aria-modal="true"
+            aria-labelledby={title ? titleId : undefined}
+            aria-describedby={description ? descriptionId : undefined}
+            tabIndex={-1}
             initial={{ x: offscreen }}
             animate={{ x: 0 }}
             exit={{ x: offscreen }}
             transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
             className={cn(
-              "absolute inset-y-0 flex w-full flex-col bg-surface shadow-xl",
+              "absolute inset-y-0 flex w-full flex-col bg-surface shadow-xl outline-none",
               side === "right" ? "right-0 border-l" : "left-0 border-r",
               "border-border-subtle",
               width,
@@ -79,12 +89,17 @@ export function Drawer({
             <div className="flex items-start justify-between gap-4 border-b border-border-subtle px-6 py-5">
               <div className="flex flex-col gap-1">
                 {title && (
-                  <h2 className="text-base font-semibold tracking-[-0.01em] text-foreground">
+                  <h2
+                    id={titleId}
+                    className="text-base font-semibold tracking-[-0.01em] text-foreground"
+                  >
                     {title}
                   </h2>
                 )}
                 {description && (
-                  <p className="text-sm text-muted-foreground">{description}</p>
+                  <p id={descriptionId} className="text-sm text-muted-foreground">
+                    {description}
+                  </p>
                 )}
               </div>
               <button

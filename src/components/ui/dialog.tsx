@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMounted } from "./use-mounted";
+import { useFocusTrap } from "./use-focus-trap";
 
 const sizeMap = {
   sm: "max-w-sm",
@@ -39,6 +40,9 @@ export function Dialog({
   children,
 }: DialogProps) {
   const mounted = useMounted();
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const titleId = React.useId();
+  const descriptionId = React.useId();
 
   React.useEffect(() => {
     if (!open) return;
@@ -53,6 +57,8 @@ export function Dialog({
       document.body.style.overflow = prev;
     };
   }, [open, onOpenChange]);
+
+  useFocusTrap(open, contentRef);
 
   if (!mounted) return null;
 
@@ -69,13 +75,18 @@ export function Dialog({
             onClick={() => onOpenChange(false)}
           />
           <motion.div
+            ref={contentRef}
             role="dialog"
             aria-modal="true"
+            aria-labelledby={title ? titleId : undefined}
+            aria-describedby={description ? descriptionId : undefined}
+            tabIndex={-1}
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.97, y: 8 }}
             transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
             className={cn(
+              "outline-none",
               "relative z-10 w-full overflow-hidden rounded-2xl border border-border-subtle bg-surface shadow-xl",
               sizeMap[size],
               className,
@@ -94,12 +105,17 @@ export function Dialog({
             {(title || description) && (
               <div className="flex flex-col gap-1.5 px-6 pb-2 pt-6 pr-12">
                 {title && (
-                  <h2 className="text-lg font-semibold tracking-[-0.01em] text-foreground">
+                  <h2
+                    id={titleId}
+                    className="text-lg font-semibold tracking-[-0.01em] text-foreground"
+                  >
                     {title}
                   </h2>
                 )}
                 {description && (
-                  <p className="text-sm text-muted-foreground">{description}</p>
+                  <p id={descriptionId} className="text-sm text-muted-foreground">
+                    {description}
+                  </p>
                 )}
               </div>
             )}

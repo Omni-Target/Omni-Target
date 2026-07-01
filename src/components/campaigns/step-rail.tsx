@@ -1,5 +1,3 @@
-"use client";
-
 import { Check, ImageIcon, PenLine, Eye, FileText, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 

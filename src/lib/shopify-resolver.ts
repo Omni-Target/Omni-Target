@@ -6,7 +6,7 @@ export async function resolveShopifyDomain(
   error?: string;
 }> {
   // Clean the input
-  let domain = input.trim()
+  const domain = input.trim()
     .replace("https://", "")
     .replace("http://", "")
     .replace("www.", "")
@@ -76,7 +76,7 @@ export async function resolveShopifyDomain(
         "the URL and try again."
     };
 
-  } catch (err) {
+  } catch {
     return {
       myshopifyDomain: null,
       isShopify: false,

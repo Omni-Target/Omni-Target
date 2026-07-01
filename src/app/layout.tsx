@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import { MotionConfig } from "motion/react";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -57,7 +58,9 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       >
         <body className="min-h-full flex flex-col bg-background text-foreground antialiased">
-          {children}
+          {/* Respect the OS "reduce motion" setting across every motion component.
+              `user` keeps opacity fades but disables transform/layout animation. */}
+          <MotionConfig reducedMotion="user">{children}</MotionConfig>
         </body>
       </html>
     </ClerkProvider>

@@ -1,15 +1,23 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { requireUser } from "@/lib/api/require-user";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { BriefPDFParams } from "@/lib/generate-brief-pdf";
 import { buildBriefHTML } from "@/lib/brief-html-template";
 
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authResult = await requireUser();
+  if (!authResult.ok) return authResult.response;
+  const { userId } = authResult;
+
+  const limited = await enforceRateLimit({
+    action: "campaigns:pdf",
+    identifier: userId,
+    limit: 40,
+    windowSeconds: 3600,
+  });
+  if (!limited.ok) return limited.response;
 
   let params: BriefPDFParams;
   try {

@@ -5,6 +5,19 @@ import { createHash } from "crypto";
 
 export const dynamic = "force-dynamic";
 
+/** Subset of the Shopify orders/create webhook payload we read. */
+interface ShopifyOrderPayload {
+  id?: number | string;
+  created_at?: string;
+  currency?: string;
+  total_price?: string;
+  current_total_price?: string;
+  customer?: { email?: string; phone?: string };
+  billing_address?: { phone?: string };
+  shipping_address?: { phone?: string };
+  client_details?: { browser_ip?: string; user_agent?: string };
+}
+
 function hashSha256(value?: string): string | null {
   if (!value) return null;
   return createHash("sha256")
@@ -47,7 +60,7 @@ export async function POST(request: Request) {
   console.log(`Verified Shopify webhook. Topic: ${topicHeader}, Shop: ${shopDomain}`);
 
   // 2. Parse payload
-  let payload: any;
+  let payload: ShopifyOrderPayload;
   try {
     payload = JSON.parse(rawBody);
   } catch (err) {
@@ -97,7 +110,7 @@ export async function POST(request: Request) {
             const email = payload.customer?.email;
             const phone = payload.customer?.phone || payload.billing_address?.phone || payload.shipping_address?.phone;
 
-            const userData: Record<string, any> = {};
+            const userData: Record<string, unknown> = {};
             
             const hashedEmail = hashSha256(email);
             if (hashedEmail) {
@@ -119,7 +132,7 @@ export async function POST(request: Request) {
             const currency = payload.currency || "NGN";
             const totalValue = parseFloat(payload.total_price || payload.current_total_price || "0");
 
-            const capiPayload: Record<string, any> = {
+            const capiPayload: Record<string, unknown> = {
               data: [
                 {
                   event_name: "Purchase",

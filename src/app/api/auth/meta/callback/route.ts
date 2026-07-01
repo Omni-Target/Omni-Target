@@ -3,6 +3,7 @@ import { upsertUserIntegration } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { META_REDIRECT_URI } from "@/lib/meta-oauth";
+import type { MetaAdAccount } from "@/lib/types/meta";
 
 export async function GET(request: Request) {
   const { userId } = await auth();
@@ -56,12 +57,12 @@ export async function GET(request: Request) {
     );
 
     const adAccountsData = await adAccountsRes.json();
-    const allAccounts = adAccountsData.data || [];
+    const allAccounts: MetaAdAccount[] = adAccountsData.data || [];
     console.log("Ad accounts found (total):", allAccounts.length);
 
     // Filter to only writable accounts: active + ADVERTISE permission
     const writableAccounts = allAccounts.filter(
-      (a: any) =>
+      (a) =>
           a.account_status === 1 &&
           a.user_tasks?.includes("ADVERTISE")
     );
@@ -69,7 +70,7 @@ export async function GET(request: Request) {
 
     // Pre-select the first writable account, fallback to any active
     const activeAccount = writableAccounts[0] ||
-      allAccounts.find((a: any) => a.account_status === 1) ||
+      allAccounts.find((a) => a.account_status === 1) ||
       allAccounts[0];
 
     const firstPixel = activeAccount?.adspixels?.data?.[0];

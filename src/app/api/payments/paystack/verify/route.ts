@@ -1,78 +1,68 @@
-import { updatePayment, getUserIntegration, updateUserIntegration } from "@/lib/db";
+import { getPaymentById } from "@/lib/db";
 import { getPackById } from "@/lib/credit-packs";
+import { grantCredits } from "@/lib/grant-credits";
+import { getEnv, requireEnv } from "@/lib/env";
 
 export async function GET(request: Request) {
+  const appUrl = getEnv().NEXT_PUBLIC_APP_URL;
   const { searchParams } = new URL(request.url);
   const reference = searchParams.get("reference");
-
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
 
   if (!reference) {
     return Response.redirect(`${appUrl}/pricing?status=failed`);
   }
 
   try {
-    // Verify with Paystack
+    // Verify the transaction with Paystack.
     const verifyRes = await fetch(
-      `https://api.paystack.co/transaction/verify/${reference}`,
+      `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
       {
         headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          Authorization: `Bearer ${requireEnv("PAYSTACK_SECRET_KEY")}`,
         },
       }
     );
 
     const verifyData = await verifyRes.json();
 
-    console.log("Paystack verify:", {
-      status: verifyData.data?.status,
-      reference,
-      amount: verifyData.data?.amount,
-    });
-
-    if (verifyData.data?.status !== "success") {
+    if (verifyData?.data?.status !== "success") {
       return Response.redirect(`${appUrl}/pricing?status=failed`);
     }
 
-    const metadata = verifyData.data.metadata;
-    const { clerk_user_id, pack_id, payment_id } = metadata;
+    // Source identity + pack from OUR records (reference === our payment id),
+    // never from Paystack metadata, so they can't be spoofed.
+    const payment = await getPaymentById(reference);
+    if (!payment) {
+      console.error("[paystack-verify] no payment record for reference", reference);
+      return Response.redirect(`${appUrl}/pricing?status=failed`);
+    }
 
-    const pack = getPackById(pack_id);
+    const pack = getPackById(payment.pack);
     if (!pack) {
+      console.error("[paystack-verify] unknown pack on payment", payment.id);
       return Response.redirect(`${appUrl}/pricing?status=failed`);
     }
 
-    // Update payment status
-    await updatePayment(payment_id, {
-      status: "success",
-      provider_reference: reference,
-    });
-
-    // Grant credits
-    if (pack.unlimited_days > 0) {
-      // Agency pack
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + pack.unlimited_days);
-
-      await updateUserIntegration(clerk_user_id, {
-        credits_unlimited_until: expiresAt.toISOString(),
-      });
-    } else {
-      // Launch or Growth pack
-      const current = await getUserIntegration(clerk_user_id);
-
-      await updateUserIntegration(clerk_user_id, {
-        credits_balance: (current?.credits_balance || 0) + pack.credits,
-        credits_total_purchased: (current?.credits_total_purchased || 0) + pack.credits,
-      });
+    // Validate the amount actually paid matches the pack price (in kobo).
+    const expected = pack.price_ngn * 100;
+    if (
+      verifyData.data.amount !== expected ||
+      (verifyData.data.currency && verifyData.data.currency !== "NGN")
+    ) {
+      console.error(
+        `[paystack-verify] amount mismatch for payment ${payment.id}: paid ${verifyData.data.amount} ${verifyData.data.currency}, expected ${expected} NGN`
+      );
+      return Response.redirect(`${appUrl}/pricing?status=failed`);
     }
 
-    console.log(`Credits granted: ${pack.credits} to ${clerk_user_id}`);
+    // Idempotent + atomic grant (safe against callback replays).
+    await grantCredits(payment.clerk_user_id, pack, payment.id, reference);
 
-    return Response.redirect(`${appUrl}/dashboard?payment=success&pack=${pack_id}`);
-
+    return Response.redirect(
+      `${appUrl}/dashboard?payment=success&pack=${pack.id}`
+    );
   } catch (error) {
-    console.error("Verify error:", error);
+    console.error("[paystack-verify] error", error);
     return Response.redirect(`${appUrl}/pricing?status=failed`);
   }
 }
