@@ -1,5 +1,3 @@
-"use client";
-
 import { ImageIcon } from "lucide-react";
 import type { ProductRow } from "./types";
 

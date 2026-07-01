@@ -130,7 +130,7 @@ async function shopifyGetPaginated<T>(
         break;
       }
 
-      const body = await res.json() as any;
+      const body = await res.json() as Record<string, T[]>;
       const items = body[dataKey] || [];
       results = results.concat(items);
       pagesFetched++;
@@ -275,7 +275,7 @@ export async function fetchShopifyStoreData(
   // Fallback to store city/country if locationMap is completely empty
   if (Object.keys(locationMap).length === 0) {
     const shopCountry = shop?.country_code || "Nigeria";
-    const shopCity = (shop as any)?.city || (shopCountry === "NG" || shopCountry === "Nigeria" ? "Lagos" : "New York");
+    const shopCity = (shop as { city?: string } | undefined)?.city || (shopCountry === "NG" || shopCountry === "Nigeria" ? "Lagos" : "New York");
     locationMap[shopCity] = { count: 1, country: shopCountry };
   }
 
@@ -397,7 +397,7 @@ export async function fetchShopifyStoreData(
       (v) => v.inventory_quantity > 0
     );
     const inStockVariants = variants.filter(
-      (v: any) => v.inventory_quantity > 0
+      (v) => v.inventory_quantity > 0
     );
     const totalVariants = variants.length;
     const hasPartialStock = 
@@ -460,7 +460,7 @@ export async function fetchShopifyStoreData(
       has_partial_stock: hasPartialStock,
       in_stock_variant_count: inStockVariants.length,
       total_variant_count: totalVariants,
-      in_stock_variant_names: inStockVariants.map((v: any) => v.title),
+      in_stock_variant_names: inStockVariants.map((v) => v.title),
       first_time_buyer_ratio,
       order_velocity,
       repeat_purchase_rate,

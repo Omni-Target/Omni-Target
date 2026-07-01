@@ -1,5 +1,4 @@
 import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
 import { randomBytes } from "crypto";
 
 export async function GET(request: Request) {
@@ -18,7 +17,7 @@ export async function GET(request: Request) {
   if (!shop) {
     const { getUserIntegration } = await import("@/lib/db");
     const integration = await getUserIntegration(userId);
-    shop = integration?.shopify_store_url || integration?.shop_domain;
+    shop = integration?.shopify_store_url || integration?.shop_domain || null;
   }
 
   if (!shop) {

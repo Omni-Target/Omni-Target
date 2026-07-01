@@ -25,6 +25,17 @@ const isPublicRoute = createRouteMatcher([
   "/api/webhooks/privacy",
   "/api/webhooks/gdpr",
   "/api/shopify/webhook",
+  // Server-to-server / self-verifying endpoints that arrive with no Clerk
+  // session. These MUST bypass the auth redirect or the proxy returns a 307 to
+  // /login and the caller (Stripe, Vercel Cron, Paystack) never reaches the
+  // handler. Each verifies its own authenticity internally:
+  //  - Stripe webhook: Stripe signature (constructEvent)
+  //  - Cron: CRON_SECRET bearer token
+  //  - Paystack verify: confirms the transaction with Paystack + amount match,
+  //    and is idempotent (handles an expired browser session on redirect-back).
+  "/api/payments/stripe/webhook",
+  "/api/cron/(.*)",
+  "/api/payments/paystack/verify",
 ]);
 
 const isOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);

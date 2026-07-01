@@ -8,8 +8,10 @@ export const maxDuration = 60; // 60 seconds
 
 export async function GET(request: Request) {
   try {
+    // Fail closed: if CRON_SECRET is not configured, deny rather than allow.
     const authHeader = request.headers.get('authorization');
-    if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    const cronSecret = process.env.CRON_SECRET;
+    if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -67,8 +69,9 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({ success: true, processed: integrations.length, sent: sentCount });
-  } catch (err: any) {
+  } catch (err) {
     console.error('Cron job error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const message = err instanceof Error ? err.message : "Internal error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

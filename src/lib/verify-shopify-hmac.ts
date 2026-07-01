@@ -21,13 +21,18 @@ export async function verifyShopifyHmac(
     .update(rawBody, "utf8")
     .digest("base64");
 
+  const digestBuf = Buffer.from(digest, "utf8");
+  const headerBuf = Buffer.from(hmacHeader, "utf8");
+
+  // timingSafeEqual throws on a length mismatch; compare lengths first so the
+  // comparison itself stays constant-time and we never rely on a thrown
+  // exception for control flow. A length mismatch is always a failed signature.
+  if (digestBuf.length !== headerBuf.length) {
+    return false;
+  }
+
   try {
-    // timingSafeEqual requires both Buffers to be the same length;
-    // a length mismatch itself leaks nothing but throws — catch it.
-    return timingSafeEqual(
-      Buffer.from(digest, "utf8"),
-      Buffer.from(hmacHeader, "utf8")
-    );
+    return timingSafeEqual(digestBuf, headerBuf);
   } catch {
     return false;
   }

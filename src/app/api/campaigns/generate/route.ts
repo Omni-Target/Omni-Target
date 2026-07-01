@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { Anthropic } from "@anthropic-ai/sdk";
-import { auth } from "@clerk/nextjs/server";
+import { requireUser } from "@/lib/api/require-user";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { queryUserIntegrationSelect, updateUserIntegration, insertCreditUsage, logApiUsage } from "@/lib/db";
 import sharp from "sharp";
-import { getPriceTier, getPriceTierPromptHint } from "@/lib/price-tier";
 
 import { detectColumns } from "@/lib/billing-db";
 
@@ -29,14 +29,28 @@ interface GenerateRequest {
   duration?: string;
   locations?: string[];
   productVariants?: string | null;
-  gatewayInsight?: any;
-  storeDataForApi?: any;
+  gatewayInsight?: GatewayInsight | null;
+  storeDataForApi?: unknown;
   storeAov?: number | null;
   storePrices?: number[];
   isNewLaunch?: boolean;
   isRegeneration?: boolean;
   shopifyStoreCountry?: string | null;
-  topCustomerLocations?: any[] | null;
+  topCustomerLocations?: CustomerLocation[] | null;
+}
+
+interface GatewayInsight {
+  storeAov?: number;
+  currentProductClassification?: string;
+  currentProductVelocity?: number;
+  storeMedianVelocity?: number;
+  currentProductRepeatRate?: number;
+}
+
+interface CustomerLocation {
+  city?: string;
+  province?: string;
+  country?: string;
 }
 
 /**
@@ -45,7 +59,18 @@ interface GenerateRequest {
  * @returns JSON response with AI-generated ad creatives or an error object
  */
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const authResult = await requireUser();
+  if (!authResult.ok) return authResult.response;
+  const { userId } = authResult;
+
+  // AI generation is the most expensive endpoint (Anthropic + image processing).
+  const limited = await enforceRateLimit({
+    action: "campaigns:generate",
+    identifier: userId,
+    limit: 20,
+    windowSeconds: 3600,
+  });
+  if (!limited.ok) return limited.response;
 
   const cols = await detectColumns();
   const selectQuery = [
@@ -90,36 +115,18 @@ export async function POST(request: Request) {
       targetAudience = "Broad",
       campaignGoal = "Drive Website Sales",
       tonePreference = "Let AI decide",
-      mediaUrl,
       imageUrl,
       productPrice,
       platform,
       productVariants,
       gatewayInsight,
-      storeDataForApi,
       storeAov,
-      storePrices,
       isNewLaunch,
       shopifyStoreCountry,
       topCustomerLocations,
     } = body;
 
     const currency = integration?.store_snapshot?.store?.currency || "USD";
-
-    const CURRENCY_TO_REGION: Record<string, string> = {
-      "NGN": "NG",
-      "GBP": "GB",
-      "EUR": "EU",
-      "AED": "AE",
-      "USD": "US",
-      "CAD": "CA",
-      "AUD": "AU",
-      "GHS": "GH",
-      "KES": "KE",
-      "ZAR": "ZA",
-    };
-
-    const storeRegion = CURRENCY_TO_REGION[currency] || "OTHER";
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
@@ -129,15 +136,6 @@ export async function POST(request: Request) {
       );
     }
     const client = new Anthropic({ apiKey });
-
-    // Derive a qualitative price tier from the store's own catalog distribution.
-    // Thresholds are computed from the data — no hardcoded currency amounts.
-    const priceTier = getPriceTier(
-      productPrice,
-      storePrices ?? [],
-      storeAov ?? gatewayInsight?.storeAov
-    );
-    const priceTierHint = priceTier ? getPriceTierPromptHint(priceTier) : null;
 
     // Validate required fields
     if (!brandName || !productName || !productDescription) {
@@ -232,7 +230,7 @@ OUTPUT — Provide the final ad copy in clean formatting. Omit all internal reas
     });
 
     const formattedLocations = Array.isArray(topCustomerLocations)
-      ? topCustomerLocations.map((l: any) => `${l.city || l.province || ""}${l.country ? ` (${l.country})` : ""}`).filter(Boolean).join(", ")
+      ? topCustomerLocations.map((l) => `${l.city || l.province || ""}${l.country ? ` (${l.country})` : ""}`).filter(Boolean).join(", ")
       : "Unknown";
 
     const textContent = 
@@ -276,8 +274,8 @@ ${productVariants ?
 ${gatewayInsight?.currentProductClassification === "Gateway" ?
   `CRITICAL: This product is classified as a GATEWAY PRODUCT. It converts cold traffic extremely well.
   Your hook MUST be derived from its high velocity or repeat rate. 
-  ${gatewayInsight.currentProductVelocity > (gatewayInsight.storeMedianVelocity || 0) ? `Consider a hook like "Sells out every ${Math.max(1, Math.round(90 / (gatewayInsight.currentProductVelocity || 1)))} days".` : ""}
-  ${gatewayInsight.currentProductRepeatRate > 0.1 ? `Or a hook like "The ${productName} our customers come back for".` : ""}`
+  ${(gatewayInsight.currentProductVelocity ?? 0) > (gatewayInsight.storeMedianVelocity || 0) ? `Consider a hook like "Sells out every ${Math.max(1, Math.round(90 / (gatewayInsight.currentProductVelocity || 1)))} days".` : ""}
+  ${(gatewayInsight.currentProductRepeatRate ?? 0) > 0.1 ? `Or a hook like "The ${productName} our customers come back for".` : ""}`
   : gatewayInsight?.currentProductClassification === "Consideration" ?
   `CRITICAL: This product is classified as a CONSIDERATION PRODUCT. It converts warm or returning traffic.
   Your hook MUST be derived from its premium attributes and the fact that it is a high-consideration purchase. Address the quality and investment value.`
@@ -292,7 +290,7 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
   - Write copy that builds desire and curiosity rather than urgency or proof.
   - Use the product's design, materials, and category to sell the vision, not the track record.` : ""}`;
 
-    const messageContent: any[] = [];
+    const messageContent: Anthropic.ContentBlockParam[] = [];
 
     // Max base64 size we'll send to Anthropic (4.5 MB leaves headroom under the 5 MB API limit)
     const MAX_BASE64_BYTES = 4_500_000;
@@ -399,7 +397,11 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
           type: "image",
           source: {
             type: "base64",
-            media_type: imgData.mediaType as any,
+            media_type: imgData.mediaType as
+              | "image/jpeg"
+              | "image/png"
+              | "image/gif"
+              | "image/webp",
             data: imgData.base64,
           }
         });
@@ -435,7 +437,9 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
         return null;
       });
 
-      const resolvedFrames = (await Promise.all(framePromises)).filter(Boolean);
+      const resolvedFrames = (await Promise.all(framePromises)).filter(
+        (f): f is NonNullable<typeof f> => f !== null
+      );
       messageContent.push(...resolvedFrames);
     }
 
@@ -499,7 +503,7 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
     // Deduct credit after successful generation, ONLY if it's not a free regeneration
     if (!hasUnlimited && !isRegeneration) {
       const newCredits = Math.max(0, currentCredits - 1);
-      const updateData: Record<string, any> = {};
+      const updateData: Record<string, unknown> = {};
       if (cols.hasCredits) {
         updateData.credits = newCredits;
       }
@@ -545,14 +549,15 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
 
     // Return the successfully parsed JSON output
     return NextResponse.json(parsedResponse, { status: 200 });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Campaign API Generation Error:", error);
 
     // Map known Anthropic error types to user-friendly messages
+    const err = error as { status?: number; message?: string };
     const message =
-      error?.status === 400 && error?.message?.includes("image")
+      err?.status === 400 && err?.message?.includes("image")
         ? "Product image could not be processed. Try a different image or generate without one."
-        : error?.status === 429
+        : err?.status === 429
           ? "AI is temporarily busy. Please try again in a moment."
           : "Something went wrong generating your brief. Please try again.";
 

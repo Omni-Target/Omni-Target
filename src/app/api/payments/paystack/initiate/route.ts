@@ -1,6 +1,12 @@
+import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
 import { createPayment } from "@/lib/db";
 import { getPackById } from "@/lib/credit-packs";
+
+const BodySchema = z.object({
+  packId: z.string().min(1).max(100),
+  email: z.string().email(),
+});
 
 export async function POST(request: Request) {
   const { userId } = await auth();
@@ -11,7 +17,18 @@ export async function POST(request: Request) {
     );
   }
 
-  const { packId, email } = await request.json();
+  let rawBody: unknown;
+  try {
+    rawBody = await request.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const parsed = BodySchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return Response.json({ error: "Invalid request" }, { status: 400 });
+  }
+  const { packId, email } = parsed.data;
 
   const pack = getPackById(packId);
   if (!pack) {

@@ -1,75 +1,10 @@
 import { StoreData } from "./store-data";
 import Anthropic from "@anthropic-ai/sdk";
 import { formatCurrency } from "@/lib/currency";
-import { getExchangeRateCache, setExchangeRateCache } from "./db";
+import { fetchExchangeRates } from "./exchange-rates";
 
 const anthropicClient = new Anthropic();
 import { logApiUsage } from "@/lib/db";
-
-// WARNING: NGN (Naira) is highly volatile.
-// The 24-hour caching window may introduce meaningful variance in daily/monthly budget recommendations
-// during periods of rapid rate fluctuations.
-export async function fetchExchangeRates(): Promise<Record<string, number>> {
-  try {
-    const cached = await getExchangeRateCache();
-    if (cached && cached.rates && cached.fetched_at) {
-      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).getTime();
-      const fetchedAt = new Date(cached.fetched_at).getTime();
-      if (fetchedAt > oneDayAgo) {
-        return cached.rates as Record<string, number>;
-      }
-    }
-  } catch (err) {
-    console.error("Error reading exchange rates cache from database layer:", err);
-  }
-
-  // Cache miss or table not found/error: fetch from API
-  try {
-    console.log("Fetching fresh exchange rates from API...");
-    const res = await fetch("https://open.er-api.com/v6/latest/USD");
-    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-    const json = await res.json();
-    const rates = json.rates as Record<string, number>;
-
-    if (rates && typeof rates === "object") {
-      try {
-        await setExchangeRateCache(rates);
-      } catch (cacheErr) {
-        console.error("Database write exchange rate cache error:", cacheErr);
-      }
-      return rates;
-    }
-  } catch (err) {
-    console.error("Failed to fetch fresh exchange rates from API:", err);
-  }
-
-  // Final fallback rates
-  return {
-    USD: 1,
-    GBP: 0.8,
-    EUR: 0.9,
-    AED: 3.67,
-    NGN: 1500,
-    CAD: 1.4,
-    AUD: 1.5,
-    GHS: 15,
-    KES: 130,
-    ZAR: 19,
-  };
-}
-
-export const CURRENCY_TO_REGION: Record<string, string> = {
-  "NGN": "NG",
-  "GBP": "GB",
-  "EUR": "EU",
-  "AED": "AE",
-  "USD": "US",
-  "CAD": "CA",
-  "AUD": "AU",
-  "GHS": "GH",
-  "KES": "KE",
-  "ZAR": "ZA",
-};
 
 export interface LocationResult {
   name: string;
@@ -308,6 +243,11 @@ Campaign Context:
 
     const toolUseBlock = response.content.find((c) => c.type === "tool_use");
     if (toolUseBlock && toolUseBlock.type === "tool_use") {
+      // The tool-use input is the model's dynamic JSON output. It is constrained
+      // by the tool's input_schema above and transformed/validated field-by-field
+      // below, so a precise static type would add maintenance cost without real
+      // safety. This is the one justified `any` in the data path.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const profile = toolUseBlock.input as any;
       // Log raw AI output for debugging targeting quality
       console.log("[AI targeting profile raw output]", JSON.stringify(profile, null, 2));
@@ -643,7 +583,7 @@ export async function generateRecommendations(
   }
 
   // ── BUDGET CALCULATION (USD tiered revenue ratio with AOV liquidity guardrail) ──
-  const avgMonthlyRevenue = (storeData.orders as any).revenue_avg_3_months || storeData.orders.revenue_last_30_days || 0;
+  const avgMonthlyRevenue = (storeData.orders as { revenue_avg_3_months?: number }).revenue_avg_3_months || storeData.orders.revenue_last_30_days || 0;
   const avgMonthlyRevenueUSD = avgMonthlyRevenue / exchangeRate;
 
   const TEST_DURATION_DAYS = 14;
@@ -704,7 +644,7 @@ export async function generateRecommendations(
   
   const locations = profile.locations;
   const interests = profile.audiences.interests;
-  const behaviours = (profile.audiences.behaviours || (profile.audiences as any).behaviors || ["Engaged Shoppers"]).filter((b: string) => b !== "Online Shoppers" && b !== "Online shoppers");
+  const behaviours = (profile.audiences.behaviours || (profile.audiences as { behaviors?: string[] }).behaviors || ["Engaged Shoppers"]).filter((b: string) => b !== "Online Shoppers" && b !== "Online shoppers");
   const interest_reasoning = profile.audiences.interest_reasoning;
 
   // Goal multipliers (applied client-side, stored for reference)
@@ -737,7 +677,7 @@ export async function generateRecommendations(
     }
   ];
 
-  let budgetReasoning = `Based on your monthly store revenue of ${formatCurrency(Math.round(avgMonthlyRevenue), storeCurrency, storeData.store.currency_symbol)}, ` +
+  const budgetReasoning = `Based on your monthly store revenue of ${formatCurrency(Math.round(avgMonthlyRevenue), storeCurrency, storeData.store.currency_symbol)}, ` +
     `we recommend ${adSets} ad set${adSets > 1 ? "s" : ""} at ${formatCurrency(recommendedDaily, storeCurrency, storeData.store.currency_symbol)} per ad set/day. ` +
     adSetReasoning;
 

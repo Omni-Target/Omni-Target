@@ -28,6 +28,7 @@ export function CopyField({
         <button
           type="button"
           onClick={() => onCopy(value, fieldKey)}
+          aria-label={copied ? `${label} copied` : `Copy ${label}`}
           className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 transition-colors hover:text-brand-700"
         >
           {copied ? (

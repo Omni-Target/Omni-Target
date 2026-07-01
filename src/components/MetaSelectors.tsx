@@ -2,6 +2,20 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useToast } from "@/components/ui/toast";
+
+interface MetaAccount {
+  id: string;
+  name: string;
+  currency?: string;
+  account_status?: number;
+  user_tasks?: string[];
+}
+
+interface MetaPage {
+  id: string;
+  name: string;
+}
 
 export function MetaSelectors({
   allAccounts,
@@ -9,15 +23,15 @@ export function MetaSelectors({
   allPages,
   selectedPageId,
 }: {
-  allAccounts: any[];
+  allAccounts: MetaAccount[];
   selectedAccountId: string | null;
-  allPages: any[];
+  allPages: MetaPage[];
   selectedPageId: string | null;
 }) {
   const router = useRouter();
+  const { toast } = useToast();
   const [loadingAccount, setLoadingAccount] = useState(false);
   const [loadingPage, setLoadingPage] = useState(false);
-  const [successMsg, setSuccessMsg] = useState("");
 
   const handleAccountChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
@@ -28,13 +42,16 @@ export function MetaSelectors({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ adAccountId: val }),
       });
-      if (res.ok) {
-        setSuccessMsg("Ad account updated");
-        setTimeout(() => setSuccessMsg(""), 3000);
-        router.refresh();
-      }
-    } catch(err) {
-      console.error(err);
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      toast({ variant: "success", title: "Ad account updated" });
+      router.refresh();
+    } catch (err) {
+      console.error("[MetaSelectors] account change failed", err);
+      toast({
+        variant: "danger",
+        title: "Couldn't update ad account",
+        description: "Please try again.",
+      });
     } finally {
       setLoadingAccount(false);
     }
@@ -50,18 +67,21 @@ export function MetaSelectors({
       const res = await fetch("/api/user/select-page", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          meta_page_id: selectedPage.id, 
-          meta_page_name: selectedPage.name 
+        body: JSON.stringify({
+          meta_page_id: selectedPage.id,
+          meta_page_name: selectedPage.name,
         }),
       });
-      if (res.ok) {
-        setSuccessMsg("Facebook Page updated");
-        setTimeout(() => setSuccessMsg(""), 3000);
-        router.refresh();
-      }
-    } catch(err) {
-      console.error(err);
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      toast({ variant: "success", title: "Facebook Page updated" });
+      router.refresh();
+    } catch (err) {
+      console.error("[MetaSelectors] page change failed", err);
+      toast({
+        variant: "danger",
+        title: "Couldn't update Facebook Page",
+        description: "Please try again.",
+      });
     } finally {
       setLoadingPage(false);
     }
@@ -69,7 +89,7 @@ export function MetaSelectors({
 
   // Filter to only show writable, active accounts
   const writableAccounts = allAccounts.filter(
-    (a: any) =>
+    (a) =>
       a.account_status === 1 &&
       (!a.user_tasks || a.user_tasks.includes("ADVERTISE"))
   );
@@ -78,13 +98,18 @@ export function MetaSelectors({
     <div className="flex flex-col gap-5 mt-4 w-full">
       {writableAccounts.length > 1 ? (
         <div>
-          <label className="block text-xs font-medium text-white/50 mb-1.5">
+          <label
+            htmlFor="meta-ad-account"
+            className="block text-xs font-medium text-white/50 mb-1.5"
+          >
             Active Ad Account
           </label>
-          <select 
-            value={selectedAccountId || ""} 
+          <select
+            id="meta-ad-account"
+            value={selectedAccountId || ""}
             onChange={handleAccountChange}
             disabled={loadingAccount}
+            aria-busy={loadingAccount || undefined}
             className="w-full sm:max-w-xs bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 appearance-none disabled:opacity-50"
           >
             {writableAccounts.map((a) => (
@@ -105,13 +130,18 @@ export function MetaSelectors({
 
       {allPages.length > 1 ? (
         <div>
-          <label className="block text-xs font-medium text-white/50 mb-1.5">
+          <label
+            htmlFor="meta-page"
+            className="block text-xs font-medium text-white/50 mb-1.5"
+          >
             Active Facebook Page
           </label>
-          <select 
-            value={selectedPageId || ""} 
+          <select
+            id="meta-page"
+            value={selectedPageId || ""}
             onChange={handlePageChange}
             disabled={loadingPage}
+            aria-busy={loadingPage || undefined}
             className="w-full sm:max-w-xs bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 appearance-none disabled:opacity-50"
           >
             {allPages.map((p) => (
@@ -129,13 +159,6 @@ export function MetaSelectors({
           <p className="text-sm text-white">{allPages[0].name}</p>
         </div>
       ) : null}
-
-      {successMsg && (
-        <div className="text-xs font-medium text-green-400 animate-fade-in flex items-center gap-1.5">
-           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-           {successMsg}
-        </div>
-      )}
     </div>
   );
 }

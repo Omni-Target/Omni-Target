@@ -360,7 +360,7 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
             base64Image = btoa(binary);
           }
         }
-      } catch (e) {
+      } catch {
         // Ignore fetch errors
       }
     }
@@ -587,7 +587,7 @@ export async function generateBriefPDF(params: BriefPDFParams): Promise<void> {
 
   // Footer on every page
 
-  const pageCount = (doc.internal as any).pages.length - 1;
+  const pageCount = (doc.internal as { pages: unknown[] }).pages.length - 1;
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
 

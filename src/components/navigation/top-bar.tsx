@@ -7,7 +7,13 @@ import { Button } from "@/components/ui/button";
 import { CreditsIndicator } from "./credits-indicator";
 import { UserMenu } from "./user-menu";
 
-export function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
+export function TopBar({
+  onMenuClick,
+  menuOpen = false,
+}: {
+  onMenuClick: () => void;
+  menuOpen?: boolean;
+}) {
   return (
     <header className="sticky top-0 z-40 flex h-16 items-center justify-between gap-3 border-b border-border-subtle bg-surface/80 px-4 backdrop-blur-md sm:px-6">
       <div className="flex items-center gap-2">
@@ -15,6 +21,7 @@ export function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
           type="button"
           onClick={onMenuClick}
           aria-label="Open menu"
+          aria-expanded={menuOpen}
           className="grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground lg:hidden"
         >
           <Menu className="size-5" />

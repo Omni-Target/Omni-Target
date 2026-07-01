@@ -7,6 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "migrate": "node supabase/migrate.mjs up",
+    "migrate:status": "node supabase/migrate.mjs status",
+    "migrate:down": "node supabase/migrate.mjs down",
+    "migrate:create": "node supabase/migrate.mjs create",
     "shopify:dev": "shopify app dev"
   },
   "dependencies": {
@@ -32,7 +38,8 @@
     "react-dom": "19.2.4",
     "resend": "^6.14.0",
     "stripe": "^22.1.1",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -41,8 +48,11 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
+    "jsdom": "^29.1.1",
+    "pg": "^8.22.0",
     "playwright": "^1.61.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.9"
   }
 }

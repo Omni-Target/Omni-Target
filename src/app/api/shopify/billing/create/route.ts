@@ -1,5 +1,7 @@
-import { auth } from "@clerk/nextjs/server";
+import { z } from "zod";
 import { getIntegrationByShop } from "@/lib/billing-db";
+import { requireUser } from "@/lib/api/require-user";
+import { apiError, apiServerError } from "@/lib/api/response";
 
 const PLANS = {
   starter: {
@@ -18,48 +20,40 @@ const PLANS = {
 
 type PlanKey = keyof typeof PLANS;
 
+const BodySchema = z.object({
+  shop: z.string().min(1).max(255),
+  plan: z.enum(["starter", "growth", "scale"]),
+});
+
 export async function POST(request: Request) {
+  const authResult = await requireUser();
+  if (!authResult.ok) return authResult.response;
+  const { userId } = authResult;
+
+  let rawBody: unknown;
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return Response.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    rawBody = await request.json();
+  } catch {
+    return apiError("Invalid JSON body", 400);
+  }
 
-    const { shop, plan } = await request.json();
+  const parsed = BodySchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return apiError("Invalid request: shop and a valid plan are required", 400);
+  }
+  const { shop, plan } = parsed.data;
+  const planInfo = PLANS[plan as PlanKey];
 
-    if (!shop || !plan) {
-      return Response.json(
-        { error: "Missing required fields: shop and plan" },
-        { status: 400 }
-      );
-    }
-
-    const planInfo = PLANS[plan as PlanKey];
-    if (!planInfo) {
-      return Response.json(
-        { error: `Invalid plan. Must be one of: ${Object.keys(PLANS).join(", ")}` },
-        { status: 400 }
-      );
-    }
-
+  try {
     // Retrieve the Shopify integration from Supabase
     const integration = await getIntegrationByShop(shop);
     if (!integration || !integration.access_token) {
-      return Response.json(
-        { error: "Shopify integration not found or access token missing" },
-        { status: 404 }
-      );
+      return apiError("Shopify integration not found", 404);
     }
 
     // Verify the integration belongs to the logged-in Clerk user for security
     if (integration.clerk_user_id !== userId) {
-      return Response.json(
-        { error: "Forbidden: You do not own this integration" },
-        { status: 403 }
-      );
+      return apiError("You do not have access to this store", 403);
     }
 
     // Call Shopify GraphQL API
@@ -108,51 +102,40 @@ export async function POST(request: Request) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`Shopify billing API HTTP error: ${response.status} ${response.statusText}`, errorText);
-      return Response.json(
-        { error: `Shopify billing API HTTP ${response.status}: ${errorText}` },
-        { status: 502 }
+      console.error(
+        `[billing-create] Shopify HTTP ${response.status} ${response.statusText}`,
+        errorText
       );
+      return apiError("Couldn't start checkout with Shopify. Please try again.", 502);
     }
 
     const result = await response.json();
 
     if (result.errors) {
-      console.error("Shopify GraphQL Errors:", JSON.stringify(result.errors, null, 2));
-      const errorMessage = result.errors.map((e: any) => e.message).join(", ") || "Shopify GraphQL error";
-      return Response.json(
-        { error: `Shopify GraphQL Error: ${errorMessage}`, details: result.errors },
-        { status: 500 }
+      console.error(
+        "[billing-create] Shopify GraphQL errors:",
+        JSON.stringify(result.errors, null, 2)
       );
+      return apiError("Couldn't start checkout with Shopify. Please try again.", 502);
     }
 
     const purchaseCreate = result.data?.appPurchaseOneTimeCreate;
     if (purchaseCreate?.userErrors && purchaseCreate.userErrors.length > 0) {
-      console.error("Shopify Mutation User Errors:", JSON.stringify(purchaseCreate.userErrors, null, 2));
-      const userErrorMessage = purchaseCreate.userErrors
-        .map((e: any) => `${e.field ? e.field.join('.') + ': ' : ''}${e.message}`)
-        .join(", ") || "Shopify billing mutation failed";
-      return Response.json(
-        { error: `Shopify Mutation Error: ${userErrorMessage}`, details: purchaseCreate.userErrors },
-        { status: 400 }
+      console.error(
+        "[billing-create] Shopify mutation userErrors:",
+        JSON.stringify(purchaseCreate.userErrors, null, 2)
       );
+      return apiError("Couldn't start checkout. Please try again.", 400);
     }
 
     const confirmationUrl = purchaseCreate?.confirmationUrl;
     if (!confirmationUrl) {
-      console.error("Shopify returned no confirmation URL:", result);
-      return Response.json(
-        { error: "Did not receive a confirmation URL from Shopify" },
-        { status: 500 }
-      );
+      console.error("[billing-create] Shopify returned no confirmation URL:", result);
+      return apiError("Couldn't start checkout with Shopify. Please try again.", 502);
     }
 
     return Response.json({ confirmationUrl });
   } catch (error) {
-    console.error("Error creating billing purchase:", error);
-    return Response.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return apiServerError("billing-create", error);
   }
 }

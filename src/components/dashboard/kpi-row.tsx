@@ -1,5 +1,3 @@
-"use client";
-
 import { TrendingUp, ShoppingBag, Receipt, Repeat } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Stat } from "@/components/ui/stat";

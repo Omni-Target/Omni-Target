@@ -5,6 +5,7 @@ import {
   getUserIntegration,
   updateUserIntegration,
 } from "./db";
+import type { UserIntegration } from "@/lib/types/integration";
 
 export interface DBColumns {
   hasShopDomain: boolean;
@@ -47,7 +48,7 @@ export async function getIntegrationByShop(shop: string) {
   return mapIntegrationData(data, cols);
 }
 
-function mapIntegrationData(data: any, cols: DBColumns) {
+function mapIntegrationData(data: UserIntegration, cols: DBColumns) {
   return {
     clerk_user_id: data.clerk_user_id,
     shop_domain: cols.hasShopDomain ? data.shop_domain : data.shopify_store_url,
@@ -73,7 +74,7 @@ export async function handleFreeCreditOnInstall(userId: string) {
   
   // If not used, update
   if (!freeCreditUsed) {
-    const updateData: Record<string, any> = {};
+    const updateData: Record<string, unknown> = {};
     if (cols.hasCredits) {
       updateData.credits = 1;
     }
@@ -125,7 +126,7 @@ export async function addCreditsToIntegration(shop: string, creditsToAdd: number
 
   const newCredits = currentCredits + creditsToAdd;
 
-  const updateData: Record<string, any> = {};
+  const updateData: Record<string, unknown> = {};
   if (cols.hasCredits) {
     updateData.credits = newCredits;
   }
