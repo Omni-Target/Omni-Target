@@ -61,7 +61,7 @@ export function DropdownMenu({
             exit={{ opacity: 0, scale: 0.97, y: side === "bottom" ? -4 : 4 }}
             transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
             className={cn(
-              "absolute z-50 min-w-[12rem] overflow-hidden rounded-xl border border-border-subtle bg-surface p-1.5 shadow-lg",
+              "absolute z-50 min-w-[12rem] overflow-hidden rounded-xl border border-border bg-surface-overlay p-1.5 shadow-lg",
               side === "bottom" ? "top-full mt-2" : "bottom-full mb-2",
               align === "end" ? "right-0" : "left-0",
               className,

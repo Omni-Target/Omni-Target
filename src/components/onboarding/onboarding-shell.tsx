@@ -5,8 +5,18 @@ import { Wordmark } from "@/components/shared/logo";
 import { cn } from "@/lib/utils";
 
 const STEPS = [
-  { n: 1, label: "Connect your store", desc: "Securely link Shopify (read-only)", Icon: Store },
-  { n: 2, label: "Store readiness audit", desc: "We analyze your ad readiness", Icon: Gauge },
+  {
+    n: 1,
+    label: "Connect your store",
+    desc: "Link your Shopify backend via encrypted, read-only credentials.",
+    Icon: Store,
+  },
+  {
+    n: 2,
+    label: "Catalog & Margin mapping",
+    desc: "Our engine maps your inventory data to define your optimal targeting and creative paths.",
+    Icon: Gauge,
+  },
 ];
 
 function ProgressRail({ currentStep }: { currentStep: 1 | 2 }) {
@@ -20,7 +30,7 @@ function ProgressRail({ currentStep }: { currentStep: 1 | 2 }) {
             {i < STEPS.length - 1 && (
               <span
                 className={cn(
-                  "absolute left-[1.1875rem] top-11 h-[calc(100%-1rem)] w-px",
+                  "absolute left-4.75 top-11 h-[calc(100%-1rem)] w-px",
                   done ? "bg-brand-400/60" : "bg-white/15",
                 )}
               />
@@ -76,11 +86,11 @@ export function OnboardingShell({
           <Wordmark size={30} textClassName="text-white" />
           <div className="mt-auto">
             <h2 className="max-w-sm text-[1.625rem] font-semibold leading-tight tracking-[-0.02em] text-white">
-              Let&apos;s get your store ready for profitable Meta ads.
+              Let&apos;s build your first pre-spend blueprint.
             </h2>
             <p className="mt-3 max-w-xs text-sm text-white/55">
-              Two quick steps. No ad spend required — just connect and we&apos;ll
-              show you exactly where you stand.
+              Two quick steps. Just connect your storefront and our engine will
+              isolate exactly what your data says to launch next.
             </p>
             <div className="mt-10">
               <ProgressRail currentStep={currentStep} />

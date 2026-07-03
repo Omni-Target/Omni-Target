@@ -3,6 +3,7 @@ import { upsertUserIntegration } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { META_REDIRECT_URI } from "@/lib/meta-oauth";
+import { fetchWithRetry } from "@/lib/http";
 import type { MetaAdAccount } from "@/lib/types/meta";
 
 export async function GET(request: Request) {
@@ -46,17 +47,29 @@ export async function GET(request: Request) {
     const accessToken = tokenData.access_token;
     console.log("Token exchange success. Has token:", !!accessToken);
 
-    // Fetch the user's ad accounts, pixels, and status
-    // Include user_tasks to check for ADVERTISE permission
-    const adAccountsRes = await fetch(
-      `https://graph.facebook.com/v19.0/` +
-      `me/adaccounts?fields=id,name,` +
-      `account_id,account_status,currency,` +
-      `user_tasks,adspixels{id,name,code}` +
-      `&access_token=${accessToken}`
-    );
+    // Ad accounts (with pixels + status) and Pages are independent reads — both
+    // only need the access token — so fetch them in parallel instead of
+    // waterfalling one after the other.
+    const [adAccountsRes, pagesRes] = await Promise.all([
+      fetchWithRetry(
+        `https://graph.facebook.com/v19.0/` +
+        `me/adaccounts?fields=id,name,` +
+        `account_id,account_status,currency,` +
+        `user_tasks,adspixels{id,name,code}` +
+        `&access_token=${accessToken}`
+      ),
+      fetchWithRetry(
+        `https://graph.facebook.com/v19.0/` +
+        `me/accounts?fields=id,name,access_token` +
+        `&access_token=${accessToken}`
+      ),
+    ]);
 
-    const adAccountsData = await adAccountsRes.json();
+    const [adAccountsData, pagesData] = await Promise.all([
+      adAccountsRes.json(),
+      pagesRes.json(),
+    ]);
+
     const allAccounts: MetaAdAccount[] = adAccountsData.data || [];
     console.log("Ad accounts found (total):", allAccounts.length);
 
@@ -75,13 +88,6 @@ export async function GET(request: Request) {
 
     const firstPixel = activeAccount?.adspixels?.data?.[0];
 
-    const pagesRes = await fetch(
-      `https://graph.facebook.com/v19.0/` +
-      `me/accounts?fields=id,name,access_token` +
-      `&access_token=${accessToken}`
-    );
-
-    const pagesData = await pagesRes.json();
     const allPages = pagesData.data || [];
     const firstPage = allPages[0];
     console.log("Pages found:", allPages.length);

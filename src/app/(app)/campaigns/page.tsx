@@ -3,8 +3,11 @@
 import React, { useState, useEffect, Suspense, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
+import { useQueryClient } from "@tanstack/react-query";
 import { FileText } from "lucide-react";
-import type { BriefPDFParams } from "@/lib/generate-brief-pdf";
+import { CREDITS_QUERY_KEY, type CreditsData } from "@/hooks/useCredits";
+import { BRIEFS_QUERY_KEY } from "@/components/campaigns/brief-history";
+import type { BriefPDFParams } from "@/lib/brief-pdf-types";
 import { PageContainer } from "@/components/layout/page-container";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -18,7 +21,7 @@ import {
 } from "@/components/campaigns";
 import { MediaStep } from "@/components/campaigns/steps/media-step";
 import { InputStep } from "@/components/campaigns/steps/input-step";
-import { ReviewStep } from "@/components/campaigns/steps/review-step";
+import { ReviewStep, type BriefVariation } from "@/components/campaigns/steps/review-step";
 import { BriefStep } from "@/components/campaigns/steps/brief-step";
 import { useMediaUpload } from "@/components/campaigns/use-media-upload";
 import { useStoreInsights } from "@/components/campaigns/use-store-insights";
@@ -54,6 +57,7 @@ function CampaignsContent() {
   const router = useRouter();
   const { user } = useUser();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const storeUrl = (user?.publicMetadata?.shopifyStoreUrl as string) || "";
 
   const [previewPlatform, setPreviewPlatform] = useState<
@@ -128,6 +132,15 @@ function CampaignsContent() {
   const [selectedStrategyIndex, setSelectedStrategyIndex] = useState(1);
   const [selectedDuration, setSelectedDuration] = useState<7 | 14 | 30>(14);
   const [regenerateCount, setRegenerateCount] = useState(0);
+  // Persisted brief session: set on the first generate, reused by regenerations
+  // (so attempts append to the same campaign) and by "Generate Brief" to route
+  // to the durable /campaigns/[id] page.
+  const [campaignId, setCampaignId] = useState<string | null>(null);
+  const [currentVersionId, setCurrentVersionId] = useState<string | null>(null);
+  // Every generation attempt this session, retained so the review step can
+  // compare variations; selectedVariationIndex is the one shown/proceeded with.
+  const [variations, setVariations] = useState<BriefVariation[]>([]);
+  const [selectedVariationIndex, setSelectedVariationIndex] = useState(0);
 
   // Read from sessionStorage for auto-fill (client-only init from external store)
   useEffect(() => {
@@ -229,6 +242,7 @@ function CampaignsContent() {
           gatewayInsight: derivedGatewayInsight,
           storeDataForApi,
           isNewLaunch,
+          campaignId,
           isRegeneration,
           shopifyStoreCountry: storeInsights?.store?.country || null,
           topCustomerLocations: storeInsights?.orders?.top_locations || null,
@@ -255,8 +269,42 @@ function CampaignsContent() {
       }
 
       const generatedCopyData: GeneratedCopy = data;
+      const newVersionId: string | null = data.versionId ?? null;
       setGeneratedCopy(generatedCopyData);
       setSelectedCta(generatedCopyData.cta);
+      // Track the persisted brief so regenerations append to the same session
+      // and "Generate Brief" can navigate to the durable /campaigns/[id] page.
+      if (data.campaignId) setCampaignId(data.campaignId);
+      setCurrentVersionId(newVersionId);
+
+      // Retain every attempt so the review step can compare variations; the
+      // freshly generated one becomes the selected/shown variation.
+      setVariations((prev) => {
+        const entry: BriefVariation = {
+          versionId: newVersionId,
+          copy: generatedCopyData,
+        };
+        const next = isRegeneration ? [...prev, entry] : [entry];
+        setSelectedVariationIndex(next.length - 1);
+        return next;
+      });
+
+      // Keep the shared credits cache in sync so the top bar + sidebar reflect
+      // the new balance instantly, with no refresh. The generate response is
+      // authoritative; invalidate afterwards to reconcile in the background.
+      if (typeof data.credits_balance === "number") {
+        queryClient.setQueryData<CreditsData | undefined>(
+          CREDITS_QUERY_KEY,
+          (prev) =>
+            ({
+              ...(prev ?? { unlimited_until: null, shop: null }),
+              credits_balance: data.credits_balance,
+              is_unlimited: data.is_unlimited ?? prev?.is_unlimited ?? false,
+            }) as CreditsData,
+        );
+      }
+      queryClient.invalidateQueries({ queryKey: CREDITS_QUERY_KEY });
+
       if (isRegeneration) setRegenerateCount((prev) => prev + 1);
       setViewState("review");
     } catch (err) {
@@ -279,8 +327,23 @@ function CampaignsContent() {
     setErrorMsg("");
     setShowBuyCredits(false);
     setRegenerateCount(0);
+    setCampaignId(null);
+    setCurrentVersionId(null);
+    setVariations([]);
+    setSelectedVariationIndex(0);
     resetMedia();
     setViewState(finalState);
+  };
+
+  // Switch which retained variation is shown; the shown one is what proceeds to
+  // the brief (and gets marked selected on finalize).
+  const handleSelectVariation = (index: number) => {
+    const v = variations[index];
+    if (!v) return;
+    setSelectedVariationIndex(index);
+    setGeneratedCopy(v.copy);
+    setCurrentVersionId(v.versionId);
+    setSelectedCta(v.copy.cta);
   };
 
   const handleDownloadPdf = async () => {
@@ -325,6 +388,9 @@ function CampaignsContent() {
       const newTab = window.open(blobUrl, "_blank", "noopener,noreferrer");
       if (!newTab) {
         setPdfFallbackUrl(blobUrl);
+      } else {
+        // Brief opened — return to the dashboard (updated credits + history).
+        setTimeout(() => router.push("/dashboard"), 1200);
       }
     } catch (err) {
       console.error("PDF error:", err);
@@ -364,7 +430,52 @@ function CampaignsContent() {
     setGatewayInsight(null);
     setSelectedCta("");
     setRegenerateCount(0);
+    setCampaignId(null);
+    setCurrentVersionId(null);
+    setVariations([]);
+    setSelectedVariationIndex(0);
     setViewState("media");
+  };
+
+  // Persist the chosen variation + brief context, then move the user to the
+  // durable brief page. Falls back to the in-app brief view if the brief was
+  // never persisted (persistence during generation is best-effort).
+  const handleGenerateBrief = async () => {
+    if (!campaignId || !generatedCopy) {
+      setViewState("brief");
+      return;
+    }
+    try {
+      const briefData = {
+        brandName,
+        productName,
+        goal,
+        generatedCopy,
+        selectedCta,
+        aiInsights,
+        storeInsights,
+        selectedStrategyIndex,
+        selectedDuration,
+        gatewayInsight,
+        isNewLaunch,
+      };
+      await fetch(`/api/campaigns/${campaignId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          versionId: currentVersionId,
+          copy: generatedCopy,
+          briefData,
+        }),
+      });
+      // The brief is now finalized — refresh the history so it appears there.
+      queryClient.invalidateQueries({ queryKey: BRIEFS_QUERY_KEY });
+    } catch (err) {
+      // Copy is already persisted from generation; brief_data just enriches the
+      // page. Navigate regardless so the user always reaches their brief.
+      console.error("Failed to finalize brief:", err);
+    }
+    router.replace(`/campaigns/${campaignId}`);
   };
 
   if (loadingDraft) {
@@ -468,10 +579,13 @@ function CampaignsContent() {
               copiedField={copiedField}
               onCopy={handleCopy}
               regenerateCount={regenerateCount}
+              variations={variations}
+              selectedVariationIndex={selectedVariationIndex}
+              onSelectVariation={handleSelectVariation}
               onUploadDifferent={() => setViewState("media")}
               onRegenerate={() => handleGenerate(true)}
               onStartOver={handleStartOver}
-              onGenerateBrief={() => setViewState("brief")}
+              onGenerateBrief={handleGenerateBrief}
             />
           )}
 
@@ -523,6 +637,7 @@ function CampaignsContent() {
               // tab to load before revoking it.
               setPdfFallbackUrl(null);
               if (url) setTimeout(() => URL.revokeObjectURL(url), 2000);
+              setTimeout(() => router.push("/dashboard"), 1200);
             }}
           >
             <FileText className="size-4" />

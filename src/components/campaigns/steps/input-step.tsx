@@ -114,7 +114,7 @@ export function InputStep({
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div className="flex items-center gap-4">
             {mediaPreviewUrl ? (
-              <div className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-xl bg-slate-100 ring-1 ring-border-subtle">
+              <div className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-xl bg-surface-muted ring-1 ring-border-subtle">
                 {mediaFile?.type?.startsWith("video/") ||
                 mediaPreviewUrl.includes(".mp4") ||
                 mediaPreviewUrl.includes(".mov") ? (

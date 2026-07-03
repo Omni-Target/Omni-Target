@@ -5,7 +5,7 @@ export function creditLowEmailHtml(): string {
   <div style="max-width:600px;margin:0 auto;padding:40px 20px;">
     <div style="margin-bottom:32px;">
       <a href="https://app.omnitarget.co" style="text-decoration:none;">
-        <img src="https://res.cloudinary.com/denwiqjid/image/upload/v1779707457/omni_target_logo_ae2epf.png" alt="Omni Target" height="28" style="display:block;border:none;outline:none;text-decoration:none;" />
+        <img src="https://app.omnitarget.co/omni_target_logo.png" alt="Omni Target" width="28" height="28" style="display:block;border:none;outline:none;text-decoration:none;border-radius:7px;" />
       </a>
     </div>
 
@@ -20,7 +20,7 @@ export function creditLowEmailHtml(): string {
     </p>
 
     <p style="margin:0 0 32px 0;">
-      <a href="https://app.omnitarget.co/pricing" style="color:#9333ea;font-weight:500;text-decoration:none;">Top Up Credits →</a>
+      <a href="https://app.omnitarget.co/pricing" style="color:#4f46e5;font-weight:500;text-decoration:none;">Top Up Credits →</a>
     </p>
 
     <p style="margin:0 0 40px 0;">

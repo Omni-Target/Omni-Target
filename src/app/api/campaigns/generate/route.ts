@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { queryUserIntegrationSelect, updateUserIntegration, insertCreditUsage, logApiUsage } from "@/lib/db";
+import { queryUserIntegrationSelect, updateUserIntegration, insertCreditUsage, logApiUsage, insertCampaign, insertBriefVersion, getBriefVersions } from "@/lib/db";
 import sharp from "sharp";
 
 import { detectColumns } from "@/lib/billing-db";
@@ -37,6 +37,9 @@ interface GenerateRequest {
   isRegeneration?: boolean;
   shopifyStoreCountry?: string | null;
   topCustomerLocations?: CustomerLocation[] | null;
+  // Present on regenerations: attaches the new attempt to the existing brief
+  // session instead of creating a fresh campaign.
+  campaignId?: string | null;
 }
 
 interface GatewayInsight {
@@ -547,8 +550,81 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
       }
     }
 
-    // Return the successfully parsed JSON output
-    return NextResponse.json(parsedResponse, { status: 200 });
+    // Persist the brief so it survives refresh, lives at a stable URL, and keeps
+    // every regeneration attempt for later comparison/history. Best-effort: a
+    // persistence failure must never break generation, so errors are swallowed
+    // and we simply return without ids (the client falls back to the in-app view).
+    const copyFields = {
+      headline: parsedResponse.headline ?? null,
+      primary_text: parsedResponse.primaryText ?? null,
+      description: parsedResponse.description ?? null,
+      cta: parsedResponse.cta ?? null,
+      copywriter_note: parsedResponse.copywriterNote ?? null,
+    };
+    let campaignId: string | null = body.campaignId ?? null;
+    let versionId: string | null = null;
+    let attemptNumber = 1;
+    try {
+      if (campaignId) {
+        // Regeneration attaching to an existing session: append the next attempt.
+        // getBriefVersions is owner-scoped, so a spoofed id resolves to [] and we
+        // safely fall through to creating a fresh campaign.
+        const versions = await getBriefVersions(userId!, campaignId);
+        if (versions.length === 0) {
+          campaignId = null;
+        } else {
+          attemptNumber = versions.length + 1;
+        }
+      }
+      if (!campaignId) {
+        campaignId = await insertCampaign(userId!, {
+          brand_name: brandName ?? null,
+          product_name: productName ?? null,
+          product_description: productDescription ?? null,
+          target_audience: targetAudience ?? null,
+          campaign_goal: campaignGoal ?? null,
+          tone_preference: tonePreference ?? null,
+          platform: platform ?? null,
+          media_url: body.mediaUrl ?? imageUrl ?? null,
+          product_price: productPrice ?? null,
+          ...copyFields,
+        });
+        attemptNumber = 1;
+      }
+      if (campaignId) {
+        versionId = await insertBriefVersion(userId!, campaignId, {
+          attempt_number: attemptNumber,
+          is_selected: attemptNumber === 1,
+          ...copyFields,
+        });
+      }
+    } catch (persistErr) {
+      console.error("Brief persistence failed (continuing):", persistErr);
+      campaignId = null;
+      versionId = null;
+    }
+
+    // Balance after this request. Deduction above runs only for the first,
+    // non-unlimited generation; regenerations and unlimited users are unchanged.
+    // Returned so the client can update the shared credits cache instantly
+    // instead of waiting for a refetch.
+    const creditsBalanceAfter =
+      !hasUnlimited && !isRegeneration
+        ? Math.max(0, currentCredits - 1)
+        : currentCredits;
+
+    // Return the parsed copy, the authoritative balance, and the persisted ids.
+    return NextResponse.json(
+      {
+        ...parsedResponse,
+        credits_balance: creditsBalanceAfter,
+        is_unlimited: !!hasUnlimited,
+        campaignId,
+        versionId,
+        attemptNumber,
+      },
+      { status: 200 },
+    );
   } catch (error) {
     console.error("Campaign API Generation Error:", error);
 

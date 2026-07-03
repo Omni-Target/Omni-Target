@@ -6,18 +6,18 @@ import { Wordmark } from "@/components/shared/logo";
 const VALUE_PROPS = [
   {
     Icon: Store,
-    title: "Shopify intelligence",
-    body: "We read your store data — products, orders, buyers — to ground every recommendation.",
+    title: "Store Grounded Intelligence",
+    body: "We analyze your live Shopify backend - orders, margins, and product performance - to eliminate guesswork.",
   },
   {
     Icon: Wand2,
-    title: "AI ad copy in seconds",
-    body: "Hook-driven Meta Ad copy and creatives, tuned to your brand and product catalog.",
+    title: "Creative and Copy blueprints",
+    body: "Get high-conversion ad copy and clear visual direction tailored directly to your current inventory.",
   },
   {
     Icon: LineChart,
-    title: "Budget & targeting briefs",
-    body: "Ready-to-launch targeting, budget tiers, and timing — straight into Ads Manager.",
+    title: "Automated Media Briefs",
+    body: "Ready-to-deploy targeting, budget tiers, and campaign structures built to push straight into Meta Ads Manager.",
   },
 ];
 
@@ -29,10 +29,11 @@ function AuthBrandPanel() {
       <div className="mt-auto">
         <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-medium text-white/80">
           <Sparkles className="size-3.5 text-brand-300" />
-          AI-powered Meta ads for Shopify
+          Store Intelligence for Meta Ads
         </div>
         <h2 className="mt-5 max-w-sm text-[1.75rem] font-semibold leading-tight tracking-[-0.02em] text-white">
-          Know exactly what to run on Meta — before you spend a dollar.
+          Built for Shopify Fashion Brands. Know exactly what to launch before
+          you deploy capital.
         </h2>
         <ul className="mt-8 space-y-5">
           {VALUE_PROPS.map(({ Icon, title, body }) => (
@@ -50,7 +51,7 @@ function AuthBrandPanel() {
       </div>
 
       <p className="mt-auto pt-10 text-xs text-white/35">
-        Trusted by 2,400+ merchants · 256-bit encryption · SOC 2 compliant
+        256-bit encryption · SOC 2 compliant
       </p>
     </div>
   );
@@ -68,7 +69,9 @@ export function AuthShell({
   return (
     <SplitLayout aside={<AuthBrandPanel />}>
       <div className="mb-8 text-center lg:hidden">
-        <h1 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">{title}</h1>
+        <h1 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">
+          {title}
+        </h1>
         <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
       </div>
       {children}

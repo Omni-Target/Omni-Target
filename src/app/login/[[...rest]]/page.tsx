@@ -3,7 +3,10 @@ import { AuthShell, authAppearance } from "@/components/auth";
 
 export default function LoginPage() {
   return (
-    <AuthShell title="Welcome back" subtitle="Sign in to your Omni Target account">
+    <AuthShell
+      title="Welcome back"
+      subtitle="Sign in to your Omni Target account"
+    >
       <SignIn
         routing="path"
         path="/login"

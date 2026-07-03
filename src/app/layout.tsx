@@ -15,13 +15,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  // Resolves the relative asset URLs below to absolute ones for crawlers,
+  // anchored to wherever this deployment is actually served.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "https://app.omnitarget.co"),
   title: "Omni Target | Launch Profitable Meta Ads",
   description:
     "Omni Target helps Shopify merchants launch highly profitable Meta Ads by auditing accounts and installing the Meta Pixel.",
   icons: {
-    icon: "https://res.cloudinary.com/denwiqjid/image/upload/v1779707457/omni_target_logo_ae2epf.png",
-    shortcut: "https://res.cloudinary.com/denwiqjid/image/upload/v1779707457/omni_target_logo_ae2epf.png",
-    apple: "https://res.cloudinary.com/denwiqjid/image/upload/v1779707457/omni_target_logo_ae2epf.png",
+    icon: "/omni_target_logo.png",
+    shortcut: "/omni_target_logo.png",
+    apple: "/omni_target_logo.png",
   },
   openGraph: {
     title: "Omni Target | Launch Profitable Meta Ads",
@@ -30,19 +33,21 @@ export const metadata: Metadata = {
     siteName: "Omni Target",
     images: [
       {
-        url: "https://res.cloudinary.com/denwiqjid/image/upload/v1779707457/omni_target_logo_ae2epf.png",
-        width: 800,
-        height: 600,
+        url: "/omni_target_logo.png",
+        width: 100,
+        height: 100,
         alt: "Omni Target Logo",
       },
     ],
     type: "website",
   },
   twitter: {
-    card: "summary_large_image",
+    // The brand mark is a small square — "summary" renders it as a compact
+    // thumbnail instead of stretching it into a large banner.
+    card: "summary",
     title: "Omni Target | Launch Profitable Meta Ads",
     description: "Omni Target helps Shopify merchants launch highly profitable Meta Ads by auditing accounts and installing the Meta Pixel.",
-    images: ["https://res.cloudinary.com/denwiqjid/image/upload/v1779707457/omni_target_logo_ae2epf.png"],
+    images: ["/omni_target_logo.png"],
   },
 };
 

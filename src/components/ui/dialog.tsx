@@ -87,7 +87,7 @@ export function Dialog({
             transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
             className={cn(
               "outline-none",
-              "relative z-10 w-full overflow-hidden rounded-2xl border border-border-subtle bg-surface shadow-xl",
+              "relative z-10 w-full overflow-hidden rounded-2xl border border-border bg-surface-overlay shadow-xl",
               sizeMap[size],
               className,
             )}

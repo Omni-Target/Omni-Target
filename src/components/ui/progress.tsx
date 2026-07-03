@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { clamp } from "@/lib/utils";
 
 const toneMap = {
-  brand: "bg-brand-600",
+  brand: "bg-gradient-brand-vivid",
   success: "bg-success-500",
   warning: "bg-warning-500",
   danger: "bg-danger-500",

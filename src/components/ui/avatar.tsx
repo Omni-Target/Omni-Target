@@ -34,7 +34,7 @@ export function Avatar({
   return (
     <div
       className={cn(
-        "relative grid shrink-0 place-items-center overflow-hidden rounded-full border border-border-subtle bg-gradient-brand font-semibold text-white",
+        "relative grid shrink-0 place-items-center overflow-hidden rounded-full border border-border-subtle bg-gradient-brand-vivid font-semibold text-white",
         sizeMap[size],
         className,
       )}

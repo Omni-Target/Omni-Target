@@ -1,5 +1,6 @@
 import { StoreData, StoreLocation, StoreProduct } from "../store-data";
 import { consolidateLocation, consolidateLocationsWithAI } from "../locations";
+import { fetchWithRetry } from "../http";
 
 // Shopify API types (subset)
 interface ShopifyShop {
@@ -43,26 +44,15 @@ interface ShopifyProduct {
 
 const API_VERSION = "2026-01";
 
+// Thin wrapper kept for the existing call sites. Now also does bounded retries
+// (transient 5xx/429/network) on top of the per-attempt timeout — Shopify reads
+// are idempotent GETs, so retrying is safe and makes store sync more resilient.
 async function fetchWithTimeout(
   url: string,
   options: RequestInit,
   timeoutMs = 8000
 ): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(), 
-    timeoutMs
-  );
-  
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-    return response;
-  } finally {
-    clearTimeout(timeout);
-  }
+  return fetchWithRetry(url, options, { timeoutMs });
 }
 
 async function shopifyGet<T>(

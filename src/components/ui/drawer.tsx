@@ -79,7 +79,7 @@ export function Drawer({
             exit={{ x: offscreen }}
             transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
             className={cn(
-              "absolute inset-y-0 flex w-full flex-col bg-surface shadow-xl outline-none",
+              "absolute inset-y-0 flex w-full flex-col bg-surface-overlay shadow-xl outline-none",
               side === "right" ? "right-0 border-l" : "left-0 border-r",
               "border-border-subtle",
               width,

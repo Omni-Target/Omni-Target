@@ -1,12 +1,13 @@
 // Shared light-theme Clerk appearance used by sign-in / sign-up / reset pages.
 // The card chrome is stripped so the form blends into the AuthShell panel.
+// Values mirror the design tokens in globals.css (Clerk needs literal colors).
 export const authAppearance = {
   variables: {
     colorBackground: "#ffffff",
     colorInputBackground: "#ffffff",
     colorText: "#0b0d12",
     colorTextSecondary: "#5b6472",
-    colorPrimary: "#09090f",
+    colorPrimary: "#4f46e5",
     colorInputText: "#0b0d12",
     colorDanger: "#dc2626",
     borderRadius: "0.625rem",

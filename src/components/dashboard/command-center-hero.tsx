@@ -38,9 +38,9 @@ const readinessMap: Record<
 };
 
 const toneText: Record<string, string> = {
-  success: "text-emerald-300",
-  warning: "text-amber-300",
-  danger: "text-rose-300",
+  success: "text-success-300",
+  warning: "text-warning-300",
+  danger: "text-danger-300",
   brand: "text-brand-300",
 };
 
@@ -66,20 +66,28 @@ export function CommandCenterHero({
   const { title, tone, Icon } = readinessMap[readiness];
 
   return (
-    <div className="relative overflow-hidden rounded-3xl bg-gradient-ink p-6 text-ink-foreground shadow-lg sm:p-8">
+    <div className="relative overflow-hidden rounded-3xl border border-brand-400/20 bg-gradient-ink p-6 text-ink-foreground shadow-lg sm:p-8">
       <div
         aria-hidden
-        className="absolute -right-20 -top-24 h-72 w-72 rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.1),transparent_70%)] blur-2xl"
+        className="absolute inset-x-8 top-0 h-px bg-linear-to-r from-transparent via-brand-400/60 to-transparent"
       />
       <div
         aria-hidden
-        className="absolute inset-0 opacity-[0.12] bg-[radial-gradient(circle_at_15%_20%,white_1px,transparent_1px)] bg-size-[24px_24px]"
+        className="absolute -right-20 -top-24 h-72 w-72 rounded-full bg-[radial-gradient(circle,color-mix(in_srgb,var(--color-brand-500)_38%,transparent),transparent_70%)] blur-2xl"
+      />
+      <div
+        aria-hidden
+        className="absolute -bottom-28 -left-16 h-64 w-64 rounded-full bg-[radial-gradient(circle,color-mix(in_srgb,var(--color-accent-600)_26%,transparent),transparent_70%)] blur-3xl"
+      />
+      <div
+        aria-hidden
+        className="absolute inset-0 opacity-[0.12] bg-[radial-gradient(circle_at_15%_20%,var(--color-ink-foreground)_1px,transparent_1px)] bg-size-[24px_24px]"
       />
       <div className="relative flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
         <div className="max-w-xl space-y-4">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-medium text-white/80">
+          <span className="inline-flex items-center gap-2 rounded-full border border-brand-400/30 bg-brand-500/20 px-3 py-1 text-xs font-medium text-brand-100">
             <Sparkles className="size-3.5 text-brand-300" />
-            AI Command Center
+            Intelligence Hub
           </span>
           <div className="space-y-2">
             <div className="flex items-center gap-2.5">

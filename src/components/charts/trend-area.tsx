@@ -19,7 +19,7 @@ export function TrendArea({
   data,
   height = 180,
   className,
-  tone = "text-brand-500",
+  tone = "text-brand-600",
   showAxis = true,
 }: TrendAreaProps) {
   const gid = React.useId();

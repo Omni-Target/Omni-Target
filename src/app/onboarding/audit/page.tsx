@@ -88,7 +88,7 @@ function AuditContent() {
   return (
     <OnboardingShell
       currentStep={2}
-      contentClassName={scanning ? "max-w-md" : "max-w-2xl"}
+      contentClassName={scanning ? "max-w-lg" : "max-w-3xl"}
     >
       {fromDashboard && (
         <Link

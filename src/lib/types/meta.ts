@@ -27,9 +27,16 @@ export interface MetaApiError {
   fbtrace_id?: string;
 }
 
+export interface MetaPaging {
+  // Cursor URL to the next page of results, present while more remain.
+  next?: string;
+  cursors?: { before?: string; after?: string };
+}
+
 export interface MetaInsightsResponse {
   data?: MetaInsight[];
   error?: MetaApiError;
+  paging?: MetaPaging;
 }
 
 /** A Meta ad account as returned by `me/adaccounts`. */

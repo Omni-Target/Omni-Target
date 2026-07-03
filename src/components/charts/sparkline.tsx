@@ -17,7 +17,7 @@ export function Sparkline({
   width = 120,
   height = 36,
   className,
-  tone = "text-brand-500",
+  tone = "text-brand-600",
   fill = true,
   strokeWidth = 2,
 }: SparklineProps) {

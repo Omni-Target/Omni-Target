@@ -9,7 +9,7 @@ const kindMap: Record<
 > = {
   premium: { Icon: Lightbulb, badge: "bg-brand-50 text-brand-600" },
   lookalike: { Icon: Users, badge: "bg-info-50 text-info-600" },
-  timing: { Icon: CalendarClock, badge: "bg-violet-50 text-accent-600" },
+  timing: { Icon: CalendarClock, badge: "bg-accent-50 text-accent-600" },
   scale: { Icon: TrendingUp, badge: "bg-success-50 text-success-600" },
 };
 

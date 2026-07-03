@@ -110,10 +110,10 @@ export function MetaSelectors({
             onChange={handleAccountChange}
             disabled={loadingAccount}
             aria-busy={loadingAccount || undefined}
-            className="w-full sm:max-w-xs bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 appearance-none disabled:opacity-50"
+            className="w-full sm:max-w-xs bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500/50 appearance-none disabled:opacity-50"
           >
             {writableAccounts.map((a) => (
-              <option key={a.id} value={a.id} className="bg-gray-900 text-white">
+              <option key={a.id} value={a.id} className="bg-surface-overlay text-foreground">
                 {a.name} ({a.currency || "USD"})
               </option>
             ))}
@@ -142,10 +142,10 @@ export function MetaSelectors({
             onChange={handlePageChange}
             disabled={loadingPage}
             aria-busy={loadingPage || undefined}
-            className="w-full sm:max-w-xs bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500/50 appearance-none disabled:opacity-50"
+            className="w-full sm:max-w-xs bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500/50 appearance-none disabled:opacity-50"
           >
             {allPages.map((p) => (
-              <option key={p.id} value={p.id} className="bg-gray-900 text-white">
+              <option key={p.id} value={p.id} className="bg-surface-overlay text-foreground">
                 {p.name}
               </option>
             ))}

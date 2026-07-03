@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { ImageIcon, ArrowRight, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -58,10 +59,11 @@ export function ProductIntelCard({
     >
       <div className="flex items-start gap-3">
         {product.image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={product.image_url}
             alt={product.name ?? "product"}
+            width={56}
+            height={56}
             className="size-14 shrink-0 rounded-xl object-cover ring-1 ring-border-subtle"
           />
         ) : (

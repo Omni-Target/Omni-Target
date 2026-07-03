@@ -1,4 +1,4 @@
-import { BriefPDFParams } from "./generate-brief-pdf";
+import { BriefPDFParams } from "./brief-pdf-types";
 import { getCurrencySymbol, formatCurrency } from "./currency";
 import fs from "fs";
 import path from "path";
@@ -35,7 +35,7 @@ type Tone = "neutral" | "success" | "info" | "warning";
 const TONE: Record<Tone, { fg: string; bg: string; bd: string }> = {
   neutral: { fg: "#09090f", bg: "#f4f4f5", bd: "#e4e4e7" },
   success: { fg: "#15803d", bg: "#f0fdf4", bd: "#c6f0d2" },
-  info: { fg: "#1d4ed8", bg: "#eff6ff", bd: "#cfe0fd" },
+  info: { fg: "#4338ca", bg: "#eef2ff", bd: "#c7d2fe" },
   warning: { fg: "#b45309", bg: "#fffaeb", bd: "#fbe6bf" },
 };
 
@@ -78,7 +78,10 @@ function card(
   </section>`;
 }
 
-export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
+export async function buildBriefHTML(
+  params: BriefPDFParams,
+  opts?: { embed?: boolean },
+): Promise<string> {
   // Load Inter font weights from disk — guarantees offline rendering.
   const fontsDir = path.join(process.cwd(), "public", "fonts");
   const loadFont = (file: string) => {
@@ -92,6 +95,22 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   const inter600 = loadFont("inter-600.woff2");
   const inter700 = loadFont("inter-700.woff2");
   const inter800 = loadFont("inter-800.woff2");
+  // Official brand mark, embedded the same way as the fonts so the document
+  // renders identically in the modal preview, standalone tab, and headless
+  // Chromium (which loads the HTML with no base URL for relative paths).
+  let logoDataUri = "";
+  try {
+    const logoBase64 = fs
+      .readFileSync(path.join(process.cwd(), "public", "omni_target_logo.png"))
+      .toString("base64");
+    logoDataUri = `data:image/png;base64,${logoBase64}`;
+  } catch {
+    // Missing asset falls back to a plain badge square (background color only).
+  }
+  const logoBadge = logoDataUri
+    ? `<img class="logo-badge" src="${logoDataUri}" alt="" />`
+    : `<span class="logo-badge"></span>`;
+
   const fontFaceCSS = [
     inter400 && `@font-face{font-family:'Inter';font-style:normal;font-weight:400;src:url('data:font/woff2;base64,${inter400}') format('woff2');}`,
     inter600 && `@font-face{font-family:'Inter';font-style:normal;font-weight:600;src:url('data:font/woff2;base64,${inter600}') format('woff2');}`,
@@ -368,6 +387,23 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
     6,
   );
 
+  // In embed mode (rendered inside the in-app modal) we drop the floating
+  // toolbar and the auto-print script — the modal supplies its own controls.
+  // The document markup/styling itself is identical either way.
+  const chrome = opts?.embed
+    ? ""
+    : `
+<div class="toolbar no-print">
+  <span class="toolbar-text">Your campaign brief is ready</span>
+  <button class="btn" onclick="window.print()">Save as PDF</button>
+</div>
+
+<script>
+  window.onload = function () {
+    setTimeout(function () { window.print(); }, 800);
+  };
+</script>`;
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -378,7 +414,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   ${fontFaceCSS}
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
   :root{
-    --ink:#09090f; --ink-2:#2c2c34;
+    --ink:#4f46e5; --ink-2:#6366f1;
     --text-1:#18181b; --text-2:#52525b; --text-3:#8a8a94;
     --bg:#eef0f3; --sheet:#ffffff; --subtle:#f6f7f9; --subtle-2:#f1f2f4;
     --border:#e6e7ea; --border-2:#dcdde1;
@@ -395,8 +431,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   .header::before{ content:''; position:absolute; top:0; left:0; right:0; height:4px; background:linear-gradient(90deg,var(--ink) 0%,var(--ink-2) 60%,transparent 100%); }
   .header-top{ display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:26px; }
   .wordmark{ display:flex; align-items:center; gap:9px; font-size:15px; font-weight:800; letter-spacing:-.3px; color:var(--ink); }
-  .logo-badge{ width:26px; height:26px; border-radius:7px; background:var(--ink); display:flex; align-items:center; justify-content:center; }
-  .logo-badge svg{ width:16px; height:16px; }
+  .logo-badge{ width:26px; height:26px; border-radius:7px; background:var(--ink); display:block; }
   .badge{ font-size:8px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--ink); border:1px solid var(--border-2); background:var(--subtle); padding:6px 12px; border-radius:100px; }
   .eyebrow{ font-size:9px; font-weight:700; letter-spacing:2.4px; text-transform:uppercase; color:var(--text-3); margin-bottom:10px; }
   .h1{ font-size:32px; font-weight:800; letter-spacing:-1.2px; line-height:1.08; color:var(--ink); margin-bottom:8px; }
@@ -501,7 +536,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   /* Footer */
   .footer{ display:flex; justify-content:space-between; align-items:center; padding:18px 48px; border-top:1px solid var(--border); background:var(--subtle); }
   .footer-brand{ display:flex; align-items:center; gap:8px; font-size:10px; font-weight:800; color:var(--ink); letter-spacing:-.2px; }
-  .footer-brand .logo-badge{ width:18px; height:18px; border-radius:5px; } .footer-brand .logo-badge svg{ width:11px; height:11px; }
+  .footer-brand .logo-badge{ width:18px; height:18px; border-radius:5px; }
   .footer-text{ font-size:9px; color:var(--text-3); font-weight:500; }
 
   /* Toolbar */
@@ -524,14 +559,7 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
   <header class="header">
     <div class="header-top">
       <div class="wordmark">
-        <span class="logo-badge">
-          <svg viewBox="0 0 32 32" fill="none">
-            <circle cx="16" cy="16" r="9" stroke="#fff" stroke-width="2" stroke-opacity="0.5"/>
-            <path d="M16 7a9 9 0 0 1 9 9" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
-            <circle cx="16" cy="16" r="4" stroke="#fff" stroke-width="2"/>
-            <circle cx="16" cy="16" r="1.6" fill="#fff"/>
-          </svg>
-        </span>
+        ${logoBadge}
         Omni Target
       </div>
       <div>
@@ -566,23 +594,14 @@ export async function buildBriefHTML(params: BriefPDFParams): Promise<string> {
 
   <footer class="footer">
     <div class="footer-brand">
-      <span class="logo-badge"><svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="9" stroke="#fff" stroke-width="2.5" stroke-opacity="0.5"/><circle cx="16" cy="16" r="4" stroke="#fff" stroke-width="2.5"/><circle cx="16" cy="16" r="1.8" fill="#fff"/></svg></span>
+      ${logoBadge}
       Omni Target
     </div>
     <div class="footer-text">omnitarget.co · Confidential campaign brief</div>
   </footer>
 </div>
 
-<div class="toolbar no-print">
-  <span class="toolbar-text">Your campaign brief is ready</span>
-  <button class="btn" onclick="window.print()">Save as PDF</button>
-</div>
-
-<script>
-  window.onload = function () {
-    setTimeout(function () { window.print(); }, 800);
-  };
-</script>
+${chrome}
 </body>
 </html>`;
 }

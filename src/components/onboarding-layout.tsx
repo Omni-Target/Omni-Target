@@ -1,5 +1,5 @@
 import React from "react";
-import { Logo } from "./Logo";
+import { Logo } from "@/components/shared/logo";
 
 export default function OnboardingLayout({
   children,
@@ -15,7 +15,7 @@ export default function OnboardingLayout({
       {/* Logo */}
       <div className="mb-10 animate-fade-in-up flex items-center gap-3">
         <div className="w-9 h-9 flex items-center justify-center">
-          <Logo className="w-9 h-9 text-[#9333ea]" />
+          <Logo size={36} />
         </div>
         <span className="text-lg font-semibold tracking-tight text-white/90">
           Omni Target

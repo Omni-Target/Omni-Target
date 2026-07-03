@@ -24,6 +24,9 @@ export interface BriefStepProps {
   onDownloadPdf: () => void;
   onCopyBrief: () => void;
   onCreateNew: () => void;
+  // Outer container class — defaults to a centered narrow column; the durable
+  // /campaigns/[id] page overrides it to fill the width beside its rail.
+  className?: string;
 }
 
 /** Final "Your campaign brief is ready" step — copy, targeting, budget, exports. */
@@ -44,13 +47,11 @@ export function BriefStep({
   onDownloadPdf,
   onCopyBrief,
   onCreateNew,
+  className = "mx-auto max-w-3xl",
 }: BriefStepProps) {
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="mb-8 text-center">
-        <div className="mx-auto mb-5 grid size-14 place-items-center rounded-2xl bg-success-50 text-success-600">
-          <Check className="size-7" />
-        </div>
+    <div className={className}>
+      <div className="mb-8">
         <h1 className="text-2xl font-semibold tracking-[-0.02em] text-foreground sm:text-3xl">
           Your campaign brief is ready
         </h1>
@@ -138,9 +139,7 @@ export function BriefStep({
             onClick={onDownloadPdf}
           >
             {!isDownloadingPdf && <Download className="size-4" />}
-            {isDownloadingPdf
-              ? "Generating premium PDF…"
-              : "Download PDF brief"}
+            {isDownloadingPdf ? "Preparing…" : "Generate PDF brief"}
           </Button>
           <Button variant="secondary" className="w-full" onClick={onCopyBrief}>
             {copiedField === "full-brief" ? (
