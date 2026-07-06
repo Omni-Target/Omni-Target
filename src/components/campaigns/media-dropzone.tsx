@@ -57,7 +57,7 @@ export function MediaDropzone({
                 </p>
               </div>
             )}
-            <div className="relative mb-4 flex aspect-square w-full max-w-sm items-center justify-center overflow-hidden rounded-xl bg-slate-100 sm:aspect-square">
+            <div className="relative mb-4 flex aspect-square w-full max-w-sm items-center justify-center overflow-hidden rounded-xl bg-surface-muted sm:aspect-square">
               {isVideoFile ? (
                 <video
                   src={mediaPreviewUrl}

@@ -1,11 +1,17 @@
-import { ArrowRight, Check, FileText, ImageIcon, Info, RefreshCw, RotateCcw } from "lucide-react";
+import { ArrowRight, Check, FileText, ImageIcon, Info, Layers, RefreshCw, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { AdPreview } from "../ad-preview";
 import { CopyField } from "../copy-field";
 import { CtaSelector } from "../cta-selector";
 import type { GeneratedCopy } from "../types";
+
+export interface BriefVariation {
+  versionId: string | null;
+  copy: GeneratedCopy;
+}
 
 export interface ReviewStepProps {
   generatedCopy: GeneratedCopy;
@@ -20,6 +26,11 @@ export interface ReviewStepProps {
   copiedField: string | null;
   onCopy: (text: string, field: string) => void;
   regenerateCount: number;
+  // Every generation attempt for this session, so the user can compare and pick
+  // one before proceeding. The shown variation is the one that continues.
+  variations: BriefVariation[];
+  selectedVariationIndex: number;
+  onSelectVariation: (index: number) => void;
   onUploadDifferent: () => void;
   onRegenerate: () => void;
   onStartOver: () => void;
@@ -40,6 +51,9 @@ export function ReviewStep({
   copiedField,
   onCopy,
   regenerateCount,
+  variations,
+  selectedVariationIndex,
+  onSelectVariation,
   onUploadDifferent,
   onRegenerate,
   onStartOver,
@@ -58,6 +72,38 @@ export function ReviewStep({
           Preview your personalised Meta ad and fine-tune the call to action.
         </p>
       </div>
+
+      {variations.length > 1 && (
+        <div className="mb-6">
+          <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-subtle-foreground">
+            <Layers className="size-3.5" /> Compare variations
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {variations.map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => onSelectVariation(i)}
+                className={cn(
+                  "inline-flex items-center rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
+                  i === selectedVariationIndex
+                    ? "border-brand-600 bg-brand-50 text-brand-700"
+                    : "border-border bg-surface text-muted-foreground hover:border-border-strong hover:bg-surface-subtle",
+                )}
+              >
+                Variation {i + 1}
+                {i === selectedVariationIndex && (
+                  <Check className="ml-1.5 size-3.5" />
+                )}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Viewing variation {selectedVariationIndex + 1} of {variations.length}
+            . The one shown here is the one that continues to your brief.
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
         <div className="space-y-6 xl:col-span-8">

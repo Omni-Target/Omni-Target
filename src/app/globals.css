@@ -1,8 +1,14 @@
 @import "tailwindcss";
 
 /* =========================================================================
-   OMNI TARGET — Design System (light-first SaaS)
+   OMNI TARGET — Design System (light-first SaaS, deep-indigo brand)
    Single source of truth. Prefer semantic tokens over arbitrary values.
+
+   Brand language: deep indigo primary (#4f46e5 as the interactive
+   workhorse, #6366f1 as the bright accent), purple logo accent, and
+   sophisticated indigo-tinged dark "ink" surfaces for hero bands and
+   premium panels. Info tokens intentionally alias the indigo family so
+   no bright saturated blue competes with the brand.
    ========================================================================= */
 
 @theme inline {
@@ -19,6 +25,7 @@
   --color-surface-muted: var(--surface-muted);
   --color-surface-inset: var(--surface-inset);
   --color-surface-raised: var(--surface-raised);
+  --color-surface-overlay: var(--surface-overlay);
 
   --color-border: var(--border);
   --color-border-subtle: var(--border-subtle);
@@ -28,51 +35,68 @@
   --color-subtle-foreground: var(--subtle-foreground);
   --color-faint-foreground: var(--faint-foreground);
 
-  /* Dark "ink" accent surfaces (hero bands, sidebar option) ----------- */
-  --color-ink: #09090f;
-  --color-ink-700: #16161d;
-  --color-ink-600: #24242c;
-  --color-ink-foreground: #ededf0;
+  /* Dark "ink" accent surfaces (hero bands, tooltips, premium panels).
+     Indigo-tinged so dark sections still read as on-brand. */
+  --color-ink: #0e0d1a;
+  --color-ink-700: #1b1936;
+  --color-ink-600: #262347;
+  --color-ink-foreground: #ededf2;
 
-  /* ---- Brand ramp (sophisticated near-black; primary = #09090F) ------ */
-  --color-brand-50: #f4f4f6;
-  --color-brand-100: #e6e6ea;
-  --color-brand-200: #cdced4;
-  --color-brand-300: #9a9ba4;
-  --color-brand-400: #5e606b;
-  --color-brand-500: #3a3b44;
-  --color-brand-600: #09090f; /* PRIMARY */
-  --color-brand-700: #2c2c34; /* hover — intentionally a touch lighter so near-black CTAs show state */
-  --color-brand-800: #050509;
-  --color-brand-900: #000000;
+  /* ---- Brand ramp (indigo; interactive primary = 600 #4f46e5) --------
+     50/100 tinted chips · 200/300 borders & accents on dark panels ·
+     400/500 bright accents · 600 primary CTA · 700 hover · 800/900 deep */
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-300: #a5b4fc;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5; /* PRIMARY interactive (white text ≥ 5:1) */
+  --color-brand-700: #4338ca; /* hover */
+  --color-brand-800: #3730a3;
+  --color-brand-900: #312e81;
 
-  --color-accent-400: #6b6c77;
-  --color-accent-500: #44454f;
-  --color-accent-600: #2c2c34;
+  /* Logo / premium purple accent */
+  --color-accent-50: #faf5ff;
+  --color-accent-100: #f3e8ff;
+  --color-accent-400: #c084fc;
+  --color-accent-500: #a855f7;
+  --color-accent-600: #9333ea;
+  --color-accent-700: #7c3aed;
 
-  /* ---- Status ramps (tuned for light backgrounds) ------------------- */
+  /* ---- Status ramps (tuned for light backgrounds; 300/400 steps are
+     for accents on dark ink panels) --------------------------------- */
   --color-success-50: #ecfdf5;
   --color-success-100: #d1fae5;
+  --color-success-300: #6ee7b7;
+  --color-success-400: #34d399;
   --color-success-500: #10b981;
   --color-success-600: #059669;
   --color-success-700: #047857;
 
   --color-danger-50: #fef2f2;
   --color-danger-100: #fee2e2;
+  --color-danger-300: #fca5a5;
+  --color-danger-400: #f87171;
   --color-danger-500: #ef4444;
   --color-danger-600: #dc2626;
   --color-danger-700: #b91c1c;
 
   --color-warning-50: #fffbeb;
   --color-warning-100: #fef3c7;
+  --color-warning-300: #fcd34d;
+  --color-warning-400: #fbbf24;
   --color-warning-500: #f59e0b;
   --color-warning-600: #d97706;
   --color-warning-700: #b45309;
 
-  --color-info-50: #eff6ff;
-  --color-info-100: #dbeafe;
-  --color-info-500: #3b82f6;
-  --color-info-600: #2563eb;
+  /* Info aliases the indigo family — no competing bright blue. */
+  --color-info-50: #eef2ff;
+  --color-info-100: #e0e7ff;
+  --color-info-300: #a5b4fc;
+  --color-info-400: #818cf8;
+  --color-info-500: #6366f1;
+  --color-info-600: #4f46e5;
 
   /* ---- Radius (tightened, Vercel-like — less rounded, not square) ---- */
   --radius-xs: 0.25rem; /* 4px */
@@ -83,7 +107,7 @@
   --radius-2xl: 0.875rem; /* 14px */
   --radius-3xl: 1.25rem; /* 20px */
 
-  /* ---- Elevation (soft, light-theme) -------------------------------- */
+  /* ---- Elevation (soft, light-theme; brand glow is indigo) ----------- */
   --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
   --shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.07), 0 1px 2px rgba(16, 24, 40, 0.04);
   --shadow-md: 0 4px 14px -3px rgba(16, 24, 40, 0.09),
@@ -92,8 +116,8 @@
     0 5px 12px -6px rgba(16, 24, 40, 0.07);
   --shadow-xl: 0 28px 60px -14px rgba(16, 24, 40, 0.2),
     0 10px 24px -10px rgba(16, 24, 40, 0.1);
-  --shadow-brand: 0 10px 30px -8px rgba(9, 9, 15, 0.3);
-  --shadow-focus: 0 0 0 4px rgba(9, 9, 15, 0.12);
+  --shadow-brand: 0 10px 30px -8px rgba(79, 70, 229, 0.35);
+  --shadow-focus: 0 0 0 4px rgba(79, 70, 229, 0.16);
 
   /* ---- Motion -------------------------------------------------------- */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
@@ -121,6 +145,7 @@
   --surface-muted: #eef0f4;
   --surface-inset: #f8f9fb;
   --surface-raised: #ffffff;
+  --surface-overlay: #ffffff;
 
   --border: #e7e8ec;
   --border-subtle: #eef0f3;
@@ -130,14 +155,28 @@
   --subtle-foreground: #8a93a2;
   --faint-foreground: #aeb6c2;
 
-  --gradient-brand: linear-gradient(135deg, #09090f 0%, #3a3b44 100%);
+  /* Primary premium gradient (use selectively: heroes, AI callouts,
+     progress fills — not button fills; white text fails on the light end) */
+  --gradient-brand: linear-gradient(
+    135deg,
+    #6366f1 0%,
+    #818cf8 50%,
+    #c7d2fe 100%
+  );
+  /* Deep indigo → purple; dark enough for gradient text on white */
   --gradient-brand-vivid: linear-gradient(
     120deg,
-    #09090f 0%,
-    #2c2c34 50%,
-    #44454f 100%
+    #4f46e5 0%,
+    #6366f1 45%,
+    #9333ea 100%
   );
-  --gradient-ink: linear-gradient(160deg, #16161d 0%, #09090f 100%);
+  /* Premium dark band: deep indigo, not generic black */
+  --gradient-ink: linear-gradient(
+    160deg,
+    #1e1b4b 0%,
+    #161433 48%,
+    #0b0a14 100%
+  );
   --color-scheme: light;
 }
 
@@ -169,7 +208,7 @@
   }
 
   ::selection {
-    background: rgba(9, 9, 15, 0.14);
+    background: rgba(79, 70, 229, 0.16);
     color: var(--foreground);
   }
 
@@ -304,10 +343,10 @@
 @keyframes glow-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(9, 9, 15, 0.16);
+    box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.2);
   }
   50% {
-    box-shadow: 0 0 0 8px rgba(9, 9, 15, 0);
+    box-shadow: 0 0 0 8px rgba(79, 70, 229, 0);
   }
 }
 
@@ -366,7 +405,7 @@
   background-image: var(--gradient-ink);
 }
 
-/* Light frosted glass (re-themed from the old dark glass) */
+/* Light frosted glass */
 .glass {
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: saturate(180%) blur(16px);
@@ -381,15 +420,15 @@
   box-shadow: var(--shadow-lg);
 }
 
-/* Ambient backdrops */
+/* Ambient backdrops (indigo-tinted) */
 .ambient-glow {
   position: absolute;
   pointer-events: none;
   z-index: 0;
   background: radial-gradient(
     circle at center,
-    rgba(9, 9, 15, 0.06) 0%,
-    rgba(9, 9, 15, 0.03) 35%,
+    rgba(99, 102, 241, 0.1) 0%,
+    rgba(99, 102, 241, 0.05) 35%,
     transparent 70%
   );
   filter: blur(40px);
@@ -401,7 +440,7 @@
   height: 40vw;
   background: radial-gradient(
     circle,
-    rgba(9, 9, 15, 0.05) 0%,
+    rgba(99, 102, 241, 0.09) 0%,
     transparent 70%
   );
   filter: blur(90px);
@@ -412,17 +451,17 @@
 .grid-background {
   background-image: linear-gradient(
       to right,
-      rgba(11, 13, 18, 0.04) 1px,
+      rgba(49, 46, 129, 0.05) 1px,
       transparent 1px
     ),
-    linear-gradient(to bottom, rgba(11, 13, 18, 0.04) 1px, transparent 1px);
+    linear-gradient(to bottom, rgba(49, 46, 129, 0.05) 1px, transparent 1px);
   background-size: 44px 44px;
   mask-image: radial-gradient(ellipse at center, black, transparent 78%);
 }
 
 .dot-background {
   background-image: radial-gradient(
-    rgba(11, 13, 18, 0.07) 1px,
+    rgba(49, 46, 129, 0.08) 1px,
     transparent 1px
   );
   background-size: 22px 22px;

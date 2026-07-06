@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getIntegrationByShop } from "@/lib/billing-db";
+import { getIntegrationByUser } from "@/lib/billing-db";
 import { requireUser } from "@/lib/api/require-user";
 import { apiError, apiServerError } from "@/lib/api/response";
 
@@ -41,19 +41,24 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return apiError("Invalid request: shop and a valid plan are required", 400);
   }
-  const { shop, plan } = parsed.data;
+  const { plan } = parsed.data;
   const planInfo = PLANS[plan as PlanKey];
 
   try {
-    // Retrieve the Shopify integration from Supabase
-    const integration = await getIntegrationByShop(shop);
+    // Resolve the integration by the authenticated user rather than by the
+    // client-supplied shop. `clerk_user_id` is unique, so this both scopes the
+    // purchase to the right account and avoids the PGRST116 "multiple rows"
+    // failure when a store is connected under more than one account.
+    const integration = await getIntegrationByUser(userId);
     if (!integration || !integration.access_token) {
       return apiError("Shopify integration not found", 404);
     }
 
-    // Verify the integration belongs to the logged-in Clerk user for security
-    if (integration.clerk_user_id !== userId) {
-      return apiError("You do not have access to this store", 403);
+    // Use the integration's own shop domain as the authoritative value for the
+    // Shopify Admin API call — never trust the client-supplied `shop`.
+    const shop = integration.shop_domain;
+    if (!shop) {
+      return apiError("Shopify integration not found", 404);
     }
 
     // Call Shopify GraphQL API
@@ -73,7 +78,10 @@ export async function POST(request: Request) {
       }
     `;
 
-    const returnUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/shopify/billing/callback?shop=${encodeURIComponent(shop)}`;
+    // Include the paying user's id so the callback (which is a Shopify redirect
+    // with no auth context) can attribute the credits to the exact account,
+    // even when the shop is shared across accounts.
+    const returnUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/shopify/billing/callback?shop=${encodeURIComponent(shop)}&uid=${encodeURIComponent(userId)}`;
     
     // Default to test mode in development, or if configured
     const testMode = process.env.NODE_ENV !== "production" || process.env.SHOPIFY_TEST_BILLING === "true";

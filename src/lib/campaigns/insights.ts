@@ -1,5 +1,5 @@
 import type { StoreInsights } from "@/components/campaigns/types";
-import type { BriefPDFParams } from "@/lib/generate-brief-pdf";
+import type { BriefPDFParams } from "@/lib/brief-pdf-types";
 
 export interface GenerationContext {
   gatewayInsight: BriefPDFParams["gatewayInsight"] | null;

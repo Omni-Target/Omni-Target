@@ -4,7 +4,7 @@ import type {
   GeneratedCopy,
   StoreInsights,
 } from "@/components/campaigns/types";
-import type { BriefPDFParams } from "@/lib/generate-brief-pdf";
+import type { BriefPDFParams } from "@/lib/brief-pdf-types";
 
 export interface BuildBriefPdfPayloadParams {
   brandName: string;

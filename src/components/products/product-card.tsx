@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { Flame, ArrowRight, ImageIcon, TrendingUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -40,11 +41,12 @@ export function ProductCard({
     <div className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md">
       <div className="relative aspect-[4/3] overflow-hidden bg-surface-muted">
         {product.image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={product.image_url}
             alt={product.name ?? "product"}
-            className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            fill
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 320px"
+            className="object-cover transition-transform duration-300 group-hover:scale-[1.03]"
           />
         ) : (
           <div className="grid size-full place-items-center text-faint-foreground">

@@ -7,6 +7,7 @@ import { PageContainer } from "@/components/layout/page-container";
 import { Section } from "@/components/layout/section";
 import { Alert } from "@/components/ui/alert";
 import { useToast } from "@/components/ui/toast";
+import { BriefHistory } from "@/components/campaigns/brief-history";
 import {
   CommandCenterHero,
   KpiRow,
@@ -23,14 +24,7 @@ import {
   buildCampaignDraft,
   type StoreProductLike,
 } from "@/components/dashboard";
-
-interface StoreDataResponse {
-  connected: boolean;
-  data?: Record<string, unknown> | null;
-  needsReauthForOrders?: boolean;
-  // Set when the Shopify refresh token is dead and the store must reconnect.
-  reauthRequired?: boolean;
-}
+import { useStoreData, useForceSyncStoreData } from "@/hooks/useStoreData";
 
 function relativeTime(iso?: string): string {
   if (!iso) return "just now";
@@ -65,13 +59,22 @@ function DashboardContent() {
   const searchParams = useSearchParams();
   const { toast } = useToast();
 
-  const [storeData, setStoreData] = useState<Record<string, unknown> | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Store snapshot from the shared cache — deduped with the products & campaigns
+  // pages, so navigating between them doesn't re-hit Shopify.
+  const { data: storeResponse, isLoading: loading } = useStoreData();
+  const forceSync = useForceSyncStoreData();
   const [refreshing, setRefreshing] = useState(false);
-  const [connected, setConnected] = useState(false);
   const [needsReauth, setNeedsReauth] = useState(false);
-  const [sessionExpired, setSessionExpired] = useState(false);
   const [shop, setShop] = useState<string | null>(null);
+
+  const connected = storeResponse?.connected ?? false;
+  const sessionExpired = !!storeResponse?.reauthRequired;
+  const storeData =
+    storeResponse?.connected && storeResponse.data ? storeResponse.data : null;
+
+  if (storeResponse?.needsReauthForOrders && !needsReauth) {
+    setNeedsReauth(true);
+  }
 
   // Resolve connected shop domain (used by the not-connected state).
   useEffect(() => {
@@ -79,20 +82,6 @@ function DashboardContent() {
       .then((r) => r.json())
       .then((data) => setShop(data.shop))
       .catch(() => {});
-  }, []);
-
-  // Initial store data load.
-  useEffect(() => {
-    fetch("/api/store/data", { cache: "no-store" })
-      .then((res) => res.json())
-      .then((data: StoreDataResponse) => {
-        setConnected(data.connected);
-        setSessionExpired(!!data.reauthRequired);
-        if (data.needsReauthForOrders) setNeedsReauth(true);
-        if (data.connected && data.data) setStoreData(data.data);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
   }, []);
 
   // Success toasts from redirect params.
@@ -106,11 +95,14 @@ function DashboardContent() {
       toast({
         variant: "success",
         title: "Payment successful",
-        description: "Your briefs have been added. Let's create your first campaign brief.",
+        description:
+          "Your briefs have been added. Let's create your first campaign brief.",
       });
       window.history.replaceState({}, "", "/dashboard");
     }
   }, [paymentSuccess, toast]);
+
+  const billingMessage = searchParams.get("message");
 
   useEffect(() => {
     if (billingSuccess === "success") {
@@ -122,21 +114,23 @@ function DashboardContent() {
         }.`,
       });
       window.history.replaceState({}, "", "/dashboard");
+    } else if (billingSuccess === "error") {
+      // Surface callback failures — a silent error here previously made failed
+      // credit grants indistinguishable from success.
+      toast({
+        variant: "danger",
+        title: "Purchase issue",
+        description:
+          billingMessage?.replace(/\+/g, " ") ||
+          "We couldn't confirm your purchase. If you were charged, contact support — your payment is safe.",
+      });
+      window.history.replaceState({}, "", "/dashboard");
     }
-  }, [billingSuccess, billingCredits, billingPlan, toast]);
+  }, [billingSuccess, billingCredits, billingPlan, billingMessage, toast]);
 
   const refreshStoreData = () => {
     setRefreshing(true);
-    fetch("/api/store/data?force=true", { cache: "no-store" })
-      .then((res) => res.json())
-      .then((data: StoreDataResponse) => {
-        setConnected(data.connected);
-        setSessionExpired(!!data.reauthRequired);
-        if (data.needsReauthForOrders) setNeedsReauth(true);
-        if (data.connected && data.data) setStoreData(data.data);
-        setRefreshing(false);
-      })
-      .catch(() => setRefreshing(false));
+    forceSync().finally(() => setRefreshing(false));
   };
 
   const onCreateBrief = (product: StoreProductLike, isNewLaunch: boolean) => {
@@ -148,9 +142,14 @@ function DashboardContent() {
   };
 
   // --- Derivations (display-only) ---
-  const store = (storeData?.store ?? {}) as { name?: string; currency?: string };
+  const store = (storeData?.store ?? {}) as {
+    name?: string;
+    currency?: string;
+  };
   const products = (storeData?.products ?? []) as StoreProductLike[];
-  const orders = (storeData?.orders ?? {}) as Parameters<typeof deriveInsights>[0];
+  const orders = (storeData?.orders ?? {}) as Parameters<
+    typeof deriveInsights
+  >[0];
   const currency = store.currency || "USD";
 
   const readiness = deriveAdReadiness(products, orders);
@@ -170,7 +169,9 @@ function DashboardContent() {
     .filter((p) => {
       const orderCount = p.order_count ?? p.units_sold ?? 0;
       const isRecentAndLow =
-        p.created_at && new Date(p.created_at) >= thirtyDaysAgo && orderCount < 3;
+        p.created_at &&
+        new Date(p.created_at) >= thirtyDaysAgo &&
+        orderCount < 3;
       return p.in_stock && (isRecentAndLow || orderCount === 0);
     })
     .slice(0, 6);
@@ -189,7 +190,9 @@ function DashboardContent() {
         <>
           <CommandCenterHero
             storeName={store.name || "Your store"}
-            lastSynced={relativeTime(storeData?.generated_at as string | undefined)}
+            lastSynced={relativeTime(
+              storeData?.generated_at as string | undefined,
+            )}
             readiness={readiness.readiness}
             subtext={readinessSubtext(readiness)}
             healthScore={healthScore}
@@ -251,9 +254,11 @@ function DashboardContent() {
             </div>
           </div>
 
+          <BriefHistory />
+
           <Section
             title="Product intelligence"
-            description="The best products to advertise right now, ranked by revenue."
+            description="Top Meta Ad candidates, optimized by revenue performance and inventory depth"
           >
             {intelligenceProducts.length > 0 ? (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -269,7 +274,8 @@ function DashboardContent() {
               </div>
             ) : (
               <div className="rounded-2xl border border-dashed border-border bg-surface-subtle p-8 text-center text-sm text-muted-foreground">
-                No in-stock products to advertise yet. Restock your winners below.
+                No in-stock products to advertise yet. Restock your winners
+                below.
               </div>
             )}
           </Section>

@@ -34,7 +34,7 @@ export function MetaDisconnectButton() {
       onClick={handleDisconnect}
       disabled={isDisconnecting}
       aria-busy={isDisconnecting || undefined}
-      className="text-xs text-white/40 hover:text-red-400 transition-colors underline underline-offset-2 shrink-0 self-start sm:self-center disabled:opacity-50 disabled:cursor-not-allowed"
+      className="text-xs text-white/40 hover:text-danger-400 transition-colors underline underline-offset-2 shrink-0 self-start sm:self-center disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {isDisconnecting ? "Disconnecting..." : "Disconnect"}
     </button>

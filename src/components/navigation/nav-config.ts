@@ -1,6 +1,7 @@
 import {
   LayoutDashboard,
   Megaphone,
+  FileText,
   Package,
   CreditCard,
   Settings,
@@ -19,13 +20,19 @@ export const PRIMARY_NAV: NavItem[] = [
     label: "Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
-    description: "AI command center",
+    description: "Intelligence Hub",
   },
   {
     label: "Campaigns",
     href: "/campaigns",
     icon: Megaphone,
     description: "Generate ad briefs",
+  },
+  {
+    label: "Briefs",
+    href: "/briefs",
+    icon: FileText,
+    description: "Your generated briefs",
   },
   {
     label: "Products",

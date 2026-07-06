@@ -55,14 +55,24 @@ export default clerkMiddleware(async (auth, request) => {
       !request.nextUrl.pathname.startsWith("/api/") &&
       !request.nextUrl.pathname.startsWith("/_next/")
     ) {
-      // Fetch the REAL user metadata from Clerk's API.
-      // session.sessionClaims does NOT include publicMetadata by default,
-      // so we must fetch the user directly to get the actual onboarding step.
-      const client = await clerkClient();
-      const user = await client.users.getUser(userId);
-      const rawStep =
-        (user.publicMetadata?.onboardingStep as string) || "connect-shopify";
-      const currentStep = STEP_MAP[rawStep] || "connect-shopify";
+      // Prefer the onboarding step from the session-token claims — that's a
+      // pure JWT read, no network call. This requires a Clerk session-token
+      // custom claim mapping `user.public_metadata.onboardingStep` (Clerk
+      // Dashboard → Sessions → customize session token), added as either a flat
+      // `onboardingStep` claim or a `metadata` object. Until that claim lands we
+      // fall back to a `getUser()` API call (the original behaviour), so this is
+      // safe to ship before the dashboard change and drops the per-navigation
+      // Clerk round-trip once the claim is present.
+      const claims = session.sessionClaims as
+        | { onboardingStep?: string; metadata?: { onboardingStep?: string } }
+        | undefined;
+      let rawStep = claims?.onboardingStep ?? claims?.metadata?.onboardingStep;
+      if (!rawStep) {
+        const client = await clerkClient();
+        const user = await client.users.getUser(userId);
+        rawStep = (user.publicMetadata?.onboardingStep as string) || undefined;
+      }
+      const currentStep = STEP_MAP[rawStep || "connect-shopify"] || "connect-shopify";
 
       if (currentStep !== "complete") {
         const expectedRoute = `/onboarding/${currentStep}`;

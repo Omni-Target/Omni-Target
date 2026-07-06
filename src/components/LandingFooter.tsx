@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Logo } from "./Logo";
+import { Logo } from "@/components/shared/logo";
 
 export function LandingFooter() {
   return (
@@ -8,7 +8,7 @@ export function LandingFooter() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
           <div className="col-span-2">
             <div className="flex items-center gap-2 mb-4">
-              <Logo className="w-6 h-6 text-[#9333ea]" />
+              <Logo size={24} />
               <span className="font-bold text-lg">Omni Target</span>
             </div>
             <p className="text-sm text-foreground/50 max-w-xs">
@@ -19,16 +19,16 @@ export function LandingFooter() {
           <div>
             <h4 className="font-semibold mb-4 text-sm uppercase tracking-wider text-foreground/30">Product</h4>
             <ul className="space-y-2 text-sm text-foreground/60">
-              <li><a href="#features" className="hover:text-primary transition-colors">Features</a></li>
-              <li><a href="#pricing" className="hover:text-primary transition-colors">Pricing</a></li>
-              <li><Link href="/login" className="hover:text-primary transition-colors">Login</Link></li>
+              <li><a href="#features" className="hover:text-brand-600 transition-colors">Features</a></li>
+              <li><a href="#pricing" className="hover:text-brand-600 transition-colors">Pricing</a></li>
+              <li><Link href="/login" className="hover:text-brand-600 transition-colors">Login</Link></li>
             </ul>
           </div>
           <div>
             <h4 className="font-semibold mb-4 text-sm uppercase tracking-wider text-foreground/30">Legal</h4>
             <ul className="space-y-2 text-sm text-foreground/60">
-              <li><Link href="/privacy" className="hover:text-primary transition-colors">Privacy Policy</Link></li>
-              <li><Link href="/terms" className="hover:text-primary transition-colors">Terms of Service</Link></li>
+              <li><Link href="/privacy" className="hover:text-brand-600 transition-colors">Privacy Policy</Link></li>
+              <li><Link href="/terms" className="hover:text-brand-600 transition-colors">Terms of Service</Link></li>
             </ul>
           </div>
         </div>

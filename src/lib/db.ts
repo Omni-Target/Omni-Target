@@ -489,7 +489,11 @@ export async function deleteUserCapiEvents(userId: string) {
 export async function getUserCampaigns(userId: string) {
   const { data, error } = await supabaseAdmin
     .from("campaigns")
-    .select("*")
+    // Project the display columns and skip the large `brief_data` JSONB — an
+    // active-campaigns list never needs the full brief blob.
+    .select(
+      "id, brand_name, product_name, product_description, product_price, media_url, campaign_goal, headline, primary_text, description, cta, copywriter_note, status, created_at, launched_at",
+    )
     .eq("clerk_user_id", userId)
     .in("status", ["active", "paused", "stopped"])
     .order("launched_at", { ascending: false });
@@ -499,6 +503,218 @@ export async function getUserCampaigns(userId: string) {
     return [];
   }
   return data || [];
+}
+
+// --- Brief persistence & versioning (perf/reliability initiative) -----------
+// A `campaigns` row is one brief session; `campaign_brief_versions` holds each
+// generation attempt (initial + up to 3 free regenerations). Exactly one version
+// per campaign carries is_selected = true — the variation the user kept. Every
+// function is scoped by clerk_user_id so a spoofed id can't reach another user's
+// data.
+
+export interface BriefCopyFields {
+  headline?: string | null;
+  primary_text?: string | null;
+  description?: string | null;
+  cta?: string | null;
+  copywriter_note?: string | null;
+}
+
+export interface CampaignInsert extends BriefCopyFields {
+  brand_name?: string | null;
+  product_name?: string | null;
+  product_description?: string | null;
+  target_audience?: string | null;
+  campaign_goal?: string | null;
+  tone_preference?: string | null;
+  platform?: string | null;
+  media_url?: string | null;
+  product_price?: string | null;
+}
+
+/**
+ * Create a campaign (brief session) row; returns its id, or null on failure.
+ */
+export async function insertCampaign(
+  userId: string,
+  data: CampaignInsert,
+): Promise<string | null> {
+  const { data: row, error } = await supabaseAdmin
+    .from("campaigns")
+    .insert({ clerk_user_id: userId, status: "draft", ...data })
+    .select("id")
+    .single();
+
+  if (error) {
+    console.error("Error in insertCampaign:", error);
+    return null;
+  }
+  return row?.id ?? null;
+}
+
+/**
+ * Append a brief generation attempt (version) to a campaign; returns its id.
+ */
+export async function insertBriefVersion(
+  userId: string,
+  campaignId: string,
+  data: BriefCopyFields & { attempt_number: number; is_selected?: boolean },
+): Promise<string | null> {
+  const { data: row, error } = await supabaseAdmin
+    .from("campaign_brief_versions")
+    .insert({
+      campaign_id: campaignId,
+      clerk_user_id: userId,
+      attempt_number: data.attempt_number,
+      is_selected: data.is_selected ?? false,
+      headline: data.headline ?? null,
+      primary_text: data.primary_text ?? null,
+      description: data.description ?? null,
+      cta: data.cta ?? null,
+      copywriter_note: data.copywriter_note ?? null,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    console.error("Error in insertBriefVersion:", error);
+    return null;
+  }
+  return row?.id ?? null;
+}
+
+/**
+ * All brief attempts for a campaign, oldest first. Authz-scoped to the owner.
+ */
+export async function getBriefVersions(userId: string, campaignId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("campaign_brief_versions")
+    .select("*")
+    .eq("clerk_user_id", userId)
+    .eq("campaign_id", campaignId)
+    .order("attempt_number", { ascending: true });
+
+  if (error) {
+    console.error("Error in getBriefVersions:", error);
+    return [];
+  }
+  return data || [];
+}
+
+/**
+ * Fetch a single campaign by id, scoped to its owner (authz). Null if not found.
+ */
+export async function getCampaignById(userId: string, campaignId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("campaigns")
+    .select("*")
+    .eq("clerk_user_id", userId)
+    .eq("id", campaignId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Error in getCampaignById:", error);
+    return null;
+  }
+  return data;
+}
+
+/**
+ * Patch a campaign owned by the user. Returns true on success.
+ */
+export async function updateCampaign(
+  userId: string,
+  campaignId: string,
+  patch: Record<string, unknown>,
+): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from("campaigns")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("clerk_user_id", userId)
+    .eq("id", campaignId);
+
+  if (error) {
+    console.error("Error in updateCampaign:", error);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Mark one version as the selected variation and clear the others. Both writes
+ * are owner-scoped, so exactly one version per campaign ends up selected.
+ */
+export async function selectBriefVersion(
+  userId: string,
+  campaignId: string,
+  versionId: string,
+): Promise<boolean> {
+  const clear = await supabaseAdmin
+    .from("campaign_brief_versions")
+    .update({ is_selected: false })
+    .eq("clerk_user_id", userId)
+    .eq("campaign_id", campaignId);
+
+  if (clear.error) {
+    console.error("Error clearing brief selection:", clear.error);
+    return false;
+  }
+
+  const set = await supabaseAdmin
+    .from("campaign_brief_versions")
+    .update({ is_selected: true })
+    .eq("clerk_user_id", userId)
+    .eq("campaign_id", campaignId)
+    .eq("id", versionId);
+
+  if (set.error) {
+    console.error("Error setting brief selection:", set.error);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * List a user's brief campaigns (history), newest first, with projected columns
+ * (no large JSONB). Feeds the dashboard history panel and /campaigns list.
+ */
+export async function listUserBriefCampaigns(userId: string, limit = 100) {
+  const { data, error } = await supabaseAdmin
+    .from("campaigns")
+    .select(
+      "id, brand_name, product_name, product_description, product_price, media_url, headline, cta, status, created_at",
+    )
+    .eq("clerk_user_id", userId)
+    // Only finalized briefs (the ones the user proceeded with) — brief_data is
+    // written at finalize, so abandoned drafts never clutter the history.
+    .not("brief_data", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("Error in listUserBriefCampaigns:", error);
+    return [];
+  }
+  const rows = data || [];
+  if (rows.length === 0) return rows;
+
+  // Attach the number of generation attempts per campaign (one extra query,
+  // counted in memory — cheap at per-user volumes).
+  const { data: versionRows, error: vErr } = await supabaseAdmin
+    .from("campaign_brief_versions")
+    .select("campaign_id")
+    .eq("clerk_user_id", userId);
+
+  if (vErr) {
+    console.error("Error counting brief versions:", vErr);
+    return rows.map((r) => ({ ...r, variation_count: 1 }));
+  }
+
+  const counts = new Map<string, number>();
+  for (const v of versionRows || []) {
+    counts.set(v.campaign_id, (counts.get(v.campaign_id) ?? 0) + 1);
+  }
+  return rows.map((r) => ({ ...r, variation_count: counts.get(r.id) ?? 0 }));
 }
 
 /**

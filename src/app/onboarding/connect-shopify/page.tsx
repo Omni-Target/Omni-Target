@@ -74,8 +74,7 @@ function ConnectShopifyContent() {
           Connect your Shopify store
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Works with any Shopify store, anywhere in the world. We only request
-          read-only access.
+          A secure integration to safely sync yout live storefront metrics.
         </p>
       </div>
 
@@ -89,7 +88,7 @@ function ConnectShopifyContent() {
         <Field
           label="Store URL"
           htmlFor="shopify-url-input"
-          hint="Enter your store URL in any format — we'll handle the rest."
+          hint="Enter your store URL - We'll handle the authentication."
           error={error || undefined}
         >
           <Input

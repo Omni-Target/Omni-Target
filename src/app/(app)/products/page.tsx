@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { PackageOpen } from "lucide-react";
+import { useStoreData } from "@/hooks/useStoreData";
 import { PageContainer } from "@/components/layout/page-container";
 import { PageHeader } from "@/components/layout/page-header";
 import { Section } from "@/components/layout/section";
@@ -33,28 +34,18 @@ function getProductLabel(product: ProductRow, maxSold: number): ProductLabel {
 
 export default function ProductsPage() {
   const router = useRouter();
-  const [storeData, setStoreData] = useState<StoreData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: storeResponse, isLoading: loading } = useStoreData();
+  const storeData = (storeResponse?.data ?? null) as StoreData | null;
 
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("best");
   const [filter, setFilter] = useState<StockFilter>("all");
 
+  // Dead Shopify session — send the user to the dashboard, which owns the
+  // reconnect prompt, rather than rendering an empty product list here.
   useEffect(() => {
-    fetch("/api/store/data", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((data) => {
-        // Dead Shopify session — send the user to the dashboard, which owns the
-        // reconnect prompt, rather than rendering an empty product list here.
-        if (data.reauthRequired) {
-          router.replace("/dashboard");
-          return;
-        }
-        setStoreData(data.data);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [router]);
+    if (storeResponse?.reauthRequired) router.replace("/dashboard");
+  }, [storeResponse, router]);
 
   const storeCurrency = storeData?.store?.currency || "USD";
 

@@ -48,6 +48,19 @@ export async function getIntegrationByShop(shop: string) {
   return mapIntegrationData(data, cols);
 }
 
+/**
+ * Fetch integration for a specific Clerk user. Preferred over
+ * `getIntegrationByShop` for authenticated flows: `clerk_user_id` is unique, so
+ * this never trips the PGRST116 "multiple rows" error that occurs when the same
+ * Shopify store is connected under more than one app account.
+ */
+export async function getIntegrationByUser(userId: string) {
+  const cols = await detectColumns();
+  const data = await getUserIntegration(userId);
+  if (!data) return null;
+  return mapIntegrationData(data, cols);
+}
+
 function mapIntegrationData(data: UserIntegration, cols: DBColumns) {
   return {
     clerk_user_id: data.clerk_user_id,
@@ -56,6 +69,49 @@ function mapIntegrationData(data: UserIntegration, cols: DBColumns) {
     credits: cols.hasCredits ? data.credits : data.credits_balance,
     free_credit_used: cols.hasFreeCreditUsed ? data.free_credit_used : false,
   };
+}
+
+/**
+ * Grant credits to a specific Clerk user, keeping BOTH balance columns in sync.
+ *
+ * The schema carries a legacy `credits` column alongside `credits_balance`, and
+ * every reader prefers `credits` when it exists (see /api/user/credits and the
+ * generate credit gate). The `increment_credits` RPC only writes
+ * `credits_balance`, so a grant made through it is invisible to the UI on this
+ * schema — this helper follows the app-wide writer convention instead and
+ * updates both columns (plus `credits_total_purchased` for bookkeeping).
+ *
+ * Callers are responsible for idempotency (e.g. `claimPayment`), which also
+ * covers the read-modify-write here for the realistic replay scenario.
+ */
+export async function addCreditsToUser(userId: string, creditsToAdd: number) {
+  const cols = await detectColumns();
+  const data = await getUserIntegration(userId);
+  if (!data) {
+    throw new Error(`No integration row for user ${userId} — cannot grant credits`);
+  }
+
+  // Read the balance exactly the way the UI reads it.
+  const currentCredits =
+    (cols.hasCredits ? data.credits : data.credits_balance) ??
+    data.credits_balance ??
+    0;
+  const newCredits = currentCredits + creditsToAdd;
+
+  const updateData: Record<string, unknown> = {
+    credits_balance: newCredits,
+    credits_total_purchased:
+      (data.credits_total_purchased || 0) + creditsToAdd,
+  };
+  if (cols.hasCredits) {
+    updateData.credits = newCredits;
+  }
+
+  await updateUserIntegration(userId, updateData);
+  console.log(
+    `[addCreditsToUser] granted ${creditsToAdd} credits to ${userId}. New balance: ${newCredits}`
+  );
+  return newCredits;
 }
 
 /**

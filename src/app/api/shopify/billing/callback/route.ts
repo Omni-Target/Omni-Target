@@ -1,11 +1,22 @@
-import { getIntegrationByShop, addCreditsToIntegration } from "@/lib/billing-db";
+import {
+  getIntegrationByShop,
+  getIntegrationByUser,
+  addCreditsToIntegration,
+  addCreditsToUser,
+} from "@/lib/billing-db";
+import { claimPayment, releasePayment, createPayment } from "@/lib/db";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const chargeId = searchParams.get("charge_id");
   const shop = searchParams.get("shop");
+  // Present on charges initiated after the user-scoped billing fix; lets us
+  // attribute credits to the exact payer even when a shop is shared.
+  const uid = searchParams.get("uid");
 
-  console.log(`Shopify billing callback received. Shop: ${shop}, Charge ID: ${chargeId}`);
+  console.log(
+    `Shopify billing callback received. Shop: ${shop}, Charge ID: ${chargeId}, User: ${uid ?? "(legacy)"}`
+  );
 
   if (!chargeId || !shop) {
     return Response.redirect(
@@ -14,10 +25,15 @@ export async function GET(request: Request) {
   }
 
   try {
-    // 1. Retrieve access token
-    const integration = await getIntegrationByShop(shop);
+    // 1. Retrieve access token. Prefer the user-scoped lookup (unique key, no
+    //    ambiguity for shared stores); fall back to shop for legacy charges.
+    const integration = uid
+      ? await getIntegrationByUser(uid)
+      : await getIntegrationByShop(shop);
     if (!integration || !integration.access_token) {
-      console.error(`Integration or token not found for shop: ${shop}`);
+      console.error(
+        `Integration or token not found for ${uid ? `user: ${uid}` : `shop: ${shop}`}`
+      );
       return Response.redirect(
         `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?billing=error&message=Shopify+integration+not+found`
       );
@@ -112,10 +128,54 @@ export async function GET(request: Request) {
       );
     }
 
-    // 5. Add credits in Supabase
-    await addCreditsToIntegration(shop, creditsToAdd);
+    // 5. Idempotency: claim this charge before granting so a callback replay
+    //    (refresh, back-button, double redirect) can never double-credit. A
+    //    lost claim means the charge was already processed — redirect to
+    //    success without granting again.
+    const claimId = `shopify:${globalId}`;
+    const claimed = await claimPayment(claimId);
+    if (!claimed) {
+      console.log(`[billing-callback] charge ${globalId} already processed — skipping grant`);
+      return Response.redirect(
+        `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?billing=success&credits=${creditsToAdd}&plan=${planName}`
+      );
+    }
 
-    // 6. Redirect to dashboard with success query param
+    // 6. Grant the credits. When we know the payer (uid), credit that exact
+    //    account, writing BOTH balance columns so every reader sees the new
+    //    balance; otherwise fall back to the legacy shop-keyed path. If the
+    //    grant fails, release the claim so a retry can re-process the charge.
+    try {
+      if (uid) {
+        await addCreditsToUser(uid, creditsToAdd);
+      } else {
+        await addCreditsToIntegration(shop, creditsToAdd);
+      }
+    } catch (grantError) {
+      await releasePayment(claimId).catch(() => {});
+      throw grantError;
+    }
+
+    // 7. Record the transaction (bookkeeping only — never blocks the grant).
+    if (uid) {
+      try {
+        await createPayment({
+          clerk_user_id: uid,
+          provider: "shopify",
+          pack: planName.toLowerCase(),
+          amount_usd: Number(chargeNode.price?.amount) || null,
+          currency: chargeNode.price?.currencyCode || "USD",
+          credits_granted: creditsToAdd,
+          unlimited_days: 0,
+          status: "success",
+          provider_reference: globalId,
+        });
+      } catch (recordError) {
+        console.error("[billing-callback] failed to record payment (credits were granted):", recordError);
+      }
+    }
+
+    // 8. Redirect to dashboard with success query param
     return Response.redirect(
       `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?billing=success&credits=${creditsToAdd}&plan=${planName}`
     );

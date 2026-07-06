@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { AlertTriangle, RefreshCw } from "lucide-react";
-import { Logo } from "@/components/Logo";
+import { Logo } from "@/components/shared/logo";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -24,7 +24,7 @@ export default function RootError({
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-6 text-center">
-      <Logo className="size-9 text-brand-600" />
+      <Logo size={36} />
       <div className="flex size-14 items-center justify-center rounded-2xl border border-border-subtle bg-surface-subtle text-subtle-foreground">
         <AlertTriangle className="size-6" />
       </div>
