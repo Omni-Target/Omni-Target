@@ -1,4 +1,5 @@
 import * as React from "react";
+import Link from "next/link";
 import { Check, Sparkles } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -9,9 +10,11 @@ export interface CreditPackCardProps {
   pack: CreditPack;
   currency: "USD" | "NGN";
   onBuy: (pack: CreditPack) => void;
+  hasStore?: boolean;
 }
 
-export function CreditPackCard({ pack, currency, onBuy }: CreditPackCardProps) {
+export function CreditPackCard({ pack, currency, onBuy, hasStore }: CreditPackCardProps) {
+  const isFree = pack.id === "free" || pack.price_usd === 0;
   const price = currency === "USD" ? pack.price_usd : pack.price_ngn;
   const symbol = currency === "USD" ? "$" : "₦";
   const perBrief = pack.credits > 0 ? price / pack.credits : price;
@@ -39,45 +42,68 @@ export function CreditPackCard({ pack, currency, onBuy }: CreditPackCardProps) {
 
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-base font-semibold text-foreground">{pack.name}</h3>
-        <span className="text-xs font-medium text-subtle-foreground">
-          {pack.credits} {pack.credits === 1 ? "brief" : "briefs"}
-        </span>
+        {!isFree && (
+          <span className="text-xs font-medium text-subtle-foreground">
+            {pack.credits} {pack.credits === 1 ? "brief" : "briefs"}
+          </span>
+        )}
       </div>
       <p className="mt-1 text-sm text-muted-foreground">{pack.tagline}</p>
 
-      <div className="mt-5 flex items-end gap-1.5">
+      <div className="mt-5 flex items-baseline gap-2">
         <span className="text-[2.5rem] font-semibold leading-none tracking-[-0.03em] text-foreground">
-          {formatCurrency(price, symbol)}
+          {isFree ? "Free" : formatCurrency(price, symbol)}
         </span>
+        {!isFree && (
+          <span className="text-xs font-medium text-muted-foreground">
+            one-time charge
+          </span>
+        )}
       </div>
+
       <p className="mt-1.5 text-xs text-subtle-foreground">
-        {formatCurrency(perBrief, symbol)} per brief
+        {isFree ? "1 free brief on install" : `${formatCurrency(perBrief, symbol)} per brief`}
         {pack.unlimited_days > 0 ? ` · ${pack.unlimited_days}-day access` : ""}
       </p>
 
-      <Button
-        variant={featured ? "primary" : "secondary"}
-        className="mt-5 w-full"
-        onClick={() => onBuy(pack)}
-      >
-        Get {pack.name}
-      </Button>
+      {isFree ? (
+        <Button
+          variant="secondary"
+          className="mt-5 w-full"
+          asChild
+        >
+          <Link href={hasStore ? "/campaigns" : "/dashboard"}>
+            {hasStore ? "Create a Brief" : "Connect Store"}
+          </Link>
+        </Button>
+      ) : (
+        <Button
+          variant={featured ? "primary" : "secondary"}
+          className="mt-5 w-full"
+          onClick={() => onBuy(pack)}
+        >
+          Get {pack.name}
+        </Button>
+      )}
 
-      <ul className="mt-6 space-y-2.5 border-t border-border-subtle pt-5">
-        {pack.features.map((f) => (
-          <li key={f} className="flex items-start gap-2.5 text-sm text-muted-foreground">
-            <span
-              className={cn(
-                "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full",
-                featured ? "bg-brand-100 text-brand-700" : "bg-success-50 text-success-600",
-              )}
-            >
-              <Check className="size-3" strokeWidth={3} />
-            </span>
-            {f}
-          </li>
-        ))}
-      </ul>
+      <div className="mt-6 border-t border-border-subtle pt-5">
+        <p className="mb-3 text-xs font-semibold text-foreground">Features</p>
+        <ul className="space-y-2.5">
+          {pack.features.map((f) => (
+            <li key={f} className="flex items-start gap-2.5 text-sm text-muted-foreground">
+              <span
+                className={cn(
+                  "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full",
+                  featured ? "bg-brand-100 text-brand-700" : "bg-success-50 text-success-600",
+                )}
+              >
+                <Check className="size-3" strokeWidth={3} />
+              </span>
+              <span>{f}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

@@ -6,11 +6,13 @@ import { cn } from "@/lib/utils";
 import { AdPreview } from "../ad-preview";
 import { CopyField } from "../copy-field";
 import { CtaSelector } from "../cta-selector";
-import type { GeneratedCopy } from "../types";
+import { CreativeHooksCard } from "../creative-hooks-card";
+import type { GeneratedCopy, AiInsights, CreativeHook } from "../types";
 
 export interface BriefVariation {
   versionId: string | null;
   copy: GeneratedCopy;
+  aiInsights?: AiInsights | null;
 }
 
 export interface ReviewStepProps {
@@ -35,9 +37,10 @@ export interface ReviewStepProps {
   onRegenerate: () => void;
   onStartOver: () => void;
   onGenerateBrief: () => void;
+  hooks?: CreativeHook[];
 }
 
-/** "Review generated copy" step — ad preview, copy fields, CTA, and next actions. */
+/** "Review generated copy" step — ad preview, copy fields, CTA, hooks, and next actions. */
 export function ReviewStep({
   generatedCopy,
   previewPlatform,
@@ -58,6 +61,7 @@ export function ReviewStep({
   onRegenerate,
   onStartOver,
   onGenerateBrief,
+  hooks,
 }: ReviewStepProps) {
   return (
     <div>
@@ -201,6 +205,12 @@ export function ReviewStep({
           </Card>
         </div>
       </div>
+
+      {hooks && hooks.length > 0 && (
+        <div className="mt-8">
+          <CreativeHooksCard hooks={hooks} />
+        </div>
+      )}
 
       <div className="mx-auto mt-8 max-w-3xl">
         <Button size="xl" className="w-full" onClick={onGenerateBrief}>

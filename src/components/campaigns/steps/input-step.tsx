@@ -276,7 +276,7 @@ export function InputStep({
 
       <Button size="xl" className="mt-8 w-full" onClick={onGenerate}>
         <Wand2 className="size-4" />
-        Generate ad copy &amp; brief
+        Generate ad copy &amp; hooks
         <ArrowRight className="size-4" />
       </Button>
     </div>

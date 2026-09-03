@@ -60,15 +60,32 @@ export function PdfBriefModal({
     })();
 
     const prevOverflow = document.body.style.overflow;
+    const prevTitle = document.title;
     document.body.style.overflow = "hidden";
+    if (params?.productName) {
+      document.title = `${params.productName} — Omni Target Campaign Brief`;
+    }
     return () => {
       cancelled = true;
       document.body.style.overflow = prevOverflow;
+      document.title = prevTitle;
     };
   }, [open, params]);
 
   // Print the document exactly as before (browser dialog → Save as PDF).
   const handlePrint = () => {
+    const prodName = params?.productName?.trim();
+    const dynamicTitle = prodName
+      ? `${prodName} — Omni Target Campaign Brief`
+      : "Omni Target Campaign Brief";
+    document.title = dynamicTitle;
+    try {
+      if (iframeRef.current?.contentDocument) {
+        iframeRef.current.contentDocument.title = dynamicTitle;
+      }
+    } catch {
+      /* ignore */
+    }
     iframeRef.current?.contentWindow?.focus();
     iframeRef.current?.contentWindow?.print();
   };

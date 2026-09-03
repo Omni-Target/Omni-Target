@@ -63,7 +63,9 @@ export function useStoreInsights({
   useEffect(() => {
     if (!connected) return;
     let cancelled = false;
-    setLoadingAiInsights(true);
+    Promise.resolve().then(() => {
+      if (!cancelled) setLoadingAiInsights(true);
+    });
     fetch("/api/store/insights", { cache: "no-store" })
       .then((r) => r.json())
       .then((insights) => {

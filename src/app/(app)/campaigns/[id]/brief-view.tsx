@@ -13,7 +13,11 @@ import type {
   AiInsights,
   StoreInsights,
 } from "@/components/campaigns/types";
-import type { BriefPDFParams } from "@/lib/brief-pdf-types";
+import type {
+  BriefPDFParams,
+  CreativeHook,
+  AdvantagePlusGuidance,
+} from "@/lib/brief-pdf-types";
 import { buildBriefPdfPayload, buildBriefText } from "@/lib/campaigns/brief";
 
 // The full-screen PDF modal is only reached on click — load its chunk on demand.
@@ -34,8 +38,11 @@ interface BriefData {
   generatedCopy?: GeneratedCopy;
   selectedCta?: string;
   aiInsights?: AiInsights | null;
+  creative_hooks?: CreativeHook[];
+  advantage_plus_guidance?: AdvantagePlusGuidance;
   storeInsights?: StoreInsights | null;
   selectedStrategyIndex?: number;
+  selectedIntlStrategyIndex?: number;
   selectedDuration?: 7 | 14 | 30;
   gatewayInsight?: BriefPDFParams["gatewayInsight"] | null;
   isNewLaunch?: boolean;
@@ -104,7 +111,23 @@ export function BriefView({
   const brandName = bd.brandName ?? campaign.brand_name ?? "";
   const productName = bd.productName ?? campaign.product_name ?? "";
   const goal = bd.goal ?? campaign.campaign_goal ?? "";
-  const aiInsights = bd.aiInsights ?? null;
+  const aiInsights: AiInsights | null = useMemo(() => {
+    if (bd.aiInsights) {
+      return {
+        ...bd.aiInsights,
+        creative_hooks: bd.creative_hooks ?? bd.aiInsights.creative_hooks,
+        advantage_plus_guidance:
+          bd.advantage_plus_guidance ?? bd.aiInsights.advantage_plus_guidance,
+      };
+    }
+    if (bd.creative_hooks || bd.advantage_plus_guidance) {
+      return {
+        creative_hooks: bd.creative_hooks,
+        advantage_plus_guidance: bd.advantage_plus_guidance,
+      } as AiInsights;
+    }
+    return null;
+  }, [bd.aiInsights, bd.creative_hooks, bd.advantage_plus_guidance]);
   const storeInsights = bd.storeInsights ?? null;
   const gatewayInsight = bd.gatewayInsight ?? null;
   const isNewLaunch = bd.isNewLaunch ?? false;
@@ -131,6 +154,9 @@ export function BriefView({
   const [selectedStrategyIndex, setSelectedStrategyIndex] = useState(
     bd.selectedStrategyIndex ?? 1,
   );
+  const [selectedIntlStrategyIndex, setSelectedIntlStrategyIndex] = useState(
+    bd.selectedIntlStrategyIndex ?? 1,
+  );
   const [selectedDuration, setSelectedDuration] = useState<7 | 14 | 30>(
     bd.selectedDuration ?? 14,
   );
@@ -151,6 +177,7 @@ export function BriefView({
         storeInsights,
         selectedDuration,
         selectedStrategyIndex,
+        selectedIntlStrategyIndex,
         gatewayInsight,
         isNewLaunch,
       }),
@@ -164,6 +191,7 @@ export function BriefView({
       storeInsights,
       selectedDuration,
       selectedStrategyIndex,
+      selectedIntlStrategyIndex,
       gatewayInsight,
       isNewLaunch,
     ],
@@ -184,6 +212,7 @@ export function BriefView({
       goal,
       selectedStrategyIndex,
       selectedDuration,
+      gatewayInsight,
     });
     navigator.clipboard.writeText(briefText);
     setCopiedField("full-brief");
@@ -272,12 +301,15 @@ export function BriefView({
             goal={goal}
             selectedStrategyIndex={selectedStrategyIndex}
             setSelectedStrategyIndex={setSelectedStrategyIndex}
+            selectedIntlStrategyIndex={selectedIntlStrategyIndex}
+            setSelectedIntlStrategyIndex={setSelectedIntlStrategyIndex}
             selectedDuration={selectedDuration}
             setSelectedDuration={setSelectedDuration}
             isDownloadingPdf={false}
             onDownloadPdf={() => setModalOpen(true)}
             onCopyBrief={handleCopyBrief}
             onCreateNew={() => router.push("/campaigns")}
+            gatewayInsight={gatewayInsight}
           />
         </div>
       </div>

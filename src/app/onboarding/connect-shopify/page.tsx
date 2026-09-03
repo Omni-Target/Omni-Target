@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { advanceOnboardingStep } from "../actions";
 
+import { ShopifyBagIcon } from "@/components/auth";
+
 function ConnectShopifyContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -67,14 +69,14 @@ function ConnectShopifyContent() {
     <OnboardingShell currentStep={1} contentClassName="max-w-md">
       <div className="mb-7">
         <span className="inline-flex items-center gap-2 rounded-full border border-brand-100 bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
-          <Store className="size-3.5" />
+          <ShopifyBagIcon className="size-3.5" />
           Step 1 of 2
         </span>
         <h1 className="mt-4 text-[1.75rem] font-semibold leading-tight tracking-[-0.02em] text-foreground">
           Connect your Shopify store
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          A secure integration to safely sync yout live storefront metrics.
+          A secure integration to safely sync your live storefront metrics.
         </p>
       </div>
 
@@ -88,7 +90,7 @@ function ConnectShopifyContent() {
         <Field
           label="Store URL"
           htmlFor="shopify-url-input"
-          hint="Enter your store URL - We'll handle the authentication."
+          hint="Enter your website or store URL — we'll handle the rest."
           error={error || undefined}
         >
           <Input
@@ -96,9 +98,9 @@ function ConnectShopifyContent() {
             id="shopify-url-input"
             value={storeUrl}
             onChange={(e) => setStoreUrl(e.target.value)}
-            placeholder="yourstore.com or yourstore.myshopify.com"
+            placeholder="yourstore.com (e.g. gymshark.com)"
             invalid={!!error}
-            startIcon={<Store />}
+            startIcon={<ShopifyBagIcon className="size-4" />}
           />
         </Field>
 

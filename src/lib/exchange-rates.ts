@@ -12,7 +12,7 @@ export const FALLBACK_RATES: Record<string, number> = {
   GBP: 0.8,
   EUR: 0.9,
   AED: 3.67,
-  NGN: 1500,
+  NGN: 1600,
   CAD: 1.4,
   AUD: 1.5,
   GHS: 15,
@@ -20,8 +20,8 @@ export const FALLBACK_RATES: Record<string, number> = {
   ZAR: 19,
 };
 
-/** How long a cached rate set is considered fresh. */
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/** How long a cached rate set is considered fresh (12h to stay responsive to FX swings). */
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 /** Free, no-key USD-base FX feed. */
 const FX_API_URL = "https://open.er-api.com/v6/latest/USD";

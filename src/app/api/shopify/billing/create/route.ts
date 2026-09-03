@@ -5,16 +5,16 @@ import { apiError, apiServerError } from "@/lib/api/response";
 
 const PLANS = {
   starter: {
-    name: "Starter Pack – 5 Credits",
-    price: "39.00",
+    name: "Starter Pack – 3 Credits",
+    price: "9.00",
   },
   growth: {
-    name: "Growth Pack – 15 Credits",
-    price: "99.00",
+    name: "Growth Pack – 10 Credits",
+    price: "25.00",
   },
   scale: {
     name: "Scale Pack – 30 Credits",
-    price: "179.00",
+    price: "59.00",
   },
 } as const;
 

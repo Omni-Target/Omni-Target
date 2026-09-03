@@ -1,6 +1,7 @@
 import { StoreData, StoreLocation, StoreProduct } from "../store-data";
 import { consolidateLocation, consolidateLocationsWithAI } from "../locations";
 import { fetchWithRetry } from "../http";
+import { getEffectiveStoreCountry } from "../market-geography";
 
 // Shopify API types (subset)
 interface ShopifyShop {
@@ -255,10 +256,34 @@ export async function fetchShopifyStoreData(
       }
     } else if (hasCountry) {
       const displayCountry = country!.trim();
-      if (!locationMap[displayCountry]) {
-        locationMap[displayCountry] = { count: 0, country: displayCountry };
+      const countryKey = displayCountry.toLowerCase();
+      const countryMetroMap: Record<string, string> = {
+        "ng": "Lagos",
+        "nigeria": "Lagos",
+        "gb": "London",
+        "uk": "London",
+        "united kingdom": "London",
+        "great britain": "London",
+        "us": "New York",
+        "usa": "New York",
+        "united states": "New York",
+        "gh": "Accra",
+        "ghana": "Accra",
+        "ca": "Toronto",
+        "canada": "Toronto",
+        "ae": "Dubai",
+        "uae": "Dubai",
+        "united arab emirates": "Dubai",
+        "za": "Johannesburg",
+        "south africa": "Johannesburg",
+        "ke": "Nairobi",
+        "kenya": "Nairobi",
+      };
+      const resolvedMetro = countryMetroMap[countryKey] || displayCountry;
+      if (!locationMap[resolvedMetro]) {
+        locationMap[resolvedMetro] = { count: 0, country: displayCountry };
       }
-      locationMap[displayCountry].count += 1;
+      locationMap[resolvedMetro].count += 1;
     }
   });
 
@@ -472,12 +497,6 @@ export async function fetchShopifyStoreData(
   const store_aov = rolling60dAov;
 
   products.forEach(p => {
-    // Stock filter timing: No out-of-stock product should enter the scoring pipeline at all
-    if (!p.in_stock) {
-      p.gateway_classification = undefined;
-      return;
-    }
-
     if (p.units_sold < 3) {
       p.gateway_classification = "Insufficient Data";
       return;
@@ -521,7 +540,7 @@ export async function fetchShopifyStoreData(
       domain: shop?.domain || shopDomain,
       currency: shop?.currency || "NGN",
       currency_symbol: symbol,
-      country: shop?.country_code || "",
+      country: getEffectiveStoreCountry(shop?.country_code, shop?.currency, topLocations),
       platform: "shopify",
     },
     orders: {

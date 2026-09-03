@@ -9,6 +9,7 @@ import {
   XCircle,
   HelpCircle,
   ArrowRight,
+  Zap,
 } from "lucide-react";
 import { DonutGauge } from "@/components/charts/donut-gauge";
 import { Button } from "@/components/ui/button";
@@ -23,15 +24,15 @@ const readinessMap: Record<
     Icon: React.ElementType;
   }
 > = {
-  ready: { title: "You're good to go", tone: "success", Icon: CheckCircle2 },
+  ready: { title: "Your store is ready for ads", tone: "success", Icon: CheckCircle2 },
   ready_with_warnings: {
-    title: "Ready to go",
-    tone: "warning",
-    Icon: AlertTriangle,
+    title: "Your store is ready for ads",
+    tone: "success",
+    Icon: Sparkles,
   },
-  caution: { title: "Not quite yet", tone: "danger", Icon: XCircle },
+  caution: { title: "Restock recommended", tone: "warning", Icon: AlertTriangle },
   not_ready: {
-    title: "Store data out of sync",
+    title: "Store sync needed",
     tone: "brand",
     Icon: HelpCircle,
   },
@@ -52,6 +53,7 @@ export interface CommandCenterHeroProps {
   healthScore: number;
   onSync: () => void;
   syncing?: boolean;
+  topProduct?: string;
 }
 
 export function CommandCenterHero({
@@ -62,6 +64,7 @@ export function CommandCenterHero({
   healthScore,
   onSync,
   syncing,
+  topProduct,
 }: CommandCenterHeroProps) {
   const { title, tone, Icon } = readinessMap[readiness];
 
@@ -85,10 +88,18 @@ export function CommandCenterHero({
       />
       <div className="relative flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
         <div className="max-w-xl space-y-4">
-          <span className="inline-flex items-center gap-2 rounded-full border border-brand-400/30 bg-brand-500/20 px-3 py-1 text-xs font-medium text-brand-100">
-            <Sparkles className="size-3.5 text-brand-300" />
-            Intelligence Hub
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-2 rounded-full border border-brand-400/30 bg-brand-500/20 px-3 py-1 text-xs font-medium text-brand-100">
+              <Sparkles className="size-3.5 text-brand-300" />
+              Store Intelligence
+            </span>
+            {topProduct && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-white/90">
+                <Zap className="size-3.5 text-brand-300" />
+                #1 Gateway Product: <strong className="font-semibold text-white">{topProduct}</strong>
+              </span>
+            )}
+          </div>
           <div className="space-y-2">
             <div className="flex items-center gap-2.5">
               <Icon className={cn("size-6", toneText[tone])} />
@@ -137,8 +148,8 @@ export function CommandCenterHero({
               </span>
             }
             sublabel={
-              <span className="text-xs font-medium uppercase tracking-wide text-white/50">
-                Store health
+              <span className="text-xs font-medium uppercase tracking-wide text-white/60">
+                Ad readiness
               </span>
             }
           />

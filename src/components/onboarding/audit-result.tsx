@@ -377,8 +377,8 @@ export function AuditResultView({
         onClick={onContinue}
         isLoading={completing}
       >
-        {fromDashboard ? "Return to dashboard" : "Continue to dashboard"}
-        {!completing && <ArrowRight className="size-4" />}
+        {fromDashboard ? "Return to dashboard" : "Go to dashboard"}
+        {!completing && <ArrowRight className="size-4 ml-1" />}
       </Button>
     </div>
   );

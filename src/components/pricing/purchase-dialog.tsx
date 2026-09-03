@@ -43,7 +43,7 @@ export function PurchaseDialog({
 
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
   // Shopify Billing supports the starter/growth/scale plans for connected stores.
-  const shopifyAvailable = !!shop && pack.id !== "single";
+  const shopifyAvailable = !!shop && pack.id !== "single" && pack.id !== "free";
 
   async function start(method: Method) {
     if (!pack) return;

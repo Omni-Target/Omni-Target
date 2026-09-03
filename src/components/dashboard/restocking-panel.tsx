@@ -10,11 +10,19 @@ import type { StoreProductLike } from "./derive";
 export function RestockingPanel({
   products,
   currency,
+  shop,
 }: {
   products: StoreProductLike[];
   currency: string;
+  shop?: string | null;
 }) {
-  const [open, setOpen] = React.useState(false);
+  const gatewayCount = products.filter(
+    (p) =>
+      p.gateway_classification === "Gateway" ||
+      ((p.first_time_buyer_ratio ?? 0) >= 0.7 && (p.units_sold ?? 0) >= 3),
+  ).length;
+
+  const [open, setOpen] = React.useState(gatewayCount > 0);
   if (products.length === 0) return null;
 
   return (
@@ -26,16 +34,24 @@ export function RestockingPanel({
         className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-surface-subtle"
       >
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-semibold text-foreground">
               Restocking opportunities
             </h3>
-            <Badge variant="warning" size="sm">
-              {products.length} items
-            </Badge>
+            {gatewayCount > 0 ? (
+              <Badge variant="brand" size="sm">
+                {gatewayCount} Gateway {gatewayCount === 1 ? "Product" : "Products"}
+              </Badge>
+            ) : (
+              <Badge variant="warning" size="sm">
+                {products.length} items
+              </Badge>
+            )}
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Restock these proven sellers before running ads
+            {gatewayCount > 0
+              ? "Critical: Restock your top cold traffic acquisition magnets to run Meta ads"
+              : "Restock these proven sellers before running ads"}
           </p>
         </div>
         <ChevronDown
@@ -53,6 +69,7 @@ export function RestockingPanel({
               product={p}
               currency={currency}
               variant="restock"
+              shop={shop}
             />
           ))}
         </div>

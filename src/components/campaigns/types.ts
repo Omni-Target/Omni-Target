@@ -1,3 +1,11 @@
+import type {
+  CreativeHook,
+  AdvantagePlusGuidance,
+  ImplementationStep,
+} from "@/lib/brief-pdf-types";
+
+export type { CreativeHook, AdvantagePlusGuidance, ImplementationStep };
+
 export interface GeneratedCopy {
   headline: string;
   primaryText: string;
@@ -21,12 +29,23 @@ export interface AiBudget {
   reasoning: string;
   ad_sets?: number;
   optimization_event?: { event: string; reasoning: string };
-  breakdown?: { goal_multipliers?: Record<string, number> };
+  breakdown?: {
+    goal_multipliers?: Record<string, number>;
+    revenue_based?: number;
+    aov_based?: number;
+  };
   strategies?: BudgetStrategy[];
+  international_strategies?: BudgetStrategy[];
+  international_recommended_daily?: number;
 }
 
 export interface AiTargeting {
-  locations?: Array<{ name?: string; city?: string }>;
+  locations?: Array<{ name?: string; city?: string; source?: string }>;
+  domestic_locations?: Array<{ name?: string; city?: string; source?: string }>;
+  international_locations?: Array<{ name?: string; city?: string; source?: string }>;
+  domestic_budget_formatted?: string;
+  international_budget_formatted?: string;
+  overseas_demand?: string[];
   age_min?: number;
   age_max?: number;
   age_reasoning?: string;
@@ -39,9 +58,16 @@ export interface AiTargeting {
 
 export interface AiInsights {
   error?: string;
+  creative_hooks?: CreativeHook[];
+  advantage_plus_guidance?: AdvantagePlusGuidance;
+  implementation_steps?: ImplementationStep[];
   targeting?: AiTargeting;
   budget?: AiBudget;
-  timing?: Record<string, unknown>;
+  timing?: {
+    peak_days?: string[];
+    launch_recommendation?: string;
+    reasoning?: string;
+  };
   warnings?: string[];
 }
 

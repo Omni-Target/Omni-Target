@@ -113,10 +113,10 @@ export async function GET(request: Request) {
     let planName = "";
 
     if (name.toLowerCase().includes("starter")) {
-      creditsToAdd = 5;
+      creditsToAdd = 3;
       planName = "Starter";
     } else if (name.toLowerCase().includes("growth")) {
-      creditsToAdd = 15;
+      creditsToAdd = 10;
       planName = "Growth";
     } else if (name.toLowerCase().includes("scale")) {
       creditsToAdd = 30;

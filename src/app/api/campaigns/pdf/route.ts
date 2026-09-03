@@ -1,17 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { BriefPDFParams } from "@/lib/brief-pdf-types";
+import { BriefPDFParams, pdfFileName } from "@/lib/brief-pdf-types";
 import { buildBriefHTML } from "@/lib/brief-html-template";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-function briefFileName(params: BriefPDFParams): string {
-  return `omni-target-brief-${(params.productName || "campaign")
-    .replace(/\s+/g, "-")
-    .toLowerCase()}.pdf`;
-}
 
 export async function POST(request: Request) {
   const authResult = await requireUser();
@@ -53,7 +47,7 @@ export async function POST(request: Request) {
         status: 200,
         headers: {
           "Content-Type": "application/pdf",
-          "Content-Disposition": `attachment; filename="${briefFileName(params)}"`,
+          "Content-Disposition": `attachment; filename="${pdfFileName(params)}"`,
           "Cache-Control": "no-store",
         },
       });

@@ -1,23 +1,29 @@
 "use client";
 
-import React, { useState, useEffect, Suspense, useRef, useCallback } from "react";
+import React, { useState, useEffect, useMemo, Suspense, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useUser } from "@clerk/nextjs";
 import { useQueryClient } from "@tanstack/react-query";
-import { FileText } from "lucide-react";
 import { CREDITS_QUERY_KEY, type CreditsData } from "@/hooks/useCredits";
 import { BRIEFS_QUERY_KEY } from "@/components/campaigns/brief-history";
 import type { BriefPDFParams } from "@/lib/brief-pdf-types";
 import { PageContainer } from "@/components/layout/page-container";
-import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { Dialog } from "@/components/ui/dialog";
-import { useToast } from "@/components/ui/toast";
+
+const PdfBriefModal = dynamic(
+  () =>
+    import("@/components/campaigns/pdf-brief-modal").then(
+      (m) => m.PdfBriefModal,
+    ),
+  { ssr: false },
+);
 import {
   StepRail,
   SelectionStep,
   GeneratingState,
   type GeneratedCopy,
+  type AiInsights,
 } from "@/components/campaigns";
 import { MediaStep } from "@/components/campaigns/steps/media-step";
 import { InputStep } from "@/components/campaigns/steps/input-step";
@@ -56,7 +62,6 @@ const STEP_INDEX: Record<CampaignState, number> = {
 function CampaignsContent() {
   const router = useRouter();
   const { user } = useUser();
-  const { toast } = useToast();
   const queryClient = useQueryClient();
   const storeUrl = (user?.publicMetadata?.shopifyStoreUrl as string) || "";
 
@@ -112,10 +117,8 @@ function CampaignsContent() {
 
   // Review state
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
-  // Holds the generated brief's blob URL when the browser blocks the auto-open
-  // pop-up, so we can offer a click-to-open link in a modal instead.
-  const [pdfFallbackUrl, setPdfFallbackUrl] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
   const [selectedCta, setSelectedCta] = useState<string>("");
 
   const handleReauthRequired = useCallback(
@@ -126,10 +129,39 @@ function CampaignsContent() {
     onReauthRequired: handleReauthRequired,
     onStoreName: setBrandName,
   });
+  const [productAiInsights, setProductAiInsights] = useState<AiInsights | null>(
+    null,
+  );
+
+  // Once a brief has been generated, `hasGenerated` becomes true. From that
+  // point on, creative_hooks, advantage_plus_guidance, and targeting MUST come
+  // from `productAiInsights` only — never from the store-level `aiInsights`,
+  // which describes the store's top-revenue product (a different SKU).
+  const hasGenerated = generatedCopy !== null;
+
+  const effectiveAiInsights: AiInsights | null = useMemo(() => {
+    if (!aiInsights && !productAiInsights) return null;
+
+    // After generation, product-specific fields must come ONLY from the
+    // per-product API response, not the store-level fallback.
+    return {
+      ...(aiInsights ?? {}),
+      ...(productAiInsights ?? {}),
+      creative_hooks: hasGenerated
+        ? (productAiInsights?.creative_hooks ?? undefined)
+        : (productAiInsights?.creative_hooks ?? aiInsights?.creative_hooks),
+      advantage_plus_guidance: hasGenerated
+        ? (productAiInsights?.advantage_plus_guidance ?? undefined)
+        : (productAiInsights?.advantage_plus_guidance ?? aiInsights?.advantage_plus_guidance),
+      timing: productAiInsights?.timing ?? aiInsights?.timing,
+    } as AiInsights;
+  }, [aiInsights, productAiInsights, hasGenerated]);
+
   const [gatewayInsight, setGatewayInsight] = useState<
     BriefPDFParams["gatewayInsight"] | null
   >(null);
   const [selectedStrategyIndex, setSelectedStrategyIndex] = useState(1);
+  const [selectedIntlStrategyIndex, setSelectedIntlStrategyIndex] = useState(1);
   const [selectedDuration, setSelectedDuration] = useState<7 | 14 | 30>(14);
   const [regenerateCount, setRegenerateCount] = useState(0);
   // Persisted brief session: set on the first generate, reused by regenerations
@@ -272,6 +304,30 @@ function CampaignsContent() {
       const newVersionId: string | null = data.versionId ?? null;
       setGeneratedCopy(generatedCopyData);
       setSelectedCta(generatedCopyData.cta);
+
+      // ALWAYS set productAiInsights after generation — even if the targeting
+      // profile call failed (returned null). This ensures effectiveAiInsights
+      // never falls back to store-level aiInsights (which describes a different
+      // product — the store's top-revenue SKU).
+      const parsedAiInsights: AiInsights = {
+        creative_hooks: data.creative_hooks ?? undefined,
+        advantage_plus_guidance: data.advantage_plus_guidance ?? undefined,
+        timing: data.targeting_profile?.timing,
+        targeting: data.targeting_profile
+          ? {
+              locations: data.targeting_profile.locations,
+              age_min: data.targeting_profile.demographics?.age_min ?? 25,
+              age_max: data.targeting_profile.demographics?.age_max ?? 44,
+              age_reasoning:
+                data.targeting_profile.demographics?.age_reasoning ?? "",
+              gender: data.targeting_profile.demographics?.gender ?? "All",
+              interests:
+                data.targeting_profile.seed_interests ?? ["Online Shopping"],
+            }
+          : undefined,
+      };
+      setProductAiInsights(parsedAiInsights);
+
       // Track the persisted brief so regenerations append to the same session
       // and "Generate Brief" can navigate to the durable /campaigns/[id] page.
       if (data.campaignId) setCampaignId(data.campaignId);
@@ -283,6 +339,7 @@ function CampaignsContent() {
         const entry: BriefVariation = {
           versionId: newVersionId,
           copy: generatedCopyData,
+          aiInsights: parsedAiInsights,
         };
         const next = isRegeneration ? [...prev, entry] : [entry];
         setSelectedVariationIndex(next.length - 1);
@@ -324,6 +381,7 @@ function CampaignsContent() {
     const finalState = typeof targetState === "string" ? targetState : "media";
     resetForm();
     setGeneratedCopy(null);
+    setProductAiInsights(null);
     setErrorMsg("");
     setShowBuyCredits(false);
     setRegenerateCount(0);
@@ -344,67 +402,64 @@ function CampaignsContent() {
     setGeneratedCopy(v.copy);
     setCurrentVersionId(v.versionId);
     setSelectedCta(v.copy.cta);
+    if (v.aiInsights) {
+      setProductAiInsights(v.aiInsights);
+    }
   };
 
-  const handleDownloadPdf = async () => {
-    if (!generatedCopy) return;
-    setIsDownloadingPdf(true);
-    try {
-      const payload = buildBriefPdfPayload({
-        brandName,
-        productName,
-        goal,
-        generatedCopy,
-        selectedCta,
-        aiInsights,
-        storeInsights,
-        selectedDuration,
-        selectedStrategyIndex,
-        gatewayInsight,
-        isNewLaunch,
-      });
-      const res = await fetch("/api/campaigns/pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(
-          errData.detail ||
-            errData.error ||
-            `Brief generation failed with status ${res.status}`,
-        );
-      }
+  const pdfParams = useMemo(() => {
+    if (!generatedCopy) return null;
+    return buildBriefPdfPayload({
+      brandName,
+      productName,
+      goal,
+      generatedCopy,
+      selectedCta,
+      aiInsights: effectiveAiInsights,
+      storeInsights,
+      selectedDuration,
+      selectedStrategyIndex,
+      selectedIntlStrategyIndex,
+      gatewayInsight,
+      isNewLaunch,
+    });
+  }, [
+    brandName,
+    productName,
+    goal,
+    generatedCopy,
+    selectedCta,
+    effectiveAiInsights,
+    storeInsights,
+    selectedDuration,
+    selectedStrategyIndex,
+    selectedIntlStrategyIndex,
+    gatewayInsight,
+    isNewLaunch,
+  ]);
 
-      const htmlString = await res.text();
-      const blob = new Blob([htmlString], { type: "text/html;charset=utf-8" });
-      const blobUrl = URL.createObjectURL(blob);
-
-      // Try to open the brief in a new tab. This runs after an `await`, outside
-      // the original click gesture, so some browsers block it. Rather than
-      // erroring, fall back to a modal with a link the user can click — a real
-      // gesture that is never blocked.
-      const newTab = window.open(blobUrl, "_blank", "noopener,noreferrer");
-      if (!newTab) {
-        setPdfFallbackUrl(blobUrl);
-      } else {
-        // Brief opened — return to the dashboard (updated credits + history).
-        setTimeout(() => router.push("/dashboard"), 1200);
+  const handleFinalize = async () => {
+    setFinalizing(true);
+    if (campaignId) {
+      try {
+        await fetch(`/api/campaigns/${campaignId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            versionId: currentVersionId,
+            copy: generatedCopy,
+            status: "complete",
+            briefData: pdfParams,
+          }),
+        });
+        queryClient.invalidateQueries({ queryKey: BRIEFS_QUERY_KEY });
+      } catch (err) {
+        console.error("Failed to finalize campaign:", err);
+      } finally {
+        setFinalizing(false);
       }
-    } catch (err) {
-      console.error("PDF error:", err);
-      toast({
-        variant: "danger",
-        title: "Couldn't generate the brief",
-        description:
-          err instanceof Error
-            ? err.message
-            : "Something went wrong. Please try again.",
-      });
-    } finally {
-      setIsDownloadingPdf(false);
     }
+    router.push("/dashboard");
   };
 
   const handleCopyBrief = () => {
@@ -412,11 +467,12 @@ function CampaignsContent() {
     const briefText = buildBriefText({
       generatedCopy,
       selectedCta,
-      aiInsights,
+      aiInsights: effectiveAiInsights,
       storeInsights,
       goal,
       selectedStrategyIndex,
       selectedDuration,
+      gatewayInsight,
     });
     navigator.clipboard.writeText(briefText);
     setCopiedField("full-brief");
@@ -452,7 +508,9 @@ function CampaignsContent() {
         goal,
         generatedCopy,
         selectedCta,
-        aiInsights,
+        aiInsights: effectiveAiInsights,
+        creative_hooks: effectiveAiInsights?.creative_hooks,
+        advantage_plus_guidance: effectiveAiInsights?.advantage_plus_guidance,
         storeInsights,
         selectedStrategyIndex,
         selectedDuration,
@@ -500,7 +558,7 @@ function CampaignsContent() {
   if (viewState === "generating") {
     return (
       <PageContainer width="wide">
-        <GeneratingState />
+        <GeneratingState productName={productName} brandName={brandName} />
       </PageContainer>
     );
   }
@@ -586,6 +644,10 @@ function CampaignsContent() {
               onRegenerate={() => handleGenerate(true)}
               onStartOver={handleStartOver}
               onGenerateBrief={handleGenerateBrief}
+              hooks={
+                variations[selectedVariationIndex]?.aiInsights?.creative_hooks ??
+                effectiveAiInsights?.creative_hooks
+              }
             />
           )}
 
@@ -597,54 +659,33 @@ function CampaignsContent() {
               onCopy={handleCopy}
               selectedCta={selectedCta}
               storeInsights={storeInsights}
-              aiInsights={aiInsights}
+              aiInsights={effectiveAiInsights}
               loadingAiInsights={loadingAiInsights}
               goal={goal}
               selectedStrategyIndex={selectedStrategyIndex}
               setSelectedStrategyIndex={setSelectedStrategyIndex}
+              selectedIntlStrategyIndex={selectedIntlStrategyIndex}
+              setSelectedIntlStrategyIndex={setSelectedIntlStrategyIndex}
               selectedDuration={selectedDuration}
               setSelectedDuration={setSelectedDuration}
-              isDownloadingPdf={isDownloadingPdf}
-              onDownloadPdf={handleDownloadPdf}
+              isDownloadingPdf={false}
+              onDownloadPdf={() => setModalOpen(true)}
               onCopyBrief={handleCopyBrief}
               onCreateNew={handleCreateNewBrief}
+              gatewayInsight={gatewayInsight}
             />
           )}
         </div>
       </div>
 
-      {/* Pop-up-blocked fallback: open the generated brief via a user click. */}
-      <Dialog
-        open={!!pdfFallbackUrl}
-        onOpenChange={(open) => {
-          if (!open) {
-            if (pdfFallbackUrl) URL.revokeObjectURL(pdfFallbackUrl);
-            setPdfFallbackUrl(null);
-          }
-        }}
-        title="Your brief is ready"
-        description="Your browser blocked the automatic pop-up. Open your campaign brief in a new tab instead."
-        size="sm"
-      >
-        <Button asChild className="w-full">
-          <a
-            href={pdfFallbackUrl ?? "#"}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => {
-              const url = pdfFallbackUrl;
-              // Close the modal but keep the blob alive long enough for the new
-              // tab to load before revoking it.
-              setPdfFallbackUrl(null);
-              if (url) setTimeout(() => URL.revokeObjectURL(url), 2000);
-              setTimeout(() => router.push("/dashboard"), 1200);
-            }}
-          >
-            <FileText className="size-4" />
-            Open brief
-          </a>
-        </Button>
-      </Dialog>
+      {modalOpen && pdfParams && (
+        <PdfBriefModal
+          open={modalOpen}
+          params={pdfParams}
+          onFinalize={handleFinalize}
+          finalizing={finalizing}
+        />
+      )}
     </PageContainer>
   );
 }

@@ -19,10 +19,8 @@ import { useToast } from "@/components/ui/toast";
 import { CreditPackCard, PurchaseDialog } from "@/components/pricing";
 import { CREDIT_PACKS, type CreditPack } from "@/lib/credit-packs";
 
-// Shopify Billing supports the starter/growth/scale plans only, so the
-// single-brief pack is omitted from the storefront for now. The pack data
-// remains in CREDIT_PACKS so it can be restored if another method returns.
-const PURCHASABLE_PACKS = CREDIT_PACKS.filter((p) => p.id !== "single");
+// All 4 plans matching Shopify App Store listing (single-brief is kept for fallback)
+const STOREFRONT_PLANS = CREDIT_PACKS.filter((p) => p.id !== "single");
 
 interface CreditsState {
   credits_balance: number;
@@ -33,7 +31,7 @@ interface CreditsState {
 const ASSURANCES = [
   { icon: ShieldCheck, title: "Secure checkout", body: "Billed safely through Shopify." },
   { icon: Zap, title: "Instant credits", body: "Briefs are added the moment you pay." },
-  { icon: HelpCircle, title: "No subscription", body: "Buy credits once — they don't expire soon." },
+  { icon: HelpCircle, title: "No subscription", body: "Buy credits once — valid for 12 months." },
 ];
 
 function PricingContent() {
@@ -72,6 +70,7 @@ function PricingContent() {
   }, [searchParams, toast]);
 
   const onBuy = (pack: CreditPack) => {
+    if (pack.id === "free") return;
     setSelected(pack);
     setDialogOpen(true);
   };
@@ -84,8 +83,8 @@ function PricingContent() {
             <Sparkles className="size-3.5" /> Credits & billing
           </>
         }
-        title="Buy campaign brief credits"
-        description="Each credit generates one full AI campaign brief — copy, targeting, budget and a downloadable PDF. No subscription required."
+        title="Pricing"
+        description="Choose the plan that best fits your business. Each credit generates one full AI campaign brief — copy, targeting, budget and a downloadable PDF."
       />
 
       {/* Current balance */}
@@ -121,16 +120,22 @@ function PricingContent() {
         )}
       </div>
 
-      {/* Packs (single-brief omitted — see PURCHASABLE_PACKS note above) */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {PURCHASABLE_PACKS.map((pack) => (
-          <CreditPackCard
-            key={pack.id}
-            pack={pack}
-            currency={currency}
-            onBuy={onBuy}
-          />
-        ))}
+      {/* 4 Plan Cards */}
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+          {STOREFRONT_PLANS.map((pack) => (
+            <CreditPackCard
+              key={pack.id}
+              pack={pack}
+              currency={currency}
+              onBuy={onBuy}
+              hasStore={Boolean(state?.shop)}
+            />
+          ))}
+        </div>
+        <p className="text-center text-xs text-muted-foreground pt-1">
+          All charges are billed in USD.
+        </p>
       </div>
 
       {/* Assurances */}
@@ -175,8 +180,8 @@ function PricingFallback() {
     <PageContainer width="wide" className="space-y-8">
       <Skeleton className="h-10 w-72" />
       <Skeleton className="h-20 w-full" />
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {[0, 1, 2].map((i) => (
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
           <Skeleton key={i} className="h-96 w-full" />
         ))}
       </div>

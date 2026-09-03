@@ -44,27 +44,29 @@ export function BuyerProfile({
   repeatRate,
   currency,
 }: BuyerProfileProps) {
+  const hasIntl = /United States|United Kingdom|London|New York|Canada|Ghana/i.test(locationText);
+  const locationSub = hasIntl ? "Overseas orders detected (US/UK)" : undefined;
+
+  const isHighAov = currency === "NGN" ? aov >= 100000 : aov >= 75;
+  const isMidAov = currency === "NGN" ? aov >= 30000 : aov >= 35;
+
   const spendSub =
-    aov > 100000
-      ? "Premium buyers — target higher income audiences"
-      : aov >= 30000
-        ? "Mid-market buyers — broad targeting works well"
-        : "Value-conscious buyers — focus on deals and new arrivals";
+    isHighAov
+      ? "Premium shoppers — highlight fabric quality, fit, and craftsmanship"
+      : isMidAov
+        ? "Mid-market shoppers — highlight style and everyday comfort"
+        : "Budget-friendly — highlight value and best-sellers";
 
   const loyaltySub =
     repeatRate < 0.15
-      ? "Most buyers are new. Focus ads on acquisition."
+      ? "Most buyers are new — ads will help expand your customer base"
       : repeatRate <= 0.3
-        ? "Healthy loyalty. Test retargeting campaigns."
-        : "Strong loyalty. Create lookalike audiences from your best customers.";
+        ? "Healthy repeat rate — great for testing new arrivals"
+        : "High loyalty — your shoppers love returning";
 
   const whenSub =
     peakDays.length > 0
-      ? `Launch campaigns on ${
-          peakDays[0] === "Saturday" || peakDays[0] === "Sunday"
-            ? "Friday evening"
-            : "the day before"
-        } to catch your ${peakDays[0]} buyers`
+      ? `Launch ads before ${peakDays[0]} to catch the shopping rush`
       : undefined;
 
   return (
@@ -73,7 +75,7 @@ export function BuyerProfile({
         <CardTitle>Your buyers</CardTitle>
       </CardHeader>
       <div className="space-y-5 px-6 pb-6">
-        <Row icon={<MapPin />} label="Where they buy from" value={locationText} />
+        <Row icon={<MapPin />} label="Where they buy from" value={locationText} sub={locationSub} />
         <Row
           icon={<CalendarClock />}
           label="When they buy"

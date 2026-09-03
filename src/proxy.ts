@@ -36,11 +36,32 @@ const isPublicRoute = createRouteMatcher([
   "/api/payments/stripe/webhook",
   "/api/cron/(.*)",
   "/api/payments/paystack/verify",
+  // Shopify App Store install, login with Shopify, and SSO ticket consumption
+  "/api/auth/shopify/(.*)",
+  "/auth/shopify-callback(.*)",
 ]);
 
 const isOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);
 
 export default clerkMiddleware(async (auth, request) => {
+  // Direct Shopify App Store installation entrypoint:
+  // When a merchant clicks "Install" on the Shopify App Store listing, Shopify directs them to:
+  //   https://app.omnitarget.co/?shop={shop}&timestamp={timestamp}&hmac={hmac}
+  // Intercept this immediately and initiate the OAuth installation flow instead of bouncing to login!
+  if (
+    request.nextUrl.searchParams.has("shop") &&
+    !request.nextUrl.pathname.startsWith("/api/auth/shopify")
+  ) {
+    const connectUrl = new URL("/api/auth/shopify/connect", request.url);
+    request.nextUrl.searchParams.forEach((val, key) => {
+      connectUrl.searchParams.set(key, val);
+    });
+    if (!connectUrl.searchParams.has("from")) {
+      connectUrl.searchParams.set("from", "app_store");
+    }
+    return NextResponse.redirect(connectUrl);
+  }
+
   if (!isPublicRoute(request)) {
     const session = await auth();
     const userId = session.userId;
@@ -67,7 +88,9 @@ export default clerkMiddleware(async (auth, request) => {
         | { onboardingStep?: string; metadata?: { onboardingStep?: string } }
         | undefined;
       let rawStep = claims?.onboardingStep ?? claims?.metadata?.onboardingStep;
-      if (!rawStep) {
+      // If the JWT claim does not say 'complete', verify with fresh user metadata
+      // so a merchant who just finished onboarding is never bounced back by a stale JWT.
+      if (!rawStep || rawStep !== "complete") {
         const client = await clerkClient();
         const user = await client.users.getUser(userId);
         rawStep = (user.publicMetadata?.onboardingStep as string) || undefined;

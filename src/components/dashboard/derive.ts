@@ -1,6 +1,8 @@
 // Pure, display-only derivations for the dashboard.
 // Faithfully ported from the previous inline dashboard logic — behavior unchanged.
 import { clamp } from "@/lib/utils";
+import { formatCurrency } from "@/lib/currency";
+import { calculateAdReadinessScore } from "@/lib/ad-readiness-score";
 
 export interface OrdersData {
   orders_last_30_days?: number;
@@ -64,62 +66,110 @@ export function deriveAdReadiness(
   return { readiness, hasProducts, hasRecentOrders, outOfStockRatio };
 }
 
-/** A blended 0–100 store-health score for the command-center gauge (display-only). */
+/** Canonical 0–100 Ad Readiness score for the command-center gauge (synchronized with Audit). */
 export function deriveHealthScore(
-  products: StoreProductLike[],
-  orders: OrdersData,
+  products: StoreProductLike[] = [],
+  orders: OrdersData = {},
 ): number {
-  const inStock = products.filter((p) => p.in_stock).length;
-  const availability = products.length ? (inStock / products.length) * 30 : 0;
-  const ordersScore = clamp((orders.orders_last_30_days ?? 0) / 20, 0, 1) * 30;
-  const retention = clamp((orders.repeat_customer_rate ?? 0) / 0.3, 0, 1) * 20;
-  const catalog = clamp(products.length / 10, 0, 1) * 20;
-  return Math.round(availability + ordersScore + retention + catalog);
+  return calculateAdReadinessScore(
+    products.map((p) => ({
+      in_stock: !!p.in_stock,
+      units_sold: p.units_sold,
+      order_count: p.order_count,
+      gateway_classification: p.gateway_classification,
+      name: p.name,
+    })),
+    orders,
+  ).totalScore;
 }
 
-export type InsightKind = "premium" | "lookalike" | "timing" | "scale";
+export type InsightKind = "premium" | "lookalike" | "timing" | "scale" | "diaspora";
 export interface Insight {
   kind: InsightKind;
   title: string;
   detail: string;
 }
 
-export function deriveInsights(orders: OrdersData): Insight[] {
+export function deriveInsights(orders: OrdersData, currency = "USD"): Insight[] {
   const insights: Insight[] = [];
   const aov = orders.average_order_value || 0;
   const repeatRate = orders.repeat_customer_rate || 0;
   const peakDays = orders.peak_days || [];
   const orders30d = orders.orders_last_30_days || 0;
+  const locations = orders.top_locations || [];
 
-  if (aov > 100000) {
+  const isHighAov = currency === "NGN" ? aov >= 100000 : aov >= 75;
+
+  // 1. Creative-First Positioning (High AOV)
+  if (isHighAov) {
+    const formattedAov = formatCurrency(Math.round(aov), currency);
     insights.push({
       kind: "premium",
-      title: "Premium positioning works",
-      detail: `Your average order of ₦${Math.round(aov / 1000)}k means buyers trust your pricing. Target 'Luxury goods' and 'Fashion enthusiasts' in Meta.`,
+      title: "Showcase the quality & details",
+      detail: `Your average order is ${formattedAov}. Shoppers buy because of your craft and quality. In your ad videos, show close-ups of the fabric, stitching, and styling.`,
     });
   }
-  if (repeatRate > 0.2) {
-    insights.push({
-      kind: "lookalike",
-      title: "Build a lookalike audience",
-      detail: `${Math.round(repeatRate * 100)}% of your buyers return. Upload your customer list to Meta and create a lookalike — these are your best potential new customers.`,
-    });
-  }
-  if (peakDays.includes("Saturday") || peakDays.includes("Sunday")) {
-    insights.push({
-      kind: "timing",
-      title: "Time your campaigns right",
-      detail: `Your buyers are most active on ${peakDays.slice(0, 2).join(" and ")}. Launch your Meta campaigns on Thursday evening to build momentum before the weekend.`,
-    });
-  }
-  if (orders30d >= 10 && orders30d < 30) {
+
+  // 2. Pixel Learning & Signal Density
+  if (orders30d > 0 && orders30d < 30) {
     insights.push({
       kind: "scale",
-      title: "Ready to scale",
-      detail: `${orders30d} orders last month without paid ads shows organic demand. A targeted Meta campaign could multiply this significantly.`,
+      title: "Start with 'Add to Cart' ads",
+      detail: `With ${orders30d} orders this month, optimizing for 'Add to Cart' trains Meta faster and protects your budget while sales ramp up.`,
+    });
+  } else if (orders30d >= 30) {
+    insights.push({
+      kind: "scale",
+      title: "Ready for direct Purchase ads",
+      detail: `With ${orders30d} monthly orders, your store has strong sales data. You can optimize ads directly for 'Purchase' to maximize revenue.`,
     });
   }
-  return insights;
+
+  // 3. Diaspora Market Opportunity
+  const intlLocs = locations
+    .filter((l) => {
+      const c = (l.country || "").toLowerCase();
+      return (
+        c.includes("united states") ||
+        c.includes("united kingdom") ||
+        c.includes("canada") ||
+        c.includes("ghana") ||
+        c.includes("uae") ||
+        (l.city && ["london", "new york", "houston", "toronto", "atlanta"].some((city) => l.city?.toLowerCase().includes(city)))
+      );
+    })
+    .map((l) => l.city || l.country || "")
+    .filter(Boolean);
+
+  if (intlLocs.length > 0) {
+    const displayCities = Array.from(new Set(intlLocs)).slice(0, 2).join(" and ");
+    insights.push({
+      kind: "diaspora",
+      title: `International buyers in ${displayCities}`,
+      detail: `Shoppers in ${displayCities} are already buying from your store. Run targeted ads to these overseas cities to capture high-margin orders.`,
+    });
+  }
+
+  // 4. Launch Timing & Pacing
+  if (peakDays.length > 0) {
+    const days = peakDays.slice(0, 2).join(" and ");
+    insights.push({
+      kind: "timing",
+      title: "Best days to run your ads",
+      detail: `Your shoppers buy most on ${days}. Launch your ads on Thursday evening so they build momentum before the weekend rush.`,
+    });
+  }
+
+  // 5. Seed Audience Signals
+  if (repeatRate > 0.15 && insights.length < 4) {
+    insights.push({
+      kind: "lookalike",
+      title: "Target people like your top buyers",
+      detail: `${Math.round(repeatRate * 100)}% of your customers come back to buy again. Meta can use your past customer list to automatically find new shoppers with similar taste.`,
+    });
+  }
+
+  return insights.slice(0, 4);
 }
 
 const COUNTRY_CODES: Record<string, string> = {
@@ -195,15 +245,15 @@ export function deriveProductNarrative(p: StoreProductLike): ProductNarrative {
   }
 
   if (p.gateway_classification === "Insufficient Data") {
-    subtext = "Too early to classify — keep selling";
+    subtext = "New arrival — create an ad brief to introduce it";
   } else if (p.gateway_classification === "Gateway") {
-    subtext = "Great for cold traffic — most buyers are first-timers";
+    subtext = "Gateway product — best for attracting new customers (most sales from first-timers)";
   } else if (p.gateway_classification === "Consideration") {
-    subtext = "High consideration builder — drives high repeat purchase rates";
+    subtext = "Loyal customer favorite — drives high repeat purchases";
   } else if (p.gateway_classification === "Hybrid") {
-    subtext = "Balanced shopper response — mixed signals across new and repeat buyers";
+    subtext = "All-around favorite — popular with both new and returning shoppers";
   } else {
-    subtext = "Consistent behavioral performance across core acquisition metrics";
+    subtext = "Solid seller with steady customer interest";
   }
   return { subtext, primaryMetric };
 }

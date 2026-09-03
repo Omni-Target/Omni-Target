@@ -4,6 +4,9 @@ import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { queryUserIntegrationSelect, updateUserIntegration, insertCreditUsage, logApiUsage, insertCampaign, insertBriefVersion, getBriefVersions } from "@/lib/db";
 import sharp from "sharp";
+import { generateTargetingProfile } from "@/lib/insights-engine";
+import { getAdvantagePlusGuidance } from "@/lib/advantage-plus";
+import type { StoreProduct } from "@/lib/store-data";
 
 import { detectColumns } from "@/lib/billing-db";
 
@@ -303,16 +306,16 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
       try {
         let fetchUrl = url;
 
-        // --- Shopify CDN: resize to 1200px wide + force JPEG ---
+        // --- Shopify CDN: resize to 1200px wide + force JPEG via query params without breaking file hashes ---
         if (fetchUrl.includes("cdn.shopify.com")) {
-          // Shopify image URLs support _WIDTHx suffix before the extension
-          // e.g. product.jpg → product_1200x.jpg
-          fetchUrl = fetchUrl.replace(
-            /(\.(jpg|jpeg|png|webp|avif))(\?|$)/i,
-            "_1200x.jpg$3"
-          );
-          // Append format=jpg to force JPEG output regardless of original
-          fetchUrl += fetchUrl.includes("?") ? "&format=jpg" : "?format=jpg";
+          try {
+            const parsed = new URL(fetchUrl);
+            parsed.searchParams.set("width", "1200");
+            parsed.searchParams.set("format", "jpg");
+            fetchUrl = parsed.toString();
+          } catch {
+            fetchUrl = url;
+          }
         }
 
         // --- Cloudinary: add quality + resize transforms ---
@@ -324,10 +327,15 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
           fetchUrl = `${base}w_1200,c_limit,q_auto:good,f_jpg/${rest}`;
         }
 
-        console.log("Fetching image for AI (resized URL):", fetchUrl.slice(0, 120));
+        console.log("Fetching image for AI (URL):", fetchUrl.slice(0, 120));
 
-        const res = await fetch(fetchUrl);
-        if (!res.ok) throw new Error(`Failed to fetch image: ${res.statusText}`);
+        let res = await fetch(fetchUrl);
+        // If resized CDN URL failed (e.g. 404 or CDN rejection), fallback to the original raw URL
+        if (!res.ok && fetchUrl !== url) {
+          console.warn(`Resized image URL returned ${res.status} ${res.statusText}, retrying with original URL: ${url}`);
+          res = await fetch(url);
+        }
+        if (!res.ok) throw new Error(`Failed to fetch image: ${res.status} ${res.statusText}`);
 
         const buffer = await res.arrayBuffer();
         let contentType = (res.headers.get("content-type") || "image/jpeg")
@@ -340,14 +348,22 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
 
         const supported = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
-        // If the CDN still returned an unsupported type (like avif),
-        // skip the image block to prevent Anthropic from crashing with a 400.
-        if (!supported.includes(contentType)) {
-          console.warn(`Unsupported image type: ${contentType} from ${fetchUrl}. Skipping visual analysis.`);
-          return null;
-        }
-
         let imgBuffer: Uint8Array = Buffer.from(buffer);
+
+        // If the CDN returned an unsupported type (like avif, tiff, heic), convert to jpeg with sharp
+        if (!supported.includes(contentType)) {
+          try {
+            console.info(`Converting image from ${contentType} to image/jpeg using sharp...`);
+            imgBuffer = await sharp(imgBuffer)
+              .resize({ width: 1200, withoutEnlargement: true })
+              .jpeg({ quality: 80, mozjpeg: true })
+              .toBuffer();
+            contentType = "image/jpeg";
+          } catch (convErr) {
+            console.warn(`Failed to convert image type ${contentType} with sharp:`, convErr);
+            return null;
+          }
+        }
 
         // Progressive compression: if still over limit, use sharp to shrink until it fits.
         // This guarantees visual analysis always works — we never skip the image.
@@ -452,19 +468,69 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
       cache_control: { type: "ephemeral" }
     });
 
-    // Call the Anthropic API
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      system: [
-        {
-          type: "text",
-          text: systemPrompt,
-          cache_control: { type: "ephemeral" }
-        }
-      ],
-      messages: [{ role: "user", content: messageContent }],
-    });
+    // Resolve matching StoreProduct or construct targetProductOverride for strict single-SKU isolation
+    const storeProducts = (integration?.store_snapshot?.products || []) as StoreProduct[];
+    const matchedProduct = storeProducts.find(
+      (p) =>
+        p.name.trim().toLowerCase() === productName.trim().toLowerCase() ||
+        (p.id && String(p.id) === String(productName))
+    );
+
+    const parsedPrice =
+      typeof productPrice === "number"
+        ? productPrice
+        : parseFloat(String(productPrice || "0").replace(/[^0-9.]/g, "")) ||
+          matchedProduct?.price ||
+          Math.round(storeAov || 50);
+
+    const targetProductOverride: StoreProduct = {
+      ...(matchedProduct || {}),
+      id: matchedProduct?.id || "selected-product",
+      name: productName,
+      description: productDescription || matchedProduct?.description || "",
+      price: parsedPrice,
+      units_sold: matchedProduct?.units_sold || 0,
+      revenue: matchedProduct?.revenue || 0,
+      in_stock: matchedProduct?.in_stock ?? true,
+      collection: matchedProduct?.collection || matchedProduct?.product_type || "Apparel",
+      image_url: imageUrl || matchedProduct?.image_url || "",
+      should_advertise: true,
+      tags: matchedProduct?.tags && matchedProduct.tags.length > 0 ? matchedProduct.tags : [],
+      product_type: matchedProduct?.product_type || matchedProduct?.collection || "Apparel",
+      has_partial_stock: matchedProduct?.has_partial_stock ?? false,
+      in_stock_variant_count: matchedProduct?.in_stock_variant_count || 1,
+      total_variant_count: matchedProduct?.total_variant_count || 1,
+    };
+
+    const targetingProfilePromise = integration?.store_snapshot
+      ? generateTargetingProfile(
+          integration.store_snapshot,
+          1,
+          50,
+          userId,
+          targetProductOverride
+        ).catch((profileErr) => {
+          console.error("Targeting profile generation error:", profileErr);
+          return null;
+        })
+      : Promise.resolve(null);
+
+    // Call Anthropic API concurrently for ad copy and single-SKU Advantage+ targeting profile
+    const [message, targetingProfile] = await Promise.all([
+      client.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: 1024,
+        system: [
+          {
+            type: "text",
+            text: systemPrompt,
+            cache_control: { type: "ephemeral" },
+          },
+        ],
+        messages: [{ role: "user", content: messageContent }],
+      }),
+      targetingProfilePromise,
+    ]);
 
     if (userId) {
       logApiUsage(
@@ -613,10 +679,48 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
         ? Math.max(0, currentCredits - 1)
         : currentCredits;
 
-    // Return the parsed copy, the authoritative balance, and the persisted ids.
+    const monthlyOrders =
+      integration?.store_snapshot?.orders?.orders_last_30_days ||
+      integration?.store_snapshot?.orders?.order_count ||
+      0;
+    const guidance = getAdvantagePlusGuidance(monthlyOrders);
+
+    const advantagePlusGuidance = targetingProfile
+      ? {
+          campaign_type: guidance.campaign_type,
+          optimization_event: guidance.optimization_event,
+          optimization_reasoning:
+            targetingProfile.optimization_reasoning || guidance.default_reasoning,
+          seed_audience_suggestions: {
+            age_min: targetingProfile.demographics?.age_min || 25,
+            age_max: targetingProfile.demographics?.age_max || 44,
+            gender: targetingProfile.demographics?.gender || "All",
+            demographic_justification:
+              targetingProfile.demographics?.demographic_justification ||
+              "Demographic profile aligned with product price point and buyer history.",
+            seed_interests: targetingProfile.seed_interests || ["Online Shopping"],
+          },
+        }
+      : null;
+
+    // ── Diagnostic logging: trace what the targeting profile returned ──
+    console.log("[GENERATE] targetProductOverride.name:", targetProductOverride.name);
+    console.log("[GENERATE] targetProductOverride.description:", targetProductOverride.description?.slice(0, 80));
+    console.log("[GENERATE] targetingProfile is null?", targetingProfile === null);
+    if (targetingProfile) {
+      console.log("[GENERATE] targetingProfile.creative_hooks count:", targetingProfile.creative_hooks?.length);
+      console.log("[GENERATE] targetingProfile.demographics.gender:", targetingProfile.demographics?.gender);
+      console.log("[GENERATE] hook[0] angle:", targetingProfile.creative_hooks?.[0]?.angle);
+      console.log("[GENERATE] hook[0] visual_cue (first 80 chars):", targetingProfile.creative_hooks?.[0]?.visual_cue?.slice(0, 80));
+    }
+
+    // Return the parsed copy, the authoritative balance, and the single-SKU targeting profile.
     return NextResponse.json(
       {
         ...parsedResponse,
+        creative_hooks: targetingProfile?.creative_hooks || null,
+        advantage_plus_guidance: advantagePlusGuidance,
+        targeting_profile: targetingProfile,
         credits_balance: creditsBalanceAfter,
         is_unlimited: !!hasUnlimited,
         campaignId,

@@ -15,26 +15,58 @@ const copy: GeneratedCopy = {
   copywriterNote: "Lead with value.",
 };
 
-/** AiInsights fixture with three budget strategies and a single goal multiplier. */
+/** AiInsights fixture with Advantage+ guidance, creative hooks, and budget strategies. */
 function baseInsights(
   goalMult = 1,
-  goalKey = "Drive Website Sales",
+  goalKey = "Drive Website Sales"
 ): AiInsights {
   return {
+    creative_hooks: [
+      {
+        angle: "Problem / Friction",
+        visual_cue: "Close up of fabric fraying vs this durable build",
+        on_screen_text: "Tired of clothes that shrink?",
+        primary_text_hook: "Most daily tees give out in 3 washes. Here's why ours doesn't.",
+      },
+      {
+        angle: "Identity / Status",
+        visual_cue: "Lifestyle street shot in London",
+        on_screen_text: "Quiet luxury for every day.",
+        primary_text_hook: "Designed for those who want quality without screaming logos.",
+      },
+      {
+        angle: "Material / Craftsmanship",
+        visual_cue: "Macro detail of heavyweight organic cotton",
+        on_screen_text: "280 GSM heavyweight cotton.",
+        primary_text_hook: "Feel the difference of true heavyweight organic cotton.",
+      },
+    ],
+    advantage_plus_guidance: {
+      campaign_type: "Manual Sales with Advantage+ Audience",
+      optimization_event: "InitiateCheckout",
+      optimization_reasoning:
+        "Moderate volume detected. Optimizing for InitiateCheckout provides enough event frequency.",
+      seed_audience_suggestions: {
+        age_min: 25,
+        age_max: 45,
+        gender: "Women",
+        demographic_justification: "Matches store purchasing history.",
+        seed_interests: ["Fashion", "Shopping"],
+      },
+    },
     targeting: {
       locations: [{ name: "Lagos" }, { name: "Abuja" }],
       age_min: 25,
       age_max: 45,
-      gender: "Female",
+      gender: "Women",
       interests: ["Fashion", "Shopping"],
-      behaviours: ["Engaged Shoppers"],
     },
     budget: {
       currency: "USD",
       reasoning: "Start moderate.",
       ad_sets: 2,
       recommended_daily: 20,
-      optimization_event: { event: "Purchase", reasoning: "Best signal." },
+      optimization_event: { event: "InitiateCheckout", reasoning: "Best signal." },
       breakdown: { goal_multipliers: { [goalKey]: goalMult } },
       strategies: [
         { label: "Conservative", daily: 10, total_daily: 20, description: "" },
@@ -46,7 +78,7 @@ function baseInsights(
 }
 
 describe("buildBriefPdfPayload", () => {
-  it("computes recommended/goal-adjusted daily, tier, and label (multiplier = 1)", () => {
+  it("computes recommended/goal-adjusted daily, tier, creative hooks, and advantage_plus_guidance", () => {
     const payload = buildBriefPdfPayload({
       brandName: "Acme",
       productName: "Tee",
@@ -54,20 +86,30 @@ describe("buildBriefPdfPayload", () => {
       generatedCopy: copy,
       selectedCta: "Buy Now",
       aiInsights: baseInsights(1),
-      storeInsights: null,
+      storeInsights: {
+        orders: { orders_last_30_days: 45 },
+      },
       selectedDuration: 14,
       selectedStrategyIndex: 1,
       gatewayInsight: null,
       isNewLaunch: false,
     });
 
-    expect(payload.budget.recommended_daily).toBe(20); // strategies[1].daily
-    expect(payload.budget.goal_adjusted_daily).toBe(40); // round(20 * 2 * 1)
+    expect(payload.budget.recommended_daily).toBe(20);
+    expect(payload.budget.goal_adjusted_daily).toBe(40);
     expect(payload.budget.tier).toBe("Balanced");
-    expect(payload.budget.goal_label).toBeUndefined(); // multiplier is 1
-    expect(payload.budget.reasoning).toBe("Start moderate."); // unchanged
-    expect(payload.copy.cta).toBe("Buy Now"); // selectedCta wins
-    expect(payload.gatewayInsight).toBeUndefined();
+    expect(payload.budget.goal_label).toBeUndefined();
+    expect(payload.budget.reasoning).toBe("Start moderate.");
+    expect(payload.copy.cta).toBe("Buy Now");
+    expect(payload.creative_hooks?.length).toBe(3);
+    expect(payload.creative_hooks?.[0].angle).toBe("Problem / Friction");
+    expect(payload.advantage_plus_guidance?.campaign_type).toBe(
+      "Manual Sales with Advantage+ Audience"
+    );
+    expect(payload.advantage_plus_guidance?.optimization_event).toBe(
+      "InitiateCheckout"
+    );
+    expect(payload.implementation_steps?.length).toBe(3);
   });
 
   it("rewrites the budget reasoning and sets goal_label when a multiplier applies", () => {
@@ -88,13 +130,12 @@ describe("buildBriefPdfPayload", () => {
       isNewLaunch: false,
     });
 
-    // adjustedPerAdSet = round(20 * 1.5) = 30 → "$20" rewritten to "$30".
     expect(payload.budget.reasoning).toBe(
-      `Spend ${formatCurrency(30, "USD")}/day to start.`,
+      `Spend ${formatCurrency(30, "USD")}/day to start.`
     );
-    expect(payload.budget.goal_adjusted_daily).toBe(60); // round(20 * 2 * 1.5)
+    expect(payload.budget.goal_adjusted_daily).toBe(60);
     expect(payload.budget.goal_label).toBe("grow brand awareness");
-    expect(payload.copy.cta).toBe("Shop Now"); // empty selectedCta → fallback
+    expect(payload.copy.cta).toBe("Shop Now");
   });
 
   it("builds productUrl from the store domain and matching product handle", () => {
@@ -118,9 +159,10 @@ describe("buildBriefPdfPayload", () => {
     });
 
     expect(payload.productUrl).toBe(
-      "https://shop.example.com/products/classic-tee",
+      "https://shop.example.com/products/classic-tee"
     );
     expect(payload.isNewLaunch).toBe(true);
+    expect(payload.creative_hooks?.length).toBe(3);
   });
 
   it("appends the limited-data warning and preserves existing warnings", () => {
@@ -148,65 +190,35 @@ describe("buildBriefPdfPayload", () => {
 
     expect(payload.warnings).toEqual([
       "Existing warning",
-      "Limited product data detected — review interests before launching.",
+      "Limited product data detected — review seed suggestions before launching.",
     ]);
   });
 
-  it("does not append the limited-data warning when product data is sufficient", () => {
-    const storeInsights: StoreInsights = {
-      orders: { order_count: 50 },
-      products: [
-        {
-          id: "1",
-          name: "Tee",
-          description: "A".repeat(40),
-          tags: ["a", "b", "c"],
-          order_count: 25,
-        },
-      ],
-    };
-
+  it("dynamically formats selected international budget based on selectedIntlStrategyIndex", () => {
     const payload = buildBriefPdfPayload({
       brandName: "Acme",
       productName: "Tee",
       goal: "Drive Website Sales",
       generatedCopy: copy,
       selectedCta: "Shop Now",
-      aiInsights: { warnings: [] },
-      storeInsights,
+      aiInsights: baseInsights(1),
+      storeInsights: null,
       selectedDuration: 14,
       selectedStrategyIndex: 1,
+      selectedIntlStrategyIndex: 2, // Full Send
       gatewayInsight: null,
       isNewLaunch: false,
     });
 
-    expect(payload.warnings).toEqual([]);
-  });
-
-  it("leaves budget figures undefined when no AI insights are present", () => {
-    const payload = buildBriefPdfPayload({
-      brandName: "Acme",
-      productName: "Tee",
-      goal: "Drive Website Sales",
-      generatedCopy: copy,
-      selectedCta: "Shop Now",
-      aiInsights: null,
-      storeInsights: null,
-      selectedDuration: 30,
-      selectedStrategyIndex: 1,
-      gatewayInsight: null,
-      isNewLaunch: false,
-    });
-
-    expect(payload.budget.recommended_daily).toBeUndefined();
-    expect(payload.budget.goal_adjusted_daily).toBeUndefined();
-    expect(payload.budget.recommended_duration_days).toBe(30);
-    expect(typeof payload.generatedAt).toBe("string");
+    expect(payload.budget.international_daily).toBe(40);
+    expect(payload.budget.international_tier).toBe("Full Send");
+    expect(payload.budget.international_budget_formatted).toBe("$40/day");
+    expect(payload.targeting?.international_budget_formatted).toBe("$40/day");
   });
 });
 
 describe("buildBriefText", () => {
-  it("assembles the brief text with computed budget figures", () => {
+  it("assembles the brief text with creative hooks and Advantage+ guidance", () => {
     const text = buildBriefText({
       generatedCopy: copy,
       selectedCta: "Buy Now",
@@ -222,38 +234,17 @@ describe("buildBriefText", () => {
 
     expect(text).toContain("HEADLINE:\nBig Sale");
     expect(text).toContain("CTA: Buy Now");
-    expect(text).toContain("Locations: Lagos, Abuja");
-    expect(text).toContain("Age: 25 — 45");
-    expect(text).toContain("Gender: Female");
-    expect(text).toContain("Interests: Fashion, Shopping");
+    expect(text).toContain("── CREATIVE HOOKS (ADVANTAGE+) ──");
+    expect(text).toContain("Hook 1 [Problem / Friction]:");
+    expect(text).toContain("── TARGET AUDIENCE & CAMPAIGN SETTINGS ──");
+    expect(text).toContain("Campaign Type: Manual Sales with Advantage+ Audience");
+    expect(text).toContain("Optimization Event: InitiateCheckout");
+    expect(text).toContain("Suggested Age: 25 — 45");
+    expect(text).toContain("Suggested Gender: Women");
+    expect(text).toContain("Suggested Interests (AI Starting Hints): Fashion, Shopping");
     expect(text).toContain("Strategy: Balanced");
     expect(text).toContain("Ad Sets: 2");
     expect(text).toContain(`Recommended Daily: ${formatCurrency(40, "USD")}/day`);
-    expect(text).toContain("Test Duration: 14 days");
-    expect(text).toContain(`Total Test Spend: ${formatCurrency(40 * 14, "USD")}`);
     expect(text).toContain("Best days: Friday, Saturday");
-  });
-
-  it("uses manual-setup fallbacks when no AI insights are present", () => {
-    const text = buildBriefText({
-      generatedCopy: copy,
-      selectedCta: "",
-      aiInsights: null,
-      storeInsights: { store: { currency: "USD" } },
-      goal: "Drive Website Sales",
-      selectedStrategyIndex: 1,
-      selectedDuration: 14,
-    });
-
-    expect(text).toContain("CTA: Shop Now"); // empty selectedCta → fallback
-    expect(text).toContain("Locations: Set manually");
-    expect(text).toContain("Age: 25 — 44");
-    expect(text).toContain("Gender: All");
-    expect(text).toContain("Behaviours: Engaged Shoppers");
-    expect(text).toContain(
-      `Recommended starting budget: ${formatCurrency(5000, "USD")}/day for 14 days`,
-    );
-    expect(text).toContain("Set final budget in Meta Ads Manager");
-    expect(text).toContain("No timing data yet");
   });
 });

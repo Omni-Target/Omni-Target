@@ -6,7 +6,10 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { PageContainer } from "@/components/layout/page-container";
 import { Section } from "@/components/layout/section";
 import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { Sparkles, ExternalLink } from "lucide-react";
 import { BriefHistory } from "@/components/campaigns/brief-history";
 import {
   CommandCenterHero,
@@ -39,16 +42,18 @@ function relativeTime(iso?: string): string {
 
 function readinessSubtext(
   readiness: ReturnType<typeof deriveAdReadiness>,
+  topProductName?: string,
 ): string {
   switch (readiness.readiness) {
     case "ready":
-      return "Active products, recent sales — everything Meta needs to start learning. Let's run something.";
     case "ready_with_warnings":
-      return "Check Product Intelligence below — we've flagged the best products to run right now.";
+      return topProductName
+        ? `${topProductName} is your top Gateway product — proven to turn new shoppers into buyers. Your store is ready to launch ads.`
+        : "You have winning Gateway products in stock and healthy buyer demand. Pick a product below to create your ad brief.";
     case "caution":
       return readiness.hasRecentOrders
-        ? "Most of your stock is out. Restock your winners and you'll be ready to go."
-        : "No recent orders yet. Build some organic momentum first, then come back.";
+        ? "Several of your best-selling styles are currently sold out. Restock your winners to start advertising."
+        : "No recent orders detected yet. Share your store link or build initial sales before running paid ads.";
     default:
       return "We couldn't load your products. Sync or reconnect to refresh your store data.";
   }
@@ -154,14 +159,36 @@ function DashboardContent() {
 
   const readiness = deriveAdReadiness(products, orders);
   const healthScore = deriveHealthScore(products, orders);
-  const insights = deriveInsights(orders);
+  const insights = deriveInsights(orders, currency);
   const locationText = deriveLocationText(orders);
   const peakDays = orders.peak_days || [];
 
-  const intelligenceProducts = products
-    .filter((p) => p.in_stock)
-    .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
+  const isGatewayProduct = (p: StoreProductLike) =>
+    p.gateway_classification?.toLowerCase() === "gateway";
+
+  const outOfStockGateways = products.filter(
+    (p) => !p.in_stock && isGatewayProduct(p),
+  );
+
+  const inStockProducts = products
+    .filter((p) => p.in_stock && (p.units_sold ?? 0) > 0)
+    .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0));
+
+  // Combine out-of-stock Gateway champions with top in-stock performers
+  // Prioritize Gateway champions (both in-stock and out-of-stock) by revenue
+  const intelligenceProducts = [...outOfStockGateways, ...inStockProducts]
+    .sort((a, b) => {
+      const aG = isGatewayProduct(a);
+      const bG = isGatewayProduct(b);
+      if (aG && !bG) return -1;
+      if (!aG && bG) return 1;
+      return (b.revenue ?? 0) - (a.revenue ?? 0);
+    })
     .slice(0, 6);
+
+  const topInStockProduct =
+    intelligenceProducts.find((p) => p.in_stock)?.name ||
+    intelligenceProducts[0]?.name;
 
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -177,7 +204,12 @@ function DashboardContent() {
     .slice(0, 6);
 
   const restocking = products
-    .filter((p) => !p.in_stock && (p.units_sold ?? 0) > 0)
+    .filter(
+      (p) =>
+        !p.in_stock &&
+        (p.units_sold ?? 0) > 0 &&
+        !isGatewayProduct(p),
+    )
     .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0));
 
   return (
@@ -194,10 +226,11 @@ function DashboardContent() {
               storeData?.generated_at as string | undefined,
             )}
             readiness={readiness.readiness}
-            subtext={readinessSubtext(readiness)}
+            subtext={readinessSubtext(readiness, topInStockProduct)}
             healthScore={healthScore}
             onSync={refreshStoreData}
             syncing={refreshing}
+            topProduct={topInStockProduct}
           />
 
           {needsReauth && (
@@ -238,7 +271,10 @@ function DashboardContent() {
               />
             </div>
             <div className="lg:col-span-2">
-              <Section title="What this means for your ads">
+              <Section
+                title="Tips for your next ad"
+                description="Recommendations based on your store's recent sales and customer habits"
+              >
                 {insights.length > 0 ? (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     {insights.map((insight, i) => (
@@ -247,19 +283,64 @@ function DashboardContent() {
                   </div>
                 ) : (
                   <div className="grid h-full place-items-center rounded-2xl border border-dashed border-border bg-surface-subtle p-8 text-center text-sm text-muted-foreground">
-                    More insights unlock as your store gathers order data.
+                    More tips unlock as your store gathers order data.
                   </div>
                 )}
               </Section>
             </div>
           </div>
 
-          <BriefHistory />
-
           <Section
-            title="Product intelligence"
-            description="Top Meta Ad candidates, optimized by revenue performance and inventory depth"
+            title="Products to advertise"
+            description="Your top Gateway products and best performers, ranked for ad readiness"
           >
+            {outOfStockGateways.length > 0 && (
+              <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-amber-300/80 bg-linear-to-r from-amber-500/10 via-amber-500/5 to-transparent p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                <div className="flex items-center gap-3">
+                  <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-amber-100 text-amber-800">
+                    <Sparkles className="size-5" />
+                  </span>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-foreground">
+                        Restock Suggestion: {outOfStockGateways.map((g) => g.name).join(", ")}
+                      </p>
+                      <Badge variant="brand" size="sm">
+                        Gateway Hero
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {outOfStockGateways.length === 1
+                        ? `95% of people who bought this were brand new to your store (${outOfStockGateways[0].units_sold} sold). Restocking this Gateway Product on Shopify lets you start attracting new shoppers again.`
+                        : "These Gateway Products are your best tools for winning new customers. Restock them on Shopify to start attracting new shoppers again."}
+                    </p>
+                  </div>
+                </div>
+                {shop && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    asChild
+                    className="shrink-0 border-amber-300 text-amber-900 hover:bg-amber-100"
+                  >
+                    <a
+                      href={
+                        outOfStockGateways.length === 1
+                          ? `https://${shop}/admin/products/${outOfStockGateways[0].id}`
+                          : `https://${shop}/admin/products`
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 font-semibold"
+                    >
+                      Restock on Shopify
+                      <ExternalLink className="size-3.5" />
+                    </a>
+                  </Button>
+                )}
+              </div>
+            )}
+
             {intelligenceProducts.length > 0 ? (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {intelligenceProducts.map((p) => (
@@ -269,6 +350,7 @@ function DashboardContent() {
                     currency={currency}
                     variant="intelligence"
                     onCreateBrief={onCreateBrief}
+                    shop={shop}
                   />
                 ))}
               </div>
@@ -282,8 +364,8 @@ function DashboardContent() {
 
           {newLaunches.length > 0 && (
             <Section
-              title="New launches"
-              description="Just added — build a launch brief before the first sale."
+              title="New arrivals"
+              description="Recently added to your store — create an ad brief to introduce them to shoppers"
             >
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {newLaunches.map((p) => (
@@ -293,13 +375,16 @@ function DashboardContent() {
                     currency={currency}
                     variant="new-launch"
                     onCreateBrief={onCreateBrief}
+                    shop={shop}
                   />
                 ))}
               </div>
             </Section>
           )}
 
-          <RestockingPanel products={restocking} currency={currency} />
+          <BriefHistory />
+
+          <RestockingPanel products={restocking} currency={currency} shop={shop} />
         </>
       )}
     </PageContainer>
