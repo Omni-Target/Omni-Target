@@ -2,7 +2,7 @@
 
 import React, { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, Lock, Store, Users } from "lucide-react";
+import { ArrowRight, Lock, Store, ShieldCheck } from "lucide-react";
 import { OnboardingShell } from "@/components/onboarding";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -98,7 +98,7 @@ function ConnectShopifyContent() {
             id="shopify-url-input"
             value={storeUrl}
             onChange={(e) => setStoreUrl(e.target.value)}
-            placeholder="yourstore.com (e.g. gymshark.com)"
+            placeholder="yourstore.com or store.myshopify.com"
             invalid={!!error}
             startIcon={<ShopifyBagIcon className="size-4" />}
           />
@@ -134,8 +134,8 @@ function ConnectShopifyContent() {
           Read-only access
         </span>
         <span className="flex items-center gap-1.5">
-          <Users className="size-3.5" />
-          2,400+ merchants
+          <ShieldCheck className="size-3.5" />
+          Official Shopify Partner API
         </span>
       </div>
     </OnboardingShell>

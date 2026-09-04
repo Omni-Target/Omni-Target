@@ -29,7 +29,7 @@ export function SplitLayout({
   return (
     <div
       className={cn(
-        "flex min-h-[100dvh] lg:h-screen w-full overflow-hidden bg-background",
+        "flex h-dvh min-h-dvh lg:h-screen w-full overflow-hidden bg-background",
         className,
       )}
     >
@@ -48,15 +48,20 @@ export function SplitLayout({
         <div className="relative z-10 flex h-full flex-col p-10">{aside}</div>
       </aside>
 
-      {/* Right — independently scrollable workspace */}
-      <main className="relative flex min-h-[100dvh] lg:h-screen flex-1 flex-col overflow-y-auto">
+      {/* Right — independently scrollable workspace dynamically centered on any device */}
+      <main className="relative flex h-full flex-1 flex-col overflow-y-auto overscroll-contain">
         {/* Mobile brand bar — sticky so it stays put while the panel scrolls */}
-        <div className="sticky top-0 z-20 flex shrink-0 items-center justify-between border-b border-border-subtle bg-background/95 px-5 py-3.5 backdrop-blur lg:hidden">
+        <div className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b border-border-subtle bg-background/95 px-5 backdrop-blur lg:hidden">
           <Wordmark size={24} />
         </div>
-        <div className="flex flex-1 flex-col items-center justify-center px-4 py-6 sm:px-10 sm:py-10">
+
+        {/* Dynamic center workspace: vertically balanced on any mobile phone */}
+        <div className="flex flex-1 flex-col items-center justify-center px-4 py-4 sm:px-10 sm:py-8">
           <div className={cn("w-full my-auto", contentClassName)}>{children}</div>
         </div>
+
+        {/* Matching bottom spacer on mobile so vertical centering is geometrically balanced against the header */}
+        <div aria-hidden className="h-14 shrink-0 pointer-events-none lg:hidden" />
       </main>
     </div>
   );

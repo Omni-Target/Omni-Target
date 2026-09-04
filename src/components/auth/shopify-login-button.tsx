@@ -141,7 +141,7 @@ export function ShopifyLoginButton() {
             type="text"
             autoFocus
             disabled={loading}
-            placeholder="yourstore.com (e.g. gymshark.com)"
+            placeholder="yourstore.com or store.myshopify.com"
             value={storeDomain}
             onChange={(e) => {
               setStoreDomain(e.target.value);
