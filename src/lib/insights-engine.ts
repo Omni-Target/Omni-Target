@@ -195,11 +195,11 @@ ${
     }`
     : `- DUAL-MARKET METROPOLITAN TARGETING (${storeCountry.toUpperCase()}):
   - Primary Local Market (3–5 domestic cities):
-    * Include top-converting economic cities within the store's home country (${storeCountry}) from actual order data (source: "from_data").
-    * In addition, dynamically infer complementary high-converting commercial hubs or state capitals with strong purchasing power for ${targetProductPrice} ${storeCurrency} products (source: "recommended"). For example, for Nigeria: Lagos, Abuja, Port Harcourt, Ibadan, Asaba, Benin City.
+    * Prioritize real buying cities within ${storeCountry} from actual order data (source: "from_data").
+    * In addition, dynamically infer 1–2 complementary commercial hubs or regional economic centres within ${storeCountry} whose local demographic and disposable income best match a ${targetProductPrice} ${storeCurrency} price point (source: "recommended"). Reason about the product category, occasion, and purchasing power — do not blindly repeat a static list.
   - International Export & Diaspora Market (2–4 international cities):
     * If the store has recorded overseas buyers, include them (source: "from_data").
-    * In addition, dynamically infer 2–3 high-purchasing-power international cities with proven diaspora demand or export purchasing power for this type of product (source: "recommended"), such as Greater London, New York, Toronto, Houston, Atlanta.`
+    * In addition, dynamically infer 2–3 international cities with proven diaspora concentration, expatriate demand, or export purchasing power specifically for ${targetProductTitle} (${targetProductType || "Apparel"}) at ${targetProductPrice} ${storeCurrency} (source: "recommended"). Tailor your selections to where buyers of this specific aesthetic and price point actually reside.`
 }
   - Each location item must include a concise, plain-English note explaining why it's a top buying hub for this store/product.
 - Gender Selection:
