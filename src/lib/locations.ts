@@ -137,35 +137,45 @@ const anthropicClient = new Anthropic();
 
 import { logApiUsage } from "@/lib/db";
 
+// In-memory cache to prevent duplicate AI calls for identical location strings within the process
+const locationMemoryCache = new Map<string, string>();
+
 export async function consolidateLocationsWithAI(
   rawLocations: { city: string; country: string }[],
   userId?: string | null
 ): Promise<Record<string, string>> {
   if (rawLocations.length === 0) return {};
 
-  const prompt = `
-You are an address consolidation API for a Shopify store.
-Your task is to take a list of raw city/country names from customer orders, and for the primary market (especially Nigeria), group/consolidate all sub-city neighborhoods, local government areas (LGAs), or districts into their standard parent metropolitan city or state (e.g. Lekki, Ikoyi, Ikeja, Victoria Island, Yaba -> Lagos; Maitama, Wuse, Gwarinpa, Kubwa -> Abuja; GRA, Trans Amadi -> Port Harcourt; Benin City -> Benin City).
+  const result: Record<string, string> = {};
+  const uncachedLocations: { city: string; country: string }[] = [];
 
-For other markets, consolidate them into their standard city or state name (e.g. "Detroit, MI" -> "Detroit", "London, Greater London" -> "London").
+  for (const loc of rawLocations) {
+    const key = loc.city.trim().toLowerCase();
+    if (locationMemoryCache.has(key)) {
+      result[loc.city.trim()] = locationMemoryCache.get(key)!;
+    } else {
+      uncachedLocations.push(loc);
+    }
+  }
 
-Clean any extra whitespaces, commas, or province abbreviations from the final name, and ensure proper Title Case.
+  // If all requested locations were already resolved in cache, return immediately
+  if (uncachedLocations.length === 0) {
+    return result;
+  }
 
-Input locations:
-${JSON.stringify(rawLocations, null, 2)}
+  const prompt = `You are an address consolidation API for an e-commerce store.
+Group sub-city neighborhoods, LGAs, or districts into standard parent metro cities (e.g. Lekki, Ikoyi, Ikeja, Yaba -> Lagos; Maitama, Wuse -> Abuja; Trans Amadi -> Port Harcourt; Detroit, MI -> Detroit; London, Greater London -> London).
+Clean extra spaces and province abbreviations. Return proper Title Case.
 
-Return ONLY a valid JSON object mapping the exact raw city input to its consolidated parent city or state name. No explanations, no markdown block.
-Example format:
-{
-  "Lekki": "Lagos",
-  "Wuse": "Abuja",
-  "Benin City": "Benin City"
-}
-`;
+Input:
+${JSON.stringify(uncachedLocations, null, 2)}
+
+Return ONLY a JSON object mapping raw city to consolidated city. No markdown blocks.
+Example: {"Lekki": "Lagos", "Wuse": "Abuja"}`;
 
   try {
     const message = await anthropicClient.messages.create({
-      model: "claude-sonnet-4-6",
+      model: "claude-haiku-4-5",
       max_tokens: 1000,
       messages: [{ role: "user", content: prompt }],
     });
@@ -179,6 +189,11 @@ Example format:
     
     const parsed = JSON.parse(cleanText) as Record<string, string>;
     if (typeof parsed === "object" && parsed !== null) {
+      for (const [rawCity, consolidatedCity] of Object.entries(parsed)) {
+        result[rawCity] = consolidatedCity;
+        locationMemoryCache.set(rawCity.trim().toLowerCase(), consolidatedCity);
+      }
+
       if (userId) {
         logApiUsage(
           userId,
@@ -187,11 +202,11 @@ Example format:
           message.usage.output_tokens
         );
       }
-      return parsed;
+      return result;
     }
-    return {};
+    return result;
   } catch (error) {
     console.error("AI location consolidation error:", error);
-    return {};
+    return result;
   }
 }

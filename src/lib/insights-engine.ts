@@ -153,32 +153,32 @@ export async function generateTargetingProfile(
     .map((c) => `  - "${c.title}"`)
     .join("\n");
 
-  const prompt = `You are a senior Meta Ads media buyer briefing a busy e-commerce founder on a single-product Advantage+ campaign.
+  const systemPrompt = `You are a senior Meta Ads media buyer briefing a busy e-commerce founder on a single-product Advantage+ campaign.
 
-Where Meta actually is right now (do not contradict this)
+Where Meta actually is right now (do not contradict this):
 Meta removed most detailed-targeting interest categories on January 15, 2026. Any interest or demographic input you give Meta's Ads Manager is a "seed suggestion" for cold-start delivery — not a hard filter, and not something the algorithm is bound to respect once it has real conversion signal. Location, minimum age, and language are the only hard constraints left. Manual behavioral tags (e.g. "Engaged Shoppers," "Frequent Travelers") still exist as selectable options in Detailed Targeting, but do NOT output them in this brief. Under the Advantage+ Audience architecture, behavioral tags are soft suggestions, and on-platform buying signal is already factored in automatically. Stick strictly to the seed_interests field; leave behaviors out entirely.
 This means creative — the hook, the visual, the on-screen text — is doing 100% of the targeting work interests used to do. Everything you write must be built on that reality.
 
-Scope: STRICT SINGLE-SKU ISOLATION
+Creative hook taxonomy — pick exactly 3 angles, all different:
+- Problem / Friction — resolves a specific physical friction or annoyance
+- Identity / Status — signals who the buyer is or wants to be seen as
+- Material / Craftsmanship — tactile quality, construction, premium finish
+- Usability / Transformation — before/after, real-world wear, ease of styling
+- Contrarian / Curiosity — challenges a category assumption, sparks a stop-scroll question
+- Offer / Risk Reversal — guarantee, early access, low-friction entry
+
+Before finalizing your answer, perform a mandatory self-check: if two hooks make a similar argument to the same buyer persona, replace one. All 3 hooks must use distinct psychological frames with zero conceptual overlap.
+
+Tone & Merchant Phrasing (CRITICAL: Simple Plain English):
+Write like you're advising a busy e-commerce founder in simple, human English. Maximum one sentence per reasoning/note/justification field.
+NEVER use corporate or technical jargon like "architecture", "signal volume", "exit the learning phase", "starving the algorithm", "CPM imbalance", "acquisition signal", "behavioral velocity", "cohort signals", "seed mechanisms", or "catalog role".
+Lead with clear, practical advice that anyone can understand immediately.`;
+
+  const prompt = `Scope: STRICT SINGLE-SKU ISOLATION
 You are writing a brief for exactly one product: ${targetProductTitle}.
 Product Description: ${targetProductDescription}
 You have NOT been given the rest of the store's catalog, on purpose. Every visual cue, on-screen text, and primary text hook must describe ${targetProductTitle} and its specific details (${targetProductDescription}) and nothing else — no other garment, set, or SKU, named or implied. If you describe "the drape of X" or "styled in Y" where X or Y is not ${targetProductTitle}, you are hallucinating sibling catalog items. Describe ONLY the target product's specific materials, cut, texture, fit, or utility as described in its product details.
 ${siblingDenyList ? `\nFORBIDDEN: These other store products MUST NEVER appear by name or be referenced in any hook field:\n${siblingDenyList}\nIf any of the above names appear in your output — even partially — the brief will be rejected.` : ""}
-
-Creative hook taxonomy — pick exactly 3 angles, all different
-Problem / Friction — resolves a specific physical friction or annoyance
-Identity / Status — signals who the buyer is or wants to be seen as
-Material / Craftsmanship — tactile quality, construction, premium finish
-Usability / Transformation — before/after, real-world wear, ease of styling
-Contrarian / Curiosity — challenges a category assumption, sparks a stop-scroll question
-Offer / Risk Reversal — guarantee, early access, low-friction entry
-
-Before finalizing your answer, perform a mandatory self-check: if two hooks make a similar argument to the same buyer persona, replace one. All 3 hooks must use distinct psychological frames with zero conceptual overlap.
-
-Tone & Merchant Phrasing (CRITICAL: Simple Plain English)
-Write like you're advising a busy e-commerce founder in simple, human English. Maximum one sentence per reasoning/note/justification field.
-NEVER use corporate or technical jargon like "architecture", "signal volume", "exit the learning phase", "starving the algorithm", "CPM imbalance", "acquisition signal", "behavioral velocity", "cohort signals", "seed mechanisms", or "catalog role".
-Lead with clear, practical advice that anyone can understand immediately.
 
 Seed Audience Suggestions, Gender & Location Strategy (CRITICAL)
 ${
@@ -243,6 +243,7 @@ Call generate_advantage_plus_profile with the complete payload.`;
     name: "generate_advantage_plus_profile",
     description:
       "Single-SKU Meta Advantage+ campaign brief: creative hooks, seed audience, timing.",
+    cache_control: { type: "ephemeral" },
     input_schema: {
       type: "object",
       properties: {
@@ -367,8 +368,15 @@ Call generate_advantage_plus_profile with the complete payload.`;
 
   try {
     const response = await anthropicClient.messages.create({
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
       max_tokens: 1800,
+      system: [
+        {
+          type: "text",
+          text: systemPrompt,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
       messages: [{ role: "user", content: prompt }],
       tools: [advantagePlusTool],
       tool_choice: {
@@ -406,9 +414,16 @@ Call generate_advantage_plus_profile with the complete payload.`;
         // Single automatic retry with temperature adjustment (0.2)
         try {
           const retryResponse = await anthropicClient.messages.create({
-            model: "claude-sonnet-4-6",
+            model: "claude-sonnet-5",
             max_tokens: 1800,
             temperature: 0.2,
+            system: [
+              {
+                type: "text",
+                text: systemPrompt,
+                cache_control: { type: "ephemeral" },
+              },
+            ],
             messages: [
               { role: "user", content: prompt },
               { role: "assistant", content: response.content },

@@ -226,10 +226,16 @@ export async function fetchShopifyStoreData(
 
   const uniqueRawLocations = Array.from(uniqueRawLocationsMap.entries()).map(([city, country]) => ({ city, country }));
 
+  // Pre-filter with local dictionary first so known cities (Lagos, Abuja, London, etc.) never burn AI tokens
+  const unresolvedLocations = uniqueRawLocations.filter(({ city }) => {
+    const staticResult = consolidateLocation(city);
+    return !staticResult || staticResult === "Unknown";
+  });
+
   let aiMapping: Record<string, string> = {};
-  if (uniqueRawLocations.length > 0) {
+  if (unresolvedLocations.length > 0) {
     try {
-      aiMapping = await consolidateLocationsWithAI(uniqueRawLocations, userId);
+      aiMapping = await consolidateLocationsWithAI(unresolvedLocations, userId);
     } catch (e) {
       console.error("AI location consolidation failed, using static fallback:", e);
     }

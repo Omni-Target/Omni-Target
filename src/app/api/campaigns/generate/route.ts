@@ -518,7 +518,7 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
     // Call Anthropic API concurrently for ad copy and single-SKU Advantage+ targeting profile
     const [message, targetingProfile] = await Promise.all([
       client.messages.create({
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-5",
         max_tokens: 1024,
         system: [
           {
