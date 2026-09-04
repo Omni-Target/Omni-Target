@@ -68,11 +68,11 @@ export function AuthShell({
 }) {
   return (
     <SplitLayout aside={<AuthBrandPanel />}>
-      <div className="mb-8 text-center lg:hidden">
-        <h1 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">
+      <div className="mb-5 text-center">
+        <h1 className="text-xl sm:text-2xl font-semibold tracking-[-0.02em] text-foreground">
           {title}
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+        <p className="mt-1 text-xs sm:text-sm text-muted-foreground">{subtitle}</p>
       </div>
       {children}
     </SplitLayout>

@@ -29,7 +29,7 @@ export function SplitLayout({
   return (
     <div
       className={cn(
-        "flex h-screen w-full overflow-hidden bg-background",
+        "flex min-h-[100dvh] lg:h-screen w-full overflow-hidden bg-background",
         className,
       )}
     >
@@ -43,19 +43,19 @@ export function SplitLayout({
         <div className="absolute inset-0 opacity-15 bg-[radial-gradient(circle_at_20%_20%,var(--color-ink-foreground)_1px,transparent_1px)] bg-size-[26px_26px]" />
         <div
           aria-hidden
-          className="absolute -left-24 top-1/3 h-80 w-80 rounded-full bg-[radial-gradient(circle,color-mix(in_srgb,var(--color-brand-500)_28%,transparent),transparent_70%)] blur-3xl"
+          className="absolute -left-24 top-1/3 h-80 w-80 rounded-full bg-[radial-gradient(circle,color-mix(in_srgb,var(--color-brand-500)_28%,transparent),transparent70%)] blur-3xl"
         />
         <div className="relative z-10 flex h-full flex-col p-10">{aside}</div>
       </aside>
 
       {/* Right — independently scrollable workspace */}
-      <main className="relative h-screen flex-1 overflow-y-auto">
+      <main className="relative flex min-h-[100dvh] lg:h-screen flex-1 flex-col overflow-y-auto">
         {/* Mobile brand bar — sticky so it stays put while the panel scrolls */}
-        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-border-subtle bg-background/85 px-5 py-4 backdrop-blur lg:hidden">
-          <Wordmark size={26} />
+        <div className="sticky top-0 z-20 flex shrink-0 items-center justify-between border-b border-border-subtle bg-background/95 px-5 py-3.5 backdrop-blur lg:hidden">
+          <Wordmark size={24} />
         </div>
-        <div className="flex min-h-full flex-col items-center justify-center px-5 py-10 sm:px-10">
-          <div className={cn("w-full", contentClassName)}>{children}</div>
+        <div className="flex flex-1 flex-col items-center justify-center px-4 py-6 sm:px-10 sm:py-10">
+          <div className={cn("w-full my-auto", contentClassName)}>{children}</div>
         </div>
       </main>
     </div>

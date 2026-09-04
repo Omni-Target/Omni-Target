@@ -14,7 +14,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       title="Welcome back"
       subtitle="Sign in to your Omni Target account"
     >
-      <div className="w-full max-w-[400px] space-y-5">
+      <div className="w-full max-w-[400px] space-y-4">
         {error && (
           <div className="flex items-start gap-2.5 rounded-xl border border-danger-200 bg-danger-50/70 p-3 text-left">
             <AlertCircle className="size-4 shrink-0 text-danger-600 mt-0.5" />
@@ -39,7 +39,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           <div className="absolute inset-0 flex items-center">
             <div className="w-full border-t border-border" />
           </div>
-          <span className="relative bg-surface px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <span className="relative bg-background px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             or continue with email
           </span>
         </div>
