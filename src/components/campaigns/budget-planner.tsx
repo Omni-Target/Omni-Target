@@ -382,7 +382,7 @@ export function BudgetPlanner({
                       </div>
 
                       <div className="rounded-lg bg-brand-50/60 border border-brand-100 p-2.5 text-[11px] text-brand-900 leading-relaxed">
-                        💡 <strong>Founder Guidance:</strong> We show both figures so you have the exact numbers if you ever want to expand abroad. <strong>Do not feel pressured to run both at once.</strong> Starting with your local budget first protects your cash flow and builds early momentum.
+                        💡 <strong>Omni Tip:</strong> We show both figures so you have the exact numbers if you ever want to expand abroad. <strong>Do not feel pressured to run both at once.</strong> Starting with your local budget first protects your cash flow and builds early momentum.
                       </div>
                     </div>
                   ) : (
@@ -412,7 +412,7 @@ export function BudgetPlanner({
                         </p>
                       </div>
                       <div className="rounded-lg bg-brand-50/60 border border-brand-100 p-2.5 text-[11px] text-brand-900 leading-relaxed">
-                        💡 <strong>Founder Guidance:</strong> Consolidating your budget into a single campaign gives Meta's machine learning the data volume it needs to optimize quickly, without fragmenting your spend across unnecessary ad sets.
+                        💡 <strong>Omni Tip:</strong> Consolidating your budget into a single campaign gives Meta's machine learning the data volume it needs to optimize quickly, without fragmenting your spend across unnecessary ad sets.
                       </div>
                     </div>
                   )}

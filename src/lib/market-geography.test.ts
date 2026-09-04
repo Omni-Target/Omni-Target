@@ -65,6 +65,26 @@ describe("market-geography dynamic utility", () => {
     expect(isDomesticCity("Netherlands", undefined, "US", "NGN", topLocations)).toBe(false);
   });
 
+  it("correctly prevents overseas diaspora hubs from leaking into domestic targeting even with 0 order history", () => {
+    // Nigerian merchant with 0 orders from Houston or Toronto: MUST BE FALSE
+    expect(isDomesticCity("Houston", undefined, "US", "NGN", [])).toBe(false);
+    expect(isDomesticCity("Toronto", undefined, "US", "NGN", [])).toBe(false);
+    expect(isDomesticCity("London", undefined, "US", "NGN", [])).toBe(false);
+    expect(isDomesticCity("Atlanta", undefined, "US", "NGN", [])).toBe(false);
+
+    // Nigerian merchant domestic cities with 0 order history: MUST BE TRUE
+    expect(isDomesticCity("Lagos", undefined, "US", "NGN", [])).toBe(true);
+    expect(isDomesticCity("Abuja", undefined, "US", "NGN", [])).toBe(true);
+    expect(isDomesticCity("Port Harcourt", undefined, "US", "NGN", [])).toBe(true);
+    expect(isDomesticCity("Ibadan", undefined, "US", "NGN", [])).toBe(true);
+
+    // US merchant: Houston, Atlanta, New York MUST BE TRUE
+    expect(isDomesticCity("Houston", undefined, "US", "USD", [])).toBe(true);
+    expect(isDomesticCity("Atlanta", undefined, "US", "USD", [])).toBe(true);
+    expect(isDomesticCity("Toronto", undefined, "US", "USD", [])).toBe(false); // Toronto is Canada
+    expect(isDomesticCity("Lagos", undefined, "US", "USD", [])).toBe(false); // Lagos is Nigeria
+  });
+
   it("formats international budget floor dynamically", () => {
     expect(getInternationalBudgetFloor("NGN", 1600)).toBe("₦28,800/day ($18/day min)");
     expect(getInternationalBudgetFloor("USD")).toBe("$18/day minimum");

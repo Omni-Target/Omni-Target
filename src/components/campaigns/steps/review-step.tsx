@@ -67,7 +67,7 @@ export function ReviewStep({
     <div>
       <div className="mb-8">
         <Badge variant="success" className="mb-3">
-          <Check className="size-3" /> AI creatives ready
+          <Check className="size-3" /> Creatives ready
         </Badge>
         <h1 className="text-2xl font-semibold tracking-[-0.02em] text-foreground sm:text-3xl">
           Review generated copy

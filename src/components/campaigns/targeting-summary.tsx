@@ -43,7 +43,6 @@ export function TargetingSummary({
   const rawLocations = legacyTargeting?.locations ?? [];
 
   const isDomLoc = (l: { name?: string; city?: string; country?: string; market_type?: string }) => {
-    if (l?.market_type === "domestic") return true;
     if (l?.market_type === "international") return false;
     return isDomesticCity(
       l?.name || l?.city || "",
@@ -54,15 +53,17 @@ export function TargetingSummary({
     );
   };
 
-  const rawDomestic =
+  const rawDomestic = (
     legacyTargeting?.domestic_locations && legacyTargeting.domestic_locations.length > 0
       ? legacyTargeting.domestic_locations
-      : rawLocations.filter(isDomLoc);
+      : rawLocations
+  ).filter(isDomLoc);
 
-  const rawIntl =
+  const rawIntl = (
     legacyTargeting?.international_locations && legacyTargeting.international_locations.length > 0
       ? legacyTargeting.international_locations
-      : rawLocations.filter((l) => !isDomLoc(l));
+      : rawLocations
+  ).filter((l) => !isDomLoc(l));
 
   const domesticLocs =
     rawDomestic.length > 0
@@ -245,7 +246,7 @@ export function TargetingSummary({
 
           <div>
             <div className="flex items-center justify-between">
-              <Label>Suggested interests (AI starting hints)</Label>
+              <Label>Suggested interests (Starting hints)</Label>
               <span className="text-[10px] text-muted-foreground">
                 Audience suggestions
               </span>
@@ -263,7 +264,7 @@ export function TargetingSummary({
                 </span>
               ) : (
                 <span className="text-xs italic text-subtle-foreground">
-                  Connect your Shopify store for AI-inferred suggested interests
+                  Connect your Shopify store for suggested interests
                 </span>
               )}
             </div>

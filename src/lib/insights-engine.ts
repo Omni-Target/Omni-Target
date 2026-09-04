@@ -55,6 +55,254 @@ export interface TargetingProfile {
   timing: TimingOutput;
 }
 
+export const ADVANTAGE_PLUS_SYSTEM_PROMPT = `You are a world-class senior Meta Ads media buyer and direct-response performance strategist briefing a busy e-commerce founder on a single-product Meta Advantage+ campaign.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 1: META ADS ALGORITHMIC REALITY (2026 ARCHITECTURE)
+═══════════════════════════════════════════════════════════════════
+Meta removed the vast majority of detailed-targeting interest categories on January 15, 2026.
+Under Meta's 2026 Advantage+ system:
+1. Seed Suggestions Only: Any interest or demographic input provided to Meta's Ads Manager serves solely as a "seed suggestion" for initial delivery. It is never a hard constraint or exclusionary boundary once conversion signals begin registering.
+2. Hard Boundaries: Location, minimum age, and language are the ONLY remaining hard constraints respected by the delivery system.
+3. Behavior Tags Exclusion: Manual behavioral tags (e.g. "Engaged Shoppers", "Frequent Travelers") are soft suggestions already internalized by Meta's algorithmic graph. Do NOT output manual behavioral tags; stick purely to broad category seed interests in the seed_interests field.
+4. Creative IS Targeting: In 2026, creative assets — the visual cue, the on-screen overlay text, and the opening primary text hook — do 100% of the audience segmentation work that manual interest stacking used to do. The creative itself filters, attracts, and converts the exact right prospective customer.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 2: STRICT SINGLE-SKU ISOLATION & ANTI-HALLUCINATION MANDATE
+═══════════════════════════════════════════════════════════════════
+Every brief is commissioned for exactly ONE target product (the "Target Product").
+1. Zero Sibling Contamination: You must never mention, reference, or imply any other garment, collection item, accessory, or SKU from the store's broader catalog. If forbidden sibling products are listed in the user prompt, none of their names or identifiers may appear in any field of your output, even partially.
+2. Echo Target Title: In target_product_title, you must echo the exact title of the target product provided in the user prompt without alterations.
+3. Specificity Over Fluff: Base all visual cues and copy hooks directly and exclusively on the physical realities of the target product — its actual materials, cut, silhouette, textures, closures, utility, or documented craft details. Do not invent non-existent features or assume unstated accessories.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 3: CREATIVE HOOK TAXONOMY (THE 6 PSYCHOLOGICAL ANGLES)
+═══════════════════════════════════════════════════════════════════
+You must output exactly 3 creative hooks. Each hook must utilize a DIFFERENT psychological angle selected from the following six canonical options. You must perform a self-check to ensure zero conceptual overlap among the 3 chosen angles:
+
+1. "Problem / Friction"
+   - Core Mechanism: Directly targets a daily annoyance, physical discomfort, poor fit, wardrobe malfunction, or recurring hassle caused by conventional alternatives.
+   - When to Use: For functional apparel, everyday staples, gateway essentials, or items resolving common buyer complaints.
+   - Example Focus: "Pants that don't sag after two washes", "Blouses that don't gape at the bust".
+
+2. "Identity / Status"
+   - Core Mechanism: Signals who the wearer is, their aesthetic taste, social standing, aspirational lifestyle, or personal confidence.
+   - When to Use: For statement pieces, luxury tailoring, contemporary designer silhouettes, and items where social signaling drives purchase.
+   - Example Focus: "Command the room without shouting", "The uniform of effortless discernment".
+
+3. "Material / Craftsmanship"
+   - Core Mechanism: Focuses on sensory and tactile quality, premium textiles, weight, drape, hand-feel, artisan construction, or ethical manufacturing. Justifies price and premium consideration.
+   - When to Use: For silk, linen, heavyweight cotton, handmade embroidery, beading, leather, or artisanal heritage items.
+   - Example Focus: "320 GSM organic French terry", "Hand-finished mother-of-pearl hardware".
+
+4. "Usability / Transformation"
+   - Core Mechanism: Demonstrates practical versatility, day-to-night styling, quick outfit changes, travel friendliness, or immediate physical transformation upon putting it on.
+   - When to Use: For versatile wardrobe staples, travel pieces, wrinkle-resistant garments, multi-way dresses, or easy slip-on silhouettes.
+   - Example Focus: "Boardroom at 9 AM, dinner at 8 PM", "Zero-iron travel perfection".
+
+5. "Contrarian / Curiosity"
+   - Core Mechanism: Counter-intuitive observations, surprising facts, myth-busting, or scroll-stopping questions that shatter standard category assumptions.
+   - When to Use: For unique structural designs, zipperless constructions, unexpected fabrics, or proprietary tailoring techniques.
+   - Example Focus: "Why the best linen dress has no zipper", "The mistake killing your tailored trousers".
+
+6. "Offer / Risk Reversal"
+   - Core Mechanism: Removes purchasing hesitation, provides peace of mind, highlights early access, guarantees fit, or frames an attractive entry proposition.
+   - When to Use: For new launches, first-time buyer acquisition, or high-consideration items needing confidence reinforcement.
+   - Example Focus: "Try it in your living room with free exchanges", "Limited inaugural batch with priority dispatch".
+
+Hook Formatting Rules:
+- on_screen_text: Maximum 8 words. Ultra-punchy, high contrast, readable in under 1.5 seconds on mobile.
+- visual_cue: Concrete, descriptive instruction for the video editor or photographer (e.g. macro close-up of stitching, dynamic walking motion in natural light).
+- primary_text_hook: Engaging 1-2 sentence opening hook designed to halt the thumb scroll in Meta feeds.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 4: GEOGRAPHIC INTELLIGENCE & LOCATION STRATEGY
+═══════════════════════════════════════════════════════════════════
+Meta Advantage+ campaigns require precise geographic strategy tailored to the merchant's operational market:
+
+1. Canonical Metro Areas Only:
+   - Output specific metropolitan cities or urban commercial centers (e.g. "Lagos", "Abuja", "London", "New York", "Houston", "Toronto", "Dubai").
+   - NEVER output broad countries, regions, or states (e.g., never output "United States", "United Kingdom", "Canada", or "Nigeria" as location names).
+2. Country & Market Type Allocation:
+   - For every location object, you MUST specify:
+     * name: The city or metro area.
+     * country: The canonical country where this specific city is situated (e.g. "Nigeria", "United Kingdom", "United States", "Canada").
+     * market_type: Strict mutual exclusivity:
+       - "domestic": MUST be physically inside the merchant's store country.
+       - "international": MUST be outside the merchant's store country (e.g., cross-border diaspora or high-GDP export hubs).
+     * source: "from_data" if the city appears in recorded customer order history, or "recommended" if inferred by AI.
+     * percentage: Order percentage from data if available, or null if recommended.
+     * note: A 1-sentence plain-English justification for this location.
+3. Market Tier Protocols:
+   - Tier 1 Domestic Markets (US, UK, CA, AU, etc.):
+     Advise broad nationwide targeting for maximum algorithmic liquidity and lower CPMs. Provide 3–5 top buyer metro hubs from order data or commercial importance, and keep international locations empty unless explicit overseas order volume exists.
+   - Dual-Market / Developing Markets (NG, GH, KE, ZA, etc.):
+     Recommend 3–5 domestic commercial cities (e.g. Lagos, Abuja, Port Harcourt) combining order data with high-purchasing-power hubs, PLUS 2–4 strategic international diaspora/export cities (e.g. London, Houston, Atlanta, Toronto) where expatriates and diaspora consumers have high disposable income and strong affinity for the brand's aesthetic.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 5: DEMOGRAPHICS & SEED AUDIENCE GUIDANCE
+═══════════════════════════════════════════════════════════════════
+1. Gender Targeting:
+   - "Women": Mandatory for womenswear, dresses, skirts, slips, female intimate apparel, or female cosmetics.
+   - "Men": Mandatory for menswear, suits, men's shorts, trunks, or male grooming.
+   - "All": Reserved strictly for truly unisex items or universal homeware/accessories.
+   - Provide 1 clear sentence in demographic_justification explaining the purchasing power fit.
+2. Age Brackets:
+   - Set age_min (minimum 18) and age_max realistically based on product price point and disposable income (e.g. 22-45 for contemporary trend items; 28-55 for high-ticket luxury investment items).
+3. Seed Interests:
+   - Select 3 to 5 broad category interests. Always include "Online Shopping". Avoid micro-interests, niche fan pages, or direct competitor names.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 6: CAMPAIGN OPTIMIZATION & TIMING PACING
+═══════════════════════════════════════════════════════════════════
+1. Optimization Event Rationale:
+   - Explain in 1 simple sentence why optimizing for the designated event (Purchase, Add to Cart, or View Content) fits the store's current 30-day order volume.
+2. Timing & Launch Schedule:
+   - launch_recommendation: 1 actionable sentence recommending launching at 12:00 AM (midnight) or early morning in the store's local timezone leading into their peak sales days, allowing Meta's delivery pacing algorithm a full 24-hour cycle to distribute daily budget efficiently.
+   - reasoning: 1 reassuring sentence advising the founder to maintain 24/7 continuous ad delivery without pausing, letting Meta accumulate shopper signals across the entire week and capture highest conversions during peak days.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 7: TONE, VOICE & FOUNDER-FRIENDLY PLAIN ENGLISH MANDATE
+═══════════════════════════════════════════════════════════════════
+You are communicating with a busy founder who values direct, actionable clarity above all else:
+- Maximum ONE sentence per reasoning, note, or justification field.
+- STRICT BAN on corporate or media-buyer jargon: Never write "algorithmic liquidity", "signal volume", "exit the learning phase", "starving the algorithm", "CPM imbalance", "acquisition signal", "behavioral velocity", "cohort signals", "seed mechanisms", "catalog cannibalization", or "pixel conversion signals".
+- Speak like a trusted growth advisor: clear, confident, pragmatic, and immediately understandable.`;
+
+export const ADVANTAGE_PLUS_TOOL: Anthropic.Tool = {
+  name: "generate_advantage_plus_profile",
+  description:
+    "Single-SKU Meta Advantage+ campaign brief: creative hooks, seed audience, timing.",
+  cache_control: { type: "ephemeral" },
+  input_schema: {
+    type: "object",
+    properties: {
+      target_product_title: {
+        type: "string",
+        description:
+          "Echo the exact target product title back — used by the validator to confirm no drift.",
+      },
+      locations: {
+        type: "array",
+        minItems: 2,
+        maxItems: 12,
+        items: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description:
+                "Specific high-converting city or metro area (e.g. 'Lagos', 'Abuja', 'Greater London', 'New York'). Never whole countries.",
+            },
+            country: {
+              type: "string",
+              description: "The country where this city is located.",
+            },
+            market_type: {
+              type: "string",
+              enum: ["domestic", "international"],
+              description:
+                "Whether this city is in the store's primary local market ('domestic') or an export/diaspora market abroad ('international').",
+            },
+            source: {
+              type: "string",
+              enum: ["from_data", "recommended"],
+            },
+            percentage: { type: ["number", "null"] },
+            note: { type: "string" },
+          },
+          required: [
+            "name",
+            "country",
+            "market_type",
+            "source",
+            "percentage",
+            "note",
+          ],
+        },
+      },
+      demographics: {
+        type: "object",
+        properties: {
+          gender: {
+            type: "string",
+            enum: ["All", "Men", "Women"],
+          },
+          demographic_justification: { type: "string" },
+          age_min: { type: "number", minimum: 18 },
+          age_max: { type: "number" },
+          age_reasoning: { type: "string" },
+        },
+        required: [
+          "gender",
+          "demographic_justification",
+          "age_min",
+          "age_max",
+          "age_reasoning",
+        ],
+      },
+      seed_interests: {
+        type: "array",
+        minItems: 3,
+        maxItems: 5,
+        items: { type: "string" },
+      },
+      creative_hooks: {
+        type: "array",
+        minItems: 3,
+        maxItems: 3,
+        items: {
+          type: "object",
+          properties: {
+            angle: {
+              type: "string",
+              enum: [
+                "Problem / Friction",
+                "Identity / Status",
+                "Material / Craftsmanship",
+                "Usability / Transformation",
+                "Contrarian / Curiosity",
+                "Offer / Risk Reversal",
+              ],
+            },
+            visual_cue: { type: "string" },
+            on_screen_text: { type: "string" },
+            primary_text_hook: { type: "string" },
+          },
+          required: [
+            "angle",
+            "visual_cue",
+            "on_screen_text",
+            "primary_text_hook",
+          ],
+        },
+      },
+      optimization_reasoning: { type: "string" },
+      timing: {
+        type: "object",
+        properties: {
+          peak_days: {
+            type: "array",
+            items: { type: "string" },
+          },
+          launch_recommendation: { type: "string" },
+          reasoning: { type: "string" },
+        },
+        required: ["peak_days", "launch_recommendation", "reasoning"],
+      },
+    },
+    required: [
+      "target_product_title",
+      "locations",
+      "demographics",
+      "seed_interests",
+      "creative_hooks",
+      "optimization_reasoning",
+      "timing",
+    ],
+  },
+};
+
 /**
  * ─── 1. Consolidate AI Calls (Single-Pass Intelligence) ───
  * Makes a single call to Anthropic's Message API using structured tool use
@@ -153,218 +401,29 @@ export async function generateTargetingProfile(
     .map((c) => `  - "${c.title}"`)
     .join("\n");
 
-  const systemPrompt = `You are a senior Meta Ads media buyer briefing a busy e-commerce founder on a single-product Advantage+ campaign.
+  const prompt = `Target Product Context:
+- Product Title: ${targetProductTitle}
+- Product Description: ${targetProductDescription}
+- Category: ${targetProductType}
+- Tags: ${targetProductTags}
+- Price: ${targetProductPrice} ${storeCurrency}
+- Product URL: ${targetProductUrl}
+${siblingDenyList ? `\nForbidden Sibling Products (MUST NEVER appear by name or be referenced in any hook):\n${siblingDenyList}` : ""}
 
-Where Meta actually is right now (do not contradict this):
-Meta removed most detailed-targeting interest categories on January 15, 2026. Any interest or demographic input you give Meta's Ads Manager is a "seed suggestion" for cold-start delivery — not a hard filter, and not something the algorithm is bound to respect once it has real conversion signal. Location, minimum age, and language are the only hard constraints left. Manual behavioral tags (e.g. "Engaged Shoppers," "Frequent Travelers") still exist as selectable options in Detailed Targeting, but do NOT output them in this brief. Under the Advantage+ Audience architecture, behavioral tags are soft suggestions, and on-platform buying signal is already factored in automatically. Stick strictly to the seed_interests field; leave behaviors out entirely.
-This means creative — the hook, the visual, the on-screen text — is doing 100% of the targeting work interests used to do. Everything you write must be built on that reality.
+Store & Market Context:
+- Store Name: ${storeName}
+- Home Market: ${storeCountry} (${isTier1 ? "Tier 1 Domestic Market" : "Dual-Market / Developing Economy"})
+- Currency: ${storeCurrency}
+- Rolling 60-day Average Order Value (AOV): ${aov} ${storeCurrency}
+- Monthly Order Volume: ${monthlyOrders} orders/month
+- Assigned Campaign Architecture: ${guidance.campaign_type}
+- Assigned Optimization Event: ${guidance.optimization_event}
+- Top Buyer Locations from Order Data: ${consolidatedLocations || "None recorded yet"}
+- Has Recorded Overseas Buyers: ${hasOverseasBuyers ? "Yes" : "No"}
+- Peak Order Days: ${peakDaysStr}
 
-Creative hook taxonomy — pick exactly 3 angles, all different:
-- Problem / Friction — resolves a specific physical friction or annoyance
-- Identity / Status — signals who the buyer is or wants to be seen as
-- Material / Craftsmanship — tactile quality, construction, premium finish
-- Usability / Transformation — before/after, real-world wear, ease of styling
-- Contrarian / Curiosity — challenges a category assumption, sparks a stop-scroll question
-- Offer / Risk Reversal — guarantee, early access, low-friction entry
-
-Before finalizing your answer, perform a mandatory self-check: if two hooks make a similar argument to the same buyer persona, replace one. All 3 hooks must use distinct psychological frames with zero conceptual overlap.
-
-Tone & Merchant Phrasing (CRITICAL: Simple Plain English):
-Write like you're advising a busy e-commerce founder in simple, human English. Maximum one sentence per reasoning/note/justification field.
-NEVER use corporate or technical jargon like "architecture", "signal volume", "exit the learning phase", "starving the algorithm", "CPM imbalance", "acquisition signal", "behavioral velocity", "cohort signals", "seed mechanisms", or "catalog role".
-Lead with clear, practical advice that anyone can understand immediately.`;
-
-  const prompt = `Scope: STRICT SINGLE-SKU ISOLATION
-You are writing a brief for exactly one product: ${targetProductTitle}.
-Product Description: ${targetProductDescription}
-You have NOT been given the rest of the store's catalog, on purpose. Every visual cue, on-screen text, and primary text hook must describe ${targetProductTitle} and its specific details (${targetProductDescription}) and nothing else — no other garment, set, or SKU, named or implied. If you describe "the drape of X" or "styled in Y" where X or Y is not ${targetProductTitle}, you are hallucinating sibling catalog items. Describe ONLY the target product's specific materials, cut, texture, fit, or utility as described in its product details.
-${siblingDenyList ? `\nFORBIDDEN: These other store products MUST NEVER appear by name or be referenced in any hook field:\n${siblingDenyList}\nIf any of the above names appear in your output — even partially — the brief will be rejected.` : ""}
-
-Seed Audience Suggestions, Gender & Location Strategy (CRITICAL)
-${
-  isTier1
-    ? `- ADVANTAGE+ LOCATION STRATEGY FOR ${storeCountry.toUpperCase()}:
-  - Primary Domestic Market:
-    * In Meta Advantage+, nationwide broad targeting (${storeCountry} Nationwide) is the gold standard for maximum algorithmic liquidity and lowest CPMs.
-    * If the store has order data in specific metro hubs (e.g. New York, Los Angeles, Chicago, Houston, Atlanta), include 3–5 of them as top buyer signals (source: "from_data" if present, else "recommended"), but advise broad nationwide targeting in Meta Ads Manager.
-  - International Export Market:
-    ${
-      hasOverseasBuyers
-        ? `* The store has recorded overseas buyers in order data. Include only those real international cities (source: "from_data").`
-        : `* The store operates primarily domestically. Do NOT invent or output international cities. Leave international locations empty so the founder stays 100% focused on their home market.`
-    }`
-    : `- DUAL-MARKET METROPOLITAN TARGETING (${storeCountry.toUpperCase()}):
-  - Primary Local Market (3–5 domestic cities):
-    * Prioritize real buying cities within ${storeCountry} from actual order data (source: "from_data").
-    * In addition, dynamically infer 1–2 complementary commercial hubs or regional economic centres within ${storeCountry} whose local demographic and disposable income best match a ${targetProductPrice} ${storeCurrency} price point (source: "recommended"). Reason about the product category, occasion, and purchasing power — do not blindly repeat a static list.
-  - International Export & Diaspora Market (2–4 international cities):
-    * If the store has recorded overseas buyers, include them (source: "from_data").
-    * In addition, dynamically infer 2–3 international cities with proven diaspora concentration, expatriate demand, or export purchasing power specifically for ${targetProductTitle} (${targetProductType || "Apparel"}) at ${targetProductPrice} ${storeCurrency} (source: "recommended"). Tailor your selections to where buyers of this specific aesthetic and price point actually reside.`
-}
-  - Each location item must include a concise, plain-English note explaining why it's a top buying hub for this store/product.
-- Gender Selection:
-  - If the product is specifically for women (e.g. dresses, skirts, mini slips, robes, bras, heels, women's co-ords, women's lingerie/fashion), you MUST select gender: "Women".
-  - If the product is specifically for men (e.g. men's suits, boxer briefs, men's shorts, trunks), you MUST select gender: "Men".
-  - Only select gender: "All" if the product is genuinely unisex or universal.
-- In demographic_justification, write 1 simple sentence explaining the gender selection and purchasing power fit.
-- Select 3–5 broad category interests (always include "Online Shopping"). Avoid competitor names or niche interest stacking.
-
-Store & Product Context
-Target Product: ${targetProductTitle}
-Product Description: ${targetProductDescription}
-Category: ${targetProductType}
-Tags: ${targetProductTags}
-Price: ${targetProductPrice} ${storeCurrency}
-Product URL: ${targetProductUrl}
-Store: ${storeName}, ${storeCountry}
-Rolling 60-day AOV: ${aov} ${storeCurrency}
-Monthly Orders: ${monthlyOrders}
-Assigned Campaign Architecture: ${guidance.campaign_type}
-Assigned Optimization Event: ${guidance.optimization_event}
-Top Buyer Locations: ${consolidatedLocations || "None recorded yet"}
-Peak Order Days: ${peakDaysStr}
-
-Creative hooks: exactly 3 distinct angles dynamically inferred from ${targetProductTitle}'s attributes, price point (${aov} ${storeCurrency}), and buyer mindset:
-  - If the product features tactile fabric, handmade detailing (e.g. beading, embroidery, artisan construction), or premium materials: select "Material / Craftsmanship" to establish quality and justify price.
-  - If the product solves a dressing hassle, fit friction, or comfort frustration (e.g. elasticated waist, no zip struggle, easy slip-on, versatile styling): select "Usability / Transformation" to highlight effortless daily wear.
-  - If the product has a unique design feature that defies convention or sparks intrigue (e.g. "Why does this dress need no zip?"): select "Contrarian / Curiosity" to stop the feed scroll.
-  - For entry-level gateway products or everyday staples: select "Problem / Friction" (fixing frustrations with ordinary clothes) or "Identity / Status" (personal aesthetic and confidence).
-  Ensure all 3 angles represent fundamentally DIFFERENT psychological reasons to buy so Meta's Advantage+ machine learning can dynamically match each angle to different shopper mindsets. Keep on-screen text under 8 words.
-Demographics: gender matched to product type ("Women", "Men", or "All") and age range fitted to price point; 1-sentence justification in plain English.
-Seed interests: 3–5 broad category items (must include "Online Shopping").
-Locations: Recommend 3–5 high-converting domestic cities in ${storeCountry} (combining order data with inferred commercial hubs), plus 2–4 strategic international cities with strong buyer affinity. Mark each from_data or recommended.
-Optimization reasoning: 1 simple sentence in plain English explaining why optimizing for ${guidance.optimization_event} is best for this store's volume of ${monthlyOrders} orders/month.
-Timing (Plain English & Practical):
-  - launch_recommendation: 1 dynamic sentence advising the founder to schedule the campaign to go live at 12:00 AM (midnight) or early morning in their store's timezone leading into ${peakDaysStr} so Meta has a clean full day to pace the daily budget smoothly.
-  - reasoning: 1 dynamic sentence reassuring the founder to keep ads running 24/7 without pausing, explaining that Meta builds shopper interest all week and automatically drives the most sales during their peak days of ${peakDaysStr}.
-Call generate_advantage_plus_profile with the complete payload.`;
-
-  const advantagePlusTool: Anthropic.Tool = {
-    name: "generate_advantage_plus_profile",
-    description:
-      "Single-SKU Meta Advantage+ campaign brief: creative hooks, seed audience, timing.",
-    cache_control: { type: "ephemeral" },
-    input_schema: {
-      type: "object",
-      properties: {
-        target_product_title: {
-          type: "string",
-          description:
-            "Echo the exact target product title back — used by the validator to confirm no drift.",
-        },
-        locations: {
-          type: "array",
-          minItems: 2,
-          maxItems: 12,
-          items: {
-            type: "object",
-            properties: {
-              name: {
-                type: "string",
-                description:
-                  "Specific high-converting city or metro area (e.g. 'Lagos', 'Abuja', 'Greater London', 'New York'). Never whole countries.",
-              },
-              country: {
-                type: "string",
-                description: "The country where this city is located.",
-              },
-              market_type: {
-                type: "string",
-                enum: ["domestic", "international"],
-                description:
-                  "Whether this city is in the store's primary local market ('domestic') or an export/diaspora market abroad ('international').",
-              },
-              source: {
-                type: "string",
-                enum: ["from_data", "recommended"],
-              },
-              percentage: { type: ["number", "null"] },
-              note: { type: "string" },
-            },
-            required: ["name", "source", "percentage", "note"],
-          },
-        },
-        demographics: {
-          type: "object",
-          properties: {
-            gender: {
-              type: "string",
-              enum: ["All", "Men", "Women"],
-            },
-            demographic_justification: { type: "string" },
-            age_min: { type: "number", minimum: 18 },
-            age_max: { type: "number" },
-            age_reasoning: { type: "string" },
-          },
-          required: [
-            "gender",
-            "demographic_justification",
-            "age_min",
-            "age_max",
-            "age_reasoning",
-          ],
-        },
-        seed_interests: {
-          type: "array",
-          minItems: 3,
-          maxItems: 5,
-          items: { type: "string" },
-        },
-        creative_hooks: {
-          type: "array",
-          minItems: 3,
-          maxItems: 3,
-          items: {
-            type: "object",
-            properties: {
-              angle: {
-                type: "string",
-                enum: [
-                  "Problem / Friction",
-                  "Identity / Status",
-                  "Material / Craftsmanship",
-                  "Usability / Transformation",
-                  "Contrarian / Curiosity",
-                  "Offer / Risk Reversal",
-                ],
-              },
-              visual_cue: { type: "string" },
-              on_screen_text: { type: "string" },
-              primary_text_hook: { type: "string" },
-            },
-            required: [
-              "angle",
-              "visual_cue",
-              "on_screen_text",
-              "primary_text_hook",
-            ],
-          },
-        },
-        optimization_reasoning: { type: "string" },
-        timing: {
-          type: "object",
-          properties: {
-            peak_days: {
-              type: "array",
-              items: { type: "string" },
-            },
-            launch_recommendation: { type: "string" },
-            reasoning: { type: "string" },
-          },
-          required: ["peak_days", "launch_recommendation", "reasoning"],
-        },
-      },
-      required: [
-        "target_product_title",
-        "locations",
-        "demographics",
-        "seed_interests",
-        "creative_hooks",
-        "optimization_reasoning",
-        "timing",
-      ],
-    },
-  };
+Instructions for this generation:
+Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}" following all rules in the system prompt. Call the generate_advantage_plus_profile tool.`;
 
   try {
     const response = await anthropicClient.messages.create({
@@ -373,16 +432,27 @@ Call generate_advantage_plus_profile with the complete payload.`;
       system: [
         {
           type: "text",
-          text: systemPrompt,
+          text: ADVANTAGE_PLUS_SYSTEM_PROMPT,
           cache_control: { type: "ephemeral" },
         },
       ],
       messages: [{ role: "user", content: prompt }],
-      tools: [advantagePlusTool],
+      tools: [ADVANTAGE_PLUS_TOOL],
       tool_choice: {
         type: "tool",
         name: "generate_advantage_plus_profile",
       },
+    });
+
+    console.log("[Anthropic Prompt Caching - Targeting Profile]", {
+      input_tokens: response.usage.input_tokens,
+      output_tokens: response.usage.output_tokens,
+      cache_creation_input_tokens:
+        (response.usage as unknown as { cache_creation_input_tokens?: number })
+          .cache_creation_input_tokens ?? 0,
+      cache_read_input_tokens:
+        (response.usage as unknown as { cache_read_input_tokens?: number })
+          .cache_read_input_tokens ?? 0,
     });
 
     const toolUseBlock = response.content.find((c) => c.type === "tool_use");
@@ -420,13 +490,21 @@ Call generate_advantage_plus_profile with the complete payload.`;
             system: [
               {
                 type: "text",
-                text: systemPrompt,
+                text: ADVANTAGE_PLUS_SYSTEM_PROMPT,
                 cache_control: { type: "ephemeral" },
               },
             ],
             messages: [
               { role: "user", content: prompt },
-              { role: "assistant", content: response.content },
+              {
+                role: "assistant",
+                content: response.content.map((block, idx) => {
+                  if (idx === response.content.length - 1) {
+                    return { ...block, cache_control: { type: "ephemeral" as const } };
+                  }
+                  return block;
+                }),
+              },
               {
                 role: "user",
                 content: `The generated brief failed validation with the following error(s):\n${validationErrors
@@ -436,11 +514,22 @@ Call generate_advantage_plus_profile with the complete payload.`;
                   )}\n\nPlease regenerate the profile strictly addressing these errors. Ensure exactly 3 distinct angles, zero references to sibling catalog items, and describe only "${targetProductTitle}".`,
               },
             ],
-            tools: [advantagePlusTool],
+            tools: [ADVANTAGE_PLUS_TOOL],
             tool_choice: {
               type: "tool",
               name: "generate_advantage_plus_profile",
             },
+          });
+
+          console.log("[Anthropic Prompt Caching - Targeting Profile Retry]", {
+            input_tokens: retryResponse.usage.input_tokens,
+            output_tokens: retryResponse.usage.output_tokens,
+            cache_creation_input_tokens:
+              (retryResponse.usage as unknown as { cache_creation_input_tokens?: number })
+                .cache_creation_input_tokens ?? 0,
+            cache_read_input_tokens:
+              (retryResponse.usage as unknown as { cache_read_input_tokens?: number })
+                .cache_read_input_tokens ?? 0,
           });
 
           const retryToolBlock = retryResponse.content.find(
@@ -1296,7 +1385,12 @@ export async function generateRecommendations(
     const storeDataDomesticNames = new Set(storeDataDomesticLocs.map((l) => l.name.toLowerCase()));
     const aiDomesticExtra = locations
       .filter((l) => {
-        const isDom = l.market_type === "domestic" || isDomestic(l.name || "", (l as { country?: string }).country);
+        const isDom =
+          l.market_type === "domestic"
+            ? true
+            : l.market_type === "international"
+            ? false
+            : isDomestic(l.name || "", (l as { country?: string }).country);
         return isDom && !storeDataDomesticNames.has((l.name || "").toLowerCase());
       })
       .map((l) => ({ ...l, source: "recommended" as const, market_type: "domestic" as const }));
@@ -1305,7 +1399,11 @@ export async function generateRecommendations(
       storeDataDomesticLocs.length > 0
         ? [...storeDataDomesticLocs, ...aiDomesticExtra]
         : locations
-            .filter((l) => l.market_type === "domestic" || isDomestic(l.name || "", (l as { country?: string }).country))
+            .filter((l) => {
+              if (l.market_type === "domestic") return true;
+              if (l.market_type === "international") return false;
+              return isDomestic(l.name || "", (l as { country?: string }).country);
+            })
             .map((l) => ({ ...l, source: "recommended" as const, market_type: "domestic" as const }));
 
     // International locations: combine real store order data with AI-inferred strategic international hubs
@@ -1320,7 +1418,12 @@ export async function generateRecommendations(
     const storeDataIntlNames = new Set(storeDataIntlLocs.map((l) => l.name.toLowerCase()));
     const aiIntlExtra = locations
       .filter((l) => {
-        const isIntl = l.market_type === "international" || (!isDomestic(l.name || "", (l as { country?: string }).country));
+        const isIntl =
+          l.market_type === "international"
+            ? true
+            : l.market_type === "domestic"
+            ? false
+            : !isDomestic(l.name || "", (l as { country?: string }).country);
         return isIntl && !storeDataIntlNames.has((l.name || "").toLowerCase());
       })
       .map((l) => ({ ...l, source: "recommended" as const, market_type: "international" as const }));
@@ -1331,7 +1434,11 @@ export async function generateRecommendations(
         : isTier1
         ? []
         : locations
-            .filter((l) => l.market_type === "international" || (!isDomestic(l.name || "", (l as { country?: string }).country)))
+            .filter((l) => {
+              if (l.market_type === "international") return true;
+              if (l.market_type === "domestic") return false;
+              return !isDomestic(l.name || "", (l as { country?: string }).country);
+            })
             .map((l) => ({ ...l, source: "recommended" as const, market_type: "international" as const }));
 
     const domesticBudgetFormatted =

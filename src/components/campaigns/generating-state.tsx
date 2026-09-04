@@ -3,7 +3,6 @@
 import { motion } from "motion/react";
 import { Sparkles, Check, Loader2, Lightbulb } from "lucide-react";
 import { useState, useEffect } from "react";
-import { Badge } from "@/components/ui/badge";
 
 interface GeneratingStateProps {
   productName?: string;
@@ -34,11 +33,12 @@ const GENERATION_STEPS: StepItem[] = [
   },
 ];
 
-const FOUNDER_TIPS = [
-  "Up next: Review your ad copy and 3 creative hooks. You'll generate the full campaign brief with targeting and budgets right after.",
-  "Meta's Advantage+ algorithm performs best when 1 consolidated ad set runs 3 distinct creative angles.",
-  "Testing 3 contrasting angles (Craft, Fit, Curiosity) prevents creative fatigue and lowers your cost per purchase.",
-  "Single-SKU focus eliminates catalog cannibalization and sends clearer conversion signals to Meta's pixel.",
+const OMNI_TIPS = [
+  "Up next: You'll review 3 ready-to-use hooks and ad copy tailored for this product, then get your complete targeting and budget plan.",
+  "Promoting one hero product at a time gets you sales faster because your ad money isn't spread too thin across too many items.",
+  "Different buyers care about different things — some look for premium quality, others want everyday comfort. Testing 3 angles wins you more customers for less money.",
+  "Don't worry about picking dozens of detailed interest tags. In modern Meta Ads, your video hook and headline do the targeting for you.",
+  "Give new ads at least 3 to 5 days before touching them. Meta needs a few days to find the buyers who love your product.",
 ];
 
 export function GeneratingState({ productName, brandName }: GeneratingStateProps) {
@@ -61,54 +61,64 @@ export function GeneratingState({ productName, brandName }: GeneratingStateProps
   // Cycle founder tips every 4 seconds
   useEffect(() => {
     const tipInterval = setInterval(() => {
-      setTipIndex((prev) => (prev + 1) % FOUNDER_TIPS.length);
-    }, 4000);
+      setTipIndex((prev) => (prev + 1) % OMNI_TIPS.length);
+    }, 4500);
 
     return () => clearInterval(tipInterval);
   }, []);
 
   // Calculate approximate progress
   const progressPercent =
-    activeStepIndex === 0 ? 25 : activeStepIndex === 1 ? 50 : activeStepIndex === 2 ? 75 : 92;
+    activeStepIndex === 0 ? 25 : activeStepIndex === 1 ? 50 : activeStepIndex === 2 ? 75 : 94;
 
   return (
-    <div className="flex min-h-[70vh] flex-1 flex-col items-center justify-center py-8 px-4">
-      <div className="w-full max-w-lg rounded-2xl border border-border bg-card/95 p-6 sm:p-8 shadow-sm backdrop-blur-sm">
-        {/* Top Header with Glowing Icon & Badges */}
-        <div className="flex items-start justify-between gap-4 mb-6">
-          <div className="flex items-center gap-3">
-            <div className="relative grid size-11 place-items-center rounded-xl bg-brand-50 text-brand-600 border border-brand-100 dark:bg-brand-950/40 dark:border-brand-900">
+    <div className="relative flex min-h-[70vh] flex-1 flex-col items-center justify-center py-8 px-4">
+      {/* Soft ambient background glow */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-xl h-96 bg-[radial-gradient(ellipse_at_center,rgba(99,102,241,0.09),transparent_70%)] blur-2xl"
+      />
+
+      <div className="relative w-full max-w-lg rounded-2xl border border-border/80 bg-card/95 p-6 sm:p-8 shadow-xl shadow-brand-950/5 backdrop-blur-md overflow-hidden">
+        {/* Top luminous hairline highlight */}
+        <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-brand-500/50 to-transparent" />
+
+        {/* Top Header with Pulsing Halo */}
+        <div className="flex items-start justify-between gap-3 sm:gap-4 mb-6">
+          <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+            <div className="relative grid size-10 sm:size-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600 border border-brand-200/80 dark:bg-brand-950/40 dark:border-brand-900 shadow-sm mt-0.5 sm:mt-0">
               <motion.div
                 animate={{ rotate: 360 }}
-                transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
-                className="absolute inset-0 rounded-xl border border-brand-300/40 border-dashed"
+                transition={{ duration: 7, repeat: Infinity, ease: "linear" }}
+                className="absolute -inset-1 rounded-xl border border-brand-400/30 border-dashed"
               />
-              <Sparkles className="size-5 animate-pulse" />
+              <Sparkles className="size-4 sm:size-5 animate-pulse text-brand-600 dark:text-brand-400" />
             </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-semibold text-foreground tracking-tight">
-                {productName ? `Writing ad copy & hooks for ${productName}…` : "Writing your ad copy & hooks…"}
+            <div className="min-w-0 flex-1">
+              <h2 className="text-sm sm:text-base font-bold text-foreground tracking-tight leading-snug line-clamp-2 break-words">
+                {productName ? `Writing ad copy & hooks for ${productName}` : "Writing your ad copy & hooks…"}
               </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {brandName ? `${brandName} · ` : ""}AI creative engine
+              <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5 truncate">
+                <span>{brandName ? `${brandName} · ` : ""}Meta Advantage+ Engine</span>
               </p>
             </div>
           </div>
-          <Badge variant="brand" size="sm" className="shrink-0 text-[10px] uppercase font-bold tracking-wider">
-            AI Engine
-          </Badge>
         </div>
 
         {/* Progress Bar */}
         <div className="mb-6 space-y-1.5">
           <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground">
-            <span>Progress</span>
-            <span className="tabular-nums font-semibold text-brand-600">{progressPercent}%</span>
+            <span className="flex items-center gap-1.5">
+              <span>Step {activeStepIndex + 1} of {GENERATION_STEPS.length}</span>
+            </span>
+            <span className="tabular-nums font-bold text-brand-600 dark:text-brand-400">
+              {progressPercent}%
+            </span>
           </div>
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-subtle">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-surface-subtle border border-border/40 p-0.5">
             <motion.div
-              className="h-full bg-gradient-to-r from-brand-500 to-brand-600 rounded-full"
-              initial={{ width: "10%" }}
+              className="h-full bg-gradient-to-r from-brand-600 via-brand-500 to-indigo-400 rounded-full"
+              initial={{ width: "12%" }}
               animate={{ width: `${progressPercent}%` }}
               transition={{ duration: 0.8, ease: "easeOut" }}
             />
@@ -116,7 +126,7 @@ export function GeneratingState({ productName, brandName }: GeneratingStateProps
         </div>
 
         {/* Dynamic Step Checklist */}
-        <div className="space-y-3 mb-6">
+        <div className="space-y-2.5 mb-6">
           {GENERATION_STEPS.map((step, idx) => {
             const isDone = activeStepIndex > idx;
             const isCurrent = activeStepIndex === idx;
@@ -127,45 +137,60 @@ export function GeneratingState({ productName, brandName }: GeneratingStateProps
                 key={idx}
                 initial={{ opacity: 0.7 }}
                 animate={{ opacity: isPending ? 0.45 : 1 }}
-                className={`flex items-start gap-3 rounded-xl p-3 text-xs transition-colors ${
+                className={`flex items-start gap-3 rounded-xl p-3 text-xs transition-all duration-300 ${
                   isCurrent
-                    ? "bg-brand-50/70 border border-brand-200/80 dark:bg-brand-950/30 dark:border-brand-900/60"
+                    ? "bg-brand-50/70 border border-brand-200/90 dark:bg-brand-950/40 dark:border-brand-800/80 shadow-xs"
                     : isDone
-                    ? "bg-surface-subtle/60 border border-transparent"
+                    ? "bg-surface-subtle/50 border border-border/40"
                     : "bg-transparent border border-transparent"
                 }`}
               >
                 <div className="mt-0.5 shrink-0">
                   {isDone ? (
-                    <span className="grid size-4 place-items-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
-                      <Check className="size-2.5 stroke-[3]" />
+                    <span className="grid size-5 place-items-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shadow-2xs">
+                      <Check className="size-3 stroke-[3]" />
                     </span>
                   ) : isCurrent ? (
-                    <span className="grid size-4 place-items-center text-brand-600">
-                      <Loader2 className="size-3.5 animate-spin" />
+                    <span className="grid size-5 place-items-center rounded-full bg-brand-500/15 text-brand-600 border border-brand-500/30">
+                      <Loader2 className="size-3 animate-spin" />
                     </span>
                   ) : (
-                    <span className="grid size-4 place-items-center rounded-full border border-border-strong text-[10px] text-muted-foreground">
+                    <span className="grid size-5 place-items-center rounded-full border border-border-strong/80 text-[10px] font-semibold text-muted-foreground bg-surface">
                       {idx + 1}
                     </span>
                   )}
                 </div>
 
                 <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p
+                      className={`font-semibold text-xs sm:text-sm leading-tight transition-colors ${
+                        isCurrent
+                          ? "text-brand-950 dark:text-brand-100"
+                          : isDone
+                          ? "text-foreground font-medium"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      {step.title}
+                    </p>
+                    {isCurrent && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-700 dark:text-brand-300 border border-brand-500/20 shrink-0">
+                        <span className="size-1.5 rounded-full bg-brand-600 animate-pulse" />
+                        In progress
+                      </span>
+                    )}
+                    {isDone && (
+                      <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                        Completed
+                      </span>
+                    )}
+                  </div>
                   <p
-                    className={`font-semibold ${
+                    className={`text-[11px] mt-1 leading-snug transition-colors ${
                       isCurrent
-                        ? "text-brand-950 dark:text-brand-100"
-                        : isDone
-                        ? "text-foreground line-through opacity-80"
-                        : "text-muted-foreground"
-                    }`}
-                  >
-                    {step.title}
-                  </p>
-                  <p
-                    className={`text-[11px] mt-0.5 leading-snug ${
-                      isCurrent ? "text-brand-700/90 dark:text-brand-300" : "text-muted-foreground/80"
+                        ? "text-brand-700/90 dark:text-brand-300 font-medium"
+                        : "text-muted-foreground/80"
                     }`}
                   >
                     {step.detail}
@@ -176,19 +201,31 @@ export function GeneratingState({ productName, brandName }: GeneratingStateProps
           })}
         </div>
 
-        {/* Founder Tip Ticker */}
-        <div className="rounded-xl border border-amber-200/70 bg-amber-50/80 p-3 text-xs text-amber-950 dark:bg-amber-950/30 dark:border-amber-900/60 dark:text-amber-200">
-          <div className="flex items-start gap-2">
-            <Lightbulb className="size-3.5 shrink-0 text-amber-600 mt-0.5" />
+        {/* High-Contrast Founder Insight Card (replaces muddy brownish box) */}
+        <div className="relative rounded-xl border border-[#262347] bg-[#0e0d1a] p-4 text-xs text-[#ededf2] shadow-md overflow-hidden">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -right-6 -bottom-6 size-24 bg-brand-500/20 rounded-full blur-xl"
+          />
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-1.5">
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-brand-500/25 border border-brand-400/30 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand-300">
+                <Lightbulb className="size-3 text-amber-400" />
+                Omni Tip
+              </span>
+            </div>
+            <span className="text-[10px] text-slate-400 font-medium">Smart Strategy</span>
+          </div>
+          <div className="min-h-[46px] flex items-center">
             <motion.p
               key={tipIndex}
               initial={{ opacity: 0, y: 3 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -3 }}
-              transition={{ duration: 0.35 }}
-              className="text-[11px] leading-relaxed"
+              transition={{ duration: 0.3 }}
+              className="text-xs leading-relaxed text-slate-200 font-normal"
             >
-              {FOUNDER_TIPS[tipIndex]}
+              {OMNI_TIPS[tipIndex]}
             </motion.p>
           </div>
         </div>

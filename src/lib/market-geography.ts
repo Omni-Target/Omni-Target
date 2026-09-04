@@ -140,9 +140,196 @@ export function getEffectiveStoreCountry(
 }
 
 /**
+ * Fast metropolitan resolver: maps major global advertising hubs and domestic cities
+ * to their canonical country, preventing overseas diaspora hubs (e.g. Houston, Toronto, London)
+ * from ever leaking into domestic local targeting.
+ */
+export const KNOWN_METRO_COUNTRIES: Record<string, string> = {
+  // United States
+  houston: "unitedstates",
+  dallas: "unitedstates",
+  austin: "unitedstates",
+  sanantonio: "unitedstates",
+  atlanta: "unitedstates",
+  newyork: "unitedstates",
+  newyorkcity: "unitedstates",
+  nyc: "unitedstates",
+  losangeles: "unitedstates",
+  la: "unitedstates",
+  chicago: "unitedstates",
+  miami: "unitedstates",
+  orlando: "unitedstates",
+  washington: "unitedstates",
+  washingtondc: "unitedstates",
+  dc: "unitedstates",
+  boston: "unitedstates",
+  philadelphia: "unitedstates",
+  sanfrancisco: "unitedstates",
+  sf: "unitedstates",
+  seattle: "unitedstates",
+  denver: "unitedstates",
+  phoenix: "unitedstates",
+  lasvegas: "unitedstates",
+  detroit: "unitedstates",
+  charlotte: "unitedstates",
+  nashville: "unitedstates",
+  tampa: "unitedstates",
+  minneapolis: "unitedstates",
+  sandiego: "unitedstates",
+  baltimore: "unitedstates",
+  columbus: "unitedstates",
+  indianapolis: "unitedstates",
+  jacksonville: "unitedstates",
+  portland: "unitedstates",
+  memphis: "unitedstates",
+  louisville: "unitedstates",
+  milwaukee: "unitedstates",
+  albuquerque: "unitedstates",
+  tucson: "unitedstates",
+  fresno: "unitedstates",
+  sacramento: "unitedstates",
+  kansascity: "unitedstates",
+  mesa: "unitedstates",
+  omaha: "unitedstates",
+  raleigh: "unitedstates",
+  longbeach: "unitedstates",
+  oakland: "unitedstates",
+  tulsa: "unitedstates",
+  neworleans: "unitedstates",
+  cleveland: "unitedstates",
+  pittsburgh: "unitedstates",
+  cincinnati: "unitedstates",
+  stlouis: "unitedstates",
+  newark: "unitedstates",
+
+  // Canada
+  toronto: "canada",
+  montreal: "canada",
+  vancouver: "canada",
+  calgary: "canada",
+  ottawa: "canada",
+  edmonton: "canada",
+  winnipeg: "canada",
+  mississauga: "canada",
+  brampton: "canada",
+  quebeccity: "canada",
+  quebec: "canada",
+  hamilton: "canada",
+
+  // United Kingdom
+  london: "unitedkingdom",
+  greaterlondon: "unitedkingdom",
+  manchester: "unitedkingdom",
+  birmingham: "unitedkingdom",
+  leeds: "unitedkingdom",
+  glasgow: "unitedkingdom",
+  liverpool: "unitedkingdom",
+  newcastle: "unitedkingdom",
+  sheffield: "unitedkingdom",
+  bristol: "unitedkingdom",
+  edinburgh: "unitedkingdom",
+  leicester: "unitedkingdom",
+  belfast: "unitedkingdom",
+  cardiff: "unitedkingdom",
+  nottingham: "unitedkingdom",
+  coventry: "unitedkingdom",
+  southampton: "unitedkingdom",
+
+  // Ireland & Europe
+  dublin: "ireland",
+  paris: "france",
+  berlin: "germany",
+  munich: "germany",
+  frankfurt: "germany",
+  hamburg: "germany",
+  amsterdam: "netherlands",
+  rotterdam: "netherlands",
+  brussels: "belgium",
+  madrid: "spain",
+  barcelona: "spain",
+  rome: "italy",
+  milan: "italy",
+  vienna: "austria",
+  zurich: "switzerland",
+  geneva: "switzerland",
+  warsaw: "poland",
+  lisbon: "portugal",
+  stockholm: "sweden",
+  copenhagen: "denmark",
+  oslo: "norway",
+  helsinki: "finland",
+  athens: "greece",
+  prague: "czechia",
+  budapest: "hungary",
+
+  // UAE / Middle East
+  dubai: "unitedarabemirates",
+  abudhabi: "unitedarabemirates",
+  doha: "qatar",
+  riyadh: "saudiarabia",
+  jeddah: "saudiarabia",
+
+  // Australia & New Zealand
+  sydney: "australia",
+  melbourne: "australia",
+  brisbane: "australia",
+  perth: "australia",
+  adelaide: "australia",
+  auckland: "newzealand",
+
+  // Nigeria
+  lagos: "nigeria",
+  abuja: "nigeria",
+  portharcourt: "nigeria",
+  ibadan: "nigeria",
+  kano: "nigeria",
+  benincity: "nigeria",
+  enugu: "nigeria",
+  abeokuta: "nigeria",
+  warri: "nigeria",
+  calabar: "nigeria",
+  asaba: "nigeria",
+  onitsha: "nigeria",
+  jos: "nigeria",
+  kaduna: "nigeria",
+  ilorin: "nigeria",
+  owerri: "nigeria",
+  uyo: "nigeria",
+  akure: "nigeria",
+  osogbo: "nigeria",
+  maiduguri: "nigeria",
+  zaria: "nigeria",
+  aba: "nigeria",
+  minna: "nigeria",
+
+  // Ghana
+  accra: "ghana",
+  kumasi: "ghana",
+  tamale: "ghana",
+  takoradi: "ghana",
+
+  // Kenya
+  nairobi: "kenya",
+  mombasa: "kenya",
+  kisumu: "kenya",
+
+  // South Africa
+  johannesburg: "southafrica",
+  capetown: "southafrica",
+  durban: "southafrica",
+  pretoria: "southafrica",
+};
+
+export function lookupCityCountry(cityName?: string): string | undefined {
+  if (!cityName) return undefined;
+  const cleaned = cityName.toLowerCase().trim().replace(/[^a-z]/g, "");
+  return KNOWN_METRO_COUNTRIES[cleaned];
+}
+
+/**
  * Dynamically checks if a location is domestic relative to the store.
  * Relies on country metadata (from order shipping data, AI classification, or store order history),
- * never on hardcoded city name arrays.
+ * and verifies against a global metropolitan resolver to prevent overseas export hubs from leaking into domestic lists.
  */
 export function isDomesticCity(
   cityName: string,
@@ -181,7 +368,13 @@ export function isDomesticCity(
     }
   }
 
-  // 4. Default: Return true only if no known conflict
+  // 4. Metropolitan dictionary check: resolve city to canonical country
+  const resolvedCountry = lookupCityCountry(cityName);
+  if (resolvedCountry) {
+    return isSameCountry(resolvedCountry, effectiveCountry);
+  }
+
+  // 5. Default: Return true only if no known conflict
   return true;
 }
 

@@ -180,21 +180,22 @@ export async function buildBriefHTML(
     : [];
 
   const isDomLoc = (l: { name?: string; city?: string; country?: string; market_type?: string }) => {
-    if (l?.market_type === "domestic") return true;
     if (l?.market_type === "international") return false;
     return isDomesticCity(l?.name || l?.city || "", l?.country, effectiveStoreCountry, currency);
   };
 
-  const rawDomestic =
+  const rawDomestic = (
     legacyTargeting.domestic_locations && legacyTargeting.domestic_locations.length > 0
       ? legacyTargeting.domestic_locations
-      : rawLocations.filter(isDomLoc);
+      : rawLocations
+  ).filter(isDomLoc);
 
-  const rawIntl =
+  const rawIntl = (
     legacyTargeting.international_locations &&
     legacyTargeting.international_locations.length > 0
       ? legacyTargeting.international_locations
-      : rawLocations.filter((l) => !isDomLoc(l));
+      : rawLocations
+  ).filter((l) => !isDomLoc(l));
 
   const isTier1 = isTier1Market(effectiveStoreCountry, currency);
   const isUS = effectiveStoreCountry.toLowerCase().includes("united states");
