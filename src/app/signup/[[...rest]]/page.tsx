@@ -7,15 +7,6 @@ export default function SignupPage() {
       <div className="w-full max-w-[400px] mx-auto space-y-4">
         <ShopifyLoginButton />
 
-        <div className="relative flex items-center justify-center">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-border" />
-          </div>
-          <span className="relative bg-background px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            or continue with email
-          </span>
-        </div>
-
         <SignUp
           routing="path"
           path="/signup"

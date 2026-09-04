@@ -82,7 +82,7 @@ export function ShopifyLoginButton() {
           type="button"
           disabled={loading}
           onClick={() => handleInitiate(savedStore)}
-          className="group relative flex h-11 w-full items-center justify-center gap-3 rounded-xl border border-border bg-surface px-4 text-sm font-medium text-foreground shadow-xs transition-all hover:border-foreground/30 hover:bg-surface-subtle active:scale-[0.99] disabled:opacity-60 cursor-pointer"
+          className="group relative flex h-11 w-full items-center justify-center gap-3 rounded-lg border border-border bg-surface px-4 text-sm font-medium text-foreground shadow-xs transition-all hover:border-foreground/30 hover:bg-surface-subtle active:scale-[0.99] disabled:opacity-60 cursor-pointer"
         >
           {loading ? (
             <Loader2 className="size-4 animate-spin text-brand-600" />
@@ -180,7 +180,7 @@ export function ShopifyLoginButton() {
       type="button"
       disabled={loading}
       onClick={() => setIsExpanded(true)}
-      className="group relative flex h-11 w-full items-center justify-center gap-3 rounded-xl border border-border bg-surface px-4 text-sm font-medium text-foreground shadow-xs transition-all hover:border-foreground/30 hover:bg-surface-subtle active:scale-[0.99] disabled:opacity-60 cursor-pointer"
+      className="group relative flex h-11 w-full items-center justify-center gap-3 rounded-lg border border-border bg-surface px-4 text-sm font-medium text-foreground shadow-xs transition-all hover:border-foreground/30 hover:bg-surface-subtle active:scale-[0.99] disabled:opacity-60 cursor-pointer"
     >
       <ShopifyBagIcon className="size-5 shrink-0" />
       <span>Continue with Shopify</span>
