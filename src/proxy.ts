@@ -85,19 +85,52 @@ export default clerkMiddleware(async (auth, request) => {
       // safe to ship before the dashboard change and drops the per-navigation
       // Clerk round-trip once the claim is present.
       const claims = session.sessionClaims as
-        | { onboardingStep?: string; metadata?: { onboardingStep?: string } }
+        | {
+            onboardingStep?: string;
+            shopifyStoreUrl?: string;
+            metadata?: { onboardingStep?: string; shopifyStoreUrl?: string };
+          }
         | undefined;
       let rawStep = claims?.onboardingStep ?? claims?.metadata?.onboardingStep;
+      let shopifyStoreUrl =
+        claims?.shopifyStoreUrl ?? claims?.metadata?.shopifyStoreUrl;
+
       // If the JWT claim does not say 'complete', verify with fresh user metadata
       // so a merchant who just finished onboarding is never bounced back by a stale JWT.
       if (!rawStep || rawStep !== "complete") {
         const client = await clerkClient();
         const user = await client.users.getUser(userId);
-        rawStep = (user.publicMetadata?.onboardingStep as string) || undefined;
+        const metadata = user.publicMetadata as {
+          onboardingStep?: string;
+          shopifyStoreUrl?: string;
+        };
+        rawStep = metadata?.onboardingStep;
+        shopifyStoreUrl = metadata?.shopifyStoreUrl;
       }
-      const currentStep = STEP_MAP[rawStep || "connect-shopify"] || "connect-shopify";
+
+      // If merchant has already connected their Shopify store, the connect-shopify step
+      // is already satisfied! Resolve step to "audit" (or "complete"), never "connect-shopify".
+      let resolvedStep = rawStep;
+      if (!resolvedStep && shopifyStoreUrl) {
+        resolvedStep = "audit";
+      }
+
+      const currentStep = STEP_MAP[resolvedStep || "connect-shopify"] || "connect-shopify";
+      const pathname = request.nextUrl.pathname;
+      const fromParam = request.nextUrl.searchParams.get("from");
+      const isExplicitSettingsAction = fromParam === "dashboard" || fromParam === "pricing";
 
       if (currentStep !== "complete") {
+        // If the merchant already has Shopify connected, they must NEVER be forced or allowed
+        // into /onboarding/connect-shopify unless explicitly reconnecting from Settings or Pricing.
+        if (
+          pathname.startsWith("/onboarding/connect-shopify") &&
+          shopifyStoreUrl &&
+          !isExplicitSettingsAction
+        ) {
+          return NextResponse.redirect(new URL("/onboarding/audit", request.url));
+        }
+
         const expectedRoute = `/onboarding/${currentStep}`;
 
         // If user is outside the onboarding flow, redirect them in
@@ -106,13 +139,8 @@ export default clerkMiddleware(async (auth, request) => {
         }
       } else {
         // Step is complete. If they try to access onboarding, send to dashboard
-        // EXCEPT if they are explicitly visiting /onboarding/connect-shopify or /onboarding/audit
-        const pathname = request.nextUrl.pathname;
-        if (
-          isOnboardingRoute(request) &&
-          !pathname.startsWith("/onboarding/connect-shopify") &&
-          !pathname.startsWith("/onboarding/audit")
-        ) {
+        // EXCEPT if they explicitly came from settings or pricing to connect a different store.
+        if (isOnboardingRoute(request) && !isExplicitSettingsAction) {
           return NextResponse.redirect(new URL("/dashboard", request.url));
         }
       }

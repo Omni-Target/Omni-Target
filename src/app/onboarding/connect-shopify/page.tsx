@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, Suspense } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, Lock, Store, ShieldCheck } from "lucide-react";
+import { ArrowRight, Lock, Store, ShieldCheck, Loader2 } from "lucide-react";
+import { useUser } from "@clerk/nextjs";
 import { OnboardingShell } from "@/components/onboarding";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -12,12 +13,35 @@ import { advanceOnboardingStep } from "../actions";
 import { ShopifyBagIcon } from "@/components/auth";
 
 function ConnectShopifyContent() {
+  const { user, isLoaded } = useUser();
   const searchParams = useSearchParams();
   const router = useRouter();
   const [storeUrl, setStoreUrl] = useState("");
   const [isResolving, setIsResolving] = useState(false);
   const [storeVerified, setStoreVerified] = useState(false);
   const [localError, setLocalError] = useState("");
+
+  const fromParam = searchParams.get("from");
+  const isExplicitAction = fromParam === "dashboard" || fromParam === "pricing";
+
+  const metadata = user?.publicMetadata as {
+    shopifyStoreUrl?: string;
+    onboardingStep?: string;
+  } | undefined;
+
+  const hasConnectedStore = !!metadata?.shopifyStoreUrl;
+
+  useEffect(() => {
+    if (!isLoaded || isExplicitAction) return;
+
+    if (hasConnectedStore) {
+      if (metadata?.onboardingStep === "complete") {
+        router.replace("/dashboard");
+      } else {
+        router.replace("/onboarding/audit");
+      }
+    }
+  }, [isLoaded, isExplicitAction, hasConnectedStore, metadata?.onboardingStep, router]);
 
   const urlError = searchParams.get("error");
   let error = localError;
@@ -64,6 +88,24 @@ function ConnectShopifyContent() {
     await advanceOnboardingStep("audit");
     router.push("/onboarding/audit");
   };
+
+  if ((!isLoaded && !isExplicitAction) || (!isExplicitAction && hasConnectedStore)) {
+    return (
+      <OnboardingShell currentStep={1} contentClassName="max-w-md">
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <Loader2 className="size-8 animate-spin text-brand-600 mb-4" />
+          <h2 className="text-base font-semibold text-foreground">
+            {hasConnectedStore ? "Redirecting to your workspace…" : "Loading…"}
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {hasConnectedStore
+              ? "Your Shopify store is already connected."
+              : "Verifying account status…"}
+          </p>
+        </div>
+      </OnboardingShell>
+    );
+  }
 
   return (
     <OnboardingShell currentStep={1} contentClassName="max-w-md">

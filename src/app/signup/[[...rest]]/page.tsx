@@ -10,7 +10,7 @@ export default function SignupPage() {
         <SignUp
           routing="path"
           path="/signup"
-          fallbackRedirectUrl="/onboarding/connect-shopify"
+          fallbackRedirectUrl="/onboarding"
           appearance={authAppearance}
         />
       </div>

@@ -38,7 +38,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         <SignIn
           routing="path"
           path="/login"
-          fallbackRedirectUrl="/onboarding/connect-shopify"
+          fallbackRedirectUrl="/dashboard"
           appearance={authAppearance}
         />
       </div>

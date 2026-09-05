@@ -290,16 +290,34 @@ export async function queryUserIntegrationSelect(
  * Retrieve user integration record matched by store URL (using or operator).
  */
 export async function getExistingIntegrationByStore(shopUrl: string, excludeUserId?: string) {
+  const cleanShop = shopUrl
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/$/, "")
+    .toLowerCase();
+  const slug = cleanShop.replace(/\.myshopify\.com$/i, "");
+  const fullShop = cleanShop.endsWith(".myshopify.com")
+    ? cleanShop
+    : `${cleanShop}.myshopify.com`;
+
+  const variants = Array.from(
+    new Set([cleanShop, slug, fullShop, `https://${fullShop}`, `https://${cleanShop}`])
+  );
+
+  const orFilter = variants
+    .flatMap((v) => [`shopify_store_url.eq.${v}`, `shop_domain.eq.${v}`])
+    .join(",");
+
   let query = supabaseAdmin
     .from("user_integrations")
-    .select("clerk_user_id")
-    .eq("shopify_store_url", shopUrl);
+    .select("clerk_user_id, shopify_store_url, shop_domain")
+    .or(orFilter);
 
   if (excludeUserId) {
     query = query.neq("clerk_user_id", excludeUserId);
   }
 
-  const { data, error } = await query.maybeSingle();
+  const { data, error } = await query.limit(1).maybeSingle();
 
   if (error) {
     console.error("Error in getExistingIntegrationByStore:", error);

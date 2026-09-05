@@ -40,9 +40,13 @@ export async function GET(request: Request) {
   }
 
   if (!code || !shop) {
+    const [, fromParam] = state.split("___");
+    const appBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin).replace(/\/$/, "");
+    if (fromParam === "login") {
+      return Response.redirect(`${appBaseUrl}/login?error=missing_code`);
+    }
     return Response.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}` +
-      `/onboarding/connect-shopify?error=missing`
+      `${appBaseUrl}/onboarding/connect-shopify?error=missing`
     );
   }
 
@@ -275,14 +279,16 @@ export async function GET(request: Request) {
     }
 
     // Check onboarding status:
-    // If the merchant already completed onboarding previously, send them to /dashboard.
-    // If this is a new connection or audit hasn't been completed, kick off the audit!
+    // If the merchant already completed onboarding previously or logged in via "Continue with Shopify",
+    // send them to /dashboard.
+    // If this is a fresh install or audit hasn't been completed, kick off the audit!
     const targetUser = await clerk.users.getUser(targetUserId);
     const currentOnboardingStep = (targetUser.publicMetadata as { onboardingStep?: string })?.onboardingStep;
     const isAlreadyComplete = currentOnboardingStep === "complete";
-    const shouldSkipAudit = isFromDashboard || isAlreadyComplete;
+    const isLogin = from === "login";
+    const shouldSkipAudit = isFromDashboard || isAlreadyComplete || (isLogin && !!userIntegration);
 
-    // Update Clerk metadata directly
+    // Update Clerk metadata directly — store is connected, so step is either complete or audit
     await clerk.users.updateUserMetadata(targetUserId, {
       publicMetadata: {
         shopifyStoreUrl: myshopifyUrl,
