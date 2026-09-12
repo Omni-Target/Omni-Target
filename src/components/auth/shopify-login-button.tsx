@@ -89,27 +89,25 @@ export function ShopifyLoginButton({
 
     let targetShop = validation.normalized;
 
-    // For custom domains, resolve the storefront meta to verify it's a real Shopify store
-    if (validation.isCustomDomain) {
-      try {
-        const res = await fetch("/api/shopify/resolve-domain", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ domain: validation.normalized }),
-        });
-        const data = await res.json();
-        if (!data.isShopify || !data.myshopifyDomain) {
-          setError(
-            data.error ||
-              "Could not verify a Shopify store at this domain. Please check the URL or use your store.myshopify.com domain."
-          );
-          setLoading(false);
-          return;
-        }
-        targetShop = data.myshopifyDomain;
-      } catch {
-        // Fallback gracefully to the domain if offline/network error
+    // Pre-flight verify that the store exists and is a valid Shopify storefront
+    try {
+      const res = await fetch("/api/shopify/resolve-domain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domain: validation.normalized }),
+      });
+      const data = await res.json();
+      if (!data.isShopify || !data.myshopifyDomain) {
+        setError(
+          data.error ||
+            "Could not verify a Shopify store at this domain. Please verify your store URL or enter your .myshopify.com address."
+        );
+        setLoading(false);
+        return;
       }
+      targetShop = data.myshopifyDomain;
+    } catch {
+      // Fallback gracefully to the domain if offline/network error
     }
 
     try {

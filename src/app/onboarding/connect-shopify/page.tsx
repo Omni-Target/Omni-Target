@@ -3,7 +3,7 @@
 import React, { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Lock, ShieldCheck, Loader2 } from "lucide-react";
-import { useUser } from "@clerk/nextjs";
+import { useUser, useClerk } from "@clerk/nextjs";
 import { OnboardingShell } from "@/components/onboarding";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ import { ShopifyBagIcon } from "@/components/auth";
 
 function ConnectShopifyContent() {
   const { user, isLoaded } = useUser();
+  const { signOut } = useClerk();
   const searchParams = useSearchParams();
   const router = useRouter();
   const [storeUrl, setStoreUrl] = useState("");
@@ -65,24 +66,25 @@ function ConnectShopifyContent() {
 
     setIsResolving(true);
     try {
-      let myshopifyDomain = validation.normalized;
+      // Pre-flight verify that the store actually exists and is a valid Shopify storefront
+      // This prevents nonexistent store subdomains from being redirected to Shopify's outage page
+      const res = await fetch("/api/shopify/resolve-domain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domain: validation.normalized }),
+      });
+      const data = await res.json();
 
-      if (validation.isCustomDomain) {
-        const res = await fetch("/api/shopify/resolve-domain", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ domain: validation.normalized }),
-        });
-        const data = await res.json();
-
-        if (!data.isShopify || !data.myshopifyDomain) {
-          setLocalError(data.error || "Could not verify a Shopify store at this domain.");
-          setIsResolving(false);
-          return;
-        }
-        myshopifyDomain = data.myshopifyDomain;
+      if (!data.isShopify || !data.myshopifyDomain) {
+        setLocalError(
+          data.error ||
+            "Could not verify a Shopify store at this domain. Please verify your store URL or enter your .myshopify.com address."
+        );
+        setIsResolving(false);
+        return;
       }
 
+      const myshopifyDomain = data.myshopifyDomain;
       setStoreVerified(true);
       const fromParam = searchParams.get("from")
         ? `&from=${searchParams.get("from")}`
@@ -176,7 +178,45 @@ function ConnectShopifyContent() {
         </Button>
       </form>
 
-      <div className="mt-8 flex items-center justify-center gap-6 border-t border-border-subtle pt-6 text-xs text-subtle-foreground">
+      {/* Account controls & exit recovery actions */}
+      <div className="mt-5 rounded-lg border border-border-subtle bg-surface-subtle/60 p-3 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate">
+            Signed in as <strong className="font-medium text-foreground">{user?.primaryEmailAddress?.emailAddress || "Account"}</strong>
+          </span>
+          <button
+            type="button"
+            onClick={() => signOut({ redirectUrl: "/login" })}
+            className="shrink-0 font-medium text-brand-600 hover:text-brand-700 hover:underline cursor-pointer"
+          >
+            Sign out
+          </button>
+        </div>
+        <div className="mt-2 flex items-center justify-between border-t border-border-subtle/60 pt-2 text-[11px]">
+          <span>Need to review or change plans?</span>
+          <a
+            href="https://omnitarget.co/pricing"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-foreground hover:underline"
+          >
+            View pricing plans &rarr;
+          </a>
+        </div>
+        {fromParam === "dashboard" && (
+          <div className="mt-2 border-t border-border-subtle/60 pt-2 text-[11px] text-right">
+            <button
+              type="button"
+              onClick={() => router.push("/dashboard")}
+              className="text-muted-foreground hover:text-foreground hover:underline cursor-pointer"
+            >
+              &larr; Return to dashboard
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-7 flex items-center justify-center gap-6 border-t border-border-subtle pt-5 text-xs text-subtle-foreground">
         <span className="flex items-center gap-1.5">
           <Lock className="size-3.5" />
           Read-only access

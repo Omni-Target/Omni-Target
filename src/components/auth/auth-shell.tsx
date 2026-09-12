@@ -32,8 +32,8 @@ function AuthBrandPanel() {
           Store Intelligence for Meta Ads
         </div>
         <h2 className="mt-5 max-w-sm text-[1.75rem] font-semibold leading-tight tracking-[-0.02em] text-white">
-          Built for Shopify Fashion Brands. Know exactly what to launch before
-          you deploy capital.
+          Built for modern Shopify brands and growth teams. Know exactly what to
+          launch before you deploy capital.
         </h2>
         <ul className="mt-8 space-y-5">
           {VALUE_PROPS.map(({ Icon, title, body }) => (

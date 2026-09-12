@@ -1,4 +1,5 @@
 import * as React from "react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Wordmark } from "@/components/shared/logo";
 
@@ -10,6 +11,8 @@ export interface SplitLayoutProps {
   asideClassName?: string;
   /** Max-width wrapper for the right-panel content. Defaults to `max-w-md`. */
   contentClassName?: string;
+  /** Optional actions rendered in the top-right header area on mobile and desktop. */
+  headerActions?: React.ReactNode;
 }
 
 /**
@@ -25,6 +28,7 @@ export function SplitLayout({
   className,
   asideClassName,
   contentClassName = "max-w-md",
+  headerActions,
 }: SplitLayoutProps) {
   return (
     <div
@@ -51,9 +55,25 @@ export function SplitLayout({
       {/* Right — independently scrollable workspace dynamically centered on any device */}
       <main className="relative flex h-full flex-1 flex-col overflow-y-auto overscroll-contain">
         {/* Mobile brand bar — sticky so it stays put while the panel scrolls */}
-        <div className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b border-border-subtle bg-background/95 px-5 backdrop-blur lg:hidden">
-          <Wordmark size={24} />
+        <div className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b border-border-subtle bg-background/95 px-4 sm:px-5 backdrop-blur lg:hidden">
+          <Link
+            href="https://omnitarget.co"
+            className="transition-opacity hover:opacity-80 flex items-center"
+            title="Omni Target Home"
+          >
+            <Wordmark size={24} />
+          </Link>
+          {headerActions && (
+            <div className="flex items-center gap-2.5">{headerActions}</div>
+          )}
         </div>
+
+        {/* Desktop top header actions */}
+        {headerActions && (
+          <div className="hidden lg:flex absolute top-6 right-8 z-20 items-center gap-3">
+            {headerActions}
+          </div>
+        )}
 
         {/* Dynamic center workspace: vertically balanced on any mobile phone */}
         <div className="flex flex-1 flex-col items-center justify-center px-4 py-4 sm:px-10 sm:py-8">

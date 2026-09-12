@@ -1,7 +1,11 @@
+"use client";
+
 import * as React from "react";
+import Link from "next/link";
 import { Check, Store, Gauge, ShieldCheck } from "lucide-react";
 import { SplitLayout } from "@/components/layout/split-layout";
 import { Wordmark } from "@/components/shared/logo";
+import { UserMenu } from "@/components/navigation/user-menu";
 import { cn } from "@/lib/utils";
 
 const STEPS = [
@@ -71,19 +75,42 @@ export interface OnboardingShellProps {
   currentStep: 1 | 2;
   children: React.ReactNode;
   contentClassName?: string;
+  headerActions?: React.ReactNode;
 }
 
 export function OnboardingShell({
   currentStep,
   children,
   contentClassName = "max-w-xl",
+  headerActions,
 }: OnboardingShellProps) {
+  const defaultHeaderActions = (
+    <div className="flex items-center gap-3">
+      <Link
+        href="https://omnitarget.co/pricing"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors hidden sm:inline-block"
+      >
+        Plans &amp; Pricing
+      </Link>
+      <UserMenu variant="compact" />
+    </div>
+  );
+
   return (
     <SplitLayout
       contentClassName={contentClassName}
+      headerActions={headerActions ?? defaultHeaderActions}
       aside={
         <div className="flex h-full flex-col">
-          <Wordmark size={30} textClassName="text-white" />
+          <Link
+            href="https://omnitarget.co"
+            className="transition-opacity hover:opacity-80 inline-flex w-fit"
+            title="Omni Target Home"
+          >
+            <Wordmark size={30} textClassName="text-white" />
+          </Link>
           <div className="mt-auto">
             <h2 className="max-w-sm text-[1.625rem] font-semibold leading-tight tracking-[-0.02em] text-white">
               Let&apos;s build your first pre-spend blueprint.
