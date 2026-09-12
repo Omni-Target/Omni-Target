@@ -34,8 +34,6 @@ export interface UserIntegration {
   shop_domain?: string | null;
   shopify_store_url?: string | null;
   shopify_custom_domain?: string | null;
-  shopify_store_name?: string | null;
-  shopify_store_logo_url?: string | null;
   shopify_access_token?: string | null;
   shopify_refresh_token?: string | null;
   shopify_token_expires_at?: string | null;

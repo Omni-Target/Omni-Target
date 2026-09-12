@@ -190,8 +190,6 @@ export async function GET(request: Request) {
     const shopifyData: Record<string, unknown> = {
       shopify_store_url: myshopifyUrl,
       shopify_custom_domain: customDomain,
-      shopify_store_name: storeName,
-      shopify_store_logo_url: storeLogoUrl,
       shopify_access_token: accessToken,
       shop_domain: myshopifyUrl, // explicitly set shop_domain
       access_token: accessToken, // explicitly set access_token
@@ -253,19 +251,21 @@ export async function GET(request: Request) {
       const { randomBytes } = await import("crypto");
       const securePassword = randomBytes(16).toString("hex") + "A1!";
 
+      const initialMeta: Record<string, unknown> = {
+        onboardingStep: "audit",
+        source: "shopify_install",
+        shopifyStoreUrl: myshopifyUrl,
+      };
+      if (storeName) initialMeta.storeName = storeName;
+      if (storeLogoUrl) initialMeta.storeLogoUrl = storeLogoUrl;
+
       try {
         const newUser = await clerk.users.createUser({
           emailAddress: [effectiveEmail],
           password: securePassword,
           firstName,
           lastName,
-          publicMetadata: {
-            onboardingStep: "audit",
-            source: "shopify_install",
-            shopifyStoreUrl: myshopifyUrl,
-            storeName,
-            storeLogoUrl,
-          },
+          publicMetadata: initialMeta,
         });
         targetUserId = newUser.id;
         console.log("Auto-created Clerk user for Shopify merchant:", targetUserId, effectiveEmail);
@@ -366,14 +366,16 @@ export async function GET(request: Request) {
 
     // Update Clerk metadata directly — store is connected, so step is either complete or audit
     const existingMeta = (targetUser.publicMetadata || {}) as Record<string, unknown>;
+    const updatedMeta: Record<string, unknown> = {
+      ...existingMeta,
+      shopifyStoreUrl: myshopifyUrl,
+      onboardingStep: shouldSkipAudit ? "complete" : "audit",
+    };
+    if (storeName) updatedMeta.storeName = storeName;
+    if (storeLogoUrl) updatedMeta.storeLogoUrl = storeLogoUrl;
+
     await clerk.users.updateUserMetadata(targetUserId, {
-      publicMetadata: {
-        ...existingMeta,
-        shopifyStoreUrl: myshopifyUrl,
-        storeName: storeName || existingMeta.storeName,
-        storeLogoUrl: storeLogoUrl || existingMeta.storeLogoUrl,
-        onboardingStep: shouldSkipAudit ? "complete" : "audit",
-      },
+      publicMetadata: updatedMeta,
     });
 
     const appBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin).replace(/\/$/, "");
@@ -418,7 +420,22 @@ export async function GET(request: Request) {
     return buildRedirect(ssoUrl);
 
   } catch (err: unknown) {
-    const errMsg = err instanceof Error ? err.message : String(err);
+    let errMsg = "Authentication error";
+    if (err instanceof Error) {
+      errMsg = err.message;
+    } else if (err && typeof err === "object") {
+      if ("message" in err && typeof (err as { message: unknown }).message === "string") {
+        errMsg = (err as { message: string }).message;
+      } else {
+        try {
+          errMsg = JSON.stringify(err);
+        } catch {
+          errMsg = String(err);
+        }
+      }
+    } else {
+      errMsg = String(err);
+    }
     console.error("Shopify OAuth error:", errMsg, err);
     const appBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin).replace(/\/$/, "");
     return Response.redirect(
