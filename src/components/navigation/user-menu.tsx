@@ -22,13 +22,6 @@ export function UserMenu({ variant = "compact" }: { variant?: "compact" | "full"
 
   const storeName = metadata.storeName;
   const storeLogoUrl = metadata.storeLogoUrl;
-  const shopifyStoreUrl = metadata.shopifyStoreUrl;
-
-  const fallbackFavicon = shopifyStoreUrl
-    ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(
-        shopifyStoreUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "")
-      )}&sz=128`
-    : null;
 
   const displayName =
     storeName ||
@@ -36,7 +29,7 @@ export function UserMenu({ variant = "compact" }: { variant?: "compact" | "full"
     user?.primaryEmailAddress?.emailAddress?.split("@")[0] ||
     "Account";
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
-  const image = storeLogoUrl || fallbackFavicon || user?.imageUrl;
+  const image = storeLogoUrl || user?.imageUrl;
 
   const trigger =
     variant === "full" ? (

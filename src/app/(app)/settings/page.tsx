@@ -18,6 +18,14 @@ export default async function SettingsPage() {
   const { userId } = await auth();
   if (!userId) redirect("/login");
 
+  const { clerkClient } = await import("@clerk/nextjs/server");
+  const clerk = await clerkClient();
+  const user = await clerk.users.getUser(userId);
+  const metadata = (user?.publicMetadata || {}) as {
+    storeName?: string;
+    storeLogoUrl?: string;
+  };
+
   const integration = await getUserIntegration(userId);
 
   const shopifyConnected =
@@ -27,14 +35,8 @@ export default async function SettingsPage() {
     integration?.shopify_store_url ||
     "your store";
 
-  const storeLogo =
-    (integration?.shopify_store_logo_url as string | null) ||
-    (shopifyConnected && storeDomain !== "your store"
-      ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(
-          storeDomain.replace(/^https?:\/\//, "").replace(/\/.*$/, "")
-        )}&sz=128`
-      : null);
-  const storeName = (integration?.shopify_store_name as string | null) || null;
+  const storeLogo = metadata.storeLogoUrl || null;
+  const storeName = metadata.storeName || null;
 
   return (
     <PageContainer width="default" className="space-y-7 pb-16">

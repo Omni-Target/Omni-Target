@@ -176,14 +176,6 @@ export async function GET(request: Request) {
       console.warn("Could not fetch brand logo from Shopify GraphQL:", brandErr);
     }
 
-    // High-resolution storefront fallback if brand kit is not configured in Shopify
-    if (!storeLogoUrl) {
-      const cleanHost = effectiveDomain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim();
-      if (cleanHost) {
-        storeLogoUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(cleanHost)}&sz=128`;
-      }
-    }
-
     console.log("Shopify store branding resolved:", { storeName, storeLogoUrl });
 
     // Shopify data payload — store token + refresh token + expiry
