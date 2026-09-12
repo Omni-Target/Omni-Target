@@ -27,6 +27,15 @@ export default async function SettingsPage() {
     integration?.shopify_store_url ||
     "your store";
 
+  const storeLogo =
+    (integration?.shopify_store_logo_url as string | null) ||
+    (shopifyConnected && storeDomain !== "your store"
+      ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(
+          storeDomain.replace(/^https?:\/\//, "").replace(/\/.*$/, "")
+        )}&sz=128`
+      : null);
+  const storeName = (integration?.shopify_store_name as string | null) || null;
+
   return (
     <PageContainer width="default" className="space-y-7 pb-16">
       <PageHeader
@@ -37,8 +46,19 @@ export default async function SettingsPage() {
       <div className="space-y-5">
         {/* Shopify integration */}
         <IntegrationCard
-          icon={<ShoppingBag />}
-          name="Shopify store"
+          icon={
+            shopifyConnected && storeLogo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={storeLogo}
+                alt={storeName || storeDomain}
+                className="size-6 rounded-md object-contain"
+              />
+            ) : (
+              <ShoppingBag />
+            )
+          }
+          name={storeName || "Shopify store"}
           connected={shopifyConnected}
           description={
             shopifyConnected

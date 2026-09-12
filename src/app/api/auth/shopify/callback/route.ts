@@ -11,9 +11,6 @@ export async function GET(request: Request) {
   const state = searchParams.get("state") || "";
   const hmac = searchParams.get("hmac");
 
-  const [, from] = state.split("___");
-  const isFromDashboard = from === "dashboard";
-
   // Verify HMAC signature from Shopify
   const params = Object.fromEntries(
     searchParams.entries()
@@ -101,8 +98,18 @@ export async function GET(request: Request) {
     );
 
     const shopDetails = await shopDetailsRes.json();
-    const [, from, stateUserId] = state.split("___");
+    const [, from, stateUserId, statePlan] = state.split("___");
     const isFromDashboard = from === "dashboard";
+
+    let selectedPlan = statePlan?.trim().toLowerCase() || "";
+    if (!selectedPlan) {
+      const cookieHeader = request.headers.get("cookie") || "";
+      const match = cookieHeader.match(/(?:^|;\s*)selected_plan=([^;]+)/);
+      if (match) {
+        selectedPlan = decodeURIComponent(match[1]).toLowerCase();
+      }
+    }
+    const hasPaidPlan = ["starter", "growth", "scale"].includes(selectedPlan);
 
     const shopData = shopDetails.shop || {};
     const storeEmail = shopData.email || shopData.customer_email || "";
@@ -114,10 +121,77 @@ export async function GET(request: Request) {
     console.log("Shopify myshopify URL:", myshopifyUrl);
     console.log("Shopify store email:", storeEmail);
 
+    // Extract store branding (official brand logo from Shopify GraphQL, or fallback to high-res storefront favicon)
+    const effectiveDomain = customDomain || myshopifyUrl || shop;
+    let storeLogoUrl: string | null = null;
+    let storeName: string = shopData.name || "Store";
+
+    try {
+      const brandGqlQuery = `
+        query {
+          shop {
+            name
+            brand {
+              squareLogo {
+                image {
+                  url
+                }
+              }
+              logo {
+                image {
+                  url
+                }
+              }
+            }
+          }
+        }
+      `;
+      const brandRes = await fetch(
+        `https://${shop}/admin/api/2026-01/graphql.json`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
+          },
+          body: JSON.stringify({ query: brandGqlQuery }),
+          signal: AbortSignal.timeout(4000),
+        }
+      );
+
+      if (brandRes.ok) {
+        const brandData = await brandRes.json();
+        const shopBrand = brandData?.data?.shop;
+        if (shopBrand?.name) {
+          storeName = shopBrand.name;
+        }
+        const officialLogo =
+          shopBrand?.brand?.squareLogo?.image?.url ||
+          shopBrand?.brand?.logo?.image?.url;
+        if (officialLogo && typeof officialLogo === "string") {
+          storeLogoUrl = officialLogo;
+        }
+      }
+    } catch (brandErr) {
+      console.warn("Could not fetch brand logo from Shopify GraphQL:", brandErr);
+    }
+
+    // High-resolution storefront fallback if brand kit is not configured in Shopify
+    if (!storeLogoUrl) {
+      const cleanHost = effectiveDomain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim();
+      if (cleanHost) {
+        storeLogoUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(cleanHost)}&sz=128`;
+      }
+    }
+
+    console.log("Shopify store branding resolved:", { storeName, storeLogoUrl });
+
     // Shopify data payload — store token + refresh token + expiry
     const shopifyData: Record<string, unknown> = {
       shopify_store_url: myshopifyUrl,
       shopify_custom_domain: customDomain,
+      shopify_store_name: storeName,
+      shopify_store_logo_url: storeLogoUrl,
       shopify_access_token: accessToken,
       shop_domain: myshopifyUrl, // explicitly set shop_domain
       access_token: accessToken, // explicitly set access_token
@@ -189,6 +263,8 @@ export async function GET(request: Request) {
             onboardingStep: "audit",
             source: "shopify_install",
             shopifyStoreUrl: myshopifyUrl,
+            storeName,
+            storeLogoUrl,
           },
         });
         targetUserId = newUser.id;
@@ -279,29 +355,53 @@ export async function GET(request: Request) {
     }
 
     // Check onboarding status:
-    // If the merchant already completed onboarding previously or logged in via "Continue with Shopify",
-    // send them to /dashboard.
-    // If this is a fresh install or audit hasn't been completed, kick off the audit!
+    // If the merchant already completed onboarding previously, logged in via "Continue with Shopify",
+    // or selected a paid plan (starter, growth, scale), send them directly to /dashboard to review/activate.
+    // If this is a free scan or audit hasn't been completed, kick off the audit!
     const targetUser = await clerk.users.getUser(targetUserId);
     const currentOnboardingStep = (targetUser.publicMetadata as { onboardingStep?: string })?.onboardingStep;
     const isAlreadyComplete = currentOnboardingStep === "complete";
     const isLogin = from === "login";
-    const shouldSkipAudit = isFromDashboard || isAlreadyComplete || (isLogin && !!userIntegration);
+    const shouldSkipAudit = hasPaidPlan || isFromDashboard || isAlreadyComplete || (isLogin && !!userIntegration);
 
     // Update Clerk metadata directly — store is connected, so step is either complete or audit
+    const existingMeta = (targetUser.publicMetadata || {}) as Record<string, unknown>;
     await clerk.users.updateUserMetadata(targetUserId, {
       publicMetadata: {
+        ...existingMeta,
         shopifyStoreUrl: myshopifyUrl,
+        storeName: storeName || existingMeta.storeName,
+        storeLogoUrl: storeLogoUrl || existingMeta.storeLogoUrl,
         onboardingStep: shouldSkipAudit ? "complete" : "audit",
       },
     });
 
     const appBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin).replace(/\/$/, "");
-    const destination = shouldSkipAudit ? "/dashboard" : "/onboarding/audit";
+    let destination = shouldSkipAudit ? "/dashboard" : "/onboarding/audit";
+    if (selectedPlan) {
+      destination += `?plan=${encodeURIComponent(selectedPlan)}`;
+    }
+
+    // Helper to build redirect with cookie
+    const buildRedirect = (url: string) => {
+      const resp = new Response(null, {
+        status: 302,
+        headers: new Headers({
+          Location: url,
+        }),
+      });
+      if (selectedPlan) {
+        resp.headers.append(
+          "Set-Cookie",
+          `selected_plan=${selectedPlan}; Secure; SameSite=Lax; Max-Age=3600; Path=/`
+        );
+      }
+      return resp;
+    };
 
     // If the merchant is already logged into Clerk in this browser, redirect directly
     if (userId) {
-      return Response.redirect(`${appBaseUrl}${destination}`);
+      return buildRedirect(`${appBaseUrl}${destination}`);
     }
 
     // Otherwise (Shopify App Store install or Login with Shopify):
@@ -315,7 +415,7 @@ export async function GET(request: Request) {
       signInToken.token
     )}&destination=${encodeURIComponent(destination)}`;
 
-    return Response.redirect(ssoUrl);
+    return buildRedirect(ssoUrl);
 
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);

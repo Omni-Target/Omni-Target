@@ -15,6 +15,8 @@ const MetadataSchema = z
       .enum(["connect-shopify", "connect-meta", "audit", "complete"])
       .optional(),
     shopifyStoreUrl: z.string().min(1).max(255).optional(),
+    storeLogoUrl: z.string().url().max(1000).optional(),
+    storeName: z.string().min(1).max(255).optional(),
   })
   .strict();
 

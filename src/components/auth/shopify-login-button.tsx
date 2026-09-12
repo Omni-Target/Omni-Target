@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { ArrowRight, Loader2, Store, X } from "lucide-react";
+import { ArrowRight, Loader2, X, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { validateShopifyInput } from "@/lib/domain-validation";
 
 export function ShopifyBagIcon({ className = "size-5" }: { className?: string }) {
   return (
@@ -28,7 +29,17 @@ export function ShopifyBagIcon({ className = "size-5" }: { className?: string })
   );
 }
 
-export function ShopifyLoginButton() {
+export interface ShopifyLoginButtonProps {
+  plan?: string | null;
+  mode?: "login" | "signup";
+  buttonText?: string;
+}
+
+export function ShopifyLoginButton({
+  plan,
+  mode = "login",
+  buttonText,
+}: ShopifyLoginButtonProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [storeDomain, setStoreDomain] = useState("");
   const [savedStore, setSavedStore] = useState<string | null>(null);
@@ -36,37 +47,83 @@ export function ShopifyLoginButton() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      const lastStore = localStorage.getItem("omni_last_shopify_store");
-      if (lastStore) {
-        setSavedStore(lastStore);
-        setStoreDomain(lastStore.replace(/\.myshopify\.com$/i, ""));
+    const timer = setTimeout(() => {
+      try {
+        const lastStore = localStorage.getItem("omni_last_shopify_store");
+        if (lastStore) {
+          // Sanitize: Verify stored store format. Never load invalid values like "hello"
+          const validation = validateShopifyInput(lastStore);
+          if (validation.isValid) {
+            setSavedStore(validation.normalized);
+            setStoreDomain(validation.normalized.replace(/\.myshopify\.com$/i, ""));
+          } else {
+            // Clean up corrupt/invalid previous values from localStorage
+            localStorage.removeItem("omni_last_shopify_store");
+          }
+        }
+      } catch {
+        // localStorage may be unavailable in private browsing
       }
-    } catch {
-      // localStorage may be unavailable in private browsing
-    }
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
-  const handleInitiate = (shopToUse?: string) => {
+  const handleInitiate = async (shopToUse?: string) => {
     const raw = (shopToUse || storeDomain).trim();
     if (!raw) {
       setError("Please enter your website or store URL.");
       return;
     }
 
+    const validation = validateShopifyInput(raw);
+    if (!validation.isValid) {
+      setError(
+        validation.error ||
+          "Please enter a valid domain (e.g., yourstore.com or store.myshopify.com)."
+      );
+      return;
+    }
+
     setError(null);
     setLoading(true);
 
+    let targetShop = validation.normalized;
+
+    // For custom domains, resolve the storefront meta to verify it's a real Shopify store
+    if (validation.isCustomDomain) {
+      try {
+        const res = await fetch("/api/shopify/resolve-domain", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ domain: validation.normalized }),
+        });
+        const data = await res.json();
+        if (!data.isShopify || !data.myshopifyDomain) {
+          setError(
+            data.error ||
+              "Could not verify a Shopify store at this domain. Please check the URL or use your store.myshopify.com domain."
+          );
+          setLoading(false);
+          return;
+        }
+        targetShop = data.myshopifyDomain;
+      } catch {
+        // Fallback gracefully to the domain if offline/network error
+      }
+    }
+
     try {
-      localStorage.setItem("omni_last_shopify_store", raw);
+      localStorage.setItem("omni_last_shopify_store", targetShop);
     } catch {
       // ignore
     }
 
-    // Direct to the public connect endpoint — backend resolves custom domains & myshopify URLs automatically
+    const fromParam = mode === "signup" ? "signup" : "login";
+    const planParam = plan ? `&plan=${encodeURIComponent(plan)}` : "";
+
     window.location.href = `/api/auth/shopify/connect?shop=${encodeURIComponent(
-      raw
-    )}&from=login`;
+      targetShop
+    )}&from=${fromParam}${planParam}`;
   };
 
   const handleFormSubmit = (e: React.FormEvent) => {
@@ -74,7 +131,7 @@ export function ShopifyLoginButton() {
     handleInitiate();
   };
 
-  // If we have a saved store and user hasn't toggled to enter a new one
+  // If we have a verified saved store and user hasn't toggled to enter a new one
   if (savedStore && !isExpanded) {
     return (
       <div className="space-y-2">
@@ -136,7 +193,7 @@ export function ShopifyLoginButton() {
           )}
         </div>
 
-        <div className="relative flex items-center">
+        <div className="space-y-1.5">
           <input
             type="text"
             autoFocus
@@ -149,9 +206,18 @@ export function ShopifyLoginButton() {
             }}
             className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-brand-500 focus:outline-hidden focus:ring-2 focus:ring-brand-500/20 transition-all"
           />
+          <p className="text-[11px] text-muted-foreground">
+            Accepted formats: <span className="font-medium text-foreground">yourstore.com</span> or{" "}
+            <span className="font-medium text-foreground">store.myshopify.com</span>
+          </p>
         </div>
 
-        {error && <p className="text-[11px] text-danger-600 font-medium">{error}</p>}
+        {error && (
+          <div className="flex items-start gap-1.5 text-[11px] text-danger-600 font-medium">
+            <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
+            <span>{error}</span>
+          </div>
+        )}
 
         <Button
           type="submit"
@@ -165,7 +231,7 @@ export function ShopifyLoginButton() {
             </>
           ) : (
             <>
-              Continue with Shopify
+              {mode === "signup" ? "Connect store with Shopify" : "Continue with Shopify"}
               <ArrowRight className="size-3.5 ml-1.5" />
             </>
           )}
@@ -175,6 +241,10 @@ export function ShopifyLoginButton() {
   }
 
   // Default initial button (Single 1-click Apple/Google style)
+  const defaultLabel =
+    buttonText ||
+    (mode === "signup" ? "Scan store with Shopify" : "Continue with Shopify");
+
   return (
     <button
       type="button"
@@ -183,7 +253,7 @@ export function ShopifyLoginButton() {
       className="group relative flex h-11 w-full items-center justify-center gap-3 rounded-lg border border-border bg-surface px-4 text-sm font-medium text-foreground shadow-xs transition-all hover:border-foreground/30 hover:bg-surface-subtle active:scale-[0.99] disabled:opacity-60 cursor-pointer"
     >
       <ShopifyBagIcon className="size-5 shrink-0" />
-      <span>Continue with Shopify</span>
+      <span>{defaultLabel}</span>
       <ArrowRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 ml-auto" />
     </button>
   );

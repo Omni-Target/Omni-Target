@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { resolveShopifyDomain } from "@/lib/shopify-resolver";
-import { requireUser } from "@/lib/api/require-user";
+import { validateShopifyInput } from "@/lib/domain-validation";
 import { apiError, apiServerError } from "@/lib/api/response";
 
 const BodySchema = z.object({
@@ -8,10 +8,6 @@ const BodySchema = z.object({
 });
 
 export async function POST(request: Request) {
-  // Defense-in-depth: proxy.ts already gates this, but verify auth here too.
-  const authResult = await requireUser();
-  if (!authResult.ok) return authResult.response;
-
   let rawBody: unknown;
   try {
     rawBody = await request.json();
@@ -24,8 +20,17 @@ export async function POST(request: Request) {
     return apiError("Domain required", 400);
   }
 
+  const validation = validateShopifyInput(parsed.data.domain);
+  if (!validation.isValid) {
+    return Response.json({
+      isShopify: false,
+      myshopifyDomain: null,
+      error: validation.error || "Please enter a valid domain (e.g., yourstore.com or store.myshopify.com).",
+    });
+  }
+
   try {
-    const result = await resolveShopifyDomain(parsed.data.domain);
+    const result = await resolveShopifyDomain(validation.normalized);
     return Response.json(result);
   } catch (error) {
     return apiServerError("resolve-domain", error);

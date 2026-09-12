@@ -28,6 +28,8 @@ import {
   type StoreProductLike,
 } from "@/components/dashboard";
 import { useStoreData, useForceSyncStoreData } from "@/hooks/useStoreData";
+import { PurchaseDialog } from "@/components/pricing";
+import { getPackById, type CreditPack } from "@/lib/credit-packs";
 
 function relativeTime(iso?: string): string {
   if (!iso) return "just now";
@@ -108,6 +110,27 @@ function DashboardContent() {
   }, [paymentSuccess, toast]);
 
   const billingMessage = searchParams.get("message");
+
+  const planParam = searchParams.get("plan")?.toLowerCase();
+  const initialPlanPack = React.useMemo(() => {
+    if (billingSuccess) return null;
+    if (planParam && ["starter", "growth", "scale"].includes(planParam)) {
+      return getPackById(planParam) ?? null;
+    }
+    return null;
+  }, [planParam, billingSuccess]);
+
+  const [pendingPlanPack, setPendingPlanPack] = useState<CreditPack | null>(initialPlanPack);
+  const [purchaseDialogOpen, setPurchaseDialogOpen] = useState(Boolean(initialPlanPack));
+
+  useEffect(() => {
+    if (initialPlanPack) {
+      if (typeof document !== "undefined") {
+        document.cookie = "selected_plan=; Path=/; Max-Age=0";
+      }
+      window.history.replaceState({}, "", "/dashboard");
+    }
+  }, [initialPlanPack]);
 
   useEffect(() => {
     if (billingSuccess === "success") {
@@ -220,6 +243,45 @@ function DashboardContent() {
         <ConnectStoreState shop={shop} expired={sessionExpired} />
       ) : (
         <>
+          {pendingPlanPack && (
+            <div className="flex flex-col gap-3 rounded-2xl border border-brand-200 bg-brand-50/80 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5 shadow-xs animate-fade-in">
+              <div className="flex items-center gap-3">
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-100 text-brand-700">
+                  <Sparkles className="size-5" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-foreground">
+                      You selected the {pendingPlanPack.name}
+                    </p>
+                    <Badge variant="brand" size="sm">
+                      Selected Plan
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Authorize via Shopify to activate {pendingPlanPack.credits} Creative Briefs and start generating high-converting ads.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  size="sm"
+                  onClick={() => setPurchaseDialogOpen(true)}
+                  className="font-semibold"
+                >
+                  Activate via Shopify
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setPendingPlanPack(null)}
+                  className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 cursor-pointer transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
           <CommandCenterHero
             storeName={store.name || "Your store"}
             lastSynced={relativeTime(
@@ -387,6 +449,14 @@ function DashboardContent() {
           <RestockingPanel products={restocking} currency={currency} shop={shop} />
         </>
       )}
+
+      <PurchaseDialog
+        pack={pendingPlanPack}
+        open={purchaseDialogOpen}
+        onOpenChange={setPurchaseDialogOpen}
+        shop={shop}
+        currency="USD"
+      />
     </PageContainer>
   );
 }

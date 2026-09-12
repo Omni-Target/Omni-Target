@@ -14,18 +14,37 @@ export function UserMenu({ variant = "compact" }: { variant?: "compact" | "full"
   const { user } = useUser();
   const { signOut } = useClerk();
 
-  const name =
-    user?.fullName || user?.primaryEmailAddress?.emailAddress?.split("@")[0] || "Account";
+  const metadata = (user?.publicMetadata || {}) as {
+    storeName?: string;
+    storeLogoUrl?: string;
+    shopifyStoreUrl?: string;
+  };
+
+  const storeName = metadata.storeName;
+  const storeLogoUrl = metadata.storeLogoUrl;
+  const shopifyStoreUrl = metadata.shopifyStoreUrl;
+
+  const fallbackFavicon = shopifyStoreUrl
+    ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(
+        shopifyStoreUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "")
+      )}&sz=128`
+    : null;
+
+  const displayName =
+    storeName ||
+    user?.fullName ||
+    user?.primaryEmailAddress?.emailAddress?.split("@")[0] ||
+    "Account";
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
-  const image = user?.imageUrl;
+  const image = storeLogoUrl || fallbackFavicon || user?.imageUrl;
 
   const trigger =
     variant === "full" ? (
       <span className="flex w-full items-center gap-2.5 rounded-xl border border-border-subtle bg-surface p-2 text-left transition-colors hover:bg-surface-subtle">
-        <Avatar src={image} name={name} size="md" />
+        <Avatar src={image} name={displayName} size="md" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-foreground">
-            {name}
+            {displayName}
           </span>
           <span className="block truncate text-xs text-subtle-foreground">
             {email}
@@ -35,7 +54,7 @@ export function UserMenu({ variant = "compact" }: { variant?: "compact" | "full"
       </span>
     ) : (
       <span className="rounded-full ring-2 ring-transparent transition-shadow hover:ring-border">
-        <Avatar src={image} name={name} size="md" />
+        <Avatar src={image} name={displayName} size="md" />
       </span>
     );
 
@@ -47,9 +66,9 @@ export function UserMenu({ variant = "compact" }: { variant?: "compact" | "full"
       className="w-60"
     >
       <div className="flex items-center gap-2.5 px-2.5 py-2">
-        <Avatar src={image} name={name} size="md" />
+        <Avatar src={image} name={displayName} size="md" />
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-foreground">{name}</p>
+          <p className="truncate text-sm font-medium text-foreground">{displayName}</p>
           <p className="truncate text-xs text-subtle-foreground">{email}</p>
         </div>
       </div>

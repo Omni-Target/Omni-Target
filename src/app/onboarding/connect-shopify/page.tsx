@@ -2,13 +2,14 @@
 
 import React, { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, Lock, Store, ShieldCheck, Loader2 } from "lucide-react";
+import { ArrowRight, Lock, ShieldCheck, Loader2 } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
 import { OnboardingShell } from "@/components/onboarding";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { advanceOnboardingStep } from "../actions";
+import { validateShopifyInput } from "@/lib/domain-validation";
 
 import { ShopifyBagIcon } from "@/components/auth";
 
@@ -53,31 +54,48 @@ function ConnectShopifyContent() {
 
   const handleConnect = async () => {
     setLocalError("");
-    if (!storeUrl.trim()) {
-      setLocalError("Please enter your store URL.");
+    const validation = validateShopifyInput(storeUrl);
+    if (!validation.isValid) {
+      setLocalError(
+        validation.error ||
+          "Please enter a valid domain (e.g., yourstore.com or store.myshopify.com)."
+      );
       return;
     }
 
     setIsResolving(true);
     try {
-      const res = await fetch("/api/shopify/resolve-domain", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ domain: storeUrl }),
-      });
-      const data = await res.json();
+      let myshopifyDomain = validation.normalized;
 
-      if (!data.isShopify) {
-        setLocalError(data.error || "Could not verify store.");
-        setIsResolving(false);
-        return;
+      if (validation.isCustomDomain) {
+        const res = await fetch("/api/shopify/resolve-domain", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ domain: validation.normalized }),
+        });
+        const data = await res.json();
+
+        if (!data.isShopify || !data.myshopifyDomain) {
+          setLocalError(data.error || "Could not verify a Shopify store at this domain.");
+          setIsResolving(false);
+          return;
+        }
+        myshopifyDomain = data.myshopifyDomain;
       }
 
       setStoreVerified(true);
       const fromParam = searchParams.get("from")
         ? `&from=${searchParams.get("from")}`
         : "";
-      window.location.href = `/api/auth/shopify/connect?shop=${data.myshopifyDomain}${fromParam}`;
+      let activePlan = searchParams.get("plan");
+      if (!activePlan && typeof document !== "undefined") {
+        const match = document.cookie.match(/(?:^|;\s*)selected_plan=([^;]+)/);
+        if (match) activePlan = decodeURIComponent(match[1]);
+      }
+      const planParam = activePlan
+        ? `&plan=${encodeURIComponent(activePlan)}`
+        : "";
+      window.location.href = `/api/auth/shopify/connect?shop=${encodeURIComponent(myshopifyDomain)}${fromParam}${planParam}`;
     } catch {
       setLocalError("An error occurred while verifying the store.");
       setIsResolving(false);
@@ -132,7 +150,7 @@ function ConnectShopifyContent() {
         <Field
           label="Store URL"
           htmlFor="shopify-url-input"
-          hint="Enter your website or store URL — we'll handle the rest."
+          hint="Accepted formats: yourstore.com or store.myshopify.com"
           error={error || undefined}
         >
           <Input
