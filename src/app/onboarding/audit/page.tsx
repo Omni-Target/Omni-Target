@@ -37,6 +37,10 @@ function AuditContent() {
       const res = await fetch("/api/pixel/audit");
       if (!res.ok) throw new Error("Audit API failed");
       const data: AuditResult = await res.json();
+      if (data.status === "not_connected") {
+        window.location.href = "/onboarding/connect-shopify";
+        return data;
+      }
       return data;
     })();
 

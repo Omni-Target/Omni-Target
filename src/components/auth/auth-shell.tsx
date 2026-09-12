@@ -51,7 +51,7 @@ function AuthBrandPanel() {
       </div>
 
       <p className="mt-auto pt-10 text-xs text-white/35">
-        256-bit encryption · SOC 2 compliant
+        Official Shopify Partner App · 100% Read-Only Safety
       </p>
     </div>
   );

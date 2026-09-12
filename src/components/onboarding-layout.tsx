@@ -34,7 +34,7 @@ export default function OnboardingLayout({
 
       {/* Footer */}
       <p className="mt-8 text-xs text-white/30 animate-fade-in-up-delay-4">
-        Secured by 256-bit encryption · SOC 2 Compliant
+        Official Shopify Partner App · 100% Read-Only Safety
       </p>
     </div>
   );

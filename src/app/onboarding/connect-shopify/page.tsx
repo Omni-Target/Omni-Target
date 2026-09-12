@@ -102,11 +102,6 @@ function ConnectShopifyContent() {
     }
   };
 
-  const handleSkip = async () => {
-    await advanceOnboardingStep("audit");
-    router.push("/onboarding/audit");
-  };
-
   if ((!isLoaded && !isExplicitAction) || (!isExplicitAction && hasConnectedStore)) {
     return (
       <OnboardingShell currentStep={1} contentClassName="max-w-md">
@@ -180,13 +175,6 @@ function ConnectShopifyContent() {
           )}
         </Button>
       </form>
-
-      <button
-        onClick={handleSkip}
-        className="mx-auto mt-4 block text-xs font-medium text-subtle-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
-      >
-        Skip for now — I&apos;ll connect my store later
-      </button>
 
       <div className="mt-8 flex items-center justify-center gap-6 border-t border-border-subtle pt-6 text-xs text-subtle-foreground">
         <span className="flex items-center gap-1.5">

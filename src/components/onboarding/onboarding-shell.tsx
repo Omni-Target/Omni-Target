@@ -98,7 +98,7 @@ export function OnboardingShell({
           </div>
           <p className="mt-auto flex items-center gap-2 pt-10 text-xs text-white/35">
             <ShieldCheck className="size-3.5" />
-            Read-only access · 256-bit encryption · SOC 2 compliant
+            Official Shopify Partner App · 100% Read-Only Safety
           </p>
         </div>
       }
