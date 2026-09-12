@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { useUser, useClerk } from "@clerk/nextjs";
 import { Settings, LogOut, CreditCard, ChevronsUpDown } from "lucide-react";
@@ -23,13 +24,39 @@ export function UserMenu({ variant = "compact" }: { variant?: "compact" | "full"
   const storeName = metadata.storeName;
   const storeLogoUrl = metadata.storeLogoUrl;
 
+  // Check and reject any favicon URLs (stale or cached)
+  const isFavicon = (url?: string | null) =>
+    !url ||
+    url.includes("google.com/s2/favicons") ||
+    url.includes("favicon") ||
+    url.includes(".ico");
+
+  // Cleanse any stale favicon URL stored in Clerk metadata in the background
+  useEffect(() => {
+    if (storeLogoUrl && isFavicon(storeLogoUrl)) {
+      fetch("/api/user/update-metadata", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storeLogoUrl: null }),
+      }).catch(() => {});
+    }
+  }, [storeLogoUrl]);
+
   const displayName =
     storeName ||
     user?.fullName ||
     user?.primaryEmailAddress?.emailAddress?.split("@")[0] ||
     "Account";
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
-  const image = storeLogoUrl || user?.imageUrl;
+
+  // Only use official brand logo from Shopify.
+  // If not available, use a colorful geometric default random avatar seeded by store name.
+  const officialLogo = isFavicon(storeLogoUrl) ? null : storeLogoUrl;
+  const defaultRandomAvatar = `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(
+    storeName || displayName || user?.id || "omni"
+  )}`;
+
+  const image = officialLogo || defaultRandomAvatar;
 
   const trigger =
     variant === "full" ? (

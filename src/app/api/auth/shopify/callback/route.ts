@@ -362,9 +362,9 @@ export async function GET(request: Request) {
       ...existingMeta,
       shopifyStoreUrl: myshopifyUrl,
       onboardingStep: shouldSkipAudit ? "complete" : "audit",
+      storeLogoUrl: storeLogoUrl || null,
     };
     if (storeName) updatedMeta.storeName = storeName;
-    if (storeLogoUrl) updatedMeta.storeLogoUrl = storeLogoUrl;
 
     await clerk.users.updateUserMetadata(targetUserId, {
       publicMetadata: updatedMeta,

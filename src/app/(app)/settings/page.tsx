@@ -35,7 +35,13 @@ export default async function SettingsPage() {
     integration?.shopify_store_url ||
     "your store";
 
-  const storeLogo = metadata.storeLogoUrl || null;
+  const isFavicon = (url?: string | null) =>
+    !url ||
+    url.includes("google.com/s2/favicons") ||
+    url.includes("favicon") ||
+    url.includes(".ico");
+
+  const storeLogo = isFavicon(metadata.storeLogoUrl) ? null : metadata.storeLogoUrl;
   const storeName = metadata.storeName || null;
 
   return (
