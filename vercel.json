@@ -3,10 +3,7 @@
     {
       "path": "/api/cron/brief-nudge",
       "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/cron/sync-stores",
-      "schedule": "0 */4 * * *"
     }
   ]
 }
+
