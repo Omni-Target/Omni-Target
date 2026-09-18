@@ -8,12 +8,12 @@ import { Alert } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/currency";
 import {
-  getInternationalBudgetFloor,
   getInternationalStrategies,
   isDomesticCity,
   getEffectiveStoreCountry,
   isTier1Market,
 } from "@/lib/market-geography";
+import { parseBudgetReasoning } from "@/lib/campaigns/qualitative-guidance";
 import type { AiInsights, StoreInsights } from "./types";
 
 const TIMELINES = [
@@ -33,6 +33,7 @@ export function BudgetPlanner({
   loadingAiInsights,
   selectedIntlStrategyIndex: propSelectedIntlStrategyIndex,
   setSelectedIntlStrategyIndex: propSetSelectedIntlStrategyIndex,
+  productPrice,
 }: {
   aiInsights: AiInsights | null;
   storeInsights?: StoreInsights | null;
@@ -44,6 +45,7 @@ export function BudgetPlanner({
   selectedDuration: 7 | 14 | 30;
   setSelectedDuration: (d: 7 | 14 | 30) => void;
   loadingAiInsights: boolean;
+  productPrice?: number;
 }) {
   const topOrderLocs = storeInsights?.orders?.top_locations || [];
   const effectiveStoreCountry = getEffectiveStoreCountry(
@@ -88,7 +90,6 @@ export function BudgetPlanner({
 
             // Local Market calculations
             const localStrategy = strategies[selectedStrategyIndex] || strategies[1];
-            const adSets = budget!.ad_sets || 1;
             const goalMult = budget!.breakdown?.goal_multipliers?.[goal] ?? 1;
             const localBaseDaily = localStrategy.daily;
             const localAdjustedDaily = Math.round(localBaseDaily * goalMult);
@@ -116,6 +117,44 @@ export function BudgetPlanner({
               const newStr = formatCurrency(localAdjustedDaily, curr, sym);
               dynamicBudgetReasoning = dynamicBudgetReasoning.replace(oldStr, newStr);
             }
+
+            if (productPrice && productPrice > 0) {
+              const formattedProductPrice = formatCurrency(Math.round(productPrice), curr, sym);
+              dynamicBudgetReasoning = dynamicBudgetReasoning.replace(
+                /Calibrated for your product's [^ ]+ price point:/i,
+                `Calibrated for your product's ${formattedProductPrice} price point:`
+              );
+            }
+
+            const rawIntlLocs = (
+              aiInsights?.targeting?.international_locations && aiInsights.targeting.international_locations.length > 0
+                ? aiInsights.targeting.international_locations
+                : aiInsights?.targeting?.locations || []
+            ).filter((l) => !isDomesticCity(l.name || (l as { city?: string }).city || "", (l as { country?: string }).country, effectiveStoreCountry, storeCurrency, topOrderLocs));
+
+            if (rawIntlLocs.length > 0) {
+              const displayedIntlCities = rawIntlLocs
+                .map((l) => (l?.name || (l as { city?: string })?.city || "").split(",")[0].trim())
+                .filter(Boolean)
+                .slice(0, 4)
+                .join(" · ");
+              if (displayedIntlCities) {
+                dynamicBudgetReasoning = dynamicBudgetReasoning.replace(
+                  /Should you ever wish to (?:explore international demand|test overseas sales) in [^,]+,/i,
+                  `Should you ever wish to test overseas sales in ${displayedIntlCities},`
+                );
+              }
+            }
+
+            const formattedIntlDaily = formatCurrency(intlAdjustedDaily, curr, sym) + "/day";
+            dynamicBudgetReasoning = dynamicBudgetReasoning
+              .replace(
+                /launch a separate overseas ad set at [^.]+?\./gi,
+                `launch a separate overseas ad set at ${formattedIntlDaily}.`
+              )
+              .replace(/\)\./g, ".")
+              .replace(/\s*\.\s*/g, ". ")
+              .trim();
 
             return (
               <div className="space-y-6">
@@ -376,7 +415,7 @@ export function BudgetPlanner({
                             {formatCurrency(intlAdjustedDaily, curr, sym)}/day
                           </p>
                           <p className="text-[11px] text-muted-foreground mt-1">
-                            Should you ever choose to explore foreign buyers, run this as a separate ad set so overseas CPMs don't drain your local money.
+                            Should you ever choose to explore foreign buyers, run this as a separate ad set so higher overseas ad costs don&apos;t drain your local budget.
                           </p>
                         </div>
                       </div>
@@ -392,7 +431,7 @@ export function BudgetPlanner({
                           <span>🎯</span> {isUS ? "US Advantage+ Campaign Budget" : "Consolidated Campaign Budget"}
                         </span>
                         <span className="rounded bg-brand-50 border border-brand-200 px-2 py-0.5 text-[10px] font-semibold text-brand-700">
-                          1 Ad Set · Maximum Liquidity
+                          1 Ad Set · Focused Budget
                         </span>
                       </div>
                       <div className="rounded-lg bg-surface-subtle p-3 border border-brand-200/60 shadow-xs text-xs">
@@ -408,21 +447,180 @@ export function BudgetPlanner({
                           {formatCurrency(localAdjustedDaily, curr, sym)}/day
                         </p>
                         <p className="text-[11px] text-muted-foreground mt-1">
-                          Estimated test spend: {formatCurrency(localAdjustedDaily * selectedDuration, curr, sym)} for {selectedDuration} days. Run as 1 consolidated Advantage+ campaign to give Meta maximum algorithmic liquidity and build initial pixel learning.
+                          Estimated test spend: {formatCurrency(localAdjustedDaily * selectedDuration, curr, sym)} for {selectedDuration} days. Run as 1 consolidated Advantage+ campaign so Meta can focus your entire budget on finding your best customers without splitting your spend.
                         </p>
                       </div>
                       <div className="rounded-lg bg-brand-50/60 border border-brand-100 p-2.5 text-[11px] text-brand-900 leading-relaxed">
-                        💡 <strong>Omni Tip:</strong> Consolidating your budget into a single campaign gives Meta's machine learning the data volume it needs to optimize quickly, without fragmenting your spend across unnecessary ad sets.
+                        💡 <strong>Omni Tip:</strong> Putting your entire budget into a single campaign gives Meta the focus it needs to find buyers quickly, without spreading your money too thin across multiple ad sets.
                       </div>
                     </div>
                   )}
 
-                  {/* Revenue-based context */}
-                  <div className="rounded-xl border border-border bg-surface-subtle p-4">
-                    <p className="text-xs italic leading-relaxed text-subtle-foreground">
-                      {dynamicBudgetReasoning}
-                    </p>
-                  </div>
+                  {/* How Your Budget Was Calculated — structured, easy-to-read breakdown */}
+                  {dynamicBudgetReasoning && (() => {
+                    const parsed = parseBudgetReasoning(dynamicBudgetReasoning);
+                    const recentRevNum = parsed.recentRevenueFormatted
+                      ? parseFloat(parsed.recentRevenueFormatted.replace(/[^0-9.]/g, "")) || 0
+                      : 0;
+                    const totalTestSpendNum = localAdjustedDaily * selectedDuration;
+                    const pctOfRecent =
+                      recentRevNum > 0 ? Math.round((totalTestSpendNum / recentRevNum) * 100) : 0;
+                    const isTightCashFlow =
+                      Boolean(parsed.isCashFlowConstrained) || (recentRevNum > 0 && pctOfRecent > 25);
+                    const dipDailyVal = Math.round(localAdjustedDaily * 0.7);
+                    const dipDailyStr = parsed.dipDailyFormatted || `${formatCurrency(dipDailyVal, curr, sym)}/day`;
+                    const dipTotalStr = formatCurrency(dipDailyVal * selectedDuration, curr, sym);
+                    const sweetSpotDailyStr = `${formatCurrency(localAdjustedDaily, curr, sym)}/day`;
+                    const sweetSpotTotalStr = formatCurrency(totalTestSpendNum, curr, sym);
+                    const productPriceNum = typeof productPrice === "number" ? productPrice : (productPrice ? parseFloat(String(productPrice).replace(/[^0-9.]/g, "")) : 0);
+                    const productPriceFormatted = productPriceNum > 0 ? formatCurrency(productPriceNum, curr, sym) : "product";
+
+                    return (
+                      <div className="rounded-xl border border-border bg-surface p-4 space-y-3 shadow-xs">
+                        <div className="flex items-center justify-between pb-2 border-b border-border">
+                          <span className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                            <span>📊</span> How Your Budget Was Calculated
+                          </span>
+                          <span className="rounded bg-surface-subtle border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            Algorithmic Calibration
+                          </span>
+                        </div>
+
+                        {/* Transparent Budget Calculation Breakdown Table */}
+                        <div className="rounded-lg border border-border overflow-hidden bg-surface-subtle/70 my-1">
+                          <div className="px-3 py-1.5 bg-surface-subtle border-b border-border flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-foreground">
+                              Transparent Budget Inputs
+                            </span>
+                            <span className="text-[10px] text-muted-foreground">
+                              Pre-Spend Intelligence
+                            </span>
+                          </div>
+                          <div className="divide-y divide-border text-[11px]">
+                            <div className="grid grid-cols-3 p-2">
+                              <span className="font-semibold text-muted-foreground">Store Sales Context</span>
+                              <span className="col-span-2 text-foreground">
+                                {recentRevNum > 0
+                                  ? `${parsed.recentRevenueFormatted || formatCurrency(recentRevNum, curr, sym)} verified over latest 30 days`
+                                  : parsed.recentRevenueFormatted
+                                  ? `${parsed.recentRevenueFormatted} verified in Shopify store`
+                                  : "New store / early catalog testing baseline"}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-3 p-2">
+                              <span className="font-semibold text-muted-foreground">How Budget Was Chosen</span>
+                              <span className="col-span-2 text-foreground leading-relaxed">
+                                {isTightCashFlow ? (
+                                  <>
+                                    <strong>Starter Testing Baseline:</strong> Calibrated as an estimated starting test budget ({sweetSpotDailyStr}) based on your {productPriceFormatted} item price to give Meta enough daily impressions to find interested shoppers. Allocating 5–10% of last month&apos;s quiet sales ({parsed.recentRevenueFormatted || formatCurrency(recentRevNum, curr, sym)}) would stretch data collection over too many weeks.
+                                  </>
+                                ) : recentRevNum > 0 ? (
+                                  <>
+                                    <strong>Monthly Revenue Allocation:</strong> Allocates a disciplined ~5–10% testing budget from your store&apos;s regular monthly sales ({parsed.recentRevenueFormatted || formatCurrency(recentRevNum, curr, sym)}), keeping your ad spend comfortable and low-risk.
+                                  </>
+                                ) : (
+                                  <>
+                                    <strong>Starter Testing Baseline:</strong> Calibrated for your product&apos;s {productPriceFormatted} price point to give your campaign a realistic test budget to discover your first customers.
+                                  </>
+                                )}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-3 p-2 bg-brand-50/50">
+                              <span className="font-bold text-brand-900">Recommended Test (Sweet Spot)</span>
+                              <div className="col-span-2">
+                                <span className="font-bold text-brand-950 text-xs">
+                                  {sweetSpotTotalStr} Total Spend
+                                </span>{" "}
+                                <span className="text-brand-800">
+                                  ({sweetSpotDailyStr} × {selectedDuration} days) · Balanced testing baseline
+                                </span>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-3 p-2 bg-amber-50/50">
+                              <span className="font-bold text-amber-900">Lower-Spend Option (Dip Your Toe)</span>
+                              <div className="col-span-2 space-y-1">
+                                <div>
+                                  <span className="font-bold text-amber-950 text-xs">
+                                    {dipTotalStr} Total Spend
+                                  </span>{" "}
+                                  <span className="text-amber-800">
+                                    ({dipDailyStr} × {selectedDuration} days)
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-amber-900 leading-tight">
+                                  A lower-commitment test option ({dipDailyStr}). Reduces your upfront financial risk while you validate customer interest, though gathering enough signals may take a few more days.
+                                </p>
+                              </div>
+                            </div>
+                            {isTightCashFlow && (
+                              <div className="grid grid-cols-3 p-2 bg-amber-100/60 border-t border-amber-200">
+                                <span className="font-bold text-amber-950">Cash Flow Advisory</span>
+                                <span className="col-span-2 text-amber-950 text-[10px] leading-relaxed">
+                                  <strong>Founder cash flow check:</strong> {sweetSpotTotalStr} is about {pctOfRecent}% of your recent 30-day sales. If cash is tight right now, test with the Dip Your Toe option ({dipDailyStr}) or wait until store sales pick up before launching.
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2.5 text-xs pt-1">
+                          {(parsed.calibrationTitle || parsed.calibrationBody) && (
+                            <div className="flex items-start gap-2 text-muted-foreground leading-relaxed">
+                              <span className="text-brand-600 font-bold text-sm leading-none mt-0.5">•</span>
+                              <div>
+                                {parsed.calibrationTitle && (
+                                  <strong className="text-foreground font-semibold">
+                                    {parsed.calibrationTitle}{" "}
+                                  </strong>
+                                )}
+                                <span>{parsed.calibrationBody}</span>
+                              </div>
+                            </div>
+                          )}
+
+                          {parsed.recommendedPlan && (
+                            <div className="flex items-start gap-2 text-muted-foreground leading-relaxed">
+                              <span className="text-brand-600 font-bold text-sm leading-none mt-0.5">•</span>
+                              <div>
+                                <strong className="text-foreground font-semibold">
+                                  Recommended Allocation:{" "}
+                                </strong>
+                                <span>{parsed.recommendedPlan}</span>
+                              </div>
+                            </div>
+                          )}
+
+                          {parsed.overseasExpansion && (
+                            <div className="rounded-lg border border-indigo-200/60 bg-indigo-50/50 p-2.5 text-xs text-indigo-950 leading-relaxed mt-2">
+                              <span className="font-bold text-indigo-900 flex items-center gap-1 mb-1">
+                                <span>🌍</span> Optional Overseas Expansion
+                              </span>
+                              <p className="text-[11px] text-indigo-950/80 leading-relaxed">
+                                {parsed.overseasExpansion}
+                              </p>
+                            </div>
+                          )}
+
+                          {parsed.cashFlowTip && (
+                            <div className="rounded-lg border border-amber-200/80 bg-amber-50/60 p-2.5 text-xs text-amber-950 leading-relaxed mt-2">
+                              <span className="font-bold text-amber-900 flex items-center gap-1 mb-1">
+                                <span>💡</span> Cash Flow Protection Tip
+                              </span>
+                              <p className="text-[11px] text-amber-950/80 leading-relaxed">
+                                {parsed.cashFlowTip}
+                              </p>
+                            </div>
+                          )}
+
+                          {parsed.rawFallback && (
+                            <p className="text-xs leading-relaxed text-muted-foreground">
+                              {parsed.rawFallback}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             );
@@ -430,7 +628,7 @@ export function BudgetPlanner({
         : (
           <Alert variant="brand">
             {loadingAiInsights
-              ? "Calculating optimal budget for Meta's learning phase…"
+              ? "Calculating recommended budget for your store…"
               : "Set your own daily budget directly in Meta Ads Manager."}
           </Alert>
         )}

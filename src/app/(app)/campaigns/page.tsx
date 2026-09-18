@@ -173,6 +173,7 @@ function CampaignsContent() {
   // compare variations; selectedVariationIndex is the one shown/proceeded with.
   const [variations, setVariations] = useState<BriefVariation[]>([]);
   const [selectedVariationIndex, setSelectedVariationIndex] = useState(0);
+  const [hooksLoading, setHooksLoading] = useState(false);
 
   // Read from sessionStorage for auto-fill (client-only init from external store)
   useEffect(() => {
@@ -278,6 +279,7 @@ function CampaignsContent() {
           isRegeneration,
           shopifyStoreCountry: storeInsights?.store?.country || null,
           topCustomerLocations: storeInsights?.orders?.top_locations || null,
+          skipTargeting: true,
         }),
       });
 
@@ -305,29 +307,6 @@ function CampaignsContent() {
       setGeneratedCopy(generatedCopyData);
       setSelectedCta(generatedCopyData.cta);
 
-      // ALWAYS set productAiInsights after generation — even if the targeting
-      // profile call failed (returned null). This ensures effectiveAiInsights
-      // never falls back to store-level aiInsights (which describes a different
-      // product — the store's top-revenue SKU).
-      const parsedAiInsights: AiInsights = {
-        creative_hooks: data.creative_hooks ?? undefined,
-        advantage_plus_guidance: data.advantage_plus_guidance ?? undefined,
-        timing: data.targeting_profile?.timing,
-        targeting: data.targeting_profile
-          ? {
-              locations: data.targeting_profile.locations,
-              age_min: data.targeting_profile.demographics?.age_min ?? 25,
-              age_max: data.targeting_profile.demographics?.age_max ?? 44,
-              age_reasoning:
-                data.targeting_profile.demographics?.age_reasoning ?? "",
-              gender: data.targeting_profile.demographics?.gender ?? "All",
-              interests:
-                data.targeting_profile.seed_interests ?? ["Online Shopping"],
-            }
-          : undefined,
-      };
-      setProductAiInsights(parsedAiInsights);
-
       // Track the persisted brief so regenerations append to the same session
       // and "Generate Brief" can navigate to the durable /campaigns/[id] page.
       if (data.campaignId) setCampaignId(data.campaignId);
@@ -339,7 +318,7 @@ function CampaignsContent() {
         const entry: BriefVariation = {
           versionId: newVersionId,
           copy: generatedCopyData,
-          aiInsights: parsedAiInsights,
+          aiInsights: null,
         };
         const next = isRegeneration ? [...prev, entry] : [entry];
         setSelectedVariationIndex(next.length - 1);
@@ -363,7 +342,66 @@ function CampaignsContent() {
       queryClient.invalidateQueries({ queryKey: CREDITS_QUERY_KEY });
 
       if (isRegeneration) setRegenerateCount((prev) => prev + 1);
+
+      // ── Progressive rendering: Transition to "review" immediately! ──
+      // Founder immediately reviews ad copy and previews without waiting for Step 2.
       setViewState("review");
+      setHooksLoading(true);
+
+      // Step 2 (Background): Generate Advantage+ targeting & distinct creative hooks
+      // with copy angle exclusion, and hydrate review step as soon as ready.
+      fetch("/api/campaigns/generate/targeting", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productName,
+          productDescription: description,
+          productPrice: productPrice || null,
+          productVariants: productVariants || null,
+          angleUsed: data.angleUsed || null,
+          campaignId: data.campaignId || campaignId,
+          versionId: newVersionId,
+        }),
+      })
+        .then(async (tRes) => {
+          if (!tRes.ok) return null;
+          return tRes.json();
+        })
+        .then((tData) => {
+          if (tData?.targeting_profile || tData?.creative_hooks) {
+            const parsedAiInsights: AiInsights = {
+              creative_hooks: tData.creative_hooks ?? undefined,
+              advantage_plus_guidance: tData.advantage_plus_guidance ?? undefined,
+              timing: tData.targeting_profile?.timing,
+              targeting: tData.targeting_profile
+                ? {
+                    locations: tData.targeting_profile.locations,
+                    age_min: tData.targeting_profile.demographics?.age_min ?? 25,
+                    age_max: tData.targeting_profile.demographics?.age_max ?? 44,
+                    age_reasoning:
+                      tData.targeting_profile.demographics?.age_reasoning ?? "",
+                    gender: tData.targeting_profile.demographics?.gender ?? "All",
+                    interests:
+                      tData.targeting_profile.seed_interests ?? ["Online Shopping"],
+                  }
+                : undefined,
+            };
+            setProductAiInsights(parsedAiInsights);
+            setVariations((prev) =>
+              prev.map((v) =>
+                v.versionId === newVersionId
+                  ? { ...v, aiInsights: parsedAiInsights }
+                  : v
+              )
+            );
+          }
+        })
+        .catch((tErr) => {
+          console.error("Async targeting generation error:", tErr);
+        })
+        .finally(() => {
+          setHooksLoading(false);
+        });
     } catch (err) {
       console.error(err);
       setErrorMsg(
@@ -389,6 +427,7 @@ function CampaignsContent() {
     setCurrentVersionId(null);
     setVariations([]);
     setSelectedVariationIndex(0);
+    setHooksLoading(false);
     resetMedia();
     setViewState(finalState);
   };
@@ -412,6 +451,7 @@ function CampaignsContent() {
     return buildBriefPdfPayload({
       brandName,
       productName,
+      productPrice: productPrice ? parseFloat(productPrice) : undefined,
       goal,
       generatedCopy,
       selectedCta,
@@ -426,6 +466,7 @@ function CampaignsContent() {
   }, [
     brandName,
     productName,
+    productPrice,
     goal,
     generatedCopy,
     selectedCta,
@@ -490,6 +531,7 @@ function CampaignsContent() {
     setCurrentVersionId(null);
     setVariations([]);
     setSelectedVariationIndex(0);
+    setHooksLoading(false);
     setViewState("media");
   };
 
@@ -648,6 +690,7 @@ function CampaignsContent() {
                 variations[selectedVariationIndex]?.aiInsights?.creative_hooks ??
                 effectiveAiInsights?.creative_hooks
               }
+              hooksLoading={hooksLoading}
             />
           )}
 
@@ -673,6 +716,7 @@ function CampaignsContent() {
               onCopyBrief={handleCopyBrief}
               onCreateNew={handleCreateNewBrief}
               gatewayInsight={gatewayInsight}
+              productPrice={productPrice ? parseFloat(productPrice) : undefined}
             />
           )}
         </div>

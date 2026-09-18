@@ -42,6 +42,6 @@ export function getAdvantagePlusGuidance(
     campaign_type: "Manual Sales with Advantage+ Audience",
     optimization_event: "AddToCart",
     default_reasoning:
-      "With current order volume, optimizing for Add to Cart helps Meta learn who wants your product much faster than waiting for purchases.",
+      "For stores building up order volume, optimizing for Add to Cart is an informed starting test to feed Meta intent data faster than waiting for purchases.",
   };
 }

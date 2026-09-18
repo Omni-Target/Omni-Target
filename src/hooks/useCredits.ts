@@ -27,6 +27,7 @@ export function useCredits() {
   const { data } = useQuery({
     queryKey: CREDITS_QUERY_KEY,
     queryFn: fetchCredits,
+    staleTime: 60_000,
   });
 
   return {

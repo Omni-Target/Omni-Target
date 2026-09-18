@@ -1,4 +1,4 @@
-import { ArrowRight, Check, FileText, ImageIcon, Info, Layers, RefreshCw, RotateCcw } from "lucide-react";
+import { ArrowRight, Check, FileText, ImageIcon, Info, Layers, Loader2, RefreshCw, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -38,6 +38,7 @@ export interface ReviewStepProps {
   onStartOver: () => void;
   onGenerateBrief: () => void;
   hooks?: CreativeHook[];
+  hooksLoading?: boolean;
 }
 
 /** "Review generated copy" step — ad preview, copy fields, CTA, hooks, and next actions. */
@@ -62,6 +63,7 @@ export function ReviewStep({
   onStartOver,
   onGenerateBrief,
   hooks,
+  hooksLoading = false,
 }: ReviewStepProps) {
   return (
     <div>
@@ -168,7 +170,8 @@ export function ReviewStep({
               </h3>
             </div>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              {generatedCopy.copywriterNote}
+              {generatedCopy.copywriterNote ||
+                "Written to catch shoppers' attention in their feed, highlight the real product details, and encourage them to visit your store and buy."}
             </p>
           </Card>
 
@@ -206,20 +209,34 @@ export function ReviewStep({
         </div>
       </div>
 
-      {hooks && hooks.length > 0 && (
+      {(hooksLoading || (hooks && hooks.length > 0)) && (
         <div className="mt-8">
-          <CreativeHooksCard hooks={hooks} />
+          <CreativeHooksCard hooks={hooks} loading={hooksLoading} />
         </div>
       )}
 
       <div className="mx-auto mt-8 max-w-3xl">
-        <Button size="xl" className="w-full" onClick={onGenerateBrief}>
-          <FileText className="size-4" /> Generate campaign brief
-          <ArrowRight className="size-4" />
+        <Button
+          size="xl"
+          className="w-full"
+          onClick={onGenerateBrief}
+          disabled={hooksLoading}
+        >
+          {hooksLoading ? (
+            <>
+              <Loader2 className="size-4 animate-spin" /> Adding your 3 creative angles…
+            </>
+          ) : (
+            <>
+              <FileText className="size-4" /> Generate campaign brief
+              <ArrowRight className="size-4" />
+            </>
+          )}
         </Button>
         <p className="mt-3 text-center text-xs text-subtle-foreground">
-          Your brief will contain everything you need to set up this campaign in
-          Meta Ads Manager.
+          {hooksLoading
+            ? "Preparing 3 ready-to-use hooks so you have multiple creative options to test…"
+            : "Your brief will contain everything you need to set up this campaign in Meta Ads Manager."}
         </p>
       </div>
     </div>

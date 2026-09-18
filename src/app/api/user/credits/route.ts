@@ -1,6 +1,18 @@
 import { auth } from "@clerk/nextjs/server";
 import { queryUserIntegrationSelect } from "@/lib/db";
 
+interface CreditsCacheEntry {
+  data: {
+    credits_balance: number;
+    shop: string | null;
+    is_unlimited: boolean;
+    unlimited_until: string | null;
+  };
+  timestamp: number;
+}
+const creditsCache = new Map<string, CreditsCacheEntry>();
+const CREDITS_CACHE_TTL = 30_000;
+
 export async function GET() {
   const { userId } = await auth();
   if (!userId) {
@@ -8,6 +20,11 @@ export async function GET() {
       { error: "Unauthorized" },
       { status: 401 }
     );
+  }
+
+  const cached = creditsCache.get(userId);
+  if (cached && Date.now() - cached.timestamp < CREDITS_CACHE_TTL) {
+    return Response.json(cached.data);
   }
 
   const { detectColumns } = await import("@/lib/billing-db");
@@ -35,10 +52,13 @@ export async function GET() {
     ? (cols.hasCredits ? data.credits : data.credits_balance) ?? data.credits_balance ?? 0
     : 0;
 
-  return Response.json({
+  const payload = {
     credits_balance: credits,
     shop: shop || null,
     is_unlimited: !!isUnlimited,
     unlimited_until: data?.credits_unlimited_until || null,
-  });
+  };
+  creditsCache.set(userId, { data: payload, timestamp: Date.now() });
+
+  return Response.json(payload);
 }

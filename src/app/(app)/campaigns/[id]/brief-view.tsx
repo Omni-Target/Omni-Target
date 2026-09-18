@@ -46,6 +46,7 @@ interface BriefData {
   selectedDuration?: 7 | 14 | 30;
   gatewayInsight?: BriefPDFParams["gatewayInsight"] | null;
   isNewLaunch?: boolean;
+  productPrice?: number;
 }
 
 export interface BriefCampaign {
@@ -78,7 +79,9 @@ function versionToCopy(v: BriefVersionRow): GeneratedCopy {
     primaryText: v.primary_text ?? "",
     description: v.description ?? "",
     cta: v.cta ?? "",
-    copywriterNote: v.copywriter_note ?? "",
+    copywriterNote:
+      v.copywriter_note ||
+      "Written to catch shoppers' attention in their feed, highlight the real product details, and encourage them to visit your store and buy.",
   };
 }
 
@@ -103,7 +106,9 @@ export function BriefView({
         primaryText: campaign.primary_text ?? "",
         description: campaign.description ?? "",
         cta: campaign.cta ?? "",
-        copywriterNote: campaign.copywriter_note ?? "",
+        copywriterNote:
+          campaign.copywriter_note ||
+          "Written to catch shoppers' attention in their feed, highlight the real product details, and encourage them to visit your store and buy.",
       },
     [bd.generatedCopy, campaign],
   );
@@ -131,6 +136,7 @@ export function BriefView({
   const storeInsights = bd.storeInsights ?? null;
   const gatewayInsight = bd.gatewayInsight ?? null;
   const isNewLaunch = bd.isNewLaunch ?? false;
+  const productPrice = bd.productPrice;
 
   // Open on the finalized variation (or the first attempt); clicking any
   // variation in the rail switches the whole brief to it — and the active one is
@@ -170,6 +176,7 @@ export function BriefView({
       buildBriefPdfPayload({
         brandName,
         productName,
+        productPrice,
         goal,
         generatedCopy: displayedCopy,
         selectedCta: displayedCta,
@@ -184,6 +191,7 @@ export function BriefView({
     [
       brandName,
       productName,
+      productPrice,
       goal,
       displayedCopy,
       displayedCta,
@@ -310,6 +318,7 @@ export function BriefView({
             onCopyBrief={handleCopyBrief}
             onCreateNew={() => router.push("/campaigns")}
             gatewayInsight={gatewayInsight}
+            productPrice={productPrice}
           />
         </div>
       </div>

@@ -33,8 +33,18 @@ async function launchBrowser(): Promise<Browser> {
   }
 
   const puppeteer = (await import("puppeteer")).default;
+  const fs = await import("fs");
+  const localChrome =
+    process.env.PUPPETEER_EXECUTABLE_PATH ||
+    (fs.existsSync("/usr/bin/google-chrome")
+      ? "/usr/bin/google-chrome"
+      : fs.existsSync("/usr/bin/chromium-browser")
+      ? "/usr/bin/chromium-browser"
+      : undefined);
+
   const browser = await puppeteer.launch({
     headless: true,
+    ...(localChrome ? { executablePath: localChrome } : {}),
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
   return browser as unknown as Browser;

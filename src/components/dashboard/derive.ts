@@ -11,6 +11,7 @@ export interface OrdersData {
   revenue_last_30_days?: number;
   top_locations?: Array<{ city?: string; country?: string }>;
   peak_days?: string[];
+  acquisition_channels?: Array<{ channel: string; order_count: number; percentage: number }>;
 }
 
 export interface StoreProductLike {
@@ -169,6 +170,18 @@ export function deriveInsights(orders: OrdersData, currency = "USD"): Insight[] 
     });
   }
 
+  // 6. Acquisition Channel Signal
+  if (orders.acquisition_channels && orders.acquisition_channels.length > 0 && insights.length < 4) {
+    const top = orders.acquisition_channels[0];
+    if (top && top.percentage > 0) {
+      insights.push({
+        kind: "scale",
+        title: `Primary acquisition via ${top.channel}`,
+        detail: `${top.percentage}% of your store's tracked orders come through ${top.channel}. Your ad briefs and hooks are optimized to convert shoppers from this channel.`,
+      });
+    }
+  }
+
   return insights.slice(0, 4);
 }
 
@@ -239,7 +252,7 @@ export function deriveProductNarrative(p: StoreProductLike): ProductNarrative {
   } else if (p.gateway_classification === "Consideration" && p.repeat_purchase_rate) {
     primaryMetric = `${Math.round(p.repeat_purchase_rate * 100)}% repeat rate`;
   } else if (p.order_velocity) {
-    primaryMetric = `${Math.round(p.order_velocity)} units/mo velocity`;
+    primaryMetric = `${Math.round(p.order_velocity)} orders/month`;
   } else if (p.first_time_buyer_ratio) {
     primaryMetric = `${Math.round(p.first_time_buyer_ratio * 100)}% new buyers`;
   }

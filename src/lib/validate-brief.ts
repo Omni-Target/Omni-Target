@@ -55,6 +55,47 @@ export function tokenize(text: string): Set<string> {
 }
 
 /**
+ * Extracts specific, claim-bearing tokens from hook text — filtering out
+ * generic fashion/copy vocabulary that legitimately recurs across hooks
+ * without indicating conceptual overlap. Used for cross-hook overlap detection.
+ */
+function extractSalientTokens(text: string): Set<string> {
+  // Words that are too generic to signal overlap — common across all fashion copy
+  const stoplist = new Set([
+    // Common English function words
+    "that", "this", "with", "from", "your", "their", "they", "have",
+    "will", "been", "what", "when", "where", "which", "there", "about",
+    "just", "more", "into", "some", "than", "then", "them", "these",
+    "would", "could", "should", "every", "after", "before", "never",
+    "while", "still", "again", "always", "often", "built", "comes",
+    // Generic product / fashion copy words
+    "dress", "wear", "style", "look", "feel", "piece", "design", "built",
+    "made", "perfect", "first", "time", "shop", "brand", "collection",
+    "women", "woman", "fashion", "product", "quality", "premium", "those",
+    "beautiful", "stunning", "elegant", "classic", "modern", "right",
+    "best", "good", "great", "real", "true", "pure", "bold", "soft",
+    "warm", "cool", "light", "dark", "rich", "deep", "long", "short",
+    "wide", "slim", "open", "close", "free", "love", "life", "body",
+    "hand", "work", "back", "side", "line", "form", "face", "keep",
+    "make", "take", "move", "come", "goes", "know", "show", "find",
+    "like", "need", "want", "give", "meet", "turn", "high", "last",
+    "next", "same", "most", "only", "even", "also", "both", "each",
+    "many", "much", "once", "here", "very", "well", "over", "ever",
+    "clothing", "garment", "outfit", "wearing", "wears", "model", "photo",
+    "piece", "pieces", "items", "thing", "things", "scene", "close",
+    "camera", "focus", "showing", "shows", "capture", "detail", "details",
+  ]);
+
+  const salient = new Set<string>();
+  for (const token of tokenize(text)) {
+    if (token.length > 4 && !stoplist.has(token)) {
+      salient.add(token);
+    }
+  }
+  return salient;
+}
+
+/**
  * Validates a generated Advantage+ single-SKU brief response against
  * angle uniqueness, target product title drift, and sibling SKU leaks.
  */
@@ -72,6 +113,34 @@ export function validateBrief(
   }
   if (new Set(angles).size !== angles.length) {
     errors.push(`Duplicate angle detected: ${angles.join(", ")}`);
+  }
+
+  // 2. Cross-hook conceptual overlap detection
+  // Compares the salient (claim-bearing) tokens across every hook pair.
+  // Two hooks sharing 2+ salient tokens are centering on the same underlying
+  // claim even if their angle enum labels differ — the threshold of 2 avoids
+  // false positives from product-specific words that legitimately appear once.
+  if ((response.creative_hooks?.length || 0) >= 2) {
+    const hookProfiles = (response.creative_hooks || []).map((hook) => ({
+      angle: hook.angle,
+      salient: extractSalientTokens(
+        `${hook.visual_cue || ""} ${hook.on_screen_text || ""} ${hook.primary_text_hook || ""}`
+      ),
+    }));
+
+    for (let i = 0; i < hookProfiles.length; i++) {
+      for (let j = i + 1; j < hookProfiles.length; j++) {
+        const shared: string[] = [];
+        for (const token of hookProfiles[i].salient) {
+          if (hookProfiles[j].salient.has(token)) shared.push(token);
+        }
+        if (shared.length >= 2) {
+          errors.push(
+            `Hooks "${hookProfiles[i].angle}" and "${hookProfiles[j].angle}" share overlapping claims [${shared.slice(0, 4).join(", ")}]. Regenerate one using a genuinely distinct angle that does not centre on these terms.`
+          );
+        }
+      }
+    }
   }
 
   // 2. Build target product token baseline (Title + Tags)

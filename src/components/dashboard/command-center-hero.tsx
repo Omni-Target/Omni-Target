@@ -122,16 +122,18 @@ export function CommandCenterHero({
               onClick={onSync}
               disabled={syncing}
               className="inline-flex h-11 items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-4 text-sm font-medium text-white/85 transition-colors hover:bg-white/10 disabled:opacity-60"
+              title="Manually refresh store metrics from Shopify"
             >
               <RefreshCw
                 className={cn("size-4", syncing && "animate-spin-slow")}
               />
-              {syncing ? "Syncing…" : "Sync store data"}
+              {syncing ? "Refreshing…" : "Refresh data"}
             </button>
           </div>
           {lastSynced && (
-            <p className="text-xs text-white/40">
-              {storeName} · Last synced {lastSynced}
+            <p className="text-xs text-white/40 flex items-center gap-1.5">
+              <span className="inline-block size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>{storeName} · Auto-synced {lastSynced}</span>
             </p>
           )}
         </div>

@@ -29,6 +29,7 @@ export interface BriefStepProps {
   onCopyBrief: () => void;
   onCreateNew: () => void;
   gatewayInsight?: BriefPDFParams["gatewayInsight"] | null;
+  productPrice?: number;
   // Outer container class — defaults to a centered narrow column; the durable
   // /campaigns/[id] page overrides it to fill the width beside its rail.
   className?: string;
@@ -55,6 +56,7 @@ export function BriefStep({
   onCopyBrief,
   onCreateNew,
   gatewayInsight,
+  productPrice,
   className = "mx-auto max-w-3xl",
 }: BriefStepProps) {
   const isGateway = gatewayInsight?.currentProductClassification === "Gateway";
@@ -78,15 +80,35 @@ export function BriefStep({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-brand-950">
-                Gateway Product
+                Signature Gateway
               </span>
               <span className="rounded-full bg-brand-200/80 px-2 py-0.5 text-[11px] font-semibold text-brand-800">
-                Cold Traffic Magnet
+                New Buyer Gateway
               </span>
             </div>
             <p className="mt-1 text-xs leading-relaxed text-brand-800">
-              This product is verified as a top Gateway Product — best for turning cold strangers into first-time customers. The hooks, copy, and targeting below are optimized to acquire new buyers.
+              This product is verified as your Signature Gateway — your iconic entry piece with the strongest historical first-purchase signal in your store. The hooks, copy, and targeting below are crafted to attract new buyers to your store.
             </p>
+            {gatewayInsight?.firstTimeBuyerRatio ? (() => {
+              const ftbPct = Math.round(gatewayInsight.firstTimeBuyerRatio * 100);
+              const totalCust = gatewayInsight.uniqueCustomerCount ?? gatewayInsight.unitsSold ?? gatewayInsight.orderCount;
+              const ftbCount =
+                gatewayInsight.firstTimeBuyerCount ??
+                (totalCust && gatewayInsight.firstTimeBuyerRatio
+                  ? Math.round(totalCust * gatewayInsight.firstTimeBuyerRatio)
+                  : undefined);
+              const detailStr =
+                ftbCount && totalCust
+                  ? `${ftbCount} of ${totalCust} unique customers (${ftbPct}%) who purchased this item were first-time customers of your store (based on lifetime store order history)`
+                  : `${ftbPct}% of customers who purchased this item were first-time customers of your store (based on lifetime store order history)`;
+
+              return (
+                <div className="mt-2.5 rounded-lg border border-emerald-200 bg-emerald-50/80 p-2.5 text-xs text-emerald-900 leading-relaxed">
+                  <strong className="font-semibold text-emerald-950">✓ Strong first-purchase signal:</strong>{" "}
+                  <span>{detailStr}</span>
+                </div>
+              );
+            })() : null}
           </div>
         </div>
       )}
@@ -154,6 +176,7 @@ export function BriefStep({
           selectedDuration={selectedDuration}
           setSelectedDuration={setSelectedDuration}
           loadingAiInsights={loadingAiInsights}
+          productPrice={productPrice}
         />
 
         {Boolean(

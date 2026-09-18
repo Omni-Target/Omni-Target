@@ -85,6 +85,8 @@ export interface StoreProduct {
   order_velocity?: number;
   repeat_purchase_rate?: number;
   first_time_buyer_ratio?: number;
+  first_time_buyer_count?: number;
+  unique_customer_count?: number;
   gateway_classification?: string;
 }
 

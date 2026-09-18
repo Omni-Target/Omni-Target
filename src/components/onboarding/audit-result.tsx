@@ -54,7 +54,7 @@ const VERDICT: Record<string, { headline: string; summary: string }> = {
   moderate: {
     headline: "You're close — a few moves set you up to scale",
     summary:
-      "You have real signal to work with. Tighten the areas flagged below and you'll give Meta's algorithm the strongest possible start.",
+      "You have real customer activity to work with. Tighten the areas flagged below and you'll give your ads the strongest possible start.",
   },
   needs_attention: {
     headline: "Let's get the fundamentals in place first",
@@ -73,7 +73,7 @@ function metricTone(score: number, max: number): Tone {
 
 const DIMENSIONS = [
   { key: "products", label: "Product catalog", caption: "Enough to advertise", Icon: Package },
-  { key: "orders", label: "Sales signal", caption: "Purchase data for Meta", Icon: ReceiptText },
+  { key: "orders", label: "Sales history", caption: "Purchase data for Meta", Icon: ReceiptText },
   { key: "retention", label: "Customer retention", caption: "Repeat-buyer strength", Icon: Repeat },
   { key: "availability", label: "Stock health", caption: "In-stock coverage", Icon: PackageCheck },
 ] as const;
@@ -291,7 +291,7 @@ export function AuditResultView({
           <SectionHeader
             icon={<Gauge className="size-4" />}
             title="Readiness breakdown"
-            caption="How each signal scored"
+            caption="How each area scored"
           />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {breakdownItems.map((item) => {

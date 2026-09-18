@@ -24,11 +24,20 @@ export interface StoreProduct {
   total_variant_count: number;
   in_stock_variant_names?: string[];
   first_time_buyer_ratio?: number;
+  first_time_buyer_count?: number;
+  unique_customer_count?: number;
   order_velocity?: number;
   repeat_purchase_rate?: number;
   gateway_classification?: "Gateway" | "Consideration" | "Hybrid" | "Insufficient Data";
+  top_acquisition_channel?: string;
   created_at?: string;
   order_count?: number;
+}
+
+export interface StoreAcquisitionChannel {
+  channel: string;
+  order_count: number;
+  percentage: number;
 }
 
 export interface StoreData {
@@ -51,6 +60,7 @@ export interface StoreData {
     revenue_last_30_days: number;
     orders_last_30_days: number;
     oldest_order_date?: string;
+    acquisition_channels?: StoreAcquisitionChannel[];
   };
   products: StoreProduct[];
   customers: {

@@ -4,7 +4,11 @@ import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { getUserIntegration, logApiUsage } from "@/lib/db";
 import { getAdvantagePlusGuidance } from "@/lib/advantage-plus";
-import { isTier1Market, isDomesticCity } from "@/lib/market-geography";
+import {
+  isTier1Market,
+  isDomesticCity,
+  getEffectiveStoreCountry,
+} from "@/lib/market-geography";
 import {
   validateBrief,
   sanitizeLeakedTokens,
@@ -130,7 +134,11 @@ export async function POST(request: Request) {
       targetProductCtx.url ||
       `https://${storeSnapshot.store?.domain || "store.com"}`;
     const storeName = storeSnapshot.store?.name || "Our Store";
-    const storeCountry = storeSnapshot.store?.country || "US";
+    const storeCountry = getEffectiveStoreCountry(
+      storeSnapshot.store?.country,
+      storeCurrency,
+      storeSnapshot.orders?.top_locations
+    );
     const isTier1 = isTier1Market(storeCountry, storeCurrency);
     const hasOverseasBuyers = (storeSnapshot.orders?.top_locations || []).some(
       (l) => !isDomesticCity(l.city || "", l.country, storeCountry, storeCurrency, storeSnapshot.orders?.top_locations)
@@ -152,6 +160,46 @@ export async function POST(request: Request) {
       .map((c) => `  - "${c.title}"`)
       .join("\n");
 
+    // Matched product & attribution signals
+    const matchedProduct = storeSnapshot.products?.find(
+      (p) =>
+        (p.id && targetProductCtx.id && p.id.toString() === targetProductCtx.id.toString()) ||
+        p.name.trim().toLowerCase() === targetTitle.trim().toLowerCase()
+    );
+
+    let productRole = "Catalog Bestseller";
+    if (
+      matchedProduct?.gateway_classification === "Gateway" ||
+      (matchedProduct?.first_time_buyer_ratio || 0) >= 0.5
+    ) {
+      const ftbPct = Math.round((matchedProduct?.first_time_buyer_ratio || 0.6) * 100);
+      productRole = `Gateway Product (the front door bringing in ${ftbPct}% new first-time customers)`;
+    } else if (
+      matchedProduct?.gateway_classification === "Consideration" ||
+      (matchedProduct?.repeat_purchase_rate || 0) > 0.15
+    ) {
+      productRole = "High-Consideration Product (frequently purchased by customers returning to the brand)";
+    }
+
+    const primaryTrafficSource =
+      matchedProduct?.top_acquisition_channel ||
+      storeSnapshot.orders?.acquisition_channels?.[0]?.channel ||
+      "Direct / Social Discovery";
+
+    let reorderHabit = "Early Growth (Focus on driving profitable first-time discovery)";
+    if ((matchedProduct?.repeat_purchase_rate || 0) > 0.15) {
+      const repPct = Math.round((matchedProduct?.repeat_purchase_rate || 0) * 100);
+      reorderHabit = `Strong Reorder Habit (${repPct}% of customers come back to buy again)`;
+    } else if ((storeSnapshot.orders?.repeat_customer_rate || 0) > 0.2) {
+      const repStorePct = Math.round((storeSnapshot.orders?.repeat_customer_rate || 0) * 100);
+      reorderHabit = `Healthy Store Repeat Rate (${repStorePct}% of all buyers return to order again)`;
+    }
+
+    const storeTopChannels = (storeSnapshot.orders?.acquisition_channels || [])
+      .slice(0, 3)
+      .map((c) => `${c.channel} (${c.percentage}%)`)
+      .join(", ");
+
     const prompt = `Target Product Context:
 - Product Title: ${targetTitle}
 - Product Description: ${targetProductDescription}
@@ -160,6 +208,12 @@ export async function POST(request: Request) {
 - Price: ${targetProductPrice} ${storeCurrency}
 - Product URL: ${targetProductUrl}
 ${siblingDenyList ? `\nForbidden Sibling Products (MUST NEVER appear by name or be referenced in any hook):\n${siblingDenyList}` : ""}
+
+Product Performance & Customer Entry Signals:
+- Role in Store: ${productRole}
+- Primary Customer Traffic Channel: ${primaryTrafficSource}
+- Top Store Acquisition Channels: ${storeTopChannels || "Direct / Organic Discovery"}
+- Customer Reorder Habit: ${reorderHabit}
 
 Store & Market Context:
 - Store Name: ${storeName}
@@ -174,11 +228,16 @@ Store & Market Context:
 - Peak Order Days: ${peakDaysStr}
 
 Instructions for this generation:
+1. Product Role: This is ${targetTitle}, acting as ${productRole}. Frame your angles around the core emotional or practical trigger that compels cold prospects to buy for the first time.
+2. Cold Acquisition Safeguard: Hook angles must have broad scroll-stopping appeal. Do NOT use hyper-narrow or hyper-local callouts that choke Meta's broad delivery algorithm.
+3. Founder-Friendly Language: Speak directly to the founder in plain, actionable English without confusing corporate jargon or complex acronyms.
+4. Meta Andromeda Timing: Frame timing guidance around weekly sales rhythm and cash-flow predictability (e.g. expected conversion volume surges). Never advise pausing or day-parting active campaigns, which resets Meta's machine learning.
+5. Dynamic Location Intelligence: Analyze the merchant's home country (${storeCountry}), category (${targetProductType}), and unit price (${targetProductPrice} ${storeCurrency}). Infer domestic commercial hubs dynamically based on real urban purchasing power and e-commerce delivery viability in ${storeCountry}. If recommending international expansion, identify affluent global metro hubs with proven affinity for ${targetProductType} at this price point. Do not default to fixed or pre-assumed cities.
 Generate a high-converting Advantage+ campaign brief for "${targetTitle}" following all rules in the system prompt. Call the generate_advantage_plus_profile tool.`;
 
     const response = await anthropicClient.messages.create({
       model: "claude-sonnet-5",
-      max_tokens: 1800,
+      max_tokens: 4096,
       system: [
         {
           type: "text",
@@ -197,6 +256,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
     console.log("[Anthropic Prompt Caching - Standalone Brief]", {
       input_tokens: response.usage.input_tokens,
       output_tokens: response.usage.output_tokens,
+      stop_reason: response.stop_reason,
       cache_creation_input_tokens:
         (response.usage as unknown as { cache_creation_input_tokens?: number })
           .cache_creation_input_tokens ?? 0,
@@ -232,7 +292,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
       try {
         const retryResponse = await anthropicClient.messages.create({
           model: "claude-sonnet-5",
-          max_tokens: 1800,
+          max_tokens: 4096,
           temperature: 0.2,
           system: [
             {

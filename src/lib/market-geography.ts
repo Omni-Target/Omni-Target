@@ -117,6 +117,13 @@ export function getEffectiveStoreCountry(
   if (normCurr === "KES") return "Kenya";
   if (normCurr === "ZAR") return "South Africa";
   if (normCurr === "GBP") return "United Kingdom";
+  if (normCurr === "EUR") {
+    if (storeCountry) return storeCountry;
+    if (topLocations && topLocations.length > 0 && topLocations[0].country) {
+      return topLocations[0].country;
+    }
+    return "Germany";
+  }
   if (normCurr === "CAD") return "Canada";
   if (normCurr === "AUD") return "Australia";
   if (normCurr === "INR") return "India";
@@ -427,6 +434,32 @@ export function getInternationalBudgetFloor(currency: string, exchangeRate?: num
   }
 }
 
+export function getEstimatedExchangeRate(currency: string, exchangeRate?: number): number {
+  if (exchangeRate && exchangeRate > 0) return exchangeRate;
+  const normCurr = (currency || "USD").toUpperCase().trim();
+  switch (normCurr) {
+    case "NGN":
+      return 1600;
+    case "GBP":
+      return 0.78;
+    case "EUR":
+      return 0.94;
+    case "CAD":
+      return 1.39;
+    case "AUD":
+      return 1.55;
+    case "ZAR":
+      return 18.33;
+    case "GHS":
+      return 15.55;
+    case "KES":
+      return 133.33;
+    case "USD":
+    default:
+      return 1;
+  }
+}
+
 export interface MarketStrategy {
   label: string;
   daily: number;
@@ -521,7 +554,7 @@ export function getInternationalStrategies(
       total_daily: floor18,
       description: isTier1
         ? "Low-risk international test budget to explore foreign buyer demand."
-        : "Minimum test floor ($18/day). Required by Meta to deliver in high-CPM overseas markets without stalling.",
+        : "Minimum test floor ($18/day). Recommended budget to reach shoppers in competitive overseas markets without stalling.",
     },
     {
       label: "Sweet Spot",
@@ -536,9 +569,29 @@ export function getInternationalStrategies(
       daily: send40,
       total_daily: send40,
       description: isTier1
-        ? "Accelerated international push to capture early purchase signals rapidly."
-        : "Accelerated international push ($40/day). Higher bid power to capture early purchase signals rapidly.",
+        ? "Accelerated international push to find overseas buyers quickly."
+        : "Accelerated international push ($40/day). Higher daily budget to reach overseas buyers and generate sales faster.",
     },
   ];
+}
+
+/**
+ * Resolves a human-friendly regional timezone name based on store country or currency.
+ */
+export function getStoreTimezoneName(country?: string, currency?: string): string {
+  const norm = normalizeCountry(country);
+  const curr = (currency || "").toUpperCase().trim();
+
+  if (norm === "nigeria" || curr === "NGN") return "Lagos time";
+  if (norm === "unitedkingdom" || curr === "GBP") return "London time";
+  if (norm === "unitedstates" || curr === "USD") return "US Eastern time";
+  if (norm === "canada" || curr === "CAD") return "Toronto time";
+  if (norm === "australia" || curr === "AUD") return "Sydney time";
+  if (norm === "southafrica" || curr === "ZAR") return "Johannesburg time";
+  if (norm === "ghana" || curr === "GHS") return "Accra time";
+  if (norm === "kenya" || curr === "KES") return "Nairobi time";
+  if (norm === "unitedarabemirates" || curr === "AED") return "Dubai time";
+  if (norm === "germany" || norm === "france" || norm === "netherlands" || curr === "EUR") return "Central European Time";
+  return "local store time";
 }
 

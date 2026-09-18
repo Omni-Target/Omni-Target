@@ -1,4 +1,4 @@
-import { StoreData, StoreLocation, StoreProduct } from "../store-data";
+import { StoreAcquisitionChannel, StoreData, StoreLocation, StoreProduct } from "../store-data";
 import { consolidateLocation, consolidateLocationsWithAI } from "../locations";
 import { fetchWithRetry } from "../http";
 import { getEffectiveStoreCountry } from "../market-geography";
@@ -16,14 +16,21 @@ interface ShopifyShop {
 interface ShopifyOrder {
   id: number;
   total_price: string;
+  subtotal_price?: string;
+  current_subtotal_price?: string;
   created_at: string;
   customer?: { id: number };
   billing_address?: { city?: string; country_code?: string };
   shipping_address?: { city?: string; country_code?: string; country?: string };
   financial_status: string;
   source_name: string;
+  referring_site?: string | null;
+  landing_site?: string | null;
   line_items?: { product_id: number; quantity: number }[];
 }
+
+import { parseTrafficSource } from "./traffic-source";
+export { parseTrafficSource };
 
 interface ShopifyProduct {
   id: number;
@@ -156,7 +163,7 @@ export async function fetchShopifyStoreData(
   const orders = await shopifyGetPaginated<ShopifyOrder>(
     shopDomain,
     accessToken,
-    `orders.json?status=any&financial_status=paid&limit=250&fields=id,total_price,created_at,customer,billing_address,shipping_address,financial_status,source_name,line_items`,
+    `orders.json?status=any&financial_status=paid&limit=250&fields=id,total_price,subtotal_price,current_subtotal_price,created_at,customer,billing_address,shipping_address,financial_status,source_name,referring_site,landing_site,line_items`,
     "orders"
   );
 
@@ -187,16 +194,38 @@ export async function fetchShopifyStoreData(
     0
   );
 
-  // Compute AOV on a rolling 60-day window to avoid seasonal spikes distorting budget recommendations
+  // Helper: In Shopify Analytics, Average Order Value (AOV) is defined as
+  // Net Sales (Product Subtotal excluding shipping & taxes) / Orders.
+  // E.g. Order #K1166KASA: subtotal = ₦230,000 (shown in Shopify Admin as "NGN 230K AOV"),
+  // while total_price = ₦253,250 (shown in Shopify Admin as "NGN 253.2K Total sales").
+  const getOrderSubtotal = (o: ShopifyOrder) => {
+    const val = parseFloat(o.current_subtotal_price || o.subtotal_price || o.total_price);
+    return isNaN(val) ? 0 : val;
+  };
+
+  const subtotalLast30Days = ordersLast30Days.reduce(
+    (sum, o) => sum + getOrderSubtotal(o),
+    0
+  );
+
   const aovSixtyDaysAgoMs = new Date().getTime() - (60 * 24 * 60 * 60 * 1000);
   const ordersLast60Days = orders.filter(
     (o) => new Date(o.created_at).getTime() >= aovSixtyDaysAgoMs
   );
-  const revenueLast60Days = ordersLast60Days.reduce(
-    (sum, o) => sum + parseFloat(o.total_price),
+  const subtotalLast60Days = ordersLast60Days.reduce(
+    (sum, o) => sum + getOrderSubtotal(o),
     0
   );
-  const rolling60dAov = ordersLast60Days.length > 0 ? revenueLast60Days / ordersLast60Days.length : (orders.length > 0 ? totalRevenue / orders.length : 0);
+  const totalSubtotal = orders.reduce(
+    (sum, o) => sum + getOrderSubtotal(o),
+    0
+  );
+  const rolling60dAov = ordersLast60Days.length > 0
+    ? subtotalLast60Days / ordersLast60Days.length
+    : (orders.length > 0 ? totalSubtotal / orders.length : 0);
+  const thirtyDayAov = ordersLast30Days.length > 0
+    ? subtotalLast30Days / ordersLast30Days.length
+    : rolling60dAov;
 
   // Determine oldest order date
   const oldestOrderDate = orders.reduce(
@@ -284,6 +313,22 @@ export async function fetchShopifyStoreData(
         "south africa": "Johannesburg",
         "ke": "Nairobi",
         "kenya": "Nairobi",
+        "hu": "Budapest",
+        "hungary": "Budapest",
+        "nl": "Amsterdam",
+        "netherlands": "Amsterdam",
+        "de": "Berlin",
+        "germany": "Berlin",
+        "fr": "Paris",
+        "france": "Paris",
+        "ie": "Dublin",
+        "ireland": "Dublin",
+        "es": "Madrid",
+        "spain": "Madrid",
+        "it": "Rome",
+        "italy": "Rome",
+        "au": "Sydney",
+        "australia": "Sydney",
       };
       const resolvedMetro = countryMetroMap[countryKey] || displayCountry;
       if (!locationMap[resolvedMetro]) {
@@ -374,6 +419,8 @@ export async function fetchShopifyStoreData(
   const productOrdersMap: Record<number, Set<number>> = {};
   const productCustomersMap: Record<number, Set<string>> = {};
   const productCustomerOrderCountMap: Record<number, Record<string, number>> = {};
+  const channelCount: Record<string, number> = {};
+  const productChannelSalesMap: Record<number, Record<string, number>> = {};
 
   const sixtyDaysAgoMs = new Date().getTime() - (60 * 24 * 60 * 60 * 1000);
 
@@ -381,6 +428,12 @@ export async function fetchShopifyStoreData(
     const customerId = order.customer?.id?.toString() || "guest_" + order.id;
     const productsInOrder = new Set<number>();
     const isWithinLast60Days = new Date(order.created_at).getTime() >= sixtyDaysAgoMs;
+    const channel = parseTrafficSource(
+      order.referring_site,
+      order.landing_site,
+      order.source_name
+    );
+    channelCount[channel] = (channelCount[channel] || 0) + 1;
 
     order.line_items?.forEach((item) => {
       productSalesMap[item.product_id] =
@@ -391,6 +444,12 @@ export async function fetchShopifyStoreData(
           (productSalesLast60DaysMap[item.product_id] || 0) + item.quantity;
       }
       productsInOrder.add(item.product_id);
+
+      if (!productChannelSalesMap[item.product_id]) {
+        productChannelSalesMap[item.product_id] = {};
+      }
+      productChannelSalesMap[item.product_id][channel] =
+        (productChannelSalesMap[item.product_id][channel] || 0) + item.quantity;
     });
 
     productsInOrder.forEach(pid => {
@@ -404,6 +463,14 @@ export async function fetchShopifyStoreData(
       productCustomerOrderCountMap[pid][customerId] = (productCustomerOrderCountMap[pid][customerId] || 0) + 1;
     });
   });
+
+  const acquisition_channels: StoreAcquisitionChannel[] = Object.entries(channelCount)
+    .sort(([, a], [, b]) => b - a)
+    .map(([channel, count]) => ({
+      channel,
+      order_count: count,
+      percentage: orders.length > 0 ? Math.round((count / orders.length) * 100) : 0,
+    }));
 
   const products: StoreProduct[] = rawProducts.map((product) => {
     const variants = product.variants || [];
@@ -457,6 +524,11 @@ export async function fetchShopifyStoreData(
       ? repeatCustomersForProduct / customersForProduct.size 
       : 0;
 
+    // Top acquisition channel for this product
+    const productChannels = productChannelSalesMap[product.id] || {};
+    const topChannelEntry = Object.entries(productChannels).sort(([, a], [, b]) => b - a)[0];
+    const top_acquisition_channel = topChannelEntry ? topChannelEntry[0] : undefined;
+
     return {
       id: product.id.toString(),
       name: product.title,
@@ -483,8 +555,11 @@ export async function fetchShopifyStoreData(
       total_variant_count: totalVariants,
       in_stock_variant_names: inStockVariants.map((v) => v.title),
       first_time_buyer_ratio,
+      first_time_buyer_count: firstTimeBuyerCustomersCount,
+      unique_customer_count: customersForProduct.size,
       order_velocity,
       repeat_purchase_rate,
+      top_acquisition_channel,
       created_at: product.created_at || undefined,
       order_count: productOrdersMap[product.id]?.size || 0,
     };
@@ -552,7 +627,7 @@ export async function fetchShopifyStoreData(
     orders: {
       total_revenue: totalRevenue,
       order_count: orders.length,
-      average_order_value: Math.round(rolling60dAov * 100) / 100,
+      average_order_value: Math.round(thirtyDayAov * 100) / 100,
       top_locations: topLocations,
       peak_days: peakDays,
       peak_hours: peakHours,
@@ -560,6 +635,7 @@ export async function fetchShopifyStoreData(
       revenue_last_30_days: revenueLast30Days,
       orders_last_30_days: ordersLast30Days.length,
       oldest_order_date: oldestOrderDate.toISOString(),
+      acquisition_channels,
     },
     products,
     customers: {

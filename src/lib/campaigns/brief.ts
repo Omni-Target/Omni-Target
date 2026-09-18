@@ -16,6 +16,7 @@ import { getInternationalStrategies } from "@/lib/market-geography";
 export interface BuildBriefPdfPayloadParams {
   brandName: string;
   productName: string;
+  productPrice?: number;
   goal: string;
   generatedCopy: GeneratedCopy;
   selectedCta: string;
@@ -35,6 +36,7 @@ export interface BuildBriefPdfPayloadParams {
 export function buildBriefPdfPayload({
   brandName,
   productName,
+  productPrice: propProductPrice,
   goal,
   generatedCopy,
   selectedCta,
@@ -47,6 +49,12 @@ export function buildBriefPdfPayload({
   isNewLaunch,
 }: BuildBriefPdfPayloadParams): BriefPDFParams {
   const cp = storeInsights?.products?.find((p) => p.name === productName);
+  const finalProductPrice =
+    propProductPrice !== undefined
+      ? propProductPrice
+      : cp?.price
+      ? Number(cp.price)
+      : undefined;
   let productUrl: string | undefined = undefined;
   if (storeInsights?.store?.domain && cp?.handle) {
     productUrl = `https://${storeInsights.store.domain}/products/${cp.handle}`;
@@ -78,7 +86,7 @@ export function buildBriefPdfPayload({
             : "All",
         demographic_justification:
           aiInsights?.targeting?.age_reasoning ||
-          "Targeting broad age and gender gives Meta's Advantage+ algorithm maximum flexibility.",
+          "Targeting broad age and gender gives Meta the flexibility to find your best buyers across your whole audience.",
         seed_interests: aiInsights?.targeting?.interests ?? [
           "Online Shopping",
           "Fashion",
@@ -102,7 +110,7 @@ export function buildBriefPdfPayload({
             angle: "Identity / Status",
             visual_cue:
               "Lifestyle shot showing product in a natural, elevated everyday setting",
-            on_screen_text: "Engineered for daily wear.",
+            on_screen_text: "Designed for daily wear.",
             primary_text_hook: `Designed for people who appreciate thoughtful details and timeless style.`,
           },
           {
@@ -137,6 +145,19 @@ export function buildBriefPdfPayload({
     return w;
   })();
 
+  const seedSuggestions = advantage_plus_guidance?.seed_audience_suggestions || {
+    age_min: aiInsights?.targeting?.age_min ?? 25,
+    age_max: aiInsights?.targeting?.age_max ?? 44,
+    gender: "All" as const,
+    demographic_justification:
+      aiInsights?.targeting?.age_reasoning ||
+      "Targeting broad age and gender gives Meta the flexibility to find your best buyers across your whole audience.",
+    seed_interests: aiInsights?.targeting?.interests ?? [
+      "Online Shopping",
+      "Fashion",
+    ],
+  };
+
   const implementation_steps: ImplementationStep[] = [
     {
       level: "Campaign level",
@@ -148,7 +169,7 @@ export function buildBriefPdfPayload({
     {
       level: "Ad set level",
       title: "Target Audience & Conversion Setup",
-      instructions: `Set conversion to Website with optimization event set to ${advantage_plus_guidance.optimization_event}. In Audience controls, enable Advantage+ Audience and set target audience to ${advantage_plus_guidance.seed_audience_suggestions.gender === "All" ? "Men & Women" : advantage_plus_guidance.seed_audience_suggestions.gender} (ages ${advantage_plus_guidance.seed_audience_suggestions.age_min}–${advantage_plus_guidance.seed_audience_suggestions.age_max}) with suggested interest hints.`,
+      instructions: `Set conversion to Website with optimization event set to ${advantage_plus_guidance.optimization_event}. In Audience controls, enable Advantage+ Audience and set target audience to ${seedSuggestions.gender === "All" ? "Men & Women" : seedSuggestions.gender} (ages ${seedSuggestions.age_min}–${seedSuggestions.age_max}) with suggested interest hints.`,
     },
     {
       level: "Ad level",
@@ -174,7 +195,7 @@ export function buildBriefPdfPayload({
   return {
     brandName,
     productName,
-    productPrice: cp?.price ? Number(cp.price) : undefined,
+    productPrice: finalProductPrice,
     productUrl,
     campaignGoal: goal,
     copy: {
@@ -182,7 +203,9 @@ export function buildBriefPdfPayload({
       primaryText: generatedCopy.primaryText,
       description: generatedCopy.description,
       cta: selectedCta || generatedCopy.cta,
-      copywriterNote: generatedCopy.copywriterNote,
+      copywriterNote:
+        generatedCopy.copywriterNote ||
+        "Written to catch shoppers' attention in their feed, highlight the real product details, and encourage them to visit your store and buy.",
     },
     creative_hooks,
     advantage_plus_guidance,
@@ -190,10 +213,10 @@ export function buildBriefPdfPayload({
     targeting: {
       ...(aiInsights?.targeting ?? {
         locations: [],
-        age_min: advantage_plus_guidance.seed_audience_suggestions.age_min,
-        age_max: advantage_plus_guidance.seed_audience_suggestions.age_max,
-        gender: advantage_plus_guidance.seed_audience_suggestions.gender,
-        interests: advantage_plus_guidance.seed_audience_suggestions.seed_interests,
+        age_min: seedSuggestions.age_min,
+        age_max: seedSuggestions.age_max,
+        gender: seedSuggestions.gender,
+        interests: seedSuggestions.seed_interests,
       }),
       international_budget_formatted: intlBudgetFormatted,
     },
@@ -227,32 +250,61 @@ export function buildBriefPdfPayload({
           ? (() => {
               const strategies = aiInsights.budget.strategies || [];
               const currentStrategy =
-                strategies[selectedStrategyIndex] || strategies[1];
-              const baseDaily = currentStrategy.daily;
+                strategies[selectedStrategyIndex] ||
+                strategies[1] ||
+                strategies[0] ||
+                { daily: aiInsights.budget.recommended_daily || 0, label: "Sweet Spot" };
+              const baseDaily = currentStrategy.daily || 0;
               const goalMult =
                 aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1;
               const adjustedPerAdSet = Math.round(baseDaily * goalMult);
               const originalDaily = aiInsights.budget.recommended_daily;
+              const curr = aiInsights.budget.currency || "USD";
+              const sym = aiInsights.budget.currency_symbol;
               let res = aiInsights.budget.reasoning;
               if (originalDaily && originalDaily !== adjustedPerAdSet) {
-                const curr = aiInsights.budget.currency;
                 const oldStr = formatCurrency(
                   originalDaily,
                   curr,
-                  aiInsights.budget.currency_symbol
+                  sym
                 );
                 const newStr = formatCurrency(
                   adjustedPerAdSet,
                   curr,
-                  aiInsights.budget.currency_symbol
+                  sym
                 );
                 res = res.replace(oldStr, newStr);
               }
               if (res) {
+                if (finalProductPrice && finalProductPrice > 0) {
+                  const formattedProductPrice = formatCurrency(Math.round(finalProductPrice), curr, sym);
+                  res = res.replace(
+                    /Calibrated for your product's [^ ]+ price point:/i,
+                    `Calibrated for your product's ${formattedProductPrice} price point:`
+                  );
+                }
+                const rawIntlLocs = (
+                  aiInsights.targeting?.international_locations && aiInsights.targeting.international_locations.length > 0
+                    ? aiInsights.targeting.international_locations
+                    : aiInsights.targeting?.locations || []
+                );
+                if (rawIntlLocs.length > 0) {
+                  const displayedIntlCityNames = rawIntlLocs
+                    .map((l: any) => (l?.name || l?.city || "").split(",")[0].trim())
+                    .filter(Boolean)
+                    .slice(0, 4)
+                    .join(" · ");
+                  if (displayedIntlCityNames) {
+                    res = res.replace(
+                      /Should you ever wish to (?:explore international demand|test overseas sales) in [^,]+,/i,
+                      `Should you ever wish to test overseas sales in ${displayedIntlCityNames},`
+                    );
+                  }
+                }
                 const effectiveIntl =
                   intlBudgetFormatted ||
                   (intlDaily
-                    ? `${formatCurrency(intlDaily, curr, aiInsights.budget.currency_symbol)}/day`
+                    ? `${formatCurrency(intlDaily, curr, sym)}/day`
                     : "");
                 if (effectiveIntl) {
                   res = res.replace(
@@ -265,7 +317,15 @@ export function buildBriefPdfPayload({
             })()
           : aiInsights?.budget?.reasoning,
     } as BriefPDFParams["budget"],
-    timing: (aiInsights?.timing as BriefPDFParams["timing"]) ?? {},
+    timing: {
+      ...((aiInsights?.timing as BriefPDFParams["timing"]) ?? {}),
+      peak_days:
+        aiInsights?.timing?.peak_days && aiInsights.timing.peak_days.length > 0
+          ? aiInsights.timing.peak_days
+          : storeInsights?.orders?.peak_days && storeInsights.orders.peak_days.length > 0
+          ? storeInsights.orders.peak_days
+          : undefined,
+    } as BriefPDFParams["timing"],
     warnings,
     pre_launch_checklist: {
       out_of_stock_count: 0,
@@ -344,7 +404,7 @@ export function buildBriefText({
     "",
     ...(isGateway
       ? [
-          "PRODUCT ROLE: Gateway Product (Best for acquiring new first-time customers)",
+          "PRODUCT ROLE: Signature Gateway (Your iconic entry piece with the strongest signal for turning brand-new shoppers into first-time paying customers)",
           "",
         ]
       : []),
@@ -364,22 +424,26 @@ export function buildBriefText({
     `Campaign Type: ${guidance.campaign_type}`,
     `Optimization Event: ${guidance.optimization_event}`,
     `Optimization Strategy: ${guidance.optimization_reasoning}`,
-    `Suggested Age: ${guidance.seed_audience_suggestions.age_min} — ${guidance.seed_audience_suggestions.age_max}`,
-    `Suggested Gender: ${guidance.seed_audience_suggestions.gender}`,
-    `Suggested Interests (AI Starting Hints): ${guidance.seed_audience_suggestions.seed_interests.join(", ")}`,
+    `Suggested Age: ${guidance.seed_audience_suggestions?.age_min ?? 25} — ${guidance.seed_audience_suggestions?.age_max ?? 44}`,
+    `Suggested Gender: ${guidance.seed_audience_suggestions?.gender ?? "All"}`,
+    `Suggested Interests (AI Starting Hints): ${(guidance.seed_audience_suggestions?.seed_interests ?? ["Online Shopping"]).join(", ")}`,
     aiInsights?.targeting?.locations && aiInsights.targeting.locations.length > 0
-      ? `Locations: ${aiInsights.targeting.locations.map((l) => l.name).join(", ")}`
+      ? `Locations: ${aiInsights.targeting.locations.map((l) => l.name || (l as any).city || "").filter(Boolean).join(", ") || "Set manually in Meta Ads Manager"}`
       : "Locations: Set manually in Meta Ads Manager",
     "",
     "── BUDGET ──",
     aiInsights?.budget
       ? (() => {
           const strategies = aiInsights.budget.strategies || [];
-          const currentS = strategies[selectedStrategyIndex] || strategies[1];
+          const currentS =
+            strategies[selectedStrategyIndex] ||
+            strategies[1] ||
+            strategies[0] ||
+            { daily: aiInsights.budget.recommended_daily || 0, label: "Sweet Spot" };
           const adSets = aiInsights.budget.ad_sets || 1;
           const gm = aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1;
-          const adj = Math.round(currentS.daily * adSets * gm);
-          const curr = aiInsights.budget.currency;
+          const adj = Math.round((currentS.daily || 0) * adSets * gm);
+          const curr = aiInsights.budget.currency || "USD";
           return [
             `Strategy: ${currentS.label}`,
             `Ad Sets: ${adSets}`,

@@ -16,7 +16,7 @@ interface StepItem {
 
 const GENERATION_STEPS: StepItem[] = [
   {
-    title: "Analyzing Product Signals & Story",
+    title: "Analyzing Product Details & Story",
     detail: "Reading description, price point, and unique craft details…",
   },
   {

@@ -49,6 +49,7 @@ export function BriefHistory({ limit = 5 }: { limit?: number }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: BRIEFS_QUERY_KEY,
     queryFn: fetchBriefHistory,
+    staleTime: 5 * 60_000,
   });
 
   const items = (data ?? []).slice(0, limit);

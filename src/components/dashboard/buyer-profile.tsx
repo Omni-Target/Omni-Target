@@ -1,4 +1,4 @@
-import { MapPin, CalendarClock, Wallet, HeartHandshake } from "lucide-react";
+import { MapPin, CalendarClock, Wallet, HeartHandshake, Compass } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/currency";
 
@@ -8,6 +8,8 @@ export interface BuyerProfileProps {
   aov: number;
   repeatRate: number;
   currency: string;
+  topChannel?: string;
+  topChannelPercentage?: number;
 }
 
 function Row({
@@ -43,6 +45,8 @@ export function BuyerProfile({
   aov,
   repeatRate,
   currency,
+  topChannel,
+  topChannelPercentage,
 }: BuyerProfileProps) {
   const hasIntl = /United States|United Kingdom|London|New York|Canada|Ghana/i.test(locationText);
   const locationSub = hasIntl ? "Overseas orders detected (US/UK)" : undefined;
@@ -76,6 +80,14 @@ export function BuyerProfile({
       </CardHeader>
       <div className="space-y-5 px-6 pb-6">
         <Row icon={<MapPin />} label="Where they buy from" value={locationText} sub={locationSub} />
+        {topChannel && (
+          <Row
+            icon={<Compass />}
+            label="How they find you"
+            value={topChannelPercentage ? `${topChannel} (${topChannelPercentage}% of orders)` : topChannel}
+            sub="Primary customer entry channel"
+          />
+        )}
         <Row
           icon={<CalendarClock />}
           label="When they buy"

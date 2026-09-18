@@ -1,6 +1,15 @@
 import { BriefPDFParams, CreativeHook } from "./brief-pdf-types";
 import { getCurrencySymbol, formatCurrency } from "./currency";
-import { isDomesticCity, getInternationalBudgetFloor, getEffectiveStoreCountry, getInternationalStrategies, isTier1Market } from "./market-geography";
+import {
+  isDomesticCity,
+  getInternationalBudgetFloor,
+  getEffectiveStoreCountry,
+  getInternationalStrategies,
+  getEstimatedExchangeRate,
+  getStoreTimezoneName,
+  isTier1Market,
+} from "./market-geography";
+import { parseBudgetReasoning } from "./campaigns/qualitative-guidance";
 import fs from "fs";
 import path from "path";
 
@@ -30,6 +39,7 @@ const ICONS = {
   spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
   gauge: '<path d="M4 14a8 8 0 0 1 16 0"/><path d="M12 14l3.5-3"/><circle cx="12" cy="14" r="1.2"/>',
   rocket: '<path d="M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2"/><path d="M9 13.5 5.5 12a13 13 0 0 1 9-9l4 .5.5 4a13 13 0 0 1-9 9z"/><circle cx="14.5" cy="9.5" r="1.4"/>',
+  tree: '<circle cx="12" cy="4" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 6.5v5m0 0L6.8 17m5.2-5.5l5.2 5.5"/>',
 } as const;
 
 type Tone = "neutral" | "success" | "info" | "warning";
@@ -39,6 +49,37 @@ const TONE: Record<Tone, { fg: string; bg: string; bd: string }> = {
   success: { fg: "#15803d", bg: "#f0fdf4", bd: "#c6f0d2" },
   info: { fg: "#4338ca", bg: "#eef2ff", bd: "#c7d2fe" },
   warning: { fg: "#b45309", bg: "#fffaeb", bd: "#fbe6bf" },
+};
+
+export const ANGLE_DISPLAY_MAP: Record<string, { label: string; focus: string }> = {
+  "Material / Craftsmanship": {
+    label: "Craft & Quality",
+    focus: "Fabric texture & premium construction",
+  },
+  "Usability / Transformation": {
+    label: "Everyday Fit & Wear",
+    focus: "Solves daily dressing hassle & flattering comfort",
+  },
+  "Contrarian / Curiosity": {
+    label: "Why It's Different",
+    focus: "Defies convention to capture immediate feed attention",
+  },
+  "Competitive Differentiation": {
+    label: "Why It's Different",
+    focus: "Direct comparison, craft origin, and unique edge",
+  },
+  "Problem / Friction": {
+    label: "The Problem Solver",
+    focus: "Fixes common frustrations with ordinary options",
+  },
+  "Identity / Status": {
+    label: "Lifestyle & Confidence",
+    focus: "Speaks to the buyer's identity and personal aesthetic",
+  },
+  "Offer / Risk Reversal": {
+    label: "Risk-Free Confidence",
+    focus: "Removes purchase hesitation and doubt",
+  },
 };
 
 function tagList(items: string[], tone: Tone = "neutral"): string {
@@ -58,6 +99,7 @@ function fixPunctuationSpacing(text: string): string {
     .replace(/,([a-zA-Z])/g, ", $1")
     .replace(/:([a-zA-Z])/g, ": $1")
     .replace(/;([a-zA-Z])/g, "; $1")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/ {2,}/g, " ")
     .trim();
 }
@@ -75,11 +117,12 @@ function card(
   content: string,
   icon: string = ICONS.spark,
   tone: Tone = "neutral",
-  n?: number
+  n?: number,
+  extraClass?: string
 ): string {
   const t = TONE[tone];
   return `
-  <section class="card">
+  <section class="card${extraClass ? ` ${extraClass}` : ""}">
     <div class="card-head">
       <span class="card-icon" style="color:${t.fg};background:${t.bg};border-color:${t.bd}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${icon}</svg>
@@ -160,7 +203,6 @@ export async function buildBriefHTML(
   const symbol = budget.currency_symbol || getCurrencySymbol(currency);
   const daily = budget.goal_adjusted_daily ?? budget.recommended_daily ?? null;
   const duration = budget.recommended_duration_days ?? 14;
-  const adSets = budget.ad_sets || 1;
 
   const campaignType =
     guidance?.campaign_type ?? "Manual Sales with Advantage+ Audience";
@@ -254,13 +296,27 @@ export async function buildBriefHTML(
   const demographicJustification =
     seed?.demographic_justification ?? legacyTargeting.age_reasoning ?? "";
 
+  const numProductPrice =
+    typeof params.productPrice === "number"
+      ? params.productPrice
+      : params.productPrice
+      ? parseFloat(String(params.productPrice).replace(/[^0-9.]/g, ""))
+      : 0;
+
+  const expectedCartsThreshold =
+    numProductPrice > 50000 ||
+    (currency === "USD" && numProductPrice > 50) ||
+    (currency === "GBP" && numProductPrice > 40)
+      ? "8–12 Add to Carts"
+      : "15–20 Add to Carts";
+
   const hooks: CreativeHook[] = params.creative_hooks ?? [];
-  const warnings: string[] = Array.isArray(params.warnings)
-    ? params.warnings
-    : [];
   const peakDays: string[] = Array.isArray(timing.peak_days)
     ? timing.peak_days
     : [];
+  const storeTimezoneName = getStoreTimezoneName(effectiveStoreCountry, currency);
+  const launchDayName = peakDays[0] || "Monday";
+  const preciseLaunchTiming = `${launchDayName}, 12:00 AM (${storeTimezoneName})`;
 
   // ── Product image as base64 ──
   let productImgSrc = "";
@@ -282,17 +338,24 @@ export async function buildBriefHTML(
   // ── Store Intelligence & Product Strategy content ──
   let gatewayCardHTML = "";
   if (gi) {
-    const isGateway = gi.currentProductClassification === "Gateway";
-    const isConsideration = gi.currentProductClassification === "Consideration";
+    const hasSalesData = Boolean(
+      (gi.firstTimeBuyerRatio !== undefined && gi.firstTimeBuyerRatio > 0) ||
+      (gi.unitsSold && gi.unitsSold > 0) ||
+      (gi.uniqueCustomerCount && gi.uniqueCustomerCount > 0)
+    );
     const isNew =
       params.isNewLaunch ||
-      gi.currentProductClassification === "Insufficient Data" ||
-      gi.currentProductClassification === "Unknown" ||
-      !gi.currentProductClassification;
+      (!hasSalesData &&
+        (gi.currentProductClassification === "Insufficient Data" ||
+          gi.currentProductClassification === "Unknown" ||
+          !gi.currentProductClassification));
+
+    const isGateway = gi.currentProductClassification === "Gateway";
+    const isConsideration = gi.currentProductClassification === "Consideration";
 
     const classTone: Tone = isGateway ? "info" : isConsideration ? "warning" : isNew ? "neutral" : "neutral";
     const classLabel = isGateway
-      ? "Gateway Product"
+      ? "Signature Gateway"
       : isConsideration
       ? "Repeat Favorite"
       : isNew
@@ -300,10 +363,10 @@ export async function buildBriefHTML(
       : "All-Round Seller";
 
     const formatPrescription = isGateway
-      ? "Try a vertical video (Reels / Stories / TikTok) showing the product in action, paired with a clean square photo."
+      ? "Try a 9:16 vertical video (Instagram Reels & Stories) showing the product in motion on a real person, paired with a clean square photo for feed placements."
       : isConsideration
       ? "Try a photo carousel showing close-up details, styling options, and craftsmanship."
-      : "Try a vertical video (Reels/Stories) alongside a square lifestyle photo to see which one brings more sales.";
+      : "Try a 9:16 vertical video (Instagram Reels & Stories) alongside a clean square photo to see which creative brings more sales.";
 
     let insightText = "";
     if (params.isNewLaunch || isNew) {
@@ -314,16 +377,16 @@ export async function buildBriefHTML(
       gi.currentProductName === gi.bestsellerName
     ) {
       insightText =
-        "This product is both your overall bestseller and your #1 Gateway product — proven to turn first-time shoppers into buyers.";
+        "This product is both your overall bestseller and your #1 Signature Gateway — your iconic entry piece with the strongest historical first-purchase signal in your store.";
     } else if (gi.currentProductName === gi.topGatewayName) {
       insightText = `While your overall store bestseller is ${
         gi.bestsellerName || "another product"
-      }, this product is your #1 Gateway product for bringing in brand-new customers.`;
+      }, this product is your #1 Signature Gateway for winning brand-new customers.`;
     } else if (gi.currentProductName === gi.bestsellerName) {
       insightText = `This is your store's top revenue earner, with strong natural demand and steady sales.`;
     } else if (isGateway) {
       insightText =
-        "Gateway product — high conversion rate with new shoppers, proven to turn ad views into first-time buyers.";
+        "Signature Gateway — your iconic entry piece with the strongest historical first-purchase signal in your store.";
     } else if (isConsideration) {
       insightText =
         "High-value product that lifts your average cart size — best for interested shoppers and repeat buyers.";
@@ -332,15 +395,52 @@ export async function buildBriefHTML(
         "Reliable seller that appeals equally to brand-new shoppers and repeat customers.";
     }
 
+    let evidenceHTML = "";
+    if (params.isNewLaunch || isNew) {
+      evidenceHTML = `
+        <div style="margin-top:8px; margin-bottom:10px; padding:7px 11px; background:#eef2ff; border:1px solid #c7d2fe; border-left:3px solid #6366f1; border-radius:6px; font-size:11px; color:#3730a3; line-height:1.5;">
+          <strong style="color:#4f46e5; font-weight:700;">✨ New arrival test:</strong> Fresh in your catalog — optimized to introduce new shoppers to your brand.
+        </div>`;
+    } else if (gi.firstTimeBuyerRatio !== undefined && gi.firstTimeBuyerRatio > 0) {
+      const ftbPct = Math.round(gi.firstTimeBuyerRatio * 100);
+      const totalCust = gi.uniqueCustomerCount ?? gi.unitsSold ?? gi.orderCount;
+      const ftbCount =
+        gi.firstTimeBuyerCount ??
+        (totalCust && gi.firstTimeBuyerRatio ? Math.round(totalCust * gi.firstTimeBuyerRatio) : undefined);
+
+      const detailStr =
+        ftbCount && totalCust
+          ? `${ftbCount} of ${totalCust} unique customers (${ftbPct}%) who purchased this item were first-time customers of your store (based on lifetime store order history).`
+          : `${ftbPct}% of customers who purchased this item were first-time customers of your store (based on lifetime store order history).`;
+
+      evidenceHTML = `
+        <div style="margin-top:8px; margin-bottom:10px; padding:7px 11px; background:#f0fdf4; border:1px solid #bbf7d0; border-left:3px solid #16a34a; border-radius:6px; font-size:11px; color:#166534; line-height:1.5;">
+          <strong style="color:#15803d; font-weight:700;">✓ Strong first-purchase signal:</strong> ${detailStr}
+        </div>`;
+    } else if (gi.unitsSold && gi.unitsSold > 0) {
+      evidenceHTML = `
+        <div style="margin-top:8px; margin-bottom:10px; padding:7px 11px; background:#f0fdf4; border:1px solid #bbf7d0; border-left:3px solid #16a34a; border-radius:6px; font-size:11px; color:#166534; line-height:1.5;">
+          <strong style="color:#15803d; font-weight:700;">✓ Proven seller:</strong> ${gi.unitsSold} orders recorded in your Shopify store.
+        </div>`;
+    } else if (isGateway) {
+      evidenceHTML = `
+        <div style="margin-top:8px; margin-bottom:10px; padding:7px 11px; background:#f0fdf4; border:1px solid #bbf7d0; border-left:3px solid #16a34a; border-radius:6px; font-size:11px; color:#166534; line-height:1.5;">
+          <strong style="color:#15803d; font-weight:700;">✓ Strong first-purchase signal:</strong> Consistently brings the highest share of brand-new customers into your store.
+        </div>`;
+    }
+
     const ct = TONE[classTone] || TONE.neutral;
     gatewayCardHTML = card(
       "Product strategy & best formats",
       `
       <div class="intel">
         <div class="intel-main">
-          <span class="pill" style="color:${ct.fg};background:${ct.bg};border-color:${ct.bd}">${esc(
+          <div style="margin-bottom:6px;">
+            <span class="pill" style="color:${ct.fg};background:${ct.bg};border-color:${ct.bd}">${esc(
         classLabel
       )}</span>
+          </div>
+          ${evidenceHTML}
           ${field(
             "Strategy overview",
             `<p class="prose">${esc(insightText)}</p>`
@@ -358,15 +458,15 @@ export async function buildBriefHTML(
       </div>`,
       ICONS.intel,
       "neutral",
-      1
+      1,
+      "page-break-before"
     );
   }
 
   // ── Executive Campaign Flight Deck (Page 1 Control Panel) ──
   const primaryDomesticStr =
     domesticLocs
-      .slice(0, 3)
-      .map((l: any) => (l?.name || l?.city || "").split(",")[0].trim())
+      .map((l: { name?: string; city?: string }) => (l?.name || l?.city || "").split(",")[0].trim())
       .filter(Boolean)
       .join(", ") || "Nationwide Broad";
 
@@ -376,6 +476,15 @@ export async function buildBriefHTML(
       : genderLabel === "Men"
       ? `Men · Ages ${ageMin}–${ageMax}`
       : `Men & Women · Ages ${ageMin}–${ageMax}`;
+
+  const actualAngleLabels =
+    hooks && hooks.length > 0
+      ? hooks
+          .slice(0, 3)
+          .map((h) => ANGLE_DISPLAY_MAP[h.angle]?.label || h.angle)
+          .filter(Boolean)
+      : ["Craft & Quality", "The Problem Solver", "Everyday Fit & Wear"];
+  const angleSummaryStr = `${actualAngleLabels.length} Angles (${actualAngleLabels.join(", ")})`;
 
   const summaryHTML = `
   <section class="flight-deck">
@@ -394,14 +503,14 @@ export async function buildBriefHTML(
         <div class="flight-metric-sub">${esc(budget.tier || "Sweet Spot")} Strategy · 1 Ad Set</div>
       </div>
       <div class="flight-metric">
-        <div class="flight-metric-val">${esc(optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent)}</div>
+        <div class="flight-metric-val">${esc(optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent === "InitiateCheckout" ? "Initiate Checkout" : optimizationEvent)}</div>
         <div class="flight-metric-label">What to Optimize For</div>
-        <div class="flight-metric-sub">${optimizationEvent === "AddToCart" ? "Builds buyer data fast" : "Direct customer orders"}</div>
+        <div class="flight-metric-sub">${optimizationEvent === "AddToCart" ? "Suggested starting goal" : optimizationEvent === "InitiateCheckout" ? "High-intent checkout starts" : "Direct customer orders"}</div>
       </div>
       <div class="flight-metric">
         <div class="flight-metric-val flight-sku" title="${esc(params.productName)}">${esc(params.productName)}</div>
         <div class="flight-metric-label">Featured Product</div>
-        <div class="flight-metric-sub">${params.productPrice ? `Unit Price: ${fmt(params.productPrice, currency, symbol)}` : "Store catalog focus"}</div>
+        <div class="flight-metric-sub">${params.productPrice && params.productPrice > 0 ? `Unit Price: ${fmt(params.productPrice, currency, symbol)}` : "Store catalog focus"}</div>
       </div>
       <div class="flight-metric">
         <div class="flight-metric-val">${campaignType.includes("ASC") ? "Advantage+ (ASC)" : "Manual Sales (AI Guided)"}</div>
@@ -419,7 +528,7 @@ export async function buildBriefHTML(
         </div>
         <div class="cheat-cell">
           <span class="cheat-label">Conversion Goal &amp; Location</span>
-          <span class="cheat-val">${esc(optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent)} · Website</span>
+          <span class="cheat-val">${esc(optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent === "InitiateCheckout" ? "Initiate Checkout" : optimizationEvent)} · Website</span>
         </div>
         <div class="cheat-cell">
           <span class="cheat-label">Target Audience (Age &amp; Gender)</span>
@@ -435,11 +544,11 @@ export async function buildBriefHTML(
         </div>
         <div class="cheat-cell">
           <span class="cheat-label">Best Time to Launch</span>
-          <span class="cheat-val">Midnight (12:00 AM) before ${peakDays[0] || "peak shopping days"}</span>
+          <span class="cheat-val">${esc(preciseLaunchTiming)}</span>
         </div>
         <div class="cheat-cell">
           <span class="cheat-label">Ad Creatives to Upload</span>
-          <span class="cheat-val">3 Angles (Craft &amp; Quality, Effortless Fit, Why It's Different)</span>
+          <span class="cheat-val">${esc(angleSummaryStr)}</span>
         </div>
         <div class="cheat-cell">
           <span class="cheat-label">Where Ads Appear (Placements)</span>
@@ -503,37 +612,6 @@ export async function buildBriefHTML(
       )
     : "";
 
-  const ANGLE_DISPLAY_MAP: Record<string, { label: string; focus: string }> = {
-    "Material / Craftsmanship": {
-      label: "Craft & Quality",
-      focus: "Fabric texture & premium construction",
-    },
-    "Usability / Transformation": {
-      label: "Everyday Fit & Wear",
-      focus: "Solves daily dressing hassle & flattering comfort",
-    },
-    "Contrarian / Curiosity": {
-      label: "Why It's Different",
-      focus: "Defies convention to capture immediate feed attention",
-    },
-    "Competitive Differentiation": {
-      label: "Why It's Different",
-      focus: "Direct comparison, craft origin, and unique edge",
-    },
-    "Problem / Friction": {
-      label: "The Problem Solver",
-      focus: "Fixes common frustrations with ordinary options",
-    },
-    "Identity / Status": {
-      label: "Lifestyle & Confidence",
-      focus: "Speaks to the buyer's identity and personal aesthetic",
-    },
-    "Offer / Risk Reversal": {
-      label: "Risk-Free Confidence",
-      focus: "Removes purchase hesitation and doubt",
-    },
-  };
-
   // ── Creative Hooks (Card 3) ──
   let creativeHooksHTML = "";
   if (hooks.length > 0) {
@@ -578,28 +656,157 @@ export async function buildBriefHTML(
       .join("");
 
     creativeHooksHTML = card(
-      "3 High-converting creative ad angles",
-      `<p class="section-intro">3 distinct angles proven to capture feed attention and turn casual shoppers into buyers.</p>
+      "3 Creative angles to test",
+      `<p class="section-intro">3 distinct creative angles tailored to your product's appeal and customer motivations. Test each angle in your campaign to discover which resonates best with your audience.</p>
+      ${noteHTML ? `<div style="margin-bottom:12px;">${noteHTML}</div>` : ""}
       <div class="hooks-grid">${hooksCards}</div>`,
       ICONS.hooks,
       "neutral",
-      3
+      3,
+      "page-break-before"
     );
   }
 
   // ── Target Audience & Campaign Settings (Card 4) ──
   const cleanOptimizationReasoning = fixPunctuationSpacing(optimizationReasoning);
-  const cleanDemographicJustification = fixPunctuationSpacing(demographicJustification);
+
+  type LocItem = { source?: string; name?: string; city?: string };
+
+  const provenDomesticLocs = domesticLocs.filter(
+    (l: LocItem) => l?.source === "from_data"
+  );
+  const recommendedDomesticLocs = domesticLocs.filter(
+    (l: LocItem) => l?.source !== "from_data"
+  );
+
+  let domesticLocationMarkup = "";
+  if (provenDomesticLocs.length > 0 && recommendedDomesticLocs.length > 0) {
+    domesticLocationMarkup = `
+      <div style="margin-bottom:8px;">
+        <div style="font-size:10.5px; font-weight:700; color:#15803d; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.04em;">
+          ✓ Proven by past store orders
+        </div>
+        ${tagList(
+          provenDomesticLocs
+            .map((l: LocItem) => (l?.name || l?.city || "").split(",")[0].trim())
+            .filter(Boolean),
+          "success"
+        )}
+        <div style="font-size:11px; color:#15803d; margin-top:4px; font-weight:500;">
+          Based on past customer shipments in your Shopify store.
+        </div>
+      </div>
+      <div>
+        <div style="font-size:10.5px; font-weight:700; color:#475569; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.04em;">
+          💡 Suggested regional hubs (AI recommendation)
+        </div>
+        ${tagList(
+          recommendedDomesticLocs
+            .map((l: LocItem) => (l?.name || l?.city || "").split(",")[0].trim())
+            .filter(Boolean)
+        )}
+        <div style="font-size:11px; color:#475569; margin-top:4px; line-height:1.45;">
+          Commercial centers to test based on urban reach and delivery access. A suggested starting hypothesis to test alongside your proven customer locations.
+        </div>
+      </div>
+    `;
+  } else if (provenDomesticLocs.length > 0) {
+    domesticLocationMarkup = `
+      ${tagList(
+        provenDomesticLocs
+          .map((l: LocItem) => (l?.name || l?.city || "").split(",")[0].trim())
+          .filter(Boolean),
+        "success"
+      )}
+      <div style="font-size:11px; color:#15803d; margin-top:5px; font-weight:500;">
+        <span>✓</span> <strong>Proven by past store orders:</strong> Based on past customer shipments in your Shopify store.
+      </div>
+    `;
+  } else if (recommendedDomesticLocs.length > 0) {
+    domesticLocationMarkup = `
+      ${tagList(
+        recommendedDomesticLocs
+          .map((l: LocItem) => (l?.name || l?.city || "").split(",")[0].trim())
+          .filter(Boolean)
+      )}
+      <div style="font-size:11px; color:#475569; margin-top:5px; line-height:1.45;">
+        <span>💡</span> <span><strong>Suggested regional hubs (AI recommendation):</strong> Commercial centers to test based on urban reach and delivery access. A starting hypothesis to test alongside your proven customer locations.</span>
+      </div>
+    `;
+  }
+
+  const provenIntlLocs = intlLocs.filter(
+    (l: LocItem) => l?.source === "from_data"
+  );
+  const recommendedIntlLocs = intlLocs.filter(
+    (l: LocItem) => l?.source !== "from_data"
+  );
+
+  let intlLocationMarkup = "";
+  if (provenIntlLocs.length > 0 && recommendedIntlLocs.length > 0) {
+    intlLocationMarkup = `
+      <div style="margin-bottom:8px;">
+        <div style="font-size:10.5px; font-weight:700; color:#15803d; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.04em;">
+          ✓ Proven by past store orders
+        </div>
+        ${tagList(
+          provenIntlLocs
+            .map((l: LocItem) => (l?.name || l?.city || "").split(",")[0].trim())
+            .filter(Boolean),
+          "success"
+        )}
+        <div style="font-size:11px; color:#15803d; margin-top:4px; font-weight:500;">
+          Based on past customer shipments in your Shopify store.
+        </div>
+      </div>
+      <div>
+        <div style="font-size:10.5px; font-weight:700; color:#4338ca; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.04em;">
+          💡 Suggested expansion markets (AI recommendation)
+        </div>
+        ${tagList(
+          recommendedIntlLocs
+            .map((l: LocItem) => (l?.name || l?.city || "").split(",")[0].trim())
+            .filter(Boolean)
+        )}
+        <div style="font-size:11px; color:#4338ca; margin-top:4px; line-height:1.45;">
+          Major international commercial and diaspora centers. You haven't shipped there yet — win your home market first before testing overseas.
+        </div>
+      </div>
+    `;
+  } else if (provenIntlLocs.length > 0) {
+    intlLocationMarkup = `
+      ${tagList(
+        provenIntlLocs
+          .map((l: LocItem) => (l?.name || l?.city || "").split(",")[0].trim())
+          .filter(Boolean),
+        "success"
+      )}
+      <div style="font-size:11px; color:#15803d; margin-top:5px; font-weight:500;">
+        <span>✓</span> <strong>Proven by past store orders:</strong> Based on past customer shipments in your Shopify store.
+      </div>
+    `;
+  } else if (recommendedIntlLocs.length > 0) {
+    intlLocationMarkup = `
+      ${tagList(
+        recommendedIntlLocs
+          .map((l: LocItem) => (l?.name || l?.city || "").split(",")[0].trim())
+          .filter(Boolean)
+      )}
+      <div style="font-size:11px; color:#4338ca; margin-top:5px; line-height:1.45;">
+        <span>💡</span> <span><strong>Suggested expansion markets (AI recommendation):</strong> Major international commercial and diaspora centers. You haven't shipped there yet — win your home market first before testing overseas.</span>
+      </div>
+    `;
+  }
 
   const audienceHTML = card(
     "Target audience & locations",
     `
     ${engineLogic(
       `Optimization Goal · ${optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent}`,
-      `<p><strong>Why this goal:</strong> ${esc(cleanOptimizationReasoning)}</p>
+      `<p><strong>Why this goal:</strong> ${esc(cleanOptimizationReasoning || (optimizationEvent === "AddToCart" ? "With fewer than 30 monthly orders recorded, optimizing for Add to Cart is a smart starting test to feed Meta early intent signals while pointing toward real buyers." : "Optimizing directly for purchases gives Meta the signal needed to find ready-to-buy customers."))}</p>
        ${
          optimizationEvent === "AddToCart"
-           ? `<p style="margin-top:8px; color:#fde68a;"><strong>💡 Quality Check (Cart-to-Purchase Ratio):</strong> Add to Cart ads find shoppers quickly. However, if you see over 20 cart adds without a single purchase (&lt;5% conversion), check your checkout page for unexpected shipping costs or payment issues, and switch your campaign goal to <strong>Initiate Checkout</strong> or <strong>Purchase</strong>.</p>`
+           ? `<p style="margin-top:8px; color:#fde68a;"><strong>💡 Quality Check (Cart-to-Purchase Ratio):</strong> For a ${numProductPrice > 0 ? esc(fmt(numProductPrice, currency, symbol)) : "higher-value"} piece, shoppers often browse and consider before checking out. If you see ${esc(expectedCartsThreshold)} with zero completed orders, this reflects encouraging initial shopper consideration, though not yet confirmed purchase intent. If carts keep piling up without sales over several days, treat it as a helpful cue to review your checkout experience: check for unexpected delivery fees revealed at checkout, verify your payment gateway on mobile, or add a direct WhatsApp button so hesitant shoppers can ask sizing or delivery questions before paying.</p>`
            : ""
        }`
     )}
@@ -607,39 +814,21 @@ export async function buildBriefHTML(
     ${field(
       isTier1 && isUS ? "Where to run ads (Advantage+ Audience)" : "Where to run ads (Local)",
       isTier1 && isUS
-        ? `${tagList(["United States (Nationwide)"], "success")} ${tagList(
-            domesticLocs
-              .map(
-                (l) =>
-                  `${(l?.name || l?.city || "").split(",")[0].trim()}${
-                    l?.source === "from_data" ? " ✓" : ""
-                  }`
-              )
-              .filter(
-                (c) =>
-                  Boolean(c) && !c.toLowerCase().includes("united states")
-              )
-              .slice(0, 5)
-          )}${
+        ? `${tagList(["United States (Nationwide)"], "success")}${
+            domesticLocationMarkup
+              ? `<div style="margin-top:8px;">${domesticLocationMarkup}</div>`
+              : ""
+          }${
             domesticBudgetStr
-              ? `<div style="font-size:11px; color:#4b5563; margin-top:4px;"><strong>Daily budget:</strong> ${esc(
+              ? `<div style="font-size:11px; color:#4b5563; margin-top:6px;"><strong>Daily budget:</strong> ${esc(
                   domesticBudgetStr
-                )} — run as 1 ad set for maximum Meta audience liquidity</div>`
+                )} — run as 1 ad set to let Meta find buyers without splitting your spend</div>`
               : ""
           }`
         : domesticLocs.length > 0
-        ? `${tagList(
-            domesticLocs
-              .map(
-                (l) =>
-                  `${(l?.name || l?.city || "").split(",")[0].trim()}${
-                    l?.source === "from_data" ? " ✓" : ""
-                  }`
-              )
-              .filter(Boolean)
-          )}${
+        ? `${domesticLocationMarkup}${
             domesticBudgetStr
-              ? `<div style="font-size:11px; color:#4b5563; margin-top:4px;"><strong>Daily budget:</strong> ${esc(
+              ? `<div style="font-size:11px; color:#4b5563; margin-top:6px;"><strong>Daily budget:</strong> ${esc(
                   domesticBudgetStr
                 )} — run as 1 ad set to keep your local spend focused</div>`
               : ""
@@ -651,18 +840,9 @@ export async function buildBriefHTML(
       intlLocs.length > 0
         ? field(
             "🌍 International locations to consider (Optional)",
-            `${tagList(
-              intlLocs
-                .map(
-                  (l: { name?: string; city?: string; source?: string }) =>
-                    `${(l?.name || l?.city || "").split(",")[0].trim()}${
-                      l?.source === "from_data" ? " ✓" : ""
-                    }`
-                )
-                .filter(Boolean)
-            )}${
+            `${intlLocationMarkup}${
               intlBudgetStr
-                ? `<div style="font-size:11px; color:#4338ca; margin-top:4px;"><strong>Optional overseas budget:</strong> ${esc(
+                ? `<div style="font-size:11px; color:#4338ca; margin-top:6px;"><strong>Optional overseas budget:</strong> ${esc(
                     intlBudgetStr
                   )} (${esc(intlTier)} Strategy) — ${
                     isTier1
@@ -677,27 +857,30 @@ export async function buildBriefHTML(
 
     <div class="two-col">
       ${field(
-        "Suggested age",
+        "Suggested starting age",
         `<span class="stat-inline">${ageMin}–${ageMax}</span>`
       )}
       ${field("Suggested gender", `<span class="stat-inline">${genderLabel === "All" ? "Men & Women" : genderLabel}</span>`)}
     </div>
-    ${
-      cleanDemographicJustification
-        ? `<p class="reasoning">${esc(cleanDemographicJustification)}</p>`
-        : ""
-    }
+    <div style="font-size:10px; color:#475569; margin-top:4px; line-height:1.45; background:#f8fafc; border-left:3px solid #cbd5e1; padding:5px 8px; border-radius:4px;">
+      <span style="font-weight:600; color:#334155;">💡 Suggested starting age:</span>
+      Shopify does not track customer age. We recommend ${ageMin}–${ageMax} as an initial test range based on your product price point, giving Meta a clean starting window while its algorithm learns from live delivery.
+    </div>
 
     ${field(
       "Suggested interests (Starting hints)",
       seedInterests.length > 0
-        ? tagList(seedInterests)
+        ? `${tagList(seedInterests)}
+           <div style="font-size:10px; color:#475569; margin-top:4px; line-height:1.45; background:#f8fafc; border-left:3px solid #cbd5e1; padding:5px 8px; border-radius:4px;">
+             <span style="font-weight:600; color:#334155;">💡 Starting interest hints:</span>
+             These broad interests help Meta find your first wave of shoppers. Once people start clicking and buying, Meta automatically discovers more customers just like them.
+           </div>`
         : `<span class="muted">Add initial interest hints based on your niche</span>`
-    )}
-    <p class="guide-foot" style="text-align:left; margin-top:4px;">Meta uses these suggestions to start showing your ad to the right people. As shoppers click and buy, Meta automatically finds more customers like them.</p>`,
+    )}`,
     ICONS.target,
     "neutral",
-    4
+    4,
+    "page-break-before"
   );
 
   // ── Budget (Card 5) ──
@@ -705,128 +888,340 @@ export async function buildBriefHTML(
     let text = budget.reasoning || "";
     if (!text) return "";
     text = fixPunctuationSpacing(text);
+
+    if (numProductPrice > 0) {
+      text = text.replace(
+        /Calibrated for your product's [^ ]+ price point:/i,
+        `Calibrated for your product's ${fmt(numProductPrice, currency, symbol)} price point:`
+      );
+    }
+
+    // Sync international cities mentioned with the actual international cities displayed on Card 4
+    if (intlLocs && intlLocs.length > 0) {
+      const displayedIntlCityNames = intlLocs
+        .map((l: { name?: string; city?: string }) => (l?.name || l?.city || "").split(",")[0].trim())
+        .filter(Boolean)
+        .slice(0, 4)
+        .join(" · ");
+      if (displayedIntlCityNames) {
+        text = text.replace(
+          /Should you ever wish to (?:explore international demand|test overseas sales) in [^,]+,/i,
+          `Should you ever wish to test overseas sales in ${displayedIntlCityNames},`
+        );
+      }
+    }
+
     const effectiveOverseas =
       intlBudgetStr ||
       (intlDaily ? `${formatCurrency(intlDaily, currency, symbol)}/day` : "");
     if (effectiveOverseas) {
       text = text.replace(
-        /launch a separate overseas ad set at [^.)]+(?:\([^)]*\))?/gi,
-        `launch a separate overseas ad set at ${effectiveOverseas}`
+        /launch a separate overseas ad set at [^.]+?\./gi,
+        `launch a separate overseas ad set at ${effectiveOverseas}.`
       );
     }
+    // Clean up any double periods, stray closing parens before periods, or mismatched parens
+    text = text.replace(/\)\./g, ".").replace(/\s*\.\s*/g, ". ").trim();
     return text;
   })();
 
-  const budgetHTML = card(
-    "Budget & spending plan",
-    `
-    ${
-      showOverseas
-        ? `<div class="budget-grid">
-      <!-- Local Primary Market -->
-      <div class="budget-card local">
-        <div class="budget-card-header">
-          <span class="budget-card-title">📍 Primary Market (Local)</span>
-          <span class="budget-badge local">Start Here</span>
+  const parsedBudget = cleanBudgetReasoning ? parseBudgetReasoning(cleanBudgetReasoning) : null;
+
+  const formattedBudgetReasoningHTML = (() => {
+    if (!cleanBudgetReasoning || !parsedBudget) return "";
+    const parsed = parsedBudget;
+    let html = "";
+
+    const dipDailyVal = Math.round((daily || 0) * 0.7);
+    const dipDailyStr = parsed.dipDailyFormatted || (daily ? `${fmt(dipDailyVal, currency, symbol)}/day` : "");
+    const dipTotalStr = daily ? fmt(dipDailyVal * duration, currency, symbol) : "";
+    const sweetSpotDailyStr = daily ? `${fmt(daily, currency, symbol)}/day` : "";
+    const sweetSpotTotalStr = daily ? fmt(daily * duration, currency, symbol) : "";
+
+    const recentRevNum =
+      budget.breakdown?.revenue_based ||
+      (parsed.recentRevenueFormatted
+        ? parseFloat(parsed.recentRevenueFormatted.replace(/[^0-9.]/g, "")) || 0
+        : 0);
+    const totalTestSpendNum = daily ? daily * duration : 0;
+    const pctOfRecent =
+      recentRevNum > 0 ? Math.round((totalTestSpendNum / recentRevNum) * 100) : 0;
+    const isTightCashFlow =
+      Boolean(parsed.isCashFlowConstrained) || (recentRevNum > 0 && pctOfRecent > 25);
+
+    html += `
+      <div style="margin-top:7px; margin-bottom:7px; border:1px solid rgba(255,255,255,0.12); border-radius:8px; overflow:hidden; background:rgba(15,23,42,0.6);">
+        <div style="padding:6px 10px; background:rgba(255,255,255,0.06); font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#cbd5e1; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center;">
+          <span>Transparent Budget Calculation Breakdown</span>
+          <span style="font-size:9px; color:#94a3b8; font-weight:500;">Pre-Spend Intelligence</span>
         </div>
-        <div class="budget-card-amount">
-          ${daily ? fmt(daily, currency, symbol) : "Set manually"}<span class="budget-unit">/day</span>
+        <table style="width:100%; border-collapse:collapse; font-size:10px; text-align:left;">
+          <tbody>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+              <td style="padding:5px 10px; font-weight:600; color:#94a3b8; width:34%;">Store Sales Context</td>
+              <td style="padding:5px 10px; color:#f1f5f9;">${
+                recentRevNum > 0
+                  ? `${esc(parsed.recentRevenueFormatted || fmt(recentRevNum, currency, symbol))} verified over latest 30 days`
+                  : parsed.recentRevenueFormatted
+                  ? `${esc(parsed.recentRevenueFormatted)} verified in Shopify store`
+                  : "New store / early catalog testing baseline"
+              }</td>
+            </tr>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+              <td style="padding:5px 10px; font-weight:600; color:#94a3b8;">How Budget Was Chosen</td>
+              <td style="padding:5px 10px; color:#f1f5f9; line-height:1.4;">${
+                isTightCashFlow
+                  ? `<strong>Starter Testing Baseline:</strong> Calibrated as an estimated starting test budget (${sweetSpotDailyStr}) based on your ${numProductPrice > 0 ? esc(fmt(numProductPrice, currency, symbol)) : "product"} price point to give Meta enough daily impressions to find interested shoppers. Allocating only 5–10% of last month's quiet sales (${esc(parsed.recentRevenueFormatted || fmt(recentRevNum, currency, symbol))}) would stretch data collection over too many weeks.`
+                  : recentRevNum > 0
+                  ? `<strong>Monthly Revenue Allocation:</strong> Allocates a disciplined ~5–10% testing budget from your store's regular monthly sales (${esc(parsed.recentRevenueFormatted || fmt(recentRevNum, currency, symbol))}), keeping your ad spend comfortable and low-risk.`
+                  : `<strong>Starter Testing Baseline:</strong> Calibrated for your product's ${numProductPrice > 0 ? esc(fmt(numProductPrice, currency, symbol)) : "catalog"} price point to give Meta enough daily headroom to discover your first customers.`
+              }</td>
+            </tr>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(99,102,241,0.08);">
+              <td style="padding:6px 10px; font-weight:700; color:#a5b4fc;">Recommended Test (Sweet Spot)</td>
+              <td style="padding:6px 10px; color:#fff; font-weight:600;"><span style="font-size:11.5px; color:#818cf8; font-weight:800;">${sweetSpotTotalStr} Total Spend</span> (${sweetSpotDailyStr} × ${duration} days) · Balanced testing baseline</td>
+            </tr>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(245,158,11,0.08);">
+              <td style="padding:6px 10px; font-weight:700; color:#fcd34d;">Lower-Spend Option (Dip Your Toe)</td>
+              <td style="padding:6px 10px; color:#fff; font-weight:600;">
+                <span style="font-size:11.5px; color:#fbbf24; font-weight:800;">${dipTotalStr || "—"} Total Spend</span> (${esc(dipDailyStr)} × ${duration} days)
+                ${
+                  isTightCashFlow
+                    ? `<div style="font-size:9px; color:#fef3c7; font-weight:400; margin-top:2px; line-height:1.35;">⚠️ Cash Flow Advisory: ${sweetSpotTotalStr} is about ${pctOfRecent}% of your recent 30-day sales. If cash is tight right now during this quiet spell, test with this lower option (${esc(dipDailyStr)}) to reduce your upfront risk while you collect early data, though gathering enough signals may take a few more days.</div>`
+                    : `<div style="font-size:9px; color:#fef3c7; font-weight:400; margin-top:2px; line-height:1.35;">A lower-commitment test option (${esc(dipDailyStr)}). Reduces your upfront financial risk while you validate customer interest.</div>`
+                }
+              </td>
+            </tr>
+            ${
+              showOverseas && intlDaily
+                ? `<tr style="background:rgba(147,51,234,0.08);">
+              <td style="padding:6px 10px; font-weight:700; color:#c084fc;">Optional Overseas Expansion</td>
+              <td style="padding:6px 10px; color:#fff; font-weight:600;">
+                <span style="font-size:11.5px; color:#c084fc; font-weight:800;">${fmt(intlDaily * duration, currency, symbol)} Total Spend</span> (${fmt(intlDaily, currency, symbol)}/day × ${duration} days) · Test only after your domestic campaign is proven profitable
+              </td>
+            </tr>`
+                : ""
+            }
+          </tbody>
+        </table>
+      </div>`;
+
+    if (parsed.calibrationTitle || parsed.calibrationBody) {
+      html += `<p style="margin-top:4px; font-size:10px; color:#e2e8f0; line-height:1.4;">${
+        parsed.calibrationTitle ? `<strong style="color:#fff;">${esc(parsed.calibrationTitle)}</strong> ` : ""
+      }${esc(parsed.calibrationBody || "")}</p>`;
+    }
+    if (parsed.recommendedPlan) {
+      html += `<p style="margin-top:3px; font-size:10px; color:#e2e8f0; line-height:1.4;"><strong style="color:#fff;">Recommended Allocation:</strong> ${esc(parsed.recommendedPlan)}</p>`;
+    }
+    if (parsed.overseasExpansion) {
+      html += `<div style="margin-top:5px; padding:5px 8px; background:rgba(99,102,241,0.12); border:1px solid rgba(129,140,248,0.25); border-radius:6px; font-size:9.5px; color:#e0e7ff; line-height:1.35;"><strong style="color:#a5b4fc;">🌍 Optional Overseas Expansion:</strong> ${esc(parsed.overseasExpansion)}</div>`;
+    }
+    if (parsed.rawFallback) {
+      html += `<p style="margin-top:5px; font-size:10px; color:#e2e8f0; line-height:1.4;">${esc(parsed.rawFallback)}</p>`;
+    }
+    return html;
+  })();
+
+  let pricingStrategyHTML = "";
+  if (numProductPrice > 0 && daily !== null && daily > 0) {
+    const dailyAmount = daily;
+    const totalTestSpend = dailyAmount * duration;
+    const priceToDailyRatio = numProductPrice / dailyAmount;
+    const formattedPrice = fmt(numProductPrice, currency, symbol);
+    const formattedDaily = fmt(dailyAmount, currency, symbol);
+
+    if (priceToDailyRatio >= 2.0 || (totalTestSpend > 0 && numProductPrice >= totalTestSpend * 0.7)) {
+      pricingStrategyHTML = `
+        <div style="padding:7px 10px; background:rgba(99,102,241,0.16); border:1px solid rgba(129,140,248,0.3); border-left:3px solid #818cf8; border-radius:6px;">
+          <div style="font-size:10px; font-weight:700; color:#c7d2fe; display:flex; align-items:center; gap:5px; margin-bottom:2px;">
+            <span>💎</span> High-Ticket Consideration Strategy (${formattedPrice} unit price vs ${formattedDaily}/day budget)
+          </div>
+          <p style="font-size:9.5px; color:#e2e8f0; margin-top:3px; line-height:1.4;">
+            Because <strong style="color:#fff;">${esc(params.productName)}</strong> is a premium investment piece, a single order (${formattedPrice}) is larger than several days of test spend. High-value shoppers explore, bookmark, and add to cart before buying. Optimizing for <strong style="color:#fff;">${esc(optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent)}</strong> helps Meta identify interested shoppers first without pushing for immediate checkouts before they are ready. Early success looks like steady cart additions, inquiries, and visits while shoppers make up their mind.
+          </p>
+        </div>`;
+    } else if (priceToDailyRatio < 1.2) {
+      pricingStrategyHTML = `
+        <div style="padding:7px 10px; background:rgba(16,185,129,0.16); border:1px solid rgba(52,211,153,0.3); border-left:3px solid #34d399; border-radius:6px;">
+          <div style="font-size:10px; font-weight:700; color:#a7f3d0; display:flex; align-items:center; gap:5px; margin-bottom:2px;">
+            <span>⚡</span> Fast-Conversion Impulse Strategy (${formattedPrice} unit price)
+          </div>
+          <p style="font-size:9.5px; color:#e2e8f0; margin-top:3px; line-height:1.4;">
+            With a unit price well within your daily spend of ${formattedDaily}/day, <strong style="color:#fff;">${esc(params.productName)}</strong> sits at an accessible purchase threshold. New shoppers can make quick buying decisions on their very first visit.
+          </p>
+        </div>`;
+    }
+  }
+
+  const budgetNotesGridHTML =
+    (parsedBudget?.cashFlowTip || pricingStrategyHTML)
+      ? `<div class="budget-notes-grid">
+          ${
+            parsedBudget?.cashFlowTip
+              ? `<div style="padding:7px 10px; background:rgba(245,158,11,0.12); border:1px solid rgba(251,191,36,0.25); border-radius:6px; font-size:9.5px; color:#fef3c7; line-height:1.4;"><strong style="color:#fde68a;">💡 Cash Flow Protection:</strong> ${esc(parsedBudget.cashFlowTip)}</div>`
+              : ""
+          }
+          ${pricingStrategyHTML}
+        </div>`
+      : "";
+
+  const budgetHTML = (() => {
+    const fallbackRate = getEstimatedExchangeRate(currency);
+    const overseasTargetUSD =
+      intlTier === "Dip Your Toe" ? 18 : intlTier === "Full Send" ? 40 : 25;
+    const effectiveRate =
+      showOverseas && intlDaily && intlDaily > 0 && overseasTargetUSD > 0
+        ? intlDaily / overseasTargetUSD
+        : fallbackRate;
+
+    const localDailyUSD =
+      daily && effectiveRate > 0 ? Math.max(1, Math.round(daily / effectiveRate)) : null;
+    const localDailyStr = daily ? fmt(daily, currency, symbol) : "";
+    const intlDailyUSD =
+      intlDaily && effectiveRate > 0 ? Math.max(1, Math.round(intlDaily / effectiveRate)) : overseasTargetUSD;
+    const intlDailyStr = intlDaily ? fmt(intlDaily, currency, symbol) : "";
+
+    const multiMarketCurrencyTipHTML =
+      currency !== "USD" && localDailyUSD
+        ? `<p style="margin-top:7px; color:#cbd5e1;"><strong>💱 Ad Account Currency Tip:</strong> If your Meta Ads Manager account bills you in US Dollars ($) instead of ${esc(
+            currency
+          )}, enter <strong>~$${localDailyUSD}/day USD</strong> for your primary local campaign (equivalent to ${localDailyStr}/day)${
+            showOverseas && intlDaily
+              ? `, or <strong>~$${intlDailyUSD}/day USD</strong> if you launch the separate overseas test campaign (${intlDailyStr}/day)`
+              : ""
+          }. <em>(Estimated currency conversion; actual billing depends on your payment card's daily exchange rate.)</em></p>`
+        : currency !== "USD"
+        ? `<p style="margin-top:7px; color:#cbd5e1;"><strong>💱 Ad Account Currency Tip:</strong> If your Meta Ads Manager account bills you in US Dollars ($) instead of ${esc(
+            currency
+          )}, enter the equivalent daily USD directly in Ads Manager so exchange rate shifts don't cause Meta to slow down ad delivery. <em>(Estimated currency conversion; verify with your current exchange rate.)</em></p>`
+        : "";
+
+    const singleMarketCurrencyTipHTML =
+      currency !== "USD" && localDailyUSD
+        ? `<p style="margin-top:7px; color:#cbd5e1;"><strong>💱 Ad Account Currency Tip:</strong> If your Meta Ads Manager account bills you in US Dollars ($) instead of ${esc(
+            currency
+          )}, enter <strong>~$${localDailyUSD}/day USD</strong> (equivalent to ${localDailyStr}/day) directly in Ads Manager so exchange rate shifts don't cause Meta to slow down ad delivery. <em>(Estimated currency conversion; actual billing depends on your payment card's daily exchange rate.)</em></p>`
+        : currency !== "USD"
+        ? `<p style="margin-top:7px; color:#cbd5e1;"><strong>💱 Ad Account Currency Tip:</strong> If your Meta Ads Manager account bills you in US Dollars ($) instead of ${esc(
+            currency
+          )}, enter the equivalent daily USD directly in Ads Manager so exchange rate shifts don't cause Meta to slow down ad delivery. <em>(Estimated currency conversion; verify with your current exchange rate.)</em></p>`
+        : "";
+
+    return card(
+      "Budget & spending plan",
+      `
+      ${
+        showOverseas
+          ? `<div class="budget-grid">
+        <!-- Local Primary Market -->
+        <div class="budget-card local">
+          <div class="budget-card-header">
+            <span class="budget-card-title">📍 Primary Market (Local)</span>
+            <span class="budget-badge local">Start Here</span>
+          </div>
+          <div class="budget-card-amount">
+            ${daily ? fmt(daily, currency, symbol) : "Set manually"}<span class="budget-unit">/day</span>
+          </div>
+          <div class="budget-card-sub">
+            ${esc(budget.tier || "Sweet Spot")} Strategy · 1 Local Ad Set
+          </div>
+          <div class="budget-meta" style="min-width:0; border-top:1px solid var(--subtle-2); padding-top:8px;">
+            ${row("Test Duration", `${duration} days`)}
+            ${daily ? row("Total Test Spend", fmt(daily * duration, currency, symbol)) : ""}
+            ${row("Delivery", "Core domestic sales")}
+          </div>
         </div>
-        <div class="budget-card-sub">
-          ${esc(budget.tier || "Sweet Spot")} Strategy · 1 Local Ad Set
-        </div>
-        <div class="budget-meta" style="min-width:0; border-top:1px solid var(--subtle-2); padding-top:8px;">
-          ${row("Test Duration", `${duration} days`)}
-          ${daily ? row("Total Test Spend", fmt(daily * duration, currency, symbol)) : ""}
-          ${row("Delivery", "Core domestic sales")}
+
+        <!-- Overseas Test (Optional) -->
+        <div class="budget-card intl">
+          <div class="budget-card-header">
+            <span class="budget-card-title">🌍 Overseas Test (Optional)</span>
+            <span class="budget-badge intl">Suggested Expansion</span>
+          </div>
+          <div class="budget-card-amount">
+            ${
+              intlDaily
+                ? fmt(intlDaily, currency, symbol)
+                : esc(intlBudgetStr || "Set manually")
+            }<span class="budget-unit">/day</span>
+          </div>
+          <div class="budget-card-sub">
+            ${esc(intlTier)} Strategy · 1 Separate Ad Set
+          </div>
+          <div class="budget-meta" style="min-width:0; border-top:1px solid #e0e7ff; padding-top:8px;">
+            ${row("Optional Duration", `${duration} days`)}
+            ${intlDaily ? row("Estimated Test Spend", fmt(intlDaily * duration, currency, symbol)) : ""}
+            ${row("Delivery", "Group into 1 ad set")}
+          </div>
         </div>
       </div>
 
-      <!-- Overseas Test (Optional) -->
-      <div class="budget-card intl">
-        <div class="budget-card-header">
-          <span class="budget-card-title">🌍 Overseas Test (Optional)</span>
-          <span class="budget-badge intl">Suggested Expansion</span>
-        </div>
-        <div class="budget-card-amount">
-          ${intlDaily ? fmt(intlDaily, currency, symbol) : esc(intlBudgetStr)}<span class="budget-unit">/day</span>
-        </div>
-        <div class="budget-card-sub">
-          ${esc(intlTier)} Strategy · 1 Separate Ad Set
-        </div>
-        <div class="budget-meta" style="min-width:0; border-top:1px solid #e0e7ff; padding-top:8px;">
-          ${row("Optional Duration", `${duration} days`)}
-          ${intlDaily ? row("Estimated Test Spend", fmt(intlDaily * duration, currency, symbol)) : ""}
-          ${row("Delivery", "Group into 1 ad set")}
-        </div>
-      </div>
-    </div>
-
-    ${engineLogic(
-      "How your budget was calculated",
-      `<p><strong>Two Independent Budgets:</strong> Run your <strong>Primary Local Campaign</strong> first to establish solid domestic cash flow. The <strong>Overseas Campaign</strong> is an optional suggestion to launch separately only when you want to explore international demand — never combine them into a single ad set.</p>
-       ${
-         currency !== "USD"
-           ? `<p style="margin-top:7px; color:#cbd5e1;"><strong>💱 Ad Account Currency Tip:</strong> If your Meta Ads Manager account bills you in US Dollars ($) instead of ${esc(
-               currency
-             )}, enter $18/day USD directly in Ads Manager so exchange rate shifts don't lower your spend below Meta's required auction floor.</p>`
-           : ""
-       }
-       ${
-         cleanBudgetReasoning
-           ? `<p style="margin-top:7px; white-space: pre-line;"><strong>Why this amount:</strong> ${esc(cleanBudgetReasoning)}</p>`
-           : ""
-       }`
-    )}`
-        : `<div class="budget-grid" style="grid-template-columns: 1fr;">
-      <!-- Single Consolidated Campaign -->
-      <div class="budget-card local">
-        <div class="budget-card-header">
-          <span class="budget-card-title">📍 Recommended Campaign Budget</span>
-          <span class="budget-badge local">Advantage+</span>
-        </div>
-        <div class="budget-card-amount">
-          ${daily ? fmt(daily, currency, symbol) : "Set manually"}<span class="budget-unit">/day</span>
-        </div>
-        <div class="budget-card-sub">
-          ${esc(budget.tier || "Sweet Spot")} Strategy · 1 Consolidated Ad Set
-        </div>
-        <div class="budget-meta" style="min-width:0; border-top:1px solid var(--subtle-2); padding-top:8px;">
-          ${row("Test Duration", `${duration} days`)}
-          ${daily ? row("Total Test Spend", fmt(daily * duration, currency, symbol)) : ""}
-          ${row("Delivery", isUS ? "United States (Nationwide)" : "Core domestic sales")}
+      ${engineLogic(
+        "How your budget was calculated",
+        `<p style="font-size:10px; line-height:1.45;"><strong>Two Independent Budgets:</strong> Run your <strong>Primary Local Campaign</strong> first to establish solid domestic cash flow. The <strong>Overseas Campaign</strong> is an optional expansion to test only when you want to explore buyers abroad — never combine local and overseas audiences into the same ad set.</p>
+         ${multiMarketCurrencyTipHTML}
+         ${formattedBudgetReasoningHTML}
+         ${budgetNotesGridHTML}`
+      )}`
+          : `<div class="budget-grid" style="grid-template-columns: 1fr;">
+        <!-- Single Consolidated Campaign -->
+        <div class="budget-card local">
+          <div class="budget-card-header">
+            <span class="budget-card-title">📍 Recommended Campaign Budget</span>
+            <span class="budget-badge local">Advantage+</span>
+          </div>
+          <div class="budget-card-amount">
+            ${daily ? fmt(daily, currency, symbol) : "Set manually"}<span class="budget-unit">/day</span>
+          </div>
+          <div class="budget-card-sub">
+            ${esc(budget.tier || "Sweet Spot")} Strategy · 1 Consolidated Ad Set
+          </div>
+          <div class="budget-meta" style="min-width:0; border-top:1px solid var(--subtle-2); padding-top:6px;">
+            ${row("Test Duration", `${duration} days`)}
+            ${daily ? row("Total Test Spend", fmt(daily * duration, currency, symbol)) : ""}
+            ${row("Delivery", isUS ? "United States (Nationwide)" : "Core domestic sales")}
+          </div>
         </div>
       </div>
-    </div>
 
-    ${engineLogic(
-      "How your budget was calculated",
-      `<p><strong>Single Consolidated Campaign:</strong> Run as 1 Advantage+ ad set to give Meta's algorithm maximum audience liquidity and build initial pixel learning without fragmenting your spend.</p>
-       ${
-         currency !== "USD"
-           ? `<p style="margin-top:7px; color:#cbd5e1;"><strong>💱 Ad Account Currency Tip:</strong> If your Meta Ads Manager account bills you in US Dollars ($) instead of ${esc(
-               currency
-             )}, enter the equivalent daily USD directly in Ads Manager so exchange rate shifts don't lower your spend below Meta's auction floor.</p>`
-           : ""
-       }
-       ${
-         cleanBudgetReasoning
-           ? `<p style="margin-top:7px; white-space: pre-line;"><strong>Why this amount:</strong> ${esc(cleanBudgetReasoning)}</p>`
-           : ""
-       }`
-    )}`
-    }`,
-    ICONS.budget,
-    "neutral",
-    5
-  );
+      ${engineLogic(
+        "How your budget was calculated",
+        `<p style="font-size:10px; line-height:1.45;"><strong>Single Consolidated Campaign:</strong> Run as 1 Advantage+ ad set so Meta can focus your entire budget on finding your best customers without splitting your spend across multiple ad sets.</p>
+         ${singleMarketCurrencyTipHTML}
+         ${formattedBudgetReasoningHTML}
+         ${budgetNotesGridHTML}`
+      )}`
+      }`,
+      ICONS.budget,
+      "neutral",
+      5,
+      "page-break-before"
+    );
+  })();
 
   // ── Timing & Sales Expectations (Card 6) ──
   const cleanTimingReasoning = fixPunctuationSpacing(
     timing.reasoning ||
-      "Keep delivery active 24/7. Meta continuously gathers buyer interest across the week and automatically concentrates conversions during your store's peak shopping days."
+      "Keep your ads running 24/7 without turning them on and off. Meta gets smarter over the week as it learns who clicks and buys. Slower weekdays are normal warm-ups that introduce your brand to shoppers so they are ready to purchase during your peak buying days."
   );
-  const cleanTimingLaunch = fixPunctuationSpacing(timing.launch_recommendation || "");
+  const rawTimingLaunch = fixPunctuationSpacing(timing.launch_recommendation || "");
+  let cleanTimingLaunch = rawTimingLaunch;
+  if (cleanTimingLaunch) {
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    for (const d of days) {
+      if (d.toLowerCase() !== launchDayName.toLowerCase()) {
+        cleanTimingLaunch = cleanTimingLaunch.replace(
+          new RegExp(`\\b(?:on\\s+a\\s+)?${d}(?:\\s+night)?\\s+at\\s+midnight\\b`, "gi"),
+          `${launchDayName} at 12:00 AM (midnight)`
+        );
+        cleanTimingLaunch = cleanTimingLaunch.replace(
+          new RegExp(`\\bmidnight(?:\\s+[a-zA-Z\\s]+time)?\\s+on\\s+(?:a\\s+)?${d}\\b`, "gi"),
+          `12:00 AM (midnight ${storeTimezoneName}) as ${launchDayName} begins`
+        );
+      }
+    }
+  }
 
   let timingHTML = "";
   if (peakDays.length > 0 || timing.launch_recommendation) {
@@ -837,40 +1232,29 @@ export async function buildBriefHTML(
         cleanTimingLaunch
           ? field(
               "Launch schedule",
-              `<p class="prose">${esc(cleanTimingLaunch)}</p>`
+              `<p class="prose"><strong>Recommended launch time:</strong> ${esc(preciseLaunchTiming)}.<br/>${esc(cleanTimingLaunch)}</p>`
             )
-          : ""
+          : field(
+              "Launch schedule",
+              `<p class="prose"><strong>Recommended launch time:</strong> ${esc(preciseLaunchTiming)}.<br/>Schedule your campaign to start on ${esc(launchDayName)} at 12:00 AM (midnight ${esc(storeTimezoneName)}) so Meta has a full 24-hour cycle to pace your daily budget smoothly across your first active sales day.</p>`
+            )
       }
       ${
         peakDays.length > 0
-          ? field("Peak store buying days", tagList(peakDays, "info"))
+          ? field(
+              "Peak buying days (from your Shopify orders)",
+              `${tagList(peakDays, "info")}<div style="font-size:10.5px; color:#475569; margin-top:4px; font-weight:500;">✓ Based on order history: Shoppers placed the most orders on ${esc(peakDays.join(", "))}. Past order timing reflects historical customer activity, not an algorithmic guarantee of future ad performance.</div>`
+            )
           : ""
       }
       ${engineLogic(
-        "Why ads run 24/7 (even on slower days)",
+        "Why keep ads running 24/7 (even on slower days)",
         `<p>${esc(cleanTimingReasoning)}</p>`
       )}`,
       ICONS.timing,
       "neutral",
-      6
-    );
-  }
-
-  // ── Warnings ──
-  let warningsHTML = "";
-  if (warnings.length > 0) {
-    warningsHTML = card(
-      "Before you launch",
-      `<div class="warn-list">${warnings
-        .map(
-          (w) =>
-            `<div class="warn-item"><span class="warn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS.warning}</svg></span><span>${esc(
-              w
-            )}</span></div>`
-        )
-        .join("")}</div>`,
-      ICONS.warning,
-      "warning"
+      6,
+      "page-break-before"
     );
   }
 
@@ -883,21 +1267,20 @@ export async function buildBriefHTML(
   const steps = params.implementation_steps ?? [
     {
       level: "Campaign level" as const,
-      title: "Campaign setup",
+      title: "Choose Sales Objective",
       instructions: campaignType.includes("ASC")
-        ? "In Meta Ads Manager, click Create, select Sales, and choose Advantage+ Shopping Campaign (ASC)."
-        : "In Meta Ads Manager, click Create, select Sales, and choose Manual Sales Campaign with Advantage+ Audience enabled.",
+        ? "In Meta Ads Manager, click the green '+ Create' button. Select 'Sales' as your campaign objective and choose 'Advantage+ Shopping Campaign'."
+        : "In Meta Ads Manager, click the green '+ Create' button. Select 'Sales' as your campaign objective, click Continue, and choose 'Manual Sales Campaign' with Advantage+ Audience enabled.",
     },
     {
       level: "Ad set level" as const,
-      title: "Target Audience & Conversion Setup",
-      instructions: `Set conversion event to ${optimizationEvent}. In Audience Controls, enable Advantage+ Audience, set target audience to ${genderLabel === "All" ? "Men & Women" : genderLabel} (ages ${ageMin}–${ageMax}), and enter suggested interest hints.`,
+      title: "Budget, Audience & Conversion",
+      instructions: `Under Conversion, choose 'Website' and select '${optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent}'. Set your daily budget to ${domesticBudgetStr || "your recommended daily budget"}. Set start schedule to ${preciseLaunchTiming}. Under Audience, add your suggested locations and set age to ${ageMin}–${ageMax} (${genderLabel === "All" ? "Men & Women" : genderLabel}).`,
     },
     {
       level: "Ad level" as const,
-      title: "Creative execution",
-      instructions:
-        "Upload 3 creative assets mapped to the 3 Creative Angles. Paste the primary text, headline, and link description, applying the visual cue and on-screen text overlays.",
+      title: "Creative & Copy",
+      instructions: `Upload your product photos or vertical video. Copy and paste your Primary Text, Headline, and Description from Page 2. Set your Call to Action button to '${copy.cta || "Shop Now"}' and hit Publish!`,
     },
   ];
 
@@ -915,10 +1298,86 @@ export async function buildBriefHTML(
           )}</div></div></div>`
       )
       .join("")}</div>
-    <p class="guide-foot">Designed to be copied straight into Meta Ads Manager — optimized for Advantage+ broad AI targeting.</p>`,
+    <p class="guide-foot">Follow these 3 quick steps in Meta Ads Manager to launch your campaign with confidence.</p>`,
     ICONS.guide,
     "neutral",
     7
+  );
+
+  // ── Day 7 Decision Tree & Scaling Playbook (Card 8) ──
+  const scaleBudgetVal = daily ? Math.round(daily * 1.2) : 0;
+  const midTestSpendVal = daily ? Math.round(daily * 4) : 0;
+  const threeDaySpendVal = daily ? Math.round(daily * 3) : 0;
+  const redLightSpendStr =
+    threeDaySpendVal > 0 && midTestSpendVal > 0
+      ? ` (${fmt(threeDaySpendVal, currency, symbol)}–${fmt(midTestSpendVal, currency, symbol)} spent)`
+      : "";
+
+  const cpaTarget = numProductPrice > 0 ? Math.round(numProductPrice * 0.3) : 0;
+
+  const decisionTreeHTML = card(
+    `What to do after Day ${duration} (How to read your results)`,
+    `<p class="section-intro" style="margin-bottom:8px;">Once your ${duration}-day test finishes, you don't have to guess what to do next. Match what happened in your store to one of these 3 simple situations:</p>
+    
+    <div style="font-size:10px; color:#1e293b; background:#f1f5f9; border:1px solid #cbd5e1; border-left:4px solid #4f46e5; padding:6px 10px; border-radius:6px; margin-bottom:8px; line-height:1.45;">
+      <strong>⏱️ Rule #1: Give it 3 full days before touching anything.</strong> Ad performance naturally fluctuates day to day. Let Meta deliver for at least 3 full days without edits so you see real shopper trends rather than daily noise.
+    </div>
+
+    <div class="decision-grid">
+      <!-- Green Light -->
+      <div class="decision-card decision-green">
+        <div class="decision-card-head">
+          <span class="decision-tag green">🟢 It's Working · Profitable Orders</span>
+          <div class="decision-metric">Target ad cost: under ~30% of item price${cpaTarget ? ` (~${fmt(cpaTarget, currency, symbol)})` : ""}</div>
+        </div>
+        <p class="decision-meaning">Shoppers are buying and orders are coming in with real profit left over in your pocket.</p>
+        <div class="decision-action">
+          <div style="font-size:9.5px; background:#f0fdf4; border:1px solid #bbf7d0; padding:5px 9px; border-radius:5px; margin-bottom:5px; color:#166534; font-weight:600;">
+            Founder Profit Check: Money Made − Ad Spend − Making the Product − Delivery − Card Fees = Real Profit in Your Pocket
+          </div>
+          <div style="display:flex; flex-direction:column; gap:3px;">
+            <div><strong>• Check real profit first:</strong> Make sure your margin covers all production, delivery, and payment fees before celebrating.</div>
+            <div><strong>• When to scale:</strong> Once you see <strong>at least 3–5 steady orders</strong> putting verified cash in the bank, increase your daily budget by <strong>~20% every 3 to 4 days</strong>${daily ? ` (e.g. from ${fmt(daily, currency, symbol)} to <strong>${fmt(scaleBudgetVal, currency, symbol)}/day</strong>)` : ""}. Small bumps let you scale up without resetting Meta's delivery.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="decision-subgrid">
+        <!-- Yellow Light -->
+        <div class="decision-card decision-yellow">
+          <div class="decision-card-head">
+            <span class="decision-tag yellow">🟡 High Carts, Low Orders</span>
+            <div class="decision-metric">${esc(expectedCartsThreshold)}, but few or no orders</div>
+          </div>
+          <p class="decision-meaning">Shoppers like the piece and added to cart, but paused before paying. (0 orders from your first few carts is normal—typical cart checkout rates are 10–20%).</p>
+          <div class="decision-action">
+            <strong>If carts keep piling up with no sales, check:</strong>
+            <ul style="margin:4px 0 0 16px; padding:0; list-style-type:disc; line-height:1.45;">
+              <li style="margin-bottom:2px;"><strong>Surprise delivery fees:</strong> High shipping revealed at checkout?</li>
+              <li style="margin-bottom:2px;"><strong>Payment issues:</strong> Test buying on mobile or offer local bank transfer.</li>
+              <li><strong>Hesitation:</strong> Add a WhatsApp button for quick sizing questions.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Red Light -->
+        <div class="decision-card decision-red">
+          <div class="decision-card-head">
+            <span class="decision-tag red">🔴 Low Clicks / Refresh Hook</span>
+            <div class="decision-metric">After 3–4 days${redLightSpendStr}: Link CTR &lt; 0.6% &amp; 0 carts</div>
+          </div>
+          <p class="decision-meaning">People are scrolling past without clicking. The current visual hook isn't grabbing attention in the feed.</p>
+          <div class="decision-action">
+            <strong>What to do next:</strong>
+            <p style="margin-top:2px;">Don't start over or delete your campaign. Keep your audience settings, pause this ad visual, and test <strong>Angle 2 (${esc(actualAngleLabels[1] || "Craft & Quality")})</strong> or <strong>Angle 3 (${esc(actualAngleLabels[2] || "Everyday Fit")})</strong> from Page 3.</p>
+          </div>
+        </div>
+      </div>
+    </div>`,
+    ICONS.tree,
+    "neutral",
+    8,
+    "page-break-before"
   );
 
   const chrome = opts?.embed
@@ -953,7 +1412,7 @@ export async function buildBriefHTML(
   }
   @page{ size:auto; margin:14mm 0; }
   html{ -webkit-print-color-adjust:exact!important; print-color-adjust:exact!important; background:var(--bg); }
-  body{ font-family:var(--font); background:var(--bg); color:var(--text-1); font-size:11.5px; line-height:1.6; padding:32px 0 64px; }
+  body{ font-family:var(--font); background:var(--bg); color:var(--text-1); font-size:11.5px; line-height:1.6; padding:16px 0 0; }
 
   .sheet{ width:760px; max-width:94%; margin:0 auto; background:var(--sheet); border:1px solid var(--border); border-radius:18px; overflow:hidden; box-shadow:0 24px 60px -24px rgba(9,9,15,.18); }
 
@@ -975,7 +1434,7 @@ export async function buildBriefHTML(
   .header-date{ font-size:9px; color:var(--text-3); font-weight:600; margin-top:6px; text-align:right; }
 
   /* Content */
-  .content{ padding:28px 48px 44px; }
+  .content{ padding:24px 44px 32px; }
 
   /* Executive Flight Deck (Page 1 Control Panel) */
   .flight-deck{ background:linear-gradient(180deg,#fafbff 0%,#f4f6fa 100%); border:1.5px solid #cbd5e1; border-radius:14px; padding:18px 20px; margin-bottom:18px; page-break-inside:avoid; box-shadow:0 4px 14px -4px rgba(15,23,42,.06); }
@@ -1014,28 +1473,28 @@ export async function buildBriefHTML(
   @media(max-width:600px){ .clip-row{ flex-direction:column; } }
 
   /* Engine Logic Accent Box */
-  .engine-logic{ background:linear-gradient(135deg,#090d16 0%,#151b2e 100%); color:#e2e8f0; border:1px solid #283049; border-left:4px solid #6366f1; border-radius:10px; padding:13px 16px; margin:12px 0; page-break-inside:avoid; }
-  .engine-logic-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; border-bottom:1px solid rgba(255,255,255,.1); padding-bottom:6px; }
+  .engine-logic{ background:linear-gradient(135deg,#090d16 0%,#151b2e 100%); color:#e2e8f0; border:1px solid #283049; border-left:4px solid #6366f1; border-radius:10px; padding:10px 14px; margin:8px 0; page-break-inside:avoid; }
+  .engine-logic-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:7px; border-bottom:1px solid rgba(255,255,255,.1); padding-bottom:5px; }
   .engine-logic-tag{ font-size:8.5px; font-weight:800; letter-spacing:1.4px; text-transform:uppercase; color:#818cf8; font-family:monospace; }
   .engine-logic-title{ font-size:9.5px; font-weight:700; color:#cbd5e1; text-transform:uppercase; letter-spacing:.6px; }
-  .engine-logic-body{ font-size:10.5px; line-height:1.6; color:#cbd5e1; }
-  .engine-logic-body p{ margin-bottom:6px; } .engine-logic-body p:last-child{ margin-bottom:0; }
+  .engine-logic-body{ font-size:10.5px; line-height:1.55; color:#cbd5e1; }
+  .engine-logic-body p{ margin-bottom:5px; } .engine-logic-body p:last-child{ margin-bottom:0; }
   .engine-logic-body strong{ color:#fff; font-weight:700; }
 
   /* Card */
-  .card{ background:#fff; border:1px solid var(--border); border-radius:14px; margin-bottom:16px; overflow:hidden; page-break-inside:avoid; }
-  .card-head{ display:flex; align-items:center; gap:11px; padding:16px 20px; border-bottom:1px solid var(--subtle-2); }
+  .card{ background:#fff; border:1px solid var(--border); border-radius:14px; margin-bottom:12px; overflow:hidden; page-break-inside:avoid; }
+  .card-head{ display:flex; align-items:center; gap:11px; padding:12px 18px; border-bottom:1px solid var(--subtle-2); }
   .card-icon{ width:30px; height:30px; border-radius:8px; border:1px solid; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
   .card-icon svg{ width:16px; height:16px; }
   .card-label{ font-size:11px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; color:var(--text-1); }
   .card-num{ margin-left:auto; font-size:11px; font-weight:800; color:var(--text-3); letter-spacing:1px; }
-  .card-body{ padding:18px 20px; }
+  .card-body{ padding:12px 18px; }
 
   /* Fields */
   .field{ margin-bottom:15px; } .field:last-child{ margin-bottom:0; }
   .field-label{ font-size:8.5px; font-weight:700; letter-spacing:1.6px; text-transform:uppercase; color:var(--text-3); margin-bottom:6px; }
   .field-value{ font-size:11.5px; color:var(--text-1); line-height:1.65; }
-  .headline{ font-size:17px; font-weight:800; letter-spacing:-.4px; color:var(--ink); line-height:1.25; }
+  .headline{ font-size:17px; font-weight:800; letter-spacing:-0.01em; word-spacing:normal; color:var(--ink); line-height:1.25; }
   .two-col{ display:flex; gap:24px; } .two-col .field{ flex:1; }
   .hr{ height:1px; background:var(--subtle-2); margin:4px 0 15px; }
 
@@ -1059,9 +1518,9 @@ export async function buildBriefHTML(
   .hook-angle{ font-size:11px; font-weight:700; color:var(--ink); }
   .hook-body{ display:flex; flex-direction:column; gap:5px; }
   .hook-row{ display:flex; gap:8px; font-size:11px; line-height:1.5; }
-  .hook-label{ width:85px; flex-shrink:0; font-size:8.5px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:var(--text-3); padding-top:2px; }
+  .hook-label{ font-size:10px; font-weight:600; color:var(--text-3); width:85px; flex-shrink:0; }
   .hook-val{ color:var(--text-1); flex:1; }
-  .hook-overlay{ font-family:monospace; background:rgba(245,158,11,.12); color:#b45309; padding:1px 6px; border-radius:4px; font-size:10.5px; font-weight:600; }
+  .hook-overlay{ font-family:monospace; background:rgba(79,70,229,.08); color:#4338ca; border:1px solid rgba(79,70,229,.18); padding:1px 6px; border-radius:4px; font-size:10.5px; font-weight:600; }
   .hook-opening{ font-style:italic; color:var(--text-1); font-weight:500; }
 
   /* Callout */
@@ -1086,33 +1545,34 @@ export async function buildBriefHTML(
   .quote-text{ font-size:13px; line-height:1.7; color:#fff; font-weight:500; }
 
   /* Budget */
-  .budget-hero{ display:flex; justify-content:space-between; align-items:flex-start; gap:20px; padding-bottom:16px; margin-bottom:16px; border-bottom:1px solid var(--subtle-2); }
-  .budget-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px; }
+  .budget-hero{ display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding-bottom:12px; margin-bottom:12px; border-bottom:1px solid var(--subtle-2); }
+  .budget-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:8px; }
   @media(max-width:600px){ .budget-grid{ grid-template-columns:1fr; } }
-  .budget-card{ border-radius:10px; padding:12px 14px; page-break-inside:avoid; }
+  .budget-card{ border-radius:9px; padding:7px 11px; page-break-inside:avoid; }
   .budget-card.local{ background:var(--subtle); border:1.5px solid var(--ink); }
   .budget-card.intl{ background:#fafafe; border:1.5px dashed #6366f1; }
-  .budget-card-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
-  .budget-card-title{ font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.6px; }
+  .budget-card-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:2px; }
+  .budget-card-title{ font-size:8.5px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; }
   .budget-card.local .budget-card-title{ color:var(--ink); }
   .budget-card.intl .budget-card-title{ color:#4338ca; }
-  .budget-badge{ font-size:8px; font-weight:700; padding:2px 6px; border-radius:9999px; text-transform:uppercase; letter-spacing:.3px; }
+  .budget-badge{ font-size:7.5px; font-weight:700; padding:2px 5px; border-radius:9999px; text-transform:uppercase; letter-spacing:.3px; }
   .budget-badge.local{ background:var(--ink); color:#fff; }
   .budget-badge.intl{ background:#ede9fe; color:#6d28d9; }
-  .budget-card-amount{ font-size:22px; font-weight:800; letter-spacing:-.8px; line-height:1.1; color:var(--ink); margin-top:2px; }
+  .budget-card-amount{ font-size:18px; font-weight:800; letter-spacing:-.6px; line-height:1.1; color:var(--ink); margin-top:1px; }
   .budget-card.intl .budget-card-amount{ color:#1e1b4b; }
-  .budget-card-sub{ font-size:9.5px; font-weight:600; margin-top:2px; margin-bottom:8px; }
+  .budget-card-sub{ font-size:8.5px; font-weight:600; margin-top:1px; margin-bottom:4px; }
   .budget-card.local .budget-card-sub{ color:var(--text-2); }
   .budget-card.intl .budget-card-sub{ color:#4f46e5; }
-  .budget-amount{ font-size:30px; font-weight:800; letter-spacing:-1.2px; color:var(--ink); line-height:1; margin-top:4px; }
-  .budget-unit{ font-size:13px; font-weight:600; color:var(--text-3); letter-spacing:0; }
-  .budget-tier{ font-size:8.5px; font-weight:800; letter-spacing:1.4px; text-transform:uppercase; color:var(--text-2); margin-top:7px; }
-  .budget-meta{ min-width:200px; }
-  .row{ display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--subtle-2); }
+  .budget-amount{ font-size:24px; font-weight:800; letter-spacing:-1px; color:var(--ink); line-height:1; margin-top:2px; }
+  .budget-unit{ font-size:11.5px; font-weight:600; color:var(--text-3); letter-spacing:0; }
+  .budget-tier{ font-size:8px; font-weight:800; letter-spacing:1.2px; text-transform:uppercase; color:var(--text-2); margin-top:4px; }
+  .budget-meta{ min-width:170px; }
+  .row{ display:flex; justify-content:space-between; align-items:center; padding:2px 0; border-bottom:1px solid var(--subtle-2); }
   .row:last-child{ border-bottom:none; }
-  .row-label{ font-size:9px; color:var(--text-3); font-weight:700; text-transform:uppercase; letter-spacing:.6px; }
-  .row-value{ font-size:11px; color:var(--text-1); font-weight:700; }
-  .breakdown{ background:var(--subtle); border:1px solid var(--border); border-radius:10px; padding:6px 14px; }
+  .row-label{ font-size:8px; color:var(--text-3); font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
+  .row-value{ font-size:10px; color:var(--text-1); font-weight:700; }
+  .breakdown{ background:var(--subtle); border:1px solid var(--border); border-radius:9px; padding:5px 12px; }
+  .budget-notes-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:6px; margin-top:6px; }
 
   /* Warnings */
   .warn-list{ display:flex; flex-direction:column; gap:10px; }
@@ -1129,8 +1589,25 @@ export async function buildBriefHTML(
   .step-desc{ font-size:11px; color:var(--text-2); line-height:1.55; }
   .guide-foot{ margin-top:13px; font-size:10.5px; font-style:italic; color:var(--text-3); text-align:center; }
 
+  /* Decision Tree Playbook */
+  .decision-grid{ display:flex; flex-direction:column; gap:6px; margin-top:4px; }
+  .decision-subgrid{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  @media(max-width:640px){ .decision-subgrid{ grid-template-columns:1fr; } }
+  .decision-card{ background:var(--subtle); border:1px solid var(--border); border-radius:8px; padding:7px 10px; border-left-width:4px; }
+  .decision-card.decision-green{ border-left-color:#10b981; }
+  .decision-card.decision-yellow{ border-left-color:#f59e0b; }
+  .decision-card.decision-red{ border-left-color:#ef4444; }
+  .decision-card-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:3px; flex-wrap:wrap; gap:4px; }
+  .decision-tag{ font-size:9.5px; font-weight:700; padding:2px 6px; border-radius:5px; }
+  .decision-tag.green{ background:#ecfdf5; color:#065f46; }
+  .decision-tag.yellow{ background:#fffbeb; color:#92400e; }
+  .decision-tag.red{ background:#fef2f2; color:#991b1b; }
+  .decision-metric{ font-size:10px; font-weight:700; color:var(--text-1); }
+  .decision-meaning{ font-size:9.5px; color:var(--text-2); margin-bottom:5px; line-height:1.4; }
+  .decision-action{ font-size:9.5px; color:var(--text-1); background:#fff; border:1px solid var(--border); border-radius:6px; padding:5px 8px; line-height:1.4; }
+
   /* Footer */
-  .footer{ display:flex; justify-content:space-between; align-items:center; padding:18px 48px; border-top:1px solid var(--border); background:var(--subtle); }
+  .footer{ display:flex; justify-content:space-between; align-items:center; padding:12px 40px; border-top:1px solid var(--border); background:var(--subtle); }
   .footer-brand{ display:flex; align-items:center; gap:8px; font-size:10px; font-weight:800; color:var(--ink); letter-spacing:-.2px; }
   .footer-brand .logo-badge{ width:18px; height:18px; border-radius:5px; }
   .footer-text{ font-size:9px; color:var(--text-3); font-weight:500; }
@@ -1146,6 +1623,9 @@ export async function buildBriefHTML(
     body{ background:#fff; padding:0; }
     .sheet{ width:100%; max-width:100%; border:none; border-radius:0; box-shadow:none; }
     .header,.content{ padding-left:40px; padding-right:40px; }
+    .card{ page-break-inside:auto; break-inside:auto; margin-bottom:14px; }
+    .card-head, .field, .engine-logic, .two-col, .decision-card, .step, .budget-card, .intel, .cheat-sheet, .clip-card, .hook-box{ page-break-inside:avoid!important; break-inside:avoid!important; }
+    .page-break-before{ page-break-before:always!important; break-before:page!important; }
   }
 </style>
 </head>
@@ -1190,14 +1670,13 @@ export async function buildBriefHTML(
     ${summaryHTML}
     ${gatewayCardHTML}
     ${adCopyHTML}
-    ${noteHTML}
     ${creativeHooksHTML}
     ${audienceHTML}
     ${budgetHTML}
     ${timingHTML}
-    ${warningsHTML}
     ${newLaunchNoteHTML}
     ${implementationGuideHTML}
+    ${decisionTreeHTML}
   </div>
 
   <footer class="footer">

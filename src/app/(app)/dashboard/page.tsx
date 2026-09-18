@@ -83,13 +83,14 @@ function DashboardContent() {
     setNeedsReauth(true);
   }
 
-  // Resolve connected shop domain (used by the not-connected state).
+  // Resolve connected shop domain (only needed if store is not connected).
   useEffect(() => {
+    if (connected) return;
     fetch("/api/user/credits")
       .then((r) => r.json())
       .then((data) => setShop(data.shop))
       .catch(() => {});
-  }, []);
+  }, [connected]);
 
   // Success toasts from redirect params.
   const paymentSuccess = searchParams.get("payment");
@@ -173,7 +174,9 @@ function DashboardContent() {
   const store = (storeData?.store ?? {}) as {
     name?: string;
     currency?: string;
+    domain?: string;
   };
+  const activeShop = store.domain || shop;
   const products = (storeData?.products ?? []) as StoreProductLike[];
   const orders = (storeData?.orders ?? {}) as Parameters<
     typeof deriveInsights
@@ -330,6 +333,8 @@ function DashboardContent() {
                 aov={orders.average_order_value ?? 0}
                 repeatRate={orders.repeat_customer_rate ?? 0}
                 currency={currency}
+                topChannel={orders.acquisition_channels?.[0]?.channel}
+                topChannelPercentage={orders.acquisition_channels?.[0]?.percentage}
               />
             </div>
             <div className="lg:col-span-2">
@@ -378,7 +383,7 @@ function DashboardContent() {
                     </p>
                   </div>
                 </div>
-                {shop && (
+                {activeShop && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -388,8 +393,8 @@ function DashboardContent() {
                     <a
                       href={
                         outOfStockGateways.length === 1
-                          ? `https://${shop}/admin/products/${outOfStockGateways[0].id}`
-                          : `https://${shop}/admin/products`
+                          ? `https://${activeShop}/admin/products/${outOfStockGateways[0].id}`
+                          : `https://${activeShop}/admin/products`
                       }
                       target="_blank"
                       rel="noopener noreferrer"
@@ -412,7 +417,7 @@ function DashboardContent() {
                     currency={currency}
                     variant="intelligence"
                     onCreateBrief={onCreateBrief}
-                    shop={shop}
+                    shop={activeShop}
                   />
                 ))}
               </div>
@@ -437,7 +442,7 @@ function DashboardContent() {
                     currency={currency}
                     variant="new-launch"
                     onCreateBrief={onCreateBrief}
-                    shop={shop}
+                    shop={activeShop}
                   />
                 ))}
               </div>
@@ -446,7 +451,7 @@ function DashboardContent() {
 
           <BriefHistory />
 
-          <RestockingPanel products={restocking} currency={currency} shop={shop} />
+          <RestockingPanel products={restocking} currency={currency} shop={activeShop} />
         </>
       )}
 
@@ -454,7 +459,7 @@ function DashboardContent() {
         pack={pendingPlanPack}
         open={purchaseDialogOpen}
         onOpenChange={setPurchaseDialogOpen}
-        shop={shop}
+        shop={activeShop}
         currency="USD"
       />
     </PageContainer>

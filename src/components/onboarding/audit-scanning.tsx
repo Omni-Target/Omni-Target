@@ -12,8 +12,8 @@ export const AUDIT_STEPS = [
 // impression of a real analysis happening under the hood.
 const SIGNALS = [
   "Product catalog",
-  "Order velocity",
-  "Retention curve",
+  "Recent sales pace",
+  "Customer repeat rate",
   "Stock health",
   "Gateway products",
 ];

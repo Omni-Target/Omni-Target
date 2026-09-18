@@ -45,6 +45,15 @@ const isPublicRoute = createRouteMatcher([
 
 const isOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);
 
+// Cache Clerk user metadata in memory to eliminate slow (1-5s) external API calls on every page navigation.
+interface CachedUserMetadata {
+  rawStep?: string;
+  shopifyStoreUrl?: string;
+  expiresAt: number;
+}
+const userMetadataCache = new Map<string, CachedUserMetadata>();
+const METADATA_CACHE_TTL_MS = 5 * 60_000; // 5 minutes
+
 export default clerkMiddleware(async (auth, request) => {
   const nextUrl = request.nextUrl;
   const planParam = nextUrl.searchParams.get("plan")?.toLowerCase();
@@ -148,17 +157,33 @@ export default clerkMiddleware(async (auth, request) => {
       let shopifyStoreUrl =
         claims?.shopifyStoreUrl ?? claims?.metadata?.shopifyStoreUrl;
 
-      // If the JWT claim does not say 'complete', verify with fresh user metadata
-      // so a merchant who just finished onboarding is never bounced back by a stale JWT.
+      // If the JWT claim does not say 'complete', check memory cache before calling Clerk API
       if (!rawStep || rawStep !== "complete") {
-        const client = await clerkClient();
-        const user = await client.users.getUser(userId);
-        const metadata = user.publicMetadata as {
-          onboardingStep?: string;
-          shopifyStoreUrl?: string;
-        };
-        rawStep = metadata?.onboardingStep;
-        shopifyStoreUrl = metadata?.shopifyStoreUrl;
+        const cached = userMetadataCache.get(userId);
+        if (cached && Date.now() < cached.expiresAt) {
+          rawStep = cached.rawStep;
+          shopifyStoreUrl = cached.shopifyStoreUrl;
+        } else {
+          try {
+            const client = await clerkClient();
+            const user = await client.users.getUser(userId);
+            const metadata = user.publicMetadata as {
+              onboardingStep?: string;
+              shopifyStoreUrl?: string;
+            };
+            rawStep = metadata?.onboardingStep;
+            shopifyStoreUrl = metadata?.shopifyStoreUrl;
+            // Cache longer (10 mins) if onboarding is already complete
+            const ttl = rawStep === "complete" ? 10 * 60_000 : METADATA_CACHE_TTL_MS;
+            userMetadataCache.set(userId, {
+              rawStep,
+              shopifyStoreUrl,
+              expiresAt: Date.now() + ttl,
+            });
+          } catch (err) {
+            console.error("Clerk metadata fetch in proxy error:", err);
+          }
+        }
       }
 
       // If merchant has already connected their Shopify store, the connect-shopify step
