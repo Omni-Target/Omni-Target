@@ -9,6 +9,8 @@ export interface StoreDataResponse {
   connected: boolean;
   data?: Record<string, unknown> | null;
   needsReauthForOrders?: boolean;
+  needsShopifyReauthorization?: boolean;
+  missingShopifyScopes?: string[];
   reauthRequired?: boolean;
   snapshotAt?: string;
 }
@@ -25,7 +27,12 @@ function getInitialStoreSnapshot(): StoreDataResponse | undefined {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (!raw) return undefined;
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && parsed.connected && parsed.data) {
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      parsed.connected &&
+      parsed.data?.data_quality?.schema_version === 6
+    ) {
       return parsed;
     }
   } catch {}
@@ -35,6 +42,7 @@ function getInitialStoreSnapshot(): StoreDataResponse | undefined {
 function getInitialStoreUpdatedAt(): number {
   if (typeof window === "undefined") return 0;
   const snapshot = getInitialStoreSnapshot();
+  if (snapshot?.needsShopifyReauthorization || snapshot?.needsReauthForOrders) return 0;
   if (snapshot?.snapshotAt) {
     const time = new Date(snapshot.snapshotAt).getTime();
     if (!isNaN(time) && time > 0) return time;
@@ -44,7 +52,9 @@ function getInitialStoreUpdatedAt(): number {
 
 export async function fetchStoreData(force = false): Promise<StoreDataResponse> {
   const res = await fetch(`/api/store/data${force ? "?force=true" : ""}`, {
-    cache: force ? "no-store" : "default",
+    // The React Query and server snapshot caches handle reuse; browser HTTP
+    // caching can preserve obsolete OAuth-scope flags after reconnection.
+    cache: "no-store",
   });
   if (!res.ok) throw new Error(`Store data failed (${res.status})`);
   const json: StoreDataResponse = await res.json();

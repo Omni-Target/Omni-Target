@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { getUserIntegration } from "@/lib/db";
 import { calculateAdReadinessScore } from "@/lib/ad-readiness-score";
+import { compareProductsForTest } from "@/lib/gateway-decision";
 
 export async function GET() {
   const { userId } = await auth();
@@ -75,20 +76,15 @@ export async function GET() {
 
 
   // ── Identify the best product to lead with ────────────────────────────────
-  // Priority 1: in-stock Gateway product with highest velocity
-  // Priority 2: in-stock product with most units sold
-  const gatewayInStock = [...inStockProducts]
-    .filter((p) => p.gateway_classification === "Gateway")
-    .sort((a, b) =>
-      (b.order_velocity || b.units_sold || 0) - (a.order_velocity || a.units_sold || 0)
-    );
+  // Rank current planning candidates; stock does not redefine their historical role.
+  const rankedInStock = [...inStockProducts].sort(compareProductsForTest);
 
   const topByUnitsSold = [...inStockProducts].sort(
     (a, b) => (b.units_sold || 0) - (a.units_sold || 0)
   );
 
-  const bestProduct = gatewayInStock[0] || topByUnitsSold[0] || null;
-  const isGatewayPick = gatewayInStock.length > 0;
+  const bestProduct = rankedInStock[0] || null;
+  const isGatewayPick = bestProduct?.gateway_classification === "Gateway";
 
   // ── Gateway stock risk check ──────────────────────────────────────────────
   const allGatewayProducts = products.filter((p) => p.gateway_classification === "Gateway");
@@ -100,13 +96,8 @@ export async function GET() {
 
   if (bestProduct) {
     if (isGatewayPick) {
-      const soldCount = bestProduct.units_sold || 0;
-      let reason = "it converts first-time shoppers best";
-      if (soldCount > 0) {
-        reason = `it has ${soldCount} sales and converts new shoppers best`;
-      }
       positives.push(
-        `Start with "${bestProduct.name}". It's your strongest gateway product (${reason}), making it your lowest-risk item to test with paid ads.`
+        `Consider "${bestProduct.name}" for a first test. ${bestProduct.product_decision?.role_reason || "It has a first-order gateway signal in accessible Shopify history."} ${bestProduct.product_decision?.readiness_reasons.join(" ") || "Confirm stock and full costs before spending."}`
       );
     } else if ((bestProduct.units_sold || 0) > 0) {
       positives.push(
@@ -121,7 +112,7 @@ export async function GET() {
 
   if (orders30d >= 10) {
     positives.push(
-      `${orders30d} orders in the last 30 days gives your store solid momentum. Meta already knows what your buyers look like, so your campaigns will find customers much faster.`
+      `${orders30d} orders were recorded in Shopify in the last 30 days. Confirm the relevant website events are firing in Meta Events Manager before choosing an optimization goal.`
     );
   }
 
@@ -174,12 +165,12 @@ export async function GET() {
       : topByUnitsSold[1];
     if (secondProduct) {
       recommendations.push(
-        `Lead with "${bestProduct.name}" first. Let it run for 7–10 days to prove itself before introducing "${secondProduct.name}". Focusing your budget on one hero product generates sales much faster than splitting it across multiple items.`
+      `Test "${bestProduct.name}" before adding "${secondProduct.name}" so you can evaluate one product hypothesis at a time. Check stock, costs and measured results before expanding.`
       );
     }
   } else if (bestProduct) {
     recommendations.push(
-      `Put your full daily ad budget behind "${bestProduct.name}" rather than spreading it thin. Giving all your momentum to one winning product gets profitable results faster.`
+      `Start with a controlled test of "${bestProduct.name}" and compare the result with its Shopify evidence. Set a spending limit you can support; profitability is not yet established.`
     );
   }
 

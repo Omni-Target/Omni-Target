@@ -20,22 +20,19 @@ export interface ProductIntelCardProps {
   shop?: string | null;
 }
 
-function classificationBadge(c?: string) {
-  if (!c) return null;
+function classificationBadge(c?: string, confidence?: "strong" | "directional" | "insufficient") {
+  if (!c || c.toLowerCase() === "insufficient data") return null;
   let label = c;
   let variant: "brand" | "warning" | "info" | "neutral" = "neutral";
   if (c.toLowerCase() === "gateway") {
-    label = "Gateway";
+    label = "Gateway Product";
     variant = "brand";
   } else if (c.toLowerCase() === "consideration") {
     label = "Repeat Favorite";
-    variant = "warning";
+    variant = "info";
   } else if (c.toLowerCase() === "hybrid") {
     label = "Proven Seller";
     variant = "info";
-  } else if (c.toLowerCase() === "insufficient data") {
-    label = "New Arrival";
-    variant = "neutral";
   }
   return (
     <Badge variant={variant} size="sm">
@@ -54,10 +51,26 @@ export function ProductIntelCard({
   const isOutOfStock = !product.in_stock;
   const isNewLaunch = variant === "new-launch";
   const isGateway =
-    product.gateway_classification?.toLowerCase() === "gateway" ||
-    (isOutOfStock &&
-      (product.first_time_buyer_ratio ?? 0) >= 0.7 &&
-      (product.units_sold ?? 0) >= 3);
+    product.gateway_classification?.toLowerCase() === "gateway";
+  const decision = product.product_decision;
+  const hasEstablishedRole = Boolean(
+    product.gateway_classification &&
+    product.gateway_classification !== "Insufficient Data" &&
+    product.gateway_classification.toLowerCase() !== "unknown" &&
+    (product.units_sold ?? 0) >= 3
+  );
+  const syncIncomplete = decision?.readiness_reasons.some((reason) => reason.includes("sync is incomplete")) ?? false;
+  const readinessSummary = !decision ? "" : decision.test_readiness === "hold"
+    ? "Out of stock. Restock inventory before testing ads."
+    : syncIncomplete
+      ? "Shopify order or catalog sync in progress. Data refreshes automatically."
+    : decision.test_readiness === "planning_candidate"
+      ? "Stock and unit costs are recorded. Confirm shipping and transaction fees when setting your test budget."
+      : `${product.in_stock_variant_count !== undefined && product.total_variant_count
+          ? `${product.in_stock_variant_count} of ${product.total_variant_count} variants in stock. `
+          : "Check available stock. "}${product.unit_cost_coverage === "complete"
+          ? "Confirm shipping and packaging costs before launching."
+          : "Confirm product unit costs and target margin before launching."}`;
 
   const narrative = deriveProductNarrative(product);
   const footerAmount = isNewLaunch ? product.price : product.revenue;
@@ -114,7 +127,14 @@ export function ProductIntelCard({
                 Restock Priority
               </Badge>
             ) : null}
-            {!isNewLaunch && classificationBadge(product.gateway_classification || (isGateway ? "Gateway" : undefined))}
+            {!isNewLaunch && classificationBadge(product.gateway_classification, decision?.role_confidence)}
+            {decision && !isOutOfStock && hasEstablishedRole && (
+              decision.test_readiness === "planning_candidate" ? (
+                <Badge variant="brand" size="sm">Ready to Test</Badge>
+              ) : decision.test_readiness === "review" && product.in_stock_variant_count !== undefined && product.total_variant_count && product.in_stock_variant_count < product.total_variant_count ? (
+                <Badge variant="warning" size="sm">{product.in_stock_variant_count} of {product.total_variant_count} in stock</Badge>
+              ) : null
+            )}
           </div>
         </div>
       </div>
@@ -127,13 +147,13 @@ export function ProductIntelCard({
         <div className="mt-3 rounded-lg border border-amber-200/80 bg-amber-50/80 p-2.5 text-xs text-amber-900">
           <p className="font-semibold flex items-center gap-1.5 text-amber-950">
             <Sparkles className="size-3.5 text-amber-600" />
-            Gateway Hero · Restock to Run Ads
+            Restock Priority · Customer Magnet
           </p>
           <p className="mt-0.5 text-amber-800">
-            {product.first_time_buyer_ratio
-              ? `${Math.round(product.first_time_buyer_ratio * 100)}% of buyers were first-time customers.`
-              : "Proven driver of new store customers."}{" "}
-            Restock this style on Shopify to start attracting new shoppers again.
+            {decision
+              ? `${decision.first_order_count} new buyers started with this piece.`
+              : "This is one of your top products for winning new customers."}{" "}
+            Restock soon so you can scale it with ads.
           </p>
         </div>
       ) : !isOutOfStock && (narrative.subtext || narrative.primaryMetric) ? (
@@ -148,6 +168,37 @@ export function ProductIntelCard({
           )}
         </div>
       ) : null}
+
+      {decision && !isNewLaunch && (
+        <details className="mt-3 rounded-lg border border-border-subtle px-3 py-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer font-semibold text-foreground">Why start with this product?</summary>
+          <div className="mt-2 space-y-2 leading-relaxed">
+            <p className="text-foreground">
+              {decision.role === "Gateway"
+                ? `${decision.first_order_count} new customers picked this as their first purchase. It’s your top customer magnet to acquire fresh shoppers.`
+                : decision.role === "Consideration"
+                  ? `Customers frequently pick this in later orders (${decision.later_order_count} repeat orders). Ideal for retargeting and email campaigns.`
+                  : decision.role === "Hybrid"
+                    ? `Consistently popular across first-time buyers (${decision.first_order_count}) and returning customers (${decision.later_order_count}).`
+                    : `Solid catalog performer. Build a targeted ad test to gauge buyer demand.`}
+            </p>
+            {decision.follow_up_60d.repeat_rate !== null && decision.follow_up_60d.eligible_first_order_buyers > 0 && (
+              <p className="rounded-md bg-brand-50/70 px-2 py-1 text-brand-700">
+                ✨ <strong>LTV Impact:</strong> {Math.round(decision.follow_up_60d.repeat_rate * 100)}% of buyers who started with this product placed another order within 60 days.
+              </p>
+            )}
+            <p><strong className="text-foreground">Launch checklist:</strong> {readinessSummary}</p>
+            <details className="pt-1">
+              <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">View order breakdown</summary>
+              <div className="mt-1.5 space-y-1 rounded bg-surface-subtle p-2 text-[11px] text-muted-foreground">
+                <p>• First orders: {decision.first_order_count} of {decision.identified_first_orders} first-time buyers</p>
+                <p>• Repeat orders: {decision.later_order_count} of {decision.identified_later_orders} returning orders</p>
+                <p>• Inventory: {product.in_stock_variant_count !== undefined && product.total_variant_count ? `${product.in_stock_variant_count} of ${product.total_variant_count} variants in stock` : "In stock"}</p>
+              </div>
+            </details>
+          </div>
+        </details>
+      )}
 
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-border-subtle pt-3 text-xs">
         <span className="text-subtle-foreground">

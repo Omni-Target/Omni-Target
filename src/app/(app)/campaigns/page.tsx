@@ -70,6 +70,8 @@ function CampaignsContent() {
   >("facebook");
 
   const generatingRef = useRef(false);
+  const generationRequestRef = useRef<{ key: string; id: string } | null>(null);
+  const [generatedAt, setGeneratedAt] = useState<string | undefined>();
   const [viewState, setViewState] = useState<CampaignState>("selection");
   const [loadingDraft, setLoadingDraft] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
@@ -163,6 +165,7 @@ function CampaignsContent() {
   const [selectedStrategyIndex, setSelectedStrategyIndex] = useState(1);
   const [selectedIntlStrategyIndex, setSelectedIntlStrategyIndex] = useState(1);
   const [selectedDuration, setSelectedDuration] = useState<7 | 14 | 30>(14);
+  const [selectedIntlDuration, setSelectedIntlDuration] = useState<7 | 14 | 30>(14);
   const [regenerateCount, setRegenerateCount] = useState(0);
   // Persisted brief session: set on the first generate, reused by regenerations
   // (so attempts append to the same campaign) and by "Generate Brief" to route
@@ -257,6 +260,10 @@ function CampaignsContent() {
     if (derivedGatewayInsight) setGatewayInsight(derivedGatewayInsight);
 
     try {
+      const requestKey = JSON.stringify([brandName, productName, description, goal, tone, productPrice, mediaCloudUrl, campaignId, isRegeneration]);
+      if (generationRequestRef.current?.key !== requestKey) {
+        generationRequestRef.current = { key: requestKey, id: crypto.randomUUID() };
+      }
       const res = await fetch("/api/campaigns/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -279,7 +286,7 @@ function CampaignsContent() {
           isRegeneration,
           shopifyStoreCountry: storeInsights?.store?.country || null,
           topCustomerLocations: storeInsights?.orders?.top_locations || null,
-          skipTargeting: true,
+          requestId: generationRequestRef.current.id,
         }),
       });
 
@@ -302,6 +309,9 @@ function CampaignsContent() {
         throw new Error(errorDetail || "API returned an error");
       }
 
+      generationRequestRef.current = null;
+      setGeneratedAt(data.briefData?.generatedAt);
+      setProductAiInsights(data.aiInsights);
       const generatedCopyData: GeneratedCopy = data;
       const newVersionId: string | null = data.versionId ?? null;
       setGeneratedCopy(generatedCopyData);
@@ -318,7 +328,7 @@ function CampaignsContent() {
         const entry: BriefVariation = {
           versionId: newVersionId,
           copy: generatedCopyData,
-          aiInsights: null,
+          aiInsights: data.aiInsights,
         };
         const next = isRegeneration ? [...prev, entry] : [entry];
         setSelectedVariationIndex(next.length - 1);
@@ -343,65 +353,8 @@ function CampaignsContent() {
 
       if (isRegeneration) setRegenerateCount((prev) => prev + 1);
 
-      // ── Progressive rendering: Transition to "review" immediately! ──
-      // Founder immediately reviews ad copy and previews without waiting for Step 2.
       setViewState("review");
-      setHooksLoading(true);
-
-      // Step 2 (Background): Generate Advantage+ targeting & distinct creative hooks
-      // with copy angle exclusion, and hydrate review step as soon as ready.
-      fetch("/api/campaigns/generate/targeting", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          productName,
-          productDescription: description,
-          productPrice: productPrice || null,
-          productVariants: productVariants || null,
-          angleUsed: data.angleUsed || null,
-          campaignId: data.campaignId || campaignId,
-          versionId: newVersionId,
-        }),
-      })
-        .then(async (tRes) => {
-          if (!tRes.ok) return null;
-          return tRes.json();
-        })
-        .then((tData) => {
-          if (tData?.targeting_profile || tData?.creative_hooks) {
-            const parsedAiInsights: AiInsights = {
-              creative_hooks: tData.creative_hooks ?? undefined,
-              advantage_plus_guidance: tData.advantage_plus_guidance ?? undefined,
-              timing: tData.targeting_profile?.timing,
-              targeting: tData.targeting_profile
-                ? {
-                    locations: tData.targeting_profile.locations,
-                    age_min: tData.targeting_profile.demographics?.age_min ?? 25,
-                    age_max: tData.targeting_profile.demographics?.age_max ?? 44,
-                    age_reasoning:
-                      tData.targeting_profile.demographics?.age_reasoning ?? "",
-                    gender: tData.targeting_profile.demographics?.gender ?? "All",
-                    interests:
-                      tData.targeting_profile.seed_interests ?? ["Online Shopping"],
-                  }
-                : undefined,
-            };
-            setProductAiInsights(parsedAiInsights);
-            setVariations((prev) =>
-              prev.map((v) =>
-                v.versionId === newVersionId
-                  ? { ...v, aiInsights: parsedAiInsights }
-                  : v
-              )
-            );
-          }
-        })
-        .catch((tErr) => {
-          console.error("Async targeting generation error:", tErr);
-        })
-        .finally(() => {
-          setHooksLoading(false);
-        });
+      setHooksLoading(false);
     } catch (err) {
       console.error(err);
       setErrorMsg(
@@ -441,9 +394,7 @@ function CampaignsContent() {
     setGeneratedCopy(v.copy);
     setCurrentVersionId(v.versionId);
     setSelectedCta(v.copy.cta);
-    if (v.aiInsights) {
-      setProductAiInsights(v.aiInsights);
-    }
+    setProductAiInsights(v.aiInsights ?? null);
   };
 
   const pdfParams = useMemo(() => {
@@ -451,6 +402,7 @@ function CampaignsContent() {
     return buildBriefPdfPayload({
       brandName,
       productName,
+      generatedAt,
       productPrice: productPrice ? parseFloat(productPrice) : undefined,
       goal,
       generatedCopy,
@@ -458,6 +410,7 @@ function CampaignsContent() {
       aiInsights: effectiveAiInsights,
       storeInsights,
       selectedDuration,
+      selectedIntlDuration,
       selectedStrategyIndex,
       selectedIntlStrategyIndex,
       gatewayInsight,
@@ -466,6 +419,7 @@ function CampaignsContent() {
   }, [
     brandName,
     productName,
+    generatedAt,
     productPrice,
     goal,
     generatedCopy,
@@ -473,6 +427,7 @@ function CampaignsContent() {
     effectiveAiInsights,
     storeInsights,
     selectedDuration,
+    selectedIntlDuration,
     selectedStrategyIndex,
     selectedIntlStrategyIndex,
     gatewayInsight,
@@ -483,19 +438,25 @@ function CampaignsContent() {
     setFinalizing(true);
     if (campaignId) {
       try {
-        await fetch(`/api/campaigns/${campaignId}`, {
+        const saveResponse = await fetch(`/api/campaigns/${campaignId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             versionId: currentVersionId,
             copy: generatedCopy,
             status: "complete",
-            briefData: pdfParams,
+            briefData: {
+              brandName, productName, productPrice: productPrice ? Number(productPrice) : undefined,
+              goal, generatedCopy, selectedCta, aiInsights: effectiveAiInsights, storeInsights,
+              selectedStrategyIndex, selectedIntlStrategyIndex, selectedDuration, selectedIntlDuration, gatewayInsight, isNewLaunch, generatedAt,
+            },
           }),
         });
+        if (!saveResponse.ok) throw new Error("Your brief could not be saved. Please retry.");
         queryClient.invalidateQueries({ queryKey: BRIEFS_QUERY_KEY });
       } catch (err) {
-        console.error("Failed to finalize campaign:", err);
+        setErrorMsg("Your brief could not be saved. Please retry.");
+        return;
       } finally {
         setFinalizing(false);
       }
@@ -512,7 +473,9 @@ function CampaignsContent() {
       storeInsights,
       goal,
       selectedStrategyIndex,
+      selectedIntlStrategyIndex,
       selectedDuration,
+      selectedIntlDuration,
       gatewayInsight,
     });
     navigator.clipboard.writeText(briefText);
@@ -545,6 +508,9 @@ function CampaignsContent() {
     }
     try {
       const briefData = {
+        generatedAt,
+        productPrice: productPrice ? Number(productPrice) : undefined,
+        selectedIntlStrategyIndex,
         brandName,
         productName,
         goal,
@@ -556,10 +522,11 @@ function CampaignsContent() {
         storeInsights,
         selectedStrategyIndex,
         selectedDuration,
+        selectedIntlDuration,
         gatewayInsight,
         isNewLaunch,
       };
-      await fetch(`/api/campaigns/${campaignId}`, {
+      const saveResponse = await fetch(`/api/campaigns/${campaignId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -568,12 +535,14 @@ function CampaignsContent() {
           briefData,
         }),
       });
+      if (!saveResponse.ok) throw new Error("Your brief could not be saved. Please retry.");
       // The brief is now finalized — refresh the history so it appears there.
       queryClient.invalidateQueries({ queryKey: BRIEFS_QUERY_KEY });
     } catch (err) {
       // Copy is already persisted from generation; brief_data just enriches the
       // page. Navigate regardless so the user always reaches their brief.
-      console.error("Failed to finalize brief:", err);
+      setErrorMsg("Your brief could not be saved. Please retry.");
+      return;
     }
     router.replace(`/campaigns/${campaignId}`);
   };
@@ -607,6 +576,7 @@ function CampaignsContent() {
 
   return (
     <PageContainer width="wide" className="pb-24 lg:pb-12">
+      {errorMsg && viewState !== "input" && <p role="alert" className="mb-4 text-red-600">{errorMsg}</p>}
       {/* items-start lets StepRail's built-in lg:sticky pin while the right column scrolls */}
       <div className="grid gap-8 lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start">
         <StepRail activeIndex={STEP_INDEX[viewState]} />
@@ -711,6 +681,8 @@ function CampaignsContent() {
               setSelectedIntlStrategyIndex={setSelectedIntlStrategyIndex}
               selectedDuration={selectedDuration}
               setSelectedDuration={setSelectedDuration}
+              selectedIntlDuration={selectedIntlDuration}
+              setSelectedIntlDuration={setSelectedIntlDuration}
               isDownloadingPdf={false}
               onDownloadPdf={() => setModalOpen(true)}
               onCopyBrief={handleCopyBrief}

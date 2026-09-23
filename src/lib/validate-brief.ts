@@ -1,6 +1,8 @@
+import { validateCopy } from "./campaigns/validate-copy";
 export interface TargetProductContext {
   id: string;
   title: string;
+  description?: string;
   tags?: string[];
   product_type?: string;
   price?: number | string;
@@ -59,7 +61,7 @@ export function tokenize(text: string): Set<string> {
  * generic fashion/copy vocabulary that legitimately recurs across hooks
  * without indicating conceptual overlap. Used for cross-hook overlap detection.
  */
-function extractSalientTokens(text: string): Set<string> {
+function extractSalientTokens(text: string, productTokens?: Set<string>): Set<string> {
   // Words that are too generic to signal overlap — common across all fashion copy
   const stoplist = new Set([
     // Common English function words
@@ -81,14 +83,20 @@ function extractSalientTokens(text: string): Set<string> {
     "like", "need", "want", "give", "meet", "turn", "high", "last",
     "next", "same", "most", "only", "even", "also", "both", "each",
     "many", "much", "once", "here", "very", "well", "over", "ever",
-    "clothing", "garment", "outfit", "wearing", "wears", "model", "photo",
+    "clothing", "garment", "outfit", "wearing", "wears", "wearer", "model", "photo",
     "piece", "pieces", "items", "thing", "things", "scene", "close",
     "camera", "focus", "showing", "shows", "capture", "detail", "details",
+    // Common garment types and styling words that legitimately recur
+    "pants", "pant", "trousers", "trouser", "shirt", "shirts", "skirt", "skirts",
+    "top", "tops", "shorts", "tee", "tees", "blouse", "blouses", "jeans",
+    "fabric", "fabrics", "material", "materials", "natural", "everyday", "daily",
+    "comfort", "comfortable", "silhouette", "crafted", "craft", "finish", "fitting",
+    "relax", "relaxed",
   ]);
 
   const salient = new Set<string>();
   for (const token of tokenize(text)) {
-    if (token.length > 4 && !stoplist.has(token)) {
+    if (token.length > 4 && !stoplist.has(token) && (!productTokens || !productTokens.has(token))) {
       salient.add(token);
     }
   }
@@ -106,6 +114,17 @@ export function validateBrief(
 ): string[] {
   const errors: string[] = [];
 
+  if (targetProduct.description !== undefined) {
+    for (const hook of response.creative_hooks || []) {
+      errors.push(...validateCopy({
+        headline: hook.on_screen_text,
+        primaryText: hook.primary_text_hook,
+        description: hook.visual_cue,
+        cta: "Shop Now",
+      }, `${targetProduct.title} ${targetProduct.description}`).map((error) => `Hook ${hook.angle}: ${error}`));
+    }
+  }
+
   // 1. Enforce exactly 3 distinct angles
   const angles = response.creative_hooks?.map((h) => h.angle) || [];
   if (angles.length !== 3) {
@@ -114,6 +133,10 @@ export function validateBrief(
   if (new Set(angles).size !== angles.length) {
     errors.push(`Duplicate angle detected: ${angles.join(", ")}`);
   }
+
+  const targetTokens = tokenize(
+    `${targetProduct.title} ${targetProduct.tags?.join(" ") || ""}`
+  );
 
   // 2. Cross-hook conceptual overlap detection
   // Compares the salient (claim-bearing) tokens across every hook pair.
@@ -124,7 +147,8 @@ export function validateBrief(
     const hookProfiles = (response.creative_hooks || []).map((hook) => ({
       angle: hook.angle,
       salient: extractSalientTokens(
-        `${hook.visual_cue || ""} ${hook.on_screen_text || ""} ${hook.primary_text_hook || ""}`
+        `${hook.visual_cue || ""} ${hook.on_screen_text || ""} ${hook.primary_text_hook || ""}`,
+        targetTokens
       ),
     }));
 
@@ -142,11 +166,6 @@ export function validateBrief(
       }
     }
   }
-
-  // 2. Build target product token baseline (Title + Tags)
-  const targetTokens = tokenize(
-    `${targetProduct.title} ${targetProduct.tags?.join(" ") || ""}`
-  );
 
   // 3. Filter sibling products dynamically (Token-Subset Exclusion)
   const verifiableSiblings = catalog.filter((sibling) => {
@@ -207,6 +226,63 @@ export function validateBrief(
     );
   }
 
+  // 6. Factual claim validation
+  const allCopyTexts = (response.creative_hooks || []).flatMap((h) => [
+    h.primary_text_hook,
+    h.on_screen_text,
+  ].filter((text): text is string => typeof text === 'string'));
+
+  const factualErrors = validateFactualClaims(allCopyTexts, {
+    title: targetProduct.title,
+    description: targetProduct.description || "",
+    tags: targetProduct.tags || [],
+    product_type: targetProduct.product_type || "",
+  });
+  errors.push(...factualErrors);
+
+  return errors;
+}
+
+/**
+ * Material-claim patterns the AI might assert. Each regex is tested against
+ * generated copy; a match is only valid if a corresponding token appears in
+ * the product's own description, tags, or product_type.
+ */
+const MATERIAL_CLAIM_PATTERNS: { pattern: RegExp; evidenceTokens: string[] }[] = [
+  { pattern: /\b(?:100%|pure|genuine|real)\s+(?:leather|silk|cotton|linen|wool|cashmere|suede)/i, evidenceTokens: ["leather", "silk", "cotton", "linen", "wool", "cashmere", "suede"] },
+  { pattern: /\bhand[- ]?(?:made|crafted|stitched|sewn|woven|painted|dyed|beaded|finished)/i, evidenceTokens: ["handmade", "handcrafted", "hand-stitched", "hand-sewn", "hand-woven", "hand-painted", "hand-dyed", "hand-beaded", "hand-finished", "hand stitched", "hand sewn", "hand woven", "hand painted", "hand dyed", "hand beaded", "hand finished", "artisan", "craftsmanship"] },
+  { pattern: /\b(?:organic|vegan|cruelty[- ]?free|eco[- ]?friendly|sustainable|fair[- ]?trade|recyclable|biodegradable)/i, evidenceTokens: ["organic", "vegan", "cruelty-free", "cruelty free", "eco-friendly", "eco friendly", "sustainable", "fair-trade", "fair trade", "recyclable", "biodegradable"] },
+  { pattern: /\b(?:medical[- ]?grade|clinical(?:ly)?[- ]?(?:tested|proven)|dermatologist[- ]?(?:tested|approved|recommended)|FDA[- ]?approved)/i, evidenceTokens: ["medical-grade", "medical grade", "clinically tested", "clinically proven", "dermatologist", "fda"] },
+  { pattern: /\b(?:patented|award[- ]?winning|best[- ]?selling|#1|number one)/i, evidenceTokens: ["patented", "award-winning", "award winning", "best-selling", "best selling", "#1", "number one"] },
+  { pattern: /\bmade in (?:italy|france|japan|usa|uk|switzerland|germany)/i, evidenceTokens: ["made in italy", "made in france", "made in japan", "made in usa", "made in uk", "made in switzerland", "made in germany", "italian", "french", "japanese", "american", "british", "swiss", "german"] },
+];
+
+/** Checks generated copy for factual claims not supported by the product's own data. */
+export function validateFactualClaims(
+  copyTexts: string[],
+  productEvidence: { title?: string; description: string; tags: string[]; product_type: string },
+): string[] {
+  const errors: string[] = [];
+  const evidenceCorpus = [
+    productEvidence.title || "",
+    productEvidence.description,
+    ...productEvidence.tags,
+    productEvidence.product_type,
+  ].join(" ").toLowerCase();
+
+  for (const text of copyTexts) {
+    for (const { pattern, evidenceTokens } of MATERIAL_CLAIM_PATTERNS) {
+      const match = text.match(pattern);
+      if (match) {
+        const claimSupported = evidenceTokens.some((token) => evidenceCorpus.includes(token.toLowerCase()));
+        if (!claimSupported) {
+          errors.push(
+            `Unsupported factual claim: "${match[0]}" — not found in the product's description, tags, or type. Remove or rephrase.`
+          );
+        }
+      }
+    }
+  }
   return errors;
 }
 

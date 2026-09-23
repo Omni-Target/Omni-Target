@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { randomBytes } from "crypto";
 import { validateShopifyInput } from "@/lib/domain-validation";
+import { SHOPIFY_SCOPE_PARAM } from "@/lib/shopify-config";
 
 export async function GET(request: Request) {
   const { userId } = await auth();
@@ -82,22 +83,13 @@ export async function GET(request: Request) {
   const nonce = randomBytes(16).toString("hex");
   const state = `${nonce}___${from}___${userId || "anonymous"}___${selectedPlan}`;
 
-  const scopes = [
-    "read_orders",
-    "read_all_orders",
-    "read_customers",
-    "read_products",
-    "read_product_listings",
-    "read_inventory"
-  ].join(",");
-
   const redirectUri = `${appBaseUrl}/api/auth/shopify/callback`;
 
   // Standard offline token OAuth flow
   const authUrl =
     `https://${shop}/admin/oauth/authorize?` +
     `client_id=${process.env.SHOPIFY_CLIENT_ID}` +
-    `&scope=${scopes}` +
+    `&scope=${encodeURIComponent(SHOPIFY_SCOPE_PARAM)}` +
     `&redirect_uri=${redirectUri}` +
     `&state=${state}`;
 

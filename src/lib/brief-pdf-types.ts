@@ -16,6 +16,7 @@ export interface AdvantagePlusGuidance {
     | "Manual Sales with Advantage+ Audience";
   optimization_event: "AddToCart" | "InitiateCheckout" | "Purchase";
   optimization_reasoning: string;
+  event_evidence?: import("./advantage-plus").EventPlanningEvidence;
   seed_audience_suggestions: {
     age_min: number;
     age_max: number;
@@ -67,6 +68,7 @@ export interface CampaignBriefPayload {
 }
 
 export interface BriefPDFParams {
+  storeCountry?: string;
   id?: string;
   brandName: string;
   productName: string;
@@ -99,6 +101,7 @@ export interface BriefPDFParams {
     interest_reasoning?: string;
   };
   budget: {
+    calculation?: import("./budget-evidence").BudgetCalculation;
     recommended_daily?: number;
     recommended_duration_days?: number;
     reasoning?: string;
@@ -119,6 +122,7 @@ export interface BriefPDFParams {
     international_daily?: number;
     international_tier?: string;
     international_budget_formatted?: string;
+    international_duration_days?: number;
   };
   timing: {
     peak_days?: string[];
@@ -128,6 +132,7 @@ export interface BriefPDFParams {
   warnings: string[];
   generatedAt: string;
   gatewayInsight?: {
+    productDecision?: import("@/lib/store-data").ProductDecisionEvidence;
     currentProductClassification?: string;
     currentProductName?: string;
     currentProductImage?: string;
@@ -150,6 +155,16 @@ export interface BriefPDFParams {
   pre_launch_checklist?: {
     out_of_stock_count: number;
     warnings: string[];
+  };
+  decisionEvidence?: {
+    analytics_window_days?: number;
+    recent_funnel?: import("./store-data").StoreRecentFunnel | null;
+    historical_conversion_rate?: number | null;
+    historical_cart_to_checkout_rate?: number | null;
+    historical_cart_to_order_rate?: number | null;
+    unit_cost?: number | null;
+    unit_cost_coverage?: "complete" | "partial" | "missing";
+    price_less_unit_cost?: number | null;
   };
 }
 

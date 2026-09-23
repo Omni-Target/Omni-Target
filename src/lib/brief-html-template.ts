@@ -1,3 +1,4 @@
+import { fetchSafeImage } from "@/lib/safe-image-fetch";
 import { BriefPDFParams, CreativeHook } from "./brief-pdf-types";
 import { getCurrencySymbol, formatCurrency } from "./currency";
 import {
@@ -203,19 +204,20 @@ export async function buildBriefHTML(
   const symbol = budget.currency_symbol || getCurrencySymbol(currency);
   const daily = budget.goal_adjusted_daily ?? budget.recommended_daily ?? null;
   const duration = budget.recommended_duration_days ?? 14;
+  const intlDuration = budget.international_duration_days ?? duration;
 
   const campaignType =
     guidance?.campaign_type ?? "Manual Sales with Advantage+ Audience";
   const optimizationEvent =
     guidance?.optimization_event ??
     budget.optimization_event?.event ??
-    "AddToCart";
+    "Purchase";
   const optimizationReasoning =
     guidance?.optimization_reasoning ??
     budget.optimization_event?.reasoning ??
     "";
 
-  const effectiveStoreCountry = getEffectiveStoreCountry(undefined, currency);
+  const effectiveStoreCountry = getEffectiveStoreCountry(params.storeCountry, currency);
 
   const rawLocations = Array.isArray(legacyTargeting.locations)
     ? legacyTargeting.locations
@@ -293,9 +295,6 @@ export async function buildBriefHTML(
       : legacyTargeting.gender === "male"
       ? "Men"
       : "All");
-  const demographicJustification =
-    seed?.demographic_justification ?? legacyTargeting.age_reasoning ?? "";
-
   const numProductPrice =
     typeof params.productPrice === "number"
       ? params.productPrice
@@ -303,26 +302,28 @@ export async function buildBriefHTML(
       ? parseFloat(String(params.productPrice).replace(/[^0-9.]/g, ""))
       : 0;
 
-  const expectedCartsThreshold =
-    numProductPrice > 50000 ||
-    (currency === "USD" && numProductPrice > 50) ||
-    (currency === "GBP" && numProductPrice > 40)
-      ? "8–12 Add to Carts"
-      : "15–20 Add to Carts";
+  const decisionEvidence = params.decisionEvidence;
+  const recentFunnel = guidance?.event_evidence?.recent_funnel ?? decisionEvidence?.recent_funnel;
+  const recentFunnelSummary = recentFunnel?.cart_sessions !== null &&
+    recentFunnel?.cart_sessions !== undefined &&
+    recentFunnel.checkout_sessions !== null &&
+    recentFunnel.completed_checkout_sessions !== null
+      ? `Shopify ${recentFunnel.window_days}-day sessions: ${recentFunnel.cart_sessions} cart additions, ${recentFunnel.checkout_sessions} reached checkout, ${recentFunnel.completed_checkout_sessions} completed checkout`
+      : "Strong interest: shoppers adding to cart, but drop-offs before checkout";
 
   const hooks: CreativeHook[] = params.creative_hooks ?? [];
   const peakDays: string[] = Array.isArray(timing.peak_days)
     ? timing.peak_days
     : [];
   const storeTimezoneName = getStoreTimezoneName(effectiveStoreCountry, currency);
-  const launchDayName = peakDays[0] || "Monday";
-  const preciseLaunchTiming = `${launchDayName}, 12:00 AM (${storeTimezoneName})`;
+  const launchDayName = peakDays[0];
+  const preciseLaunchTiming = launchDayName ? `${launchDayName}, 12:00 AM (${storeTimezoneName})` : "When your store and creative are ready";
 
   // ── Product image as base64 ──
   let productImgSrc = "";
   if (gi?.currentProductImage) {
     try {
-      const res = await fetch(gi.currentProductImage);
+      const res = await fetchSafeImage(gi.currentProductImage);
       if (res.ok) {
         const buf = await res.arrayBuffer();
         const ct = res.headers.get("content-type") || "image/jpeg";
@@ -353,11 +354,12 @@ export async function buildBriefHTML(
     const isGateway = gi.currentProductClassification === "Gateway";
     const isConsideration = gi.currentProductClassification === "Consideration";
 
-    const classTone: Tone = isGateway ? "info" : isConsideration ? "warning" : isNew ? "neutral" : "neutral";
+    const decision = gi.productDecision;
+    const classTone: Tone = decision?.test_readiness === "hold" ? "warning" : isGateway ? "info" : isConsideration ? "warning" : "neutral";
     const classLabel = isGateway
-      ? "Signature Gateway"
+      ? decision?.role_confidence === "directional" ? "Possible First-Order Gateway" : "First-Order Gateway Signal"
       : isConsideration
-      ? "Repeat Favorite"
+      ? decision ? "Later-Order Signal" : "Repeat Favorite"
       : isNew
       ? "New Arrival"
       : "All-Round Seller";
@@ -369,7 +371,9 @@ export async function buildBriefHTML(
       : "Try a 9:16 vertical video (Instagram Reels & Stories) alongside a clean square photo to see which creative brings more sales.";
 
     let insightText = "";
-    if (params.isNewLaunch || isNew) {
+    if (decision && !params.isNewLaunch && !isNew) {
+      insightText = `${decision.role_reason} ${decision.test_readiness === "hold" ? "Hold the ad test until stock returns." : decision.test_readiness === "review" ? "Review inventory and recorded costs before testing." : "This is a planning candidate; check shipping, fees and returns before setting an affordable acquisition cost."}`;
+    } else if (params.isNewLaunch || isNew) {
       insightText =
         "New product launch — great for testing customer interest with Meta's audience discovery.";
     } else if (
@@ -377,26 +381,72 @@ export async function buildBriefHTML(
       gi.currentProductName === gi.bestsellerName
     ) {
       insightText =
-        "This product is both your overall bestseller and your #1 Signature Gateway — your iconic entry piece with the strongest historical first-purchase signal in your store.";
+        "This product is both your overall bestseller and the item that appeared most often in new shoppers' first orders.";
     } else if (gi.currentProductName === gi.topGatewayName) {
       insightText = `While your overall store bestseller is ${
         gi.bestsellerName || "another product"
-      }, this product is your #1 Signature Gateway for winning brand-new customers.`;
+      }, this product appeared most often in new buyers' first orders, making it your highest-signal candidate for winning cold shoppers on Meta.`;
     } else if (gi.currentProductName === gi.bestsellerName) {
       insightText = `This is your store's top revenue earner, with strong natural demand and steady sales.`;
     } else if (isGateway) {
       insightText =
-        "Signature Gateway — your iconic entry piece with the strongest historical first-purchase signal in your store.";
+        "First-order magnet — this piece appeared frequently in new shoppers' first purchases.";
     } else if (isConsideration) {
       insightText =
-        "High-value product that lifts your average cart size — best for interested shoppers and repeat buyers.";
+        "Repeat favorite — this product is frequently purchased by returning shoppers after discovering your brand.";
     } else {
       insightText =
         "Reliable seller that appeals equally to brand-new shoppers and repeat customers.";
     }
 
     let evidenceHTML = "";
-    if (params.isNewLaunch || isNew) {
+    if (decision && !params.isNewLaunch && !isNew) {
+      const followUp = decision.follow_up_60d;
+      evidenceHTML = `
+        <div style="margin-top:12px; margin-bottom:12px; padding:12px 14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; font-size:11.5px; color:#166534;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid #dcfce7;">
+            <div style="display:flex; align-items:center; gap:6px; font-weight:700; color:#15803d; font-size:12px;">
+              <span>✓</span>
+              <span>Verified First-Order Magnet</span>
+            </div>
+            <span style="font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; background:#dcfce7; color:#166534; padding:2px 7px; border-radius:999px;">
+              ${esc(decision.role_confidence)} Signal
+            </span>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:8px;">
+            <div>
+              <div style="font-size:10px; font-weight:600; text-transform:uppercase; color:#15803d; letter-spacing:0.03em;">First-Order Volume</div>
+              <div style="font-weight:700; font-size:13px; color:#14532d; margin-top:2px;">
+                ${decision.first_order_count} of ${decision.identified_first_orders} identified first orders
+              </div>
+              <div style="font-size:10.5px; color:#166534; margin-top:1px;">
+                vs ${decision.later_order_count} repeat orders
+              </div>
+            </div>
+            <div>
+              <div style="font-size:10px; font-weight:600; text-transform:uppercase; color:#15803d; letter-spacing:0.03em;">60-Day Repeat LTV</div>
+              <div style="font-weight:700; font-size:13px; color:#14532d; margin-top:2px;">
+                ${followUp.repeat_rate === null ? "Building Cohort" : `${Math.round(followUp.repeat_rate * 100)}% reorder rate`}
+              </div>
+              <div style="font-size:10.5px; color:#166534; margin-top:1px;">
+                ${followUp.repeat_rate === null ? "New product" : `${followUp.buyers_with_another_order} of ${followUp.eligible_first_order_buyers} buyers placed another store order`}
+              </div>
+            </div>
+            <div>
+              <div style="font-size:10px; font-weight:600; text-transform:uppercase; color:#15803d; letter-spacing:0.03em;">Test Readiness</div>
+              <div style="font-weight:700; font-size:13px; color:#14532d; margin-top:2px; text-transform:capitalize;">
+                ${esc(decision.test_readiness.replaceAll("_", " "))}
+              </div>
+              <div style="font-size:10.5px; color:#166534; margin-top:1px;">
+                ${esc(decision.readiness_reasons[0] || "Stock verified")}
+              </div>
+            </div>
+          </div>
+          <div style="font-size:10px; color:#15803d; border-top:1px solid #dcfce7; padding-top:5px; opacity:0.85;">
+            Source: Shopify accessible paid orders and catalog, synced ${esc(decision.as_of.slice(0, 10))}. ${esc(decision.limitations.join(" "))}
+          </div>
+        </div>`;
+    } else if (params.isNewLaunch || isNew) {
       evidenceHTML = `
         <div style="margin-top:8px; margin-bottom:10px; padding:7px 11px; background:#eef2ff; border:1px solid #c7d2fe; border-left:3px solid #6366f1; border-radius:6px; font-size:11px; color:#3730a3; line-height:1.5;">
           <strong style="color:#4f46e5; font-weight:700;">✨ New arrival test:</strong> Fresh in your catalog — optimized to introduce new shoppers to your brand.
@@ -410,8 +460,8 @@ export async function buildBriefHTML(
 
       const detailStr =
         ftbCount && totalCust
-          ? `${ftbCount} of ${totalCust} unique customers (${ftbPct}%) who purchased this item were first-time customers of your store (based on lifetime store order history).`
-          : `${ftbPct}% of customers who purchased this item were first-time customers of your store (based on lifetime store order history).`;
+          ? `${ftbCount} of ${totalCust} unique customers (${ftbPct}%) who purchased this item were first-time customers of your store (based on accessible paid-order history).`
+          : `${ftbPct}% of customers who purchased this item were first-time customers of your store (based on accessible paid-order history).`;
 
       evidenceHTML = `
         <div style="margin-top:8px; margin-bottom:10px; padding:7px 11px; background:#f0fdf4; border:1px solid #bbf7d0; border-left:3px solid #16a34a; border-radius:6px; font-size:11px; color:#166534; line-height:1.5;">
@@ -425,7 +475,7 @@ export async function buildBriefHTML(
     } else if (isGateway) {
       evidenceHTML = `
         <div style="margin-top:8px; margin-bottom:10px; padding:7px 11px; background:#f0fdf4; border:1px solid #bbf7d0; border-left:3px solid #16a34a; border-radius:6px; font-size:11px; color:#166534; line-height:1.5;">
-          <strong style="color:#15803d; font-weight:700;">✓ Strong first-purchase signal:</strong> Consistently brings the highest share of brand-new customers into your store.
+          <strong style="color:#15803d; font-weight:700;">✓ Gateway product:</strong> This product is your top customer acquisition magnet for attracting first-time shoppers.
         </div>`;
     }
 
@@ -499,7 +549,7 @@ export async function buildBriefHTML(
     <div class="flight-metric-grid">
       <div class="flight-metric">
         <div class="flight-metric-val">${daily ? fmt(daily, currency, symbol) : "Set manually"}<span class="flight-metric-unit">/day</span></div>
-        <div class="flight-metric-label">Recommended Daily Budget</div>
+        <div class="flight-metric-label">${showOverseas && intlDaily ? "Primary Local Daily" : "Recommended Daily Budget"}</div>
         <div class="flight-metric-sub">${esc(budget.tier || "Sweet Spot")} Strategy · 1 Ad Set</div>
       </div>
       <div class="flight-metric">
@@ -517,6 +567,24 @@ export async function buildBriefHTML(
         <div class="flight-metric-label">Campaign Type</div>
         <div class="flight-metric-sub">${campaignType.includes("ASC") ? "Automated Shopping Campaign" : "Targeted Audience Setup"}</div>
       </div>
+    </div>
+    ${
+      showOverseas && intlDaily
+        ? `<div class="flight-reconcile-bar" style="margin-top:10px; padding:8px 12px; border-radius:8px; background:#f8fafc; border:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; font-size:11px; flex-wrap:wrap; gap:6px;">
+      <div>
+        <span style="font-weight:700; color:#0f172a;">Independent Ad Set Budgets:</span>
+        <span style="color:#16a34a; font-weight:700; margin-left:6px;">Primary Local:</span> ${daily ? fmt(daily, currency, symbol) : "—"}/day (${esc(budget.tier || "Sweet Spot")})
+        <span style="color:#94a3b8; margin:0 4px;">·</span>
+        <span style="color:#6366f1; font-weight:700;">Optional Overseas:</span> ${fmt(intlDaily, currency, symbol)}/day (${esc(intlTier || budget.international_tier || "Sweet Spot")})
+      </div>
+      <div style="font-weight:700; color:#334155;">
+        Combined Total: <span style="color:#0f172a; font-weight:800;">${fmt((daily || 0) + intlDaily, currency, symbol)}/day</span> (${duration === intlDuration ? `${duration}d: ` : `Local ${duration}d + Overseas ${intlDuration}d: `}${fmt((daily ? daily * duration : 0) + intlDaily * intlDuration, currency, symbol)})
+      </div>
+    </div>`
+        : ""
+    }
+    <div style="margin-top:10px; padding:9px 12px; border-radius:8px; background:#fffaeb; border:1px solid #fbe6bf; color:#92400e; font-size:11px; line-height:1.45;">
+      <strong>Before publishing:</strong> Confirm that ${esc(optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent === "InitiateCheckout" ? "Initiate Checkout" : optimizationEvent)} is active and receiving recent website events in Meta Events Manager. Shopify sessions do not verify Meta event health.
     </div>
 
     <div class="cheat-sheet">
@@ -540,7 +608,11 @@ export async function buildBriefHTML(
         </div>
         <div class="cheat-cell">
           <span class="cheat-label">Test Duration &amp; Total Spend</span>
-          <span class="cheat-val">${duration} Days · Total ${daily ? fmt(daily * duration, currency, symbol) : "—"}</span>
+          <span class="cheat-val">${
+            showOverseas && intlDaily
+              ? `Local: ${duration}d (${daily ? fmt(daily * duration, currency, symbol) : "—"}) · Overseas: ${intlDuration}d (${fmt(intlDaily * intlDuration, currency, symbol)}) · Total: ${fmt((daily ? daily * duration : 0) + intlDaily * intlDuration, currency, symbol)}`
+              : `${duration} Days · Total ${daily ? fmt(daily * duration, currency, symbol) : "—"}`
+          }</span>
         </div>
         <div class="cheat-cell">
           <span class="cheat-label">Best Time to Launch</span>
@@ -803,10 +875,10 @@ export async function buildBriefHTML(
     `
     ${engineLogic(
       `Optimization Goal · ${optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent}`,
-      `<p><strong>Why this goal:</strong> ${esc(cleanOptimizationReasoning || (optimizationEvent === "AddToCart" ? "With fewer than 30 monthly orders recorded, optimizing for Add to Cart is a smart starting test to feed Meta early intent signals while pointing toward real buyers." : "Optimizing directly for purchases gives Meta the signal needed to find ready-to-buy customers."))}</p>
+      `<p><strong>Why this goal:</strong> ${esc(cleanOptimizationReasoning || "Purchase is the sales-goal hypothesis. Verify the selected website event in Meta Events Manager before publishing; Shopify order counts do not establish Meta event volume.")}</p>
        ${
          optimizationEvent === "AddToCart"
-           ? `<p style="margin-top:8px; color:#fde68a;"><strong>💡 Quality Check (Cart-to-Purchase Ratio):</strong> For a ${numProductPrice > 0 ? esc(fmt(numProductPrice, currency, symbol)) : "higher-value"} piece, shoppers often browse and consider before checking out. If you see ${esc(expectedCartsThreshold)} with zero completed orders, this reflects encouraging initial shopper consideration, though not yet confirmed purchase intent. If carts keep piling up without sales over several days, treat it as a helpful cue to review your checkout experience: check for unexpected delivery fees revealed at checkout, verify your payment gateway on mobile, or add a direct WhatsApp button so hesitant shoppers can ask sizing or delivery questions before paying.</p>`
+           ? `<p style="margin-top:8px; color:#fde68a;"><strong>💡 Quality Check:</strong> Compare observed cart, checkout and completed-checkout sessions during the test. A cart addition alone is not a purchase; review delivery fees, payment issues, sizing and return-policy clarity before changing the event.</p>`
            : ""
        }`
     )}
@@ -928,8 +1000,8 @@ export async function buildBriefHTML(
   const parsedBudget = cleanBudgetReasoning ? parseBudgetReasoning(cleanBudgetReasoning) : null;
 
   const formattedBudgetReasoningHTML = (() => {
-    if (!cleanBudgetReasoning || !parsedBudget) return "";
-    const parsed = parsedBudget;
+    if (!cleanBudgetReasoning && !budget.calculation) return "";
+    const parsed = parsedBudget || {};
     let html = "";
 
     const dipDailyVal = Math.round((daily || 0) * 0.7);
@@ -938,8 +1010,10 @@ export async function buildBriefHTML(
     const sweetSpotDailyStr = daily ? `${fmt(daily, currency, symbol)}/day` : "";
     const sweetSpotTotalStr = daily ? fmt(daily * duration, currency, symbol) : "";
 
+    const c = budget.calculation;
     const recentRevNum =
-      budget.breakdown?.revenue_based ||
+      c?.revenue_30d ??
+      budget.breakdown?.revenue_based ??
       (parsed.recentRevenueFormatted
         ? parseFloat(parsed.recentRevenueFormatted.replace(/[^0-9.]/g, "")) || 0
         : 0);
@@ -970,15 +1044,21 @@ export async function buildBriefHTML(
             <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
               <td style="padding:5px 10px; font-weight:600; color:#94a3b8;">How Budget Was Chosen</td>
               <td style="padding:5px 10px; color:#f1f5f9; line-height:1.4;">${
-                isTightCashFlow
-                  ? `<strong>Starter Testing Baseline:</strong> Calibrated as an estimated starting test budget (${sweetSpotDailyStr}) based on your ${numProductPrice > 0 ? esc(fmt(numProductPrice, currency, symbol)) : "product"} price point to give Meta enough daily impressions to find interested shoppers. Allocating only 5–10% of last month's quiet sales (${esc(parsed.recentRevenueFormatted || fmt(recentRevNum, currency, symbol))}) would stretch data collection over too many weeks.`
+                c
+                  ? c.selected_rule === "price_guardrail"
+                    ? `<strong>Product-Calibrated Testing Budget:</strong> Sized for ${esc(params.productName)}'s ${esc(fmt(c.effective_price, currency, symbol))} price point, giving Meta sufficient daily budget headroom to identify genuine buyers while protecting test spend.`
+                    : recentRevNum > 0
+                    ? `<strong>Revenue-Calibrated Budget:</strong> Scaled to your store's recent ${esc(fmt(recentRevNum, currency, symbol))} monthly volume, providing enough ad delivery to test reliably while protecting cash flow.`
+                    : `<strong>Starter Testing Baseline:</strong> Calibrated for your product's ${numProductPrice > 0 ? esc(fmt(numProductPrice, currency, symbol)) : "catalog"} price point to give Meta enough daily headroom to discover your first customers.`
+                  : isTightCashFlow
+                  ? `<strong>Starter Testing Baseline:</strong> Sized for your product's ${numProductPrice > 0 ? esc(fmt(numProductPrice, currency, symbol)) : "catalog"} price point to give Meta room to find buyers while keeping spend disciplined relative to recent sales.`
                   : recentRevNum > 0
-                  ? `<strong>Monthly Revenue Allocation:</strong> Allocates a disciplined ~5–10% testing budget from your store's regular monthly sales (${esc(parsed.recentRevenueFormatted || fmt(recentRevNum, currency, symbol))}), keeping your ad spend comfortable and low-risk.`
+                  ? `<strong>Revenue-Tier Testing Rule:</strong> Uses your store's recent ${esc(parsed.recentRevenueFormatted || fmt(recentRevNum, currency, symbol))} monthly volume to test reliably while protecting cash flow.`
                   : `<strong>Starter Testing Baseline:</strong> Calibrated for your product's ${numProductPrice > 0 ? esc(fmt(numProductPrice, currency, symbol)) : "catalog"} price point to give Meta enough daily headroom to discover your first customers.`
               }</td>
             </tr>
             <tr style="border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(99,102,241,0.08);">
-              <td style="padding:6px 10px; font-weight:700; color:#a5b4fc;">Recommended Test (Sweet Spot)</td>
+              <td style="padding:6px 10px; font-weight:700; color:#a5b4fc;">Recommended Test (${esc(budget.tier && budget.tier !== "Balanced" ? budget.tier : "Sweet Spot")})</td>
               <td style="padding:6px 10px; color:#fff; font-weight:600;"><span style="font-size:11.5px; color:#818cf8; font-weight:800;">${sweetSpotTotalStr} Total Spend</span> (${sweetSpotDailyStr} × ${duration} days) · Balanced testing baseline</td>
             </tr>
             <tr style="border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(245,158,11,0.08);">
@@ -997,13 +1077,20 @@ export async function buildBriefHTML(
                 ? `<tr style="background:rgba(147,51,234,0.08);">
               <td style="padding:6px 10px; font-weight:700; color:#c084fc;">Optional Overseas Expansion</td>
               <td style="padding:6px 10px; color:#fff; font-weight:600;">
-                <span style="font-size:11.5px; color:#c084fc; font-weight:800;">${fmt(intlDaily * duration, currency, symbol)} Total Spend</span> (${fmt(intlDaily, currency, symbol)}/day × ${duration} days) · Test only after your domestic campaign is proven profitable
+                <span style="font-size:11.5px; color:#c084fc; font-weight:800;">${fmt(intlDaily * intlDuration, currency, symbol)} Total Spend</span> (${fmt(intlDaily, currency, symbol)}/day × ${intlDuration} days) · Test only after your domestic campaign is proven profitable
               </td>
             </tr>`
                 : ""
             }
           </tbody>
         </table>
+        ${
+          c?.fx && currency !== "USD"
+            ? `<div style="padding:4px 10px; font-size:8.5px; color:#94a3b8; border-top:1px solid rgba(255,255,255,0.06); background:rgba(0,0,0,0.15);">
+                💱 Budget baseline converted from Meta's global USD test volume at $1 USD ≈ ${c.fx.rate >= 10 ? Math.round(c.fx.rate).toLocaleString() : c.fx.rate.toFixed(2)} ${esc(c.fx.currency)}. This gives your campaign the same competitive ad delivery volume as international stores.
+              </div>`
+            : ""
+        }
       </div>`;
 
     if (parsed.calibrationTitle || parsed.calibrationBody) {
@@ -1035,10 +1122,10 @@ export async function buildBriefHTML(
       pricingStrategyHTML = `
         <div style="padding:7px 10px; background:rgba(99,102,241,0.16); border:1px solid rgba(129,140,248,0.3); border-left:3px solid #818cf8; border-radius:6px;">
           <div style="font-size:10px; font-weight:700; color:#c7d2fe; display:flex; align-items:center; gap:5px; margin-bottom:2px;">
-            <span>💎</span> High-Ticket Consideration Strategy (${formattedPrice} unit price vs ${formattedDaily}/day budget)
+            <span>💎</span> Premium Piece Consideration Strategy (${formattedPrice} unit price vs ${formattedDaily}/day budget)
           </div>
           <p style="font-size:9.5px; color:#e2e8f0; margin-top:3px; line-height:1.4;">
-            Because <strong style="color:#fff;">${esc(params.productName)}</strong> is a premium investment piece, a single order (${formattedPrice}) is larger than several days of test spend. High-value shoppers explore, bookmark, and add to cart before buying. Optimizing for <strong style="color:#fff;">${esc(optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent)}</strong> helps Meta identify interested shoppers first without pushing for immediate checkouts before they are ready. Early success looks like steady cart additions, inquiries, and visits while shoppers make up their mind.
+            Because <strong style="color:#fff;">${esc(params.productName)}</strong> (${formattedPrice}) is a premium piece, shoppers often take time to consider sizing and details before purchasing. During your initial test, watch Add-to-Carts and Checkout Starts as strong leading indicators of intent. Even 1–2 orders at this price point delivers an exceptional return on ad spend.
           </p>
         </div>`;
     } else if (priceToDailyRatio < 1.2) {
@@ -1150,12 +1237,25 @@ export async function buildBriefHTML(
             ${esc(intlTier)} Strategy · 1 Separate Ad Set
           </div>
           <div class="budget-meta" style="min-width:0; border-top:1px solid #e0e7ff; padding-top:8px;">
-            ${row("Optional Duration", `${duration} days`)}
-            ${intlDaily ? row("Estimated Test Spend", fmt(intlDaily * duration, currency, symbol)) : ""}
+            ${row("Optional Duration", `${intlDuration} days`)}
+            ${intlDaily ? row("Estimated Test Spend", fmt(intlDaily * intlDuration, currency, symbol)) : ""}
             ${row("Delivery", "Group into 1 ad set")}
           </div>
         </div>
       </div>
+
+      ${
+        showOverseas && intlDaily
+          ? `<div style="margin-top:10px; margin-bottom:12px; padding:10px 14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; display:flex; justify-content:space-between; align-items:center; font-size:11px; flex-wrap:wrap; gap:6px;">
+        <div style="color:#475569;">
+          <strong style="color:#0f172a;">Combined Ad Commitment:</strong> If launching both independent ad sets simultaneously:
+        </div>
+        <div style="font-weight:800; color:#0f172a;">
+          Local: ${daily ? fmt(daily * duration, currency, symbol) : "—"} (${duration}d) + Overseas: ${fmt(intlDaily * intlDuration, currency, symbol)} (${intlDuration}d) = Total ${fmt((daily ? daily * duration : 0) + intlDaily * intlDuration, currency, symbol)}
+        </div>
+      </div>`
+          : ""
+      }
 
       ${engineLogic(
         "How your budget was calculated",
@@ -1275,12 +1375,12 @@ export async function buildBriefHTML(
     {
       level: "Ad set level" as const,
       title: "Budget, Audience & Conversion",
-      instructions: `Under Conversion, choose 'Website' and select '${optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent}'. Set your daily budget to ${domesticBudgetStr || "your recommended daily budget"}. Set start schedule to ${preciseLaunchTiming}. Under Audience, add your suggested locations and set age to ${ageMin}–${ageMax} (${genderLabel === "All" ? "Men & Women" : genderLabel}).`,
+      instructions: `First confirm the ${optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent === "InitiateCheckout" ? "Initiate Checkout" : optimizationEvent} event is active in Meta Events Manager. Then under Conversion, choose 'Website' and select that event. Set your daily budget to ${domesticBudgetStr || "your recommended daily budget"}. Set start schedule to ${preciseLaunchTiming}. Under Audience, add your suggested locations and set age to ${ageMin}–${ageMax} (${genderLabel === "All" ? "Men & Women" : genderLabel}).`,
     },
     {
       level: "Ad level" as const,
       title: "Creative & Copy",
-      instructions: `Upload your product photos or vertical video. Copy and paste your Primary Text, Headline, and Description from Page 2. Set your Call to Action button to '${copy.cta || "Shop Now"}' and hit Publish!`,
+      instructions: `Upload your product photos or vertical video. Copy and paste your Primary Text, Headline, and Description from Page 2. Set your Call to Action button to '${copy.cta || "Shop Now"}'. Publish after the website event check is complete.`,
     },
   ];
 
@@ -1305,22 +1405,23 @@ export async function buildBriefHTML(
   );
 
   // ── Day 7 Decision Tree & Scaling Playbook (Card 8) ──
+  const totalTestSpend = daily ? Math.round(daily * duration) : 0;
+  const midpointSpend = totalTestSpend ? Math.round(totalTestSpend * 0.5) : 0;
   const scaleBudgetVal = daily ? Math.round(daily * 1.2) : 0;
-  const midTestSpendVal = daily ? Math.round(daily * 4) : 0;
-  const threeDaySpendVal = daily ? Math.round(daily * 3) : 0;
-  const redLightSpendStr =
-    threeDaySpendVal > 0 && midTestSpendVal > 0
-      ? ` (${fmt(threeDaySpendVal, currency, symbol)}–${fmt(midTestSpendVal, currency, symbol)} spent)`
-      : "";
-
-  const cpaTarget = numProductPrice > 0 ? Math.round(numProductPrice * 0.3) : 0;
+  const contributionCeiling = decisionEvidence?.price_less_unit_cost ?? null;
+  const targetCpa = numProductPrice > 0 ? Math.round(numProductPrice * 0.35) : null;
+  const contributionLabel = contributionCeiling !== null
+    ? `Target ad spend per sale: under ${fmt(contributionCeiling, currency, symbol)} (keeps each order profitable)`
+    : targetCpa
+    ? `Target ad spend per sale: under ~${fmt(targetCpa, currency, symbol)} (~35% of piece price)`
+    : "Keep ad spend per sale comfortably under your product profit margin";
 
   const decisionTreeHTML = card(
     `What to do after Day ${duration} (How to read your results)`,
-    `<p class="section-intro" style="margin-bottom:8px;">Once your ${duration}-day test finishes, you don't have to guess what to do next. Match what happened in your store to one of these 3 simple situations:</p>
+    `<p class="section-intro" style="margin-bottom:8px;">Once your ${duration}-day test finishes, compare its results with your store evidence and verified unit economics. Match what happened to one of these 3 situations:</p>
     
     <div style="font-size:10px; color:#1e293b; background:#f1f5f9; border:1px solid #cbd5e1; border-left:4px solid #4f46e5; padding:6px 10px; border-radius:6px; margin-bottom:8px; line-height:1.45;">
-      <strong>⏱️ Rule #1: Give it 3 full days before touching anything.</strong> Ad performance naturally fluctuates day to day. Let Meta deliver for at least 3 full days without edits so you see real shopper trends rather than daily noise.
+      <strong>⏱️ Founder Rule: Give Meta 48–72 hours before making changes.</strong> Ad performance naturally fluctuates day to day. Use spend checkpoints (25% check delivery, 50% compare hooks, 100% scale or pause) to judge true shopper trends rather than hourly noise.
     </div>
 
     <div class="decision-grid">
@@ -1328,16 +1429,16 @@ export async function buildBriefHTML(
       <div class="decision-card decision-green">
         <div class="decision-card-head">
           <span class="decision-tag green">🟢 It's Working · Profitable Orders</span>
-          <div class="decision-metric">Target ad cost: under ~30% of item price${cpaTarget ? ` (~${fmt(cpaTarget, currency, symbol)})` : ""}</div>
+          <div class="decision-metric">${esc(contributionLabel)}</div>
         </div>
-        <p class="decision-meaning">Shoppers are buying and orders are coming in with real profit left over in your pocket.</p>
+        <p class="decision-meaning">Shoppers are buying and orders are rolling in! Your creative angle and audience are resonating with paying customers.</p>
         <div class="decision-action">
           <div style="font-size:9.5px; background:#f0fdf4; border:1px solid #bbf7d0; padding:5px 9px; border-radius:5px; margin-bottom:5px; color:#166534; font-weight:600;">
-            Founder Profit Check: Money Made − Ad Spend − Making the Product − Delivery − Card Fees = Real Profit in Your Pocket
+            Founder Profit Check: Money Made − Ad Spend − Product Cost − Delivery − Payment Fees = Real Cash in Pocket
           </div>
           <div style="display:flex; flex-direction:column; gap:3px;">
-            <div><strong>• Check real profit first:</strong> Make sure your margin covers all production, delivery, and payment fees before celebrating.</div>
-            <div><strong>• When to scale:</strong> Once you see <strong>at least 3–5 steady orders</strong> putting verified cash in the bank, increase your daily budget by <strong>~20% every 3 to 4 days</strong>${daily ? ` (e.g. from ${fmt(daily, currency, symbol)} to <strong>${fmt(scaleBudgetVal, currency, symbol)}/day</strong>)` : ""}. Small bumps let you scale up without resetting Meta's delivery.</div>
+            <div><strong>• Verify net profit:</strong> Ensure customer revenue comfortably covers production, shipping, and payment gateway fees.</div>
+            <div><strong>• When to scale:</strong> Once you see consistent orders, increase your daily budget gradually (by ~20% every 3–4 days${daily ? `, e.g. from ${fmt(daily, currency, symbol)} to ${fmt(scaleBudgetVal, currency, symbol)}/day` : ""}) to grow volume while preserving ad delivery efficiency.</div>
           </div>
         </div>
       </div>
@@ -1347,15 +1448,15 @@ export async function buildBriefHTML(
         <div class="decision-card decision-yellow">
           <div class="decision-card-head">
             <span class="decision-tag yellow">🟡 High Carts, Low Orders</span>
-            <div class="decision-metric">${esc(expectedCartsThreshold)}, but few or no orders</div>
+            <div class="decision-metric">${esc(recentFunnelSummary)}</div>
           </div>
-          <p class="decision-meaning">Shoppers like the piece and added to cart, but paused before paying. (0 orders from your first few carts is normal—typical cart checkout rates are 10–20%).</p>
+          <p class="decision-meaning">Shoppers love what they see and added the piece to their cart, but paused before completing payment. Your ad has done its job—the drop-off almost always happens on the checkout page.</p>
           <div class="decision-action">
-            <strong>If carts keep piling up with no sales, check:</strong>
+            <strong>Key friction checks to turn carts into sales:</strong>
             <ul style="margin:4px 0 0 16px; padding:0; list-style-type:disc; line-height:1.45;">
-              <li style="margin-bottom:2px;"><strong>Surprise delivery fees:</strong> High shipping revealed at checkout?</li>
-              <li style="margin-bottom:2px;"><strong>Payment issues:</strong> Test buying on mobile or offer local bank transfer.</li>
-              <li><strong>Hesitation:</strong> Add a WhatsApp button for quick sizing questions.</li>
+              <li style="margin-bottom:2px;"><strong>Surprise delivery fees:</strong> Are shipping costs revealed too late? Show flat or free delivery upfront.</li>
+              <li style="margin-bottom:2px;"><strong>Payment options:</strong> Are local cards and instant bank transfers working smoothly?</li>
+              <li><strong>Shopper reassurance:</strong> Add a simple WhatsApp sizing link or clear returns note on the product page.</li>
             </ul>
           </div>
         </div>
@@ -1364,12 +1465,12 @@ export async function buildBriefHTML(
         <div class="decision-card decision-red">
           <div class="decision-card-head">
             <span class="decision-tag red">🔴 Low Clicks / Refresh Hook</span>
-            <div class="decision-metric">After 3–4 days${redLightSpendStr}: Link CTR &lt; 0.6% &amp; 0 carts</div>
+            <div class="decision-metric">At 50% of test budget${midpointSpend ? ` (${fmt(midpointSpend, currency, symbol)} spent)` : ""}: link CTR &lt; 0.8% and few page visits</div>
           </div>
-          <p class="decision-meaning">People are scrolling past without clicking. The current visual hook isn't grabbing attention in the feed.</p>
+          <p class="decision-meaning">People are scrolling past without clicking. The opening 3-second visual or headline hook isn't stopping thumbs in the feed.</p>
           <div class="decision-action">
             <strong>What to do next:</strong>
-            <p style="margin-top:2px;">Don't start over or delete your campaign. Keep your audience settings, pause this ad visual, and test <strong>Angle 2 (${esc(actualAngleLabels[1] || "Craft & Quality")})</strong> or <strong>Angle 3 (${esc(actualAngleLabels[2] || "Everyday Fit")})</strong> from Page 3.</p>
+            <p style="margin-top:2px;">Don't start over or delete your campaign. Keep your audience settings, pause this ad visual, and test <strong>Angle 2 (${esc(actualAngleLabels[1] || "Craft & Quality")})</strong> or <strong>Angle 3 (${esc(actualAngleLabels[2] || "Everyday Fit")})</strong> from Page 3 to find the visual that catches attention.</p>
           </div>
         </div>
       </div>
@@ -1676,6 +1777,17 @@ export async function buildBriefHTML(
     ${timingHTML}
     ${newLaunchNoteHTML}
     ${implementationGuideHTML}
+    ${params.warnings?.length
+      ? card(
+          "Store Context & Optimization Tips",
+          `<div style="display:flex; flex-direction:column; gap:9px; font-size:11.5px; line-height:1.55; color:#475569;">
+            ${params.warnings.map((w) => `<div style="display:flex; align-items:flex-start; gap:8px;">
+              <span style="color:#0ea5e9; font-size:14px; line-height:1.2; flex-shrink:0;">💡</span>
+              <span>${esc(w)}</span>
+            </div>`).join("")}
+          </div>`
+        )
+      : ""}
     ${decisionTreeHTML}
   </div>
 

@@ -2,6 +2,10 @@ import { StoreAcquisitionChannel, StoreData, StoreLocation, StoreProduct } from 
 import { consolidateLocation, consolidateLocationsWithAI } from "../locations";
 import { fetchWithRetry } from "../http";
 import { getEffectiveStoreCountry } from "../market-geography";
+import { shopifyAdminRestUrl } from "../shopify-config";
+import { fetchShopifyPrespendIntelligence } from "./shopify-intelligence";
+import { buildProductDecisions } from "../gateway-decision";
+import { summarizeOrderCountries } from "../order-geography";
 
 // Shopify API types (subset)
 interface ShopifyShop {
@@ -20,13 +24,13 @@ interface ShopifyOrder {
   current_subtotal_price?: string;
   created_at: string;
   customer?: { id: number };
-  billing_address?: { city?: string; country_code?: string };
-  shipping_address?: { city?: string; country_code?: string; country?: string };
+  billing_address?: { city?: string; province?: string; province_code?: string; country_code?: string; country?: string };
+  shipping_address?: { city?: string; province?: string; province_code?: string; country_code?: string; country?: string };
   financial_status: string;
   source_name: string;
   referring_site?: string | null;
   landing_site?: string | null;
-  line_items?: { product_id: number; quantity: number }[];
+  line_items?: { product_id: number; quantity: number; price: string }[];
 }
 
 import { parseTrafficSource } from "./traffic-source";
@@ -50,8 +54,6 @@ interface ShopifyProduct {
   images: { src: string }[];
 }
 
-const API_VERSION = "2026-01";
-
 // Thin wrapper kept for the existing call sites. Now also does bounded retries
 // (transient 5xx/429/network) on top of the per-attempt timeout — Shopify reads
 // are idempotent GETs, so retrying is safe and makes store sync more resilient.
@@ -69,7 +71,7 @@ async function shopifyGet<T>(
   endpoint: string
 ): Promise<T | null> {
   try {
-    const url = `https://${shopDomain}/admin/api/${API_VERSION}/${endpoint}`;
+    const url = shopifyAdminRestUrl(shopDomain, endpoint);
     const res = await fetchWithTimeout(url, {
       headers: {
         "X-Shopify-Access-Token": accessToken,
@@ -111,7 +113,7 @@ async function shopifyGetPaginated<T>(
   maxPages = 200 // Increased to 200 pages (50,000 records) for full lifetime ingestion
 ): Promise<T[]> {
   let results: T[] = [];
-  let url = `https://${shopDomain}/admin/api/${API_VERSION}/${initialEndpoint}`;
+  let url = shopifyAdminRestUrl(shopDomain, initialEndpoint);
   let pagesFetched = 0;
 
   while (url && pagesFetched < maxPages) {
@@ -125,11 +127,12 @@ async function shopifyGetPaginated<T>(
 
       if (!res.ok) {
         console.error(`Shopify API error: ${res.status} ${res.statusText} for URL ${url}`);
-        break;
+        throw new Error(`Incomplete Shopify ${dataKey} import: HTTP ${res.status}`);
       }
 
       const body = await res.json() as Record<string, T[]>;
-      const items = body[dataKey] || [];
+      const items = body[dataKey];
+      if (!Array.isArray(items)) throw new Error(`Invalid Shopify ${dataKey} response`);
       results = results.concat(items);
       pagesFetched++;
 
@@ -138,10 +141,11 @@ async function shopifyGetPaginated<T>(
       url = parseNextPageUrl(linkHeader) || "";
     } catch (error) {
       console.error(`Shopify fetch error for URL ${url}:`, error);
-      break;
+      throw error;
     }
   }
 
+  if (url) throw new Error(`Incomplete Shopify ${dataKey} import: pagination limit reached`);
   return results;
 }
 
@@ -158,22 +162,48 @@ export async function fetchShopifyStoreData(
   );
 
   const shop = shopData?.shop;
+  if (!shop) throw new Error("Shopify store details unavailable; previous snapshot retained");
+
+  // Fetch optional pre-spend datasets independently. Individual GraphQL
+  // capability failures are recorded in the snapshot and never erase the
+  // reliable order/product data that powers the existing dashboard.
+  const intelligencePromise = fetchShopifyPrespendIntelligence(
+    shopDomain,
+    accessToken
+  );
 
   // STEP 2 — Fetch true lifetime orders (removed 365-day truncation and 2k pagination cap)
-  const orders = await shopifyGetPaginated<ShopifyOrder>(
-    shopDomain,
-    accessToken,
-    `orders.json?status=any&financial_status=paid&limit=250&fields=id,total_price,subtotal_price,current_subtotal_price,created_at,customer,billing_address,shipping_address,financial_status,source_name,referring_site,landing_site,line_items`,
-    "orders"
-  );
+  let orders: ShopifyOrder[];
+  let ingestionComplete = true;
+  try {
+    orders = await shopifyGetPaginated<ShopifyOrder>(
+      shopDomain,
+      accessToken,
+      `orders.json?status=any&financial_status=paid&limit=250&fields=id,total_price,subtotal_price,current_subtotal_price,created_at,customer,billing_address,shipping_address,financial_status,source_name,referring_site,landing_site,line_items`,
+      "orders"
+    );
+  } catch (err) {
+    console.error("Order ingestion incomplete:", err);
+    orders = [];
+    ingestionComplete = false;
+  }
+
+  const intelligence = await intelligencePromise;
 
   // STEP 3 — Fetch all active products using pagination
-  const rawProducts = await shopifyGetPaginated<ShopifyProduct>(
-    shopDomain,
-    accessToken,
-    "products.json?limit=250&status=active&fields=id,title,handle,body_html,variants,images,product_type,vendor,tags,created_at",
-    "products"
-  );
+  let rawProducts: ShopifyProduct[];
+  try {
+    rawProducts = await shopifyGetPaginated<ShopifyProduct>(
+      shopDomain,
+      accessToken,
+      "products.json?limit=250&status=active&fields=id,title,handle,body_html,variants,images,product_type,vendor,tags,created_at",
+      "products"
+    );
+  } catch (err) {
+    console.error("Product ingestion incomplete:", err);
+    rawProducts = [];
+    ingestionComplete = false;
+  }
 
   // STEP 4 — Process orders into insights
   const thirtyDaysAgoForMetrics = new Date();
@@ -246,7 +276,11 @@ export async function fetchShopifyStoreData(
   // Dynamic AI Location consolidation
   const uniqueRawLocationsMap = new Map<string, string>();
   orders.forEach((order) => {
-    const city = order.shipping_address?.city || order.billing_address?.city;
+    const city =
+      order.shipping_address?.city ||
+      order.billing_address?.city ||
+      order.shipping_address?.province ||
+      order.billing_address?.province;
     const country = order.shipping_address?.country || order.shipping_address?.country_code || order.billing_address?.country_code || "Unknown";
     if (isValidLocation(city)) {
       uniqueRawLocationsMap.set(city!.trim(), country);
@@ -273,7 +307,11 @@ export async function fetchShopifyStoreData(
   // Location analysis
   const locationMap: Record<string, { count: number; country: string }> = {};
   orders.forEach((order) => {
-    const city = order.shipping_address?.city || order.billing_address?.city;
+    const city =
+      order.shipping_address?.city ||
+      order.billing_address?.city ||
+      order.shipping_address?.province ||
+      order.billing_address?.province;
     const country = order.shipping_address?.country || order.shipping_address?.country_code || order.billing_address?.country_code;
 
     const hasCity = isValidLocation(city);
@@ -289,61 +327,8 @@ export async function fetchShopifyStoreData(
         }
         locationMap[consolidatedCity].count += 1;
       }
-    } else if (hasCountry) {
-      const displayCountry = country!.trim();
-      const countryKey = displayCountry.toLowerCase();
-      const countryMetroMap: Record<string, string> = {
-        "ng": "Lagos",
-        "nigeria": "Lagos",
-        "gb": "London",
-        "uk": "London",
-        "united kingdom": "London",
-        "great britain": "London",
-        "us": "New York",
-        "usa": "New York",
-        "united states": "New York",
-        "gh": "Accra",
-        "ghana": "Accra",
-        "ca": "Toronto",
-        "canada": "Toronto",
-        "ae": "Dubai",
-        "uae": "Dubai",
-        "united arab emirates": "Dubai",
-        "za": "Johannesburg",
-        "south africa": "Johannesburg",
-        "ke": "Nairobi",
-        "kenya": "Nairobi",
-        "hu": "Budapest",
-        "hungary": "Budapest",
-        "nl": "Amsterdam",
-        "netherlands": "Amsterdam",
-        "de": "Berlin",
-        "germany": "Berlin",
-        "fr": "Paris",
-        "france": "Paris",
-        "ie": "Dublin",
-        "ireland": "Dublin",
-        "es": "Madrid",
-        "spain": "Madrid",
-        "it": "Rome",
-        "italy": "Rome",
-        "au": "Sydney",
-        "australia": "Sydney",
-      };
-      const resolvedMetro = countryMetroMap[countryKey] || displayCountry;
-      if (!locationMap[resolvedMetro]) {
-        locationMap[resolvedMetro] = { count: 0, country: displayCountry };
-      }
-      locationMap[resolvedMetro].count += 1;
     }
   });
-
-  // Fallback to store city/country if locationMap is completely empty
-  if (Object.keys(locationMap).length === 0) {
-    const shopCountry = shop?.country_code || "Nigeria";
-    const shopCity = (shop as { city?: string } | undefined)?.city || (shopCountry === "NG" || shopCountry === "Nigeria" ? "Lagos" : "New York");
-    locationMap[shopCity] = { count: 1, country: shopCountry };
-  }
 
   const topLocations: StoreLocation[] = Object.entries(locationMap)
     .sort(([, a], [, b]) => b.count - a.count)
@@ -351,10 +336,14 @@ export async function fetchShopifyStoreData(
     .map(([city, data]) => ({
       city,
       country: data.country,
+      source: "from_data",
       percentage: orders.length > 0
         ? Math.round((data.count / orders.length) * 100)
         : 100,
     }));
+
+  // Keep country-only evidence separate from city-level ad recommendations.
+  const topOrderCountries = summarizeOrderCountries(orders);
 
   // Peak days analysis
   const dayCount: Record<string, number> = {};
@@ -396,7 +385,8 @@ export async function fetchShopifyStoreData(
   const sortedOrders = [...orders].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   
   sortedOrders.forEach((order) => {
-    const customerId = order.customer?.id?.toString() || "guest_" + order.id;
+    const customerId = order.customer?.id?.toString();
+    if (!customerId) return;
     customerOrderCount[customerId] = (customerOrderCount[customerId] || 0) + 1;
     if (!customerFirstOrder[customerId]) {
       customerFirstOrder[customerId] = order.id;
@@ -425,7 +415,7 @@ export async function fetchShopifyStoreData(
   const sixtyDaysAgoMs = new Date().getTime() - (60 * 24 * 60 * 60 * 1000);
 
   orders.forEach((order) => {
-    const customerId = order.customer?.id?.toString() || "guest_" + order.id;
+    const customerId = order.customer?.id?.toString();
     const productsInOrder = new Set<number>();
     const isWithinLast60Days = new Date(order.created_at).getTime() >= sixtyDaysAgoMs;
     const channel = parseTrafficSource(
@@ -456,6 +446,7 @@ export async function fetchShopifyStoreData(
       if (!productOrdersMap[pid]) productOrdersMap[pid] = new Set();
       productOrdersMap[pid].add(order.id);
 
+      if (!customerId) return;
       if (!productCustomersMap[pid]) productCustomersMap[pid] = new Set();
       productCustomersMap[pid].add(customerId);
 
@@ -471,6 +462,15 @@ export async function fetchShopifyStoreData(
       order_count: count,
       percentage: orders.length > 0 ? Math.round((count / orders.length) * 100) : 0,
     }));
+
+  // Build actual revenue from order line items (not current price × units)
+  const productRevenueMap: Record<number, number> = {};
+  orders.forEach((order) => {
+    order.line_items?.forEach((item) => {
+      const itemRevenue = item.quantity * parseFloat(item.price || '0');
+      productRevenueMap[item.product_id] = (productRevenueMap[item.product_id] || 0) + itemRevenue;
+    });
+  });
 
   const products: StoreProduct[] = rawProducts.map((product) => {
     const variants = product.variants || [];
@@ -528,12 +528,14 @@ export async function fetchShopifyStoreData(
     const productChannels = productChannelSalesMap[product.id] || {};
     const topChannelEntry = Object.entries(productChannels).sort(([, a], [, b]) => b - a)[0];
     const top_acquisition_channel = topChannelEntry ? topChannelEntry[0] : undefined;
+    const enrichment = intelligence.products[product.id.toString()];
+    const unitCost = enrichment?.unitCost ?? null;
 
     return {
       id: product.id.toString(),
       name: product.title,
       handle: product.handle,
-      revenue: unitsSold * price,
+      revenue: productRevenueMap[product.id] || (unitsSold * price),
       units_sold: unitsSold,
       in_stock: anyInStock,
       price,
@@ -562,43 +564,31 @@ export async function fetchShopifyStoreData(
       top_acquisition_channel,
       created_at: product.created_at || undefined,
       order_count: productOrdersMap[product.id]?.size || 0,
+      unit_cost: unitCost,
+      unit_cost_currency: enrichment?.currency,
+      unit_cost_coverage: enrichment?.costCoverage || "missing",
+      price_less_unit_cost: unitCost === null ? null : price - unitCost,
+      catalog_claims: enrichment?.claims || [],
     };
   });
 
-  // Dynamic Gateway Product Classification
-  // Calculate store baseline FTB ratio (average across all products that have sales)
-  const productsWithSales = products.filter(p => p.units_sold > 0);
-  const baseline_ftb = productsWithSales.length > 0 
-    ? productsWithSales.reduce((acc, p) => acc + (p.first_time_buyer_ratio || 0), 0) / productsWithSales.length 
-    : 0;
-
-  // Calculate store median velocity
-  const velocities = productsWithSales.map(p => p.order_velocity || 0).sort((a,b) => a - b);
-  const median_velocity = velocities.length > 0 ? velocities[Math.floor(velocities.length / 2)] : 0;
-  const store_aov = rolling60dAov;
-
-  products.forEach(p => {
-    if (p.units_sold < 3) {
-      p.gateway_classification = "Insufficient Data";
-      return;
-    }
-
-    const ftb = p.first_time_buyer_ratio || 0;
-    const price = p.price || 0;
-    const velocity = p.order_velocity || 0;
-    const repeat = p.repeat_purchase_rate || 0;
-
-    const isGateway = ftb > baseline_ftb && price < store_aov && velocity > median_velocity;
-    const isConsideration = ftb <= baseline_ftb && price >= store_aov && repeat > 0.1; // "strong repeat purchase signals", >10% repeat is decent
-
-    if (isGateway && !isConsideration) {
-      p.gateway_classification = "Gateway";
-    } else if (isConsideration && !isGateway) {
-      p.gateway_classification = "Consideration";
-    } else {
-      p.gateway_classification = "Hybrid";
-    }
-  });
+  const generatedAt = new Date().toISOString();
+  const costCoverageByProduct = new Map(products.map((product) => [product.id, product.unit_cost_coverage]));
+  const decisions = buildProductDecisions(
+    orders,
+    rawProducts.map((product) => ({
+      id: product.id,
+      variants: product.variants,
+      unit_cost_coverage: costCoverageByProduct.get(String(product.id)),
+    })),
+    { asOf: generatedAt, ingestionComplete },
+  );
+  for (const product of products) {
+    const decision = decisions.get(Number(product.id));
+    if (!decision) continue;
+    product.product_decision = decision;
+    product.gateway_classification = decision.role;
+  }
 
   // Sort products by revenue descending so the AI and dashboard prioritize top sellers
   products.sort((a, b) => b.revenue - a.revenue);
@@ -613,6 +603,27 @@ export async function fetchShopifyStoreData(
   } else if (shop?.currency) {
     symbol = shop.currency; // Fallback to code if format missing
   }
+
+  const anonymousOrders = orders.filter((o) => !o.customer?.id).length;
+  const ordersWithoutCity = orders.filter(
+    (o) =>
+      !isValidLocation(
+        o.shipping_address?.city ||
+          o.billing_address?.city ||
+          o.shipping_address?.province ||
+          o.billing_address?.province
+      )
+  ).length;
+  const qualityWarnings = [
+    ...(!ingestionComplete ? ["Order or product data may be incomplete due to a sync error. Recommendations use the available data."] : []),
+    ...(orders.length > 0 && anonymousOrders / orders.length > 0.4
+      ? [`${anonymousOrders} guest checkout orders lacked customer IDs; repeat-buyer metrics reflect identified accounts.`]
+      : []),
+    ...(orders.length > 0 && ordersWithoutCity / orders.length > 0.4
+      ? [`${ordersWithoutCity} orders lacked city/region details; geographic targeting is calibrated at the country level.`]
+      : []),
+    ...intelligence.warnings.filter((w) => !/GraphQL|syntax|unavailable:|argument\s+'sortKey'|shopifyqlQuery|access denied|field\s*\(|failed to fetch/i.test(w)),
+  ];
 
   // STEP 6 — Return complete StoreData
   return {
@@ -629,11 +640,16 @@ export async function fetchShopifyStoreData(
       order_count: orders.length,
       average_order_value: Math.round(thirtyDayAov * 100) / 100,
       top_locations: topLocations,
+      top_order_countries: topOrderCountries,
       peak_days: peakDays,
       peak_hours: peakHours,
       repeat_customer_rate: Math.round(repeatRate * 100) / 100,
       revenue_last_30_days: revenueLast30Days,
       orders_last_30_days: ordersLast30Days.length,
+      revenue_last_60_days: ordersLast60Days.reduce(
+        (sum, order) => sum + (Number(order.total_price) || 0),
+        0
+      ),
       oldest_order_date: oldestOrderDate.toISOString(),
       acquisition_channels,
     },
@@ -643,6 +659,16 @@ export async function fetchShopifyStoreData(
       new_count: newCustomers,
       returning_count: returningCustomers,
     },
-    generated_at: new Date().toISOString(),
+    prespend: intelligence.prespend,
+    data_quality: {
+      schema_version: 6,
+      ingestion_complete: ingestionComplete,
+      history_basis: "accessible_paid_orders",
+      oldest_order_at: orders.length ? oldestOrderDate.toISOString() : undefined,
+      anonymous_orders: anonymousOrders,
+      orders_without_city: ordersWithoutCity,
+      warnings: qualityWarnings,
+    },
+    generated_at: generatedAt,
   };
 }

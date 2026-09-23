@@ -46,8 +46,13 @@ export function consolidateLocation(city: string): string {
     }
   }
 
-  // 3. Port Harcourt check: If contains "port harcourt" or matches PH areas
-  if (cityLower.includes("port harcourt") || cityLower.includes("port-harcourt") || cityLower === "ph") {
+  // 3. Port Harcourt check: If contains "port harcourt" or matches PH areas or Rivers state
+  if (
+    cityLower.includes("port harcourt") ||
+    cityLower.includes("port-harcourt") ||
+    cityLower === "ph" ||
+    cityLower.includes("rivers")
+  ) {
     return "Port Harcourt";
   }
   for (const area of PH_AREAS) {
@@ -62,11 +67,22 @@ export function consolidateLocation(city: string): string {
   }
 
   // 5. Ibadan check
-  if (cityLower.includes("ibadan") || cityLower.includes("bodija") || cityLower.includes("oluyole")) {
+  if (
+    cityLower.includes("ibadan") ||
+    cityLower.includes("bodija") ||
+    cityLower.includes("oluyole") ||
+    cityLower === "oyo" ||
+    cityLower.includes("oyo state")
+  ) {
     return "Ibadan";
   }
 
-  // 6. Warri check
+  // 6. London / UK metro check
+  if (cityLower === "england" || cityLower.includes("london") || cityLower.includes("greater london")) {
+    return "London";
+  }
+
+  // 7. Warri check
   if (cityLower.includes("warri") || cityLower.includes("effurun")) {
     return "Warri";
   }

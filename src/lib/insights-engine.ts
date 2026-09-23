@@ -1,14 +1,19 @@
+import { groundTargetingProfile } from "./recommendation-evidence";
 import { StoreData, StoreProduct } from "./store-data";
 import Anthropic from "@anthropic-ai/sdk";
 import { formatCurrency } from "@/lib/currency";
-import { fetchExchangeRates } from "./exchange-rates";
+import { fetchExchangeRateSnapshot } from "./exchange-rates";
 import { getAdvantagePlusGuidance } from "./advantage-plus";
+import { summarizeShopifyReadiness } from "./shopify-readiness";
+import { summarizeMarketingHistory } from "./marketing-evidence";
+import { compareProductsForTest } from "./gateway-decision";
 import {
   isDomesticCity,
   getEffectiveStoreCountry,
   getInternationalStrategies,
   getInternationalBudgetFloor,
   isTier1Market,
+  isFallbackCountryEntry,
 } from "./market-geography";
 import type {
   CreativeHook,
@@ -24,6 +29,18 @@ import {
 
 const anthropicClient = new Anthropic();
 import { logApiUsage } from "@/lib/db";
+
+// Claude Sonnet 5 enables adaptive thinking by default, while Anthropic does
+// not allow forced tool_choice with thinking enabled. Hook generation relies
+// on a forced tool call for schema-safe output, so this must stay disabled.
+export const STRUCTURED_HOOK_THINKING = { type: "disabled" } as const;
+
+export class CreativeHookGenerationError extends Error {
+  constructor() {
+    super("Product-specific creative hooks could not be generated.");
+    this.name = "CreativeHookGenerationError";
+  }
+}
 
 export interface LocationResult {
   name: string;
@@ -41,6 +58,7 @@ export interface TimingOutput {
 }
 
 export interface TargetingProfile {
+  generation_status?: "generated" | "fallback";
   locations: LocationResult[];
   demographics: {
     gender: "All" | "Men" | "Women";
@@ -81,6 +99,8 @@ Every brief is commissioned for exactly ONE target product (the "Target Product"
 SECTION 3: CREATIVE HOOK TAXONOMY (THE 6 PSYCHOLOGICAL ANGLES)
 ═══════════════════════════════════════════════════════════════════
 You must output exactly 3 creative hooks. Each hook must utilize a DIFFERENT psychological angle selected from the following six canonical options. You must perform a self-check to ensure zero conceptual overlap among the 3 chosen angles:
+
+The three hooks must also use three different primary product propositions: (1) a practical problem or outcome, (2) concrete product proof such as a documented material, construction detail, or demonstrated use, and (3) identity, occasion, or verified risk reversal. Do not repeat the same comfort, movement, fit, quality, or confidence claim under different angle labels. If the catalog lacks evidence for one lane, use a clearly labeled creative hypothesis without inventing a product fact.
 
 1. "Problem / Friction"
    - Core Mechanism: Directly targets a daily annoyance, physical discomfort, poor fit, wardrobe malfunction, or recurring hassle caused by conventional alternatives.
@@ -158,7 +178,7 @@ SECTION 5: DEMOGRAPHICS & SEED AUDIENCE GUIDANCE
 SECTION 6: CAMPAIGN OPTIMIZATION & TIMING PACING
 ═══════════════════════════════════════════════════════════════════
 1. Optimization Event Rationale:
-   - Explain in 1 simple sentence why optimizing for the designated event (Purchase, Add to Cart, or View Content) fits the store's current 30-day order volume.
+   - Treat the supplied Purchase event as an unverified launch hypothesis. Shopify activity does not establish Meta event health; do not claim otherwise or recommend switching events based on order-count bands.
 2. Timing & Launch Schedule:
    - launch_recommendation: 1 actionable sentence recommending launching at 12:00 AM (midnight) as that specific day begins in the store's local timezone (e.g. "Monday at 12:00 AM (midnight Lagos time)"), allowing Meta a full 24-hour cycle to distribute daily budget efficiently. Never mention the prior day (e.g., do NOT say "midnight on Sunday" when recommending Monday 12:00 AM).
    - reasoning: 1 reassuring sentence advising the founder to maintain 24/7 continuous ad delivery without pausing, letting Meta accumulate shopper signals across the entire week and capture highest conversions during peak days. Note that past peak order days in store data reflect historical customer activity, not an algorithmic guarantee of future ad performance.
@@ -310,7 +330,7 @@ export const ADVANTAGE_PLUS_TOOL: Anthropic.Tool = {
  * Makes a single call to Anthropic's Message API using structured tool use
  * to determine Meta Advantage+ creative hooks, seed audience, and timing.
  */
-export async function generateTargetingProfile(
+async function generateRawTargetingProfile(
   storeData: StoreData,
   adSets: number,
   dailyBudget: number,
@@ -320,13 +340,16 @@ export async function generateTargetingProfile(
 ): Promise<TargetingProfile> {
   const storeCurrency = storeData.store?.currency || "USD";
   const monthlyOrders =
-    storeData.orders.orders_last_30_days || storeData.orders.order_count || 0;
-  const guidance = getAdvantagePlusGuidance(monthlyOrders);
+    storeData.orders.orders_last_30_days ?? 0;
+  const guidance = getAdvantagePlusGuidance(monthlyOrders, storeData.prespend?.analytics?.recent_funnel);
 
-  // Format top locations
-  const consolidatedLocations = storeData.orders.top_locations
-    .map((l) => `${l.city} (${l.percentage}%)`)
-    .join(", ");
+  // Format top locations (excluding country-only fallback entries)
+  const validTopLocations = (storeData.orders.top_locations || []).filter((l) => !isFallbackCountryEntry(l));
+  const consolidatedLocations = validTopLocations.length > 0
+    ? validTopLocations.map((l) => `${l.city} (${l.percentage}%)`).join(", ")
+    : storeData.orders.top_order_countries?.length
+      ? `Order cities unavailable; paid-order countries: ${storeData.orders.top_order_countries.map((c) => `${c.country} (${c.order_count} orders)`).join(", ")}`
+      : "Paid-order locations unavailable";
 
   // Identify target single product
   const targetProduct =
@@ -350,6 +373,12 @@ export async function generateTargetingProfile(
   const targetProductCtx: TargetProductContext = {
     id: (targetProduct as { id?: string }).id || targetProduct.name,
     title: targetProduct.name,
+    description: [
+      targetProduct.description,
+      ...((targetProduct as StoreProduct).catalog_claims || []).map(
+        (claim) => `${claim.key}: ${claim.value}`,
+      ),
+    ].filter(Boolean).join("\n"),
     tags: targetProduct.tags,
     product_type:
       targetProduct.product_type ||
@@ -411,17 +440,18 @@ export async function generateTargetingProfile(
       p.name.trim().toLowerCase() === targetProductTitle.trim().toLowerCase()
   );
 
-  let productRole = "Catalog Bestseller";
-  if (
-    matchedProduct?.gateway_classification === "Gateway" ||
-    (matchedProduct?.first_time_buyer_ratio || 0) >= 0.5
-  ) {
+  const productDecision = matchedProduct?.product_decision;
+  let productRole: string = productDecision
+    ? `${productDecision.role === "Gateway" ? "Gateway Product" : productDecision.role === "Consideration" ? "Repeat Favorite" : productDecision.role === "Hybrid" ? "Proven Seller" : productDecision.role}: ${productDecision.role_reason}`
+    : matchedProduct?.gateway_classification || "Insufficient Data";
+  if (!productDecision && (
+    matchedProduct?.gateway_classification === "Gateway"
+  )) {
     const ftbPct = Math.round((matchedProduct?.first_time_buyer_ratio || 0.6) * 100);
-    productRole = `Signature Gateway (your iconic entry piece bringing in ${ftbPct}% new first-time customers)`;
-  } else if (
-    matchedProduct?.gateway_classification === "Consideration" ||
-    (matchedProduct?.repeat_purchase_rate || 0) > 0.15
-  ) {
+    productRole = `Gateway Product (appeared in ${ftbPct}% of identified purchasers' first accessible paid orders)`;
+  } else if (!productDecision && (
+    matchedProduct?.gateway_classification === "Consideration"
+  )) {
     productRole = "High-Consideration Product (frequently purchased by customers returning to the brand)";
   }
 
@@ -443,6 +473,24 @@ export async function generateTargetingProfile(
     .slice(0, 3)
     .map((c) => `${c.channel} (${c.percentage}%)`)
     .join(", ");
+  const catalogClaims = (matchedProduct?.catalog_claims || [])
+    .map((claim) => `${claim.key}: ${claim.value}`)
+    .join("; ") || "None recorded";
+  const economicsEvidence = matchedProduct?.unit_cost != null
+    ? `Recorded average variant unit cost: ${matchedProduct.unit_cost} ${matchedProduct.unit_cost_currency || storeCurrency} (${matchedProduct.unit_cost_coverage || "unknown"} coverage). Price less recorded unit cost: ${matchedProduct.price_less_unit_cost ?? "unknown"}; this is not net profit because shipping, fees, returns, and overhead are not included.`
+    : "No unit cost is recorded in Shopify; do not claim a profitable CPA or margin.";
+  const analytics = storeData.prespend?.analytics;
+  const funnelEvidence = analytics
+    ? `${analytics.window_days}-day ShopifyQL funnel: ${analytics.sessions ?? "unknown"} sessions, ${analytics.sessions_with_cart_additions ?? "unknown"} cart sessions, ${analytics.sessions_that_reached_checkout ?? "unknown"} checkout sessions, ${analytics.sessions_that_completed_checkout ?? "unknown"} completed checkout sessions, ${analytics.conversion_rate ?? "unknown"} conversion rate.`
+    : "ShopifyQL funnel analytics unavailable; do not invent store-specific funnel benchmarks.";
+  const operationalReadiness = summarizeShopifyReadiness(storeData.prespend);
+  const activeDiscounts = storeData.prespend?.active_discounts
+    .map((discount) => `${discount.title}${discount.summary ? ` — ${discount.summary}` : ""}`)
+    .join("; ") || "None verified";
+  const policyEvidence = storeData.prespend?.policies
+    .map((policy) => policy.title || policy.type)
+    .join(", ") || "None verified";
+  const marketingEvidence = summarizeMarketingHistory(storeData.prespend?.marketing_history);
 
   const prompt = `Target Product Context:
 - Product Title: ${targetProductTitle}
@@ -451,13 +499,21 @@ export async function generateTargetingProfile(
 - Tags: ${targetProductTags}
 - Price: ${targetProductPrice} ${storeCurrency}
 - Product URL: ${targetProductUrl}
+- Verified Catalog Claims from Shopify Metafields/Metaobjects: ${catalogClaims}
 ${siblingDenyList ? `\nForbidden Sibling Products (MUST NEVER appear by name or be referenced in any hook):\n${siblingDenyList}` : ""}
 
 Product Performance & Customer Entry Signals:
 - Role in Store: ${productRole}
+- Test Readiness: ${productDecision ? `${productDecision.test_readiness.replaceAll("_", " ")}. ${productDecision.readiness_reasons.join(" ")}` : "Not assessed in this snapshot"}
+- 60-Day Follow-Up: ${productDecision ? productDecision.follow_up_60d.repeat_rate === null ? "No fully observed first-order cohort yet" : `${productDecision.follow_up_60d.buyers_with_another_order} of ${productDecision.follow_up_60d.eligible_first_order_buyers} eligible first-order buyers placed another store order` : "Unavailable"}
 - Primary Customer Traffic Channel: ${primaryTrafficSource}
 - Top Store Acquisition Channels: ${storeTopChannels || "Direct / Organic Discovery"}
 - Customer Reorder Habit: ${reorderHabit}
+- Unit Economics Evidence: ${economicsEvidence}
+- Store Funnel Evidence: ${funnelEvidence}
+- Active Shopify Discounts: ${activeDiscounts}
+- Published Policy Evidence: ${policyEvidence}
+- Shopify Marketing History & Ad Activity: ${marketingEvidence}
 
 Store & Market Context:
 - Store Name: ${storeName}
@@ -470,14 +526,18 @@ Store & Market Context:
 - Top Buyer Locations from Order Data: ${consolidatedLocations || "None recorded yet"}
 - Has Recorded Overseas Buyers: ${hasOverseasBuyers ? "Yes" : "No"}
 - Peak Order Days: ${peakDaysStr}
+- Shopify Operational Readiness:
+${operationalReadiness}
 
 Instructions for this generation:
 1. Product Role: This is ${targetProductTitle}, acting as ${productRole}. Frame your angles around the core emotional or practical trigger that compels cold prospects to buy for the first time.
 2. Cold Acquisition Safeguard: Hook angles must have broad scroll-stopping appeal. Do NOT use hyper-narrow or hyper-local callouts that choke Meta's broad delivery algorithm.
 3. Founder-Friendly Language: Speak directly to the founder in plain, actionable English without confusing corporate jargon or complex acronyms.
 4. Meta Andromeda Timing: Frame timing guidance around weekly sales rhythm and cash-flow predictability (e.g. expected conversion volume surges). Never advise pausing or day-parting active campaigns, which resets Meta's machine learning.
-5. Dynamic Location Intelligence: Analyze the merchant's home country (${storeCountry}), category (${targetProductType}), and unit price (${targetProductPrice} ${storeCurrency}). Infer domestic commercial hubs dynamically based on real urban purchasing power and e-commerce delivery viability in ${storeCountry}. If recommending international expansion, identify affluent global metro hubs with proven affinity for ${targetProductType} at this price point. Do not default to fixed or pre-assumed cities.
-${excludedAngle ? `6. ANGLE EXCLUSION — CRITICAL: The ad copy for this campaign has already been written and leads on this primary angle: "${excludedAngle}". None of your 3 creative hooks may centre on this claim as their primary hook. Your hooks must be genuinely additive — covering psychological territory the copy does not. A founder seeing copy and hooks that all say the same thing loses confidence in both.` : ""}
+5. Dynamic Location Intelligence: Analyze the merchant's home country (${storeCountry}), category (${targetProductType}), and unit price (${targetProductPrice} ${storeCurrency}). Infer commercial hubs as acquisition hypotheses, then check them against the Shopify operational-readiness evidence above. A city may still be recommended for demand testing, but its note must say fulfillment is unverified or blocked when its country lacks an active market or shipping method. Do not imply Shopify sales prove future conversion.
+6. Factual Grounding in Store Data: Anchor your angles and hooks on the verified materials, craftsmanship details, cut, and features documented in the Product Title and Description above. Never invent unstated fabrics, certifications, or exaggerated claims not found in the merchant's Shopify store data.
+7. Marketing Context Awareness: Note the merchant's Shopify Marketing History. If the merchant has no prior paid ad spend recorded, guide the founder on respecting the initial 7-day learning phase and establishing baseline metrics. If the store has previously run paid campaigns, tailor the recommendations to build upon and scale their past acquisition channels.
+${excludedAngle ? `8. ANGLE EXCLUSION — CRITICAL: The ad copy for this campaign has already been written and leads on this primary angle: "${excludedAngle}". None of your 3 creative hooks may centre on this claim as their primary hook. Your hooks must be genuinely additive — covering psychological territory the copy does not. A founder seeing copy and hooks that all say the same thing loses confidence in both.` : ""}
 Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}" following all rules in the system prompt. Call the generate_advantage_plus_profile tool.`;
 
   // Fallback defaults in case of API failure or tool parsing error
@@ -495,7 +555,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
           )
             ? ("domestic" as const)
             : ("international" as const),
-          source: "from_data" as const,
+          source: ((storeData.data_quality?.schema_version || 0) >= 2 ? "from_data" : "recommended") as "from_data" | "recommended",
           percentage: l.percentage,
           note: `Top buyer hub representing ${l.percentage}% of your customer orders.`,
         }))
@@ -504,7 +564,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
             name: storeCountry || "Domestic Market",
             country: storeCountry,
             market_type: "domestic" as const,
-            source: "from_data" as const,
+            source: ((storeData.data_quality?.schema_version || 0) >= 2 ? "from_data" : "recommended") as "from_data" | "recommended",
             percentage: 100,
             note: "Defaulting targeting to your store's home market.",
           },
@@ -514,6 +574,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
     const response = await anthropicClient.messages.create({
       model: "claude-sonnet-5",
       max_tokens: 4096,
+      thinking: STRUCTURED_HOOK_THINKING,
       system: [
         {
           type: "text",
@@ -573,12 +634,33 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
           validationErrors
         );
 
-        // Single automatic retry with temperature adjustment (0.2)
+        // Single automatic retry with the validator feedback.
         try {
+          const toolUseBlock = response.content.find((b) => b.type === "tool_use");
+          const retryUserContent =
+            toolUseBlock && toolUseBlock.type === "tool_use"
+              ? [
+                  {
+                    type: "tool_result" as const,
+                    tool_use_id: toolUseBlock.id,
+                    is_error: true,
+                    content: `The generated brief failed validation with the following error(s):\n${validationErrors
+                      .map((e) => `- ${e}`)
+                      .join(
+                        "\n"
+                      )}\n\nPlease regenerate the profile strictly addressing these errors. Ensure exactly 3 distinct angles, zero references to sibling catalog items, zero unsupported factual claims, and describe only "${targetProductTitle}".`,
+                  },
+                ]
+              : `The generated brief failed validation with the following error(s):\n${validationErrors
+                  .map((e) => `- ${e}`)
+                  .join(
+                    "\n"
+                  )}\n\nPlease regenerate the profile strictly addressing these errors. Ensure exactly 3 distinct angles, zero references to sibling catalog items, zero unsupported factual claims, and describe only "${targetProductTitle}".`;
+
           const retryResponse = await anthropicClient.messages.create({
             model: "claude-sonnet-5",
             max_tokens: 4096,
-            temperature: 0.2,
+            thinking: STRUCTURED_HOOK_THINKING,
             system: [
               {
                 type: "text",
@@ -599,11 +681,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
               },
               {
                 role: "user",
-                content: `The generated brief failed validation with the following error(s):\n${validationErrors
-                  .map((e) => `- ${e}`)
-                  .join(
-                    "\n"
-                  )}\n\nPlease regenerate the profile strictly addressing these errors. Ensure exactly 3 distinct angles, zero references to sibling catalog items, and describe only "${targetProductTitle}".`,
+                content: retryUserContent,
               },
             ],
             tools: [ADVANTAGE_PLUS_TOOL],
@@ -640,17 +718,13 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
           console.error("[Advantage+ Validator] Retry failed:", retryErr);
         }
 
-        // If still invalid after retry, sanitize flagged tokens and log alert
+        // Never deliver a profile that still contains known validation errors.
         if (validationErrors.length > 0) {
           console.error(
             "[Advantage+ Validator Alert] Brief failed validation after retry:",
             validationErrors
           );
-          profile = sanitizeLeakedTokens(
-            profile,
-            targetProductCtx,
-            catalog
-          );
+          throw new Error("Generated creative hooks failed validation.");
         }
       }
 
@@ -659,30 +733,31 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
         Array.isArray(profile.creative_hooks) &&
         profile.creative_hooks.length > 0
       ) {
+        const sanitized = sanitizeLeakedTokens(profile, targetProductCtx, catalog);
         return {
+          generation_status: "generated",
           locations:
-            Array.isArray(profile.locations) && profile.locations.length > 0
-              ? profile.locations
+            Array.isArray(sanitized.locations) && sanitized.locations.length > 0
+              ? sanitized.locations
               : defaultLocations,
           demographics: {
-            gender: profile.demographics?.gender || "All",
+            gender: sanitized.demographics?.gender || "All",
             demographic_justification:
-              profile.demographics?.demographic_justification ||
+              sanitized.demographics?.demographic_justification ||
               "Demographic profile aligned with product price point and buyer history.",
-            age_min: profile.demographics?.age_min || 25,
-            age_max: profile.demographics?.age_max || 44,
+            age_min: sanitized.demographics?.age_min || 25,
+            age_max: sanitized.demographics?.age_max || 44,
             age_reasoning:
-              profile.demographics?.age_reasoning ||
+              sanitized.demographics?.age_reasoning ||
               "Age range structured for core buyer purchasing power.",
           },
           seed_interests:
-            Array.isArray(profile.seed_interests) && profile.seed_interests.length > 0
-              ? profile.seed_interests
+            Array.isArray(sanitized.seed_interests) && sanitized.seed_interests.length > 0
+              ? sanitized.seed_interests
               : ["Online Shopping", "Fashion"],
-          creative_hooks: profile.creative_hooks.slice(0, 3),
-          optimization_reasoning:
-            profile.optimization_reasoning || guidance.default_reasoning,
-          timing: profile.timing || {
+          creative_hooks: sanitized.creative_hooks.slice(0, 3),
+          optimization_reasoning: guidance.default_reasoning,
+          timing: sanitized.timing || {
             peak_days:
               storeData.orders?.peak_days && storeData.orders.peak_days.length > 0
                 ? storeData.orders.peak_days
@@ -699,9 +774,8 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
     console.error("AI Advantage+ profile generation error:", err);
   }
 
-  const brand = storeData.store.name || "our collection";
-
   return {
+    generation_status: "fallback",
     locations: defaultLocations,
     demographics: {
       gender: "All",
@@ -713,29 +787,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
         "Standard e-commerce age targeting (25-44) is recommended for early validation campaigns.",
     },
     seed_interests: ["Online Shopping", "Fashion"],
-    creative_hooks: [
-      {
-        angle: "Problem / Friction",
-        visual_cue:
-          "Close-up demonstration showing common frustration resolved by product",
-        on_screen_text: "Stop settling for ordinary.",
-        primary_text_hook: `Tired of standard options that don't hold up? Here is what makes ${brand} different.`,
-      },
-      {
-        angle: "Identity / Status",
-        visual_cue:
-          "Lifestyle shot showing product in a natural, elevated everyday setting",
-        on_screen_text: "Designed for daily wear.",
-        primary_text_hook: `Designed for people who appreciate thoughtful details and timeless style.`,
-      },
-      {
-        angle: "Material / Craftsmanship",
-        visual_cue:
-          "Macro detail shot highlighting texture, stitching, and finish quality",
-        on_screen_text: "Built with premium craft.",
-        primary_text_hook: `Every piece is built to feel better and last longer from day one.`,
-      },
-    ],
+    creative_hooks: [],
     optimization_reasoning: guidance.default_reasoning,
     timing: {
       peak_days:
@@ -752,6 +804,12 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
           : "Thursday launches build momentum for weekend e-commerce traffic. Past order timing reflects historical customer activity, not an algorithmic guarantee.",
     },
   };
+}
+
+export async function generateTargetingProfile(
+  ...args: Parameters<typeof generateRawTargetingProfile>
+): Promise<TargetingProfile> {
+  return groundTargetingProfile(await generateRawTargetingProfile(...args), args[0]);
 }
 
 // ─── Health Scoring Functions ───
@@ -816,6 +874,7 @@ function scoreAvailability(products: StoreData["products"]): {
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
 export interface MetaRecommendations {
+  generation_status?: "generated" | "fallback";
   lowDataWarning?: boolean;
   lowDataMessage?: string;
   newStoreCaution?: boolean;
@@ -843,6 +902,7 @@ export interface MetaRecommendations {
     behaviours?: string[];
   };
   budget: {
+    calculation?: import("./budget-evidence").BudgetCalculation;
     recommended_daily: number;
     recommended_duration_days: number;
     reasoning: string;
@@ -860,7 +920,6 @@ export interface MetaRecommendations {
     optimization_event: {
       event: string;
       reasoning: string;
-      target_weekly: number;
       upgrade_milestone?: string;
     };
     strategies: {
@@ -901,42 +960,22 @@ export async function generateRecommendations(
   storeData: StoreData,
   dynamicExchangeRates?: Record<string, number>,
   userId?: string | null,
-  targetProductOverride?: StoreProduct
+  targetProductOverride?: StoreProduct,
+  excludedAngle?: string | null
 ): Promise<MetaRecommendations> {
   const storeCurrency = storeData.store.currency || "USD";
-  const rates = dynamicExchangeRates || (await fetchExchangeRates());
-  const exchangeRate = rates[storeCurrency] || 1;
+  const fx = dynamicExchangeRates
+    ? { rates: dynamicExchangeRates, source: "provided" as const, fetched_at: null }
+    : await fetchExchangeRateSnapshot();
+  const rates = fx.rates;
+  const exchangeRate = rates[storeCurrency];
+  if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new Error(`No reliable exchange rate for ${storeCurrency}`);
   const monthlyOrders =
-    storeData.orders.orders_last_30_days || storeData.orders.order_count || 0;
-  const guidance = getAdvantagePlusGuidance(monthlyOrders);
+    storeData.orders.orders_last_30_days ?? 0;
+  const guidance = getAdvantagePlusGuidance(monthlyOrders, storeData.prespend?.analytics?.recent_funnel);
 
   // ─── Before running calculations: data sufficiency check ───
-  if (storeData.orders.order_count < 20) {
-    const brand = storeData.store.name || "our collection";
-    const defaultHooks: CreativeHook[] = [
-      {
-        angle: "Problem / Friction",
-        visual_cue:
-          "Close-up demonstration showing common frustration resolved by product",
-        on_screen_text: "Stop settling for ordinary.",
-        primary_text_hook: `Tired of standard options that don't hold up? Here is what makes ${brand} different.`,
-      },
-      {
-        angle: "Identity / Status",
-        visual_cue:
-          "Lifestyle shot showing product in a natural, elevated everyday setting",
-        on_screen_text: "Designed for daily wear.",
-        primary_text_hook: `Designed for people who appreciate thoughtful details and timeless style.`,
-      },
-      {
-        angle: "Material / Craftsmanship",
-        visual_cue:
-          "Macro detail shot highlighting texture, stitching, and finish quality",
-        on_screen_text: "Built with premium craft.",
-        primary_text_hook: `Every piece is built to feel better and last longer from day one.`,
-      },
-    ];
-
+  if (storeData.orders.order_count < 20 && !targetProductOverride) {
     const lowDataCatalogPrices = (storeData.products || [])
       .map((p) => p.price)
       .filter((p): p is number => typeof p === "number" && p > 0)
@@ -946,23 +985,23 @@ export async function generateRecommendations(
         ? lowDataCatalogPrices[Math.floor(lowDataCatalogPrices.length / 2)]
         : 0;
     const effectiveLowDataAov =
-      (targetProductOverride?.price && targetProductOverride.price > 0)
-        ? targetProductOverride.price
-        : storeData.orders.average_order_value > 0
+      storeData.orders.average_order_value > 0
         ? storeData.orders.average_order_value
         : lowDataMedianCatalogPrice > 0
         ? lowDataMedianCatalogPrice
         : 25 * exchangeRate;
 
     return {
+      generation_status: "fallback",
       lowDataWarning: true,
       lowDataMessage:
         "We need at least 20 orders to generate reliable recommendations. Keep selling and check back soon.",
-      creative_hooks: defaultHooks,
+      creative_hooks: [],
       advantage_plus_guidance: {
         campaign_type: guidance.campaign_type,
         optimization_event: guidance.optimization_event,
         optimization_reasoning: guidance.default_reasoning,
+        event_evidence: guidance.event_evidence,
         seed_audience_suggestions: {
           age_min: 25,
           age_max: 44,
@@ -977,21 +1016,14 @@ export async function generateRecommendations(
           storeData.orders.top_locations.length > 0
             ? storeData.orders.top_locations.map((l) => ({
                 name: l.city,
-                source: "from_data" as const,
+                source: ((storeData.data_quality?.schema_version || 0) >= 2 ? "from_data" : "recommended") as "from_data" | "recommended",
                 percentage: l.percentage,
                 note: `Top buyer city representing ${l.percentage}% of your customer orders.`,
               }))
-            : [
-                {
-                  name: storeData.store.country || "Lagos",
-                  source: "from_data" as const,
-                  percentage: 100,
-                  note: "Defaulting targeting to your store's home market.",
-                },
-              ],
+            : [],
         age_min: 25,
         age_max: 44,
-        age_reasoning: "We need at least 20 orders to infer target age range.",
+        age_reasoning: "Age is a suggested test range, not observed customer age.",
         gender: "All",
         gender_reasoning:
           "We recommend starting with broad gender targeting to let Meta's pixel learn your buyer profile.",
@@ -1011,7 +1043,6 @@ export async function generateRecommendations(
         optimization_event: {
           event: guidance.optimization_event,
           reasoning: guidance.default_reasoning,
-          target_weekly: 10,
         },
         breakdown: {
           revenue_based: 0,
@@ -1140,12 +1171,15 @@ export async function generateRecommendations(
       storeData.orders.top_locations
     );
 
-  // Categorize order locations into domestic vs international
-  const domesticLocations = (storeData.orders.top_locations || []).filter((l) =>
+  // Categorize order locations into domestic vs international (excluding country-only fallback entries)
+  const validOrderLocations = (storeData.orders.top_locations || []).filter(
+    (l) => !isFallbackCountryEntry(l)
+  );
+  const domesticLocations = validOrderLocations.filter((l) =>
     isDomestic(l.city, l.country)
   );
 
-  const internationalLocations = (storeData.orders.top_locations || []).filter(
+  const internationalLocations = validOrderLocations.filter(
     (l) => !isDomestic(l.city, l.country)
   );
 
@@ -1213,7 +1247,7 @@ export async function generateRecommendations(
     budgetWarning = true;
     const guardrailLocal = Math.round(aovGuardrailUSD * exchangeRate);
     const tierLocal = Math.round(totalDailySpendUSD * exchangeRate);
-    budgetWarningMessage = `For a premium product at this price point, a daily budget of ${storeData.store.currency_symbol || ""}${guardrailLocal.toLocaleString()}/day helps Meta find buyers much faster. Starting at ${storeData.store.currency_symbol || ""}${tierLocal.toLocaleString()}/day is completely fine to test the waters, though it may take a few extra days to see steady sales. If sales feel slow initially, you can optimize for 'Add to Cart' to build momentum.`;
+    budgetWarningMessage = `For a premium product at this price point, a daily budget of ${storeData.store.currency_symbol || ""}${guardrailLocal.toLocaleString()}/day may give the test more room to gather evidence. Starting at ${storeData.store.currency_symbol || ""}${tierLocal.toLocaleString()}/day limits the amount you risk, but results may be inconclusive. Verify the Purchase event in Meta Events Manager before launch and reassess any event change using measured campaign results.`;
   } else if (aovGuardrailUSD > totalDailySpendUSD) {
     finalDailyUSD = aovGuardrailUSD;
   } else {
@@ -1249,15 +1283,16 @@ export async function generateRecommendations(
     adSets,
     recommendedDaily,
     userId,
-    targetProductOverride
+    targetProductOverride,
+    excludedAngle
   );
 
   // --- Advantage+ Guidance & Creative Hooks ---
   const advantage_plus_guidance: AdvantagePlusGuidance = {
     campaign_type: guidance.campaign_type,
     optimization_event: guidance.optimization_event,
-    optimization_reasoning:
-      profile.optimization_reasoning || guidance.default_reasoning,
+    optimization_reasoning: guidance.default_reasoning,
+    event_evidence: guidance.event_evidence,
     seed_audience_suggestions: {
       age_min: profile.demographics.age_min,
       age_max: profile.demographics.age_max,
@@ -1267,6 +1302,13 @@ export async function generateRecommendations(
     },
   };
 
+  if (targetProductOverride && profile.generation_status === "fallback") {
+    console.error(
+      "Product-specific hook generation failed for:",
+      targetProductOverride.name
+    );
+    throw new CreativeHookGenerationError();
+  }
   const creative_hooks = profile.creative_hooks;
 
   // --- TARGETING (Backward compatibility) ---
@@ -1316,7 +1358,7 @@ export async function generateRecommendations(
 
   const internationalStrategies = getInternationalStrategies(storeCurrency, exchangeRate);
 
-  const isAovPaced = aovGuardrailUSD > totalDailySpendUSD;
+  const isAovPaced = finalDailyUSD === aovGuardrailUSD && aovGuardrailUSD > totalDailySpendUSD;
   const formattedAov = formatCurrency(
     Math.round(effectiveAOV),
     storeCurrency,
@@ -1336,14 +1378,14 @@ export async function generateRecommendations(
   let budgetReasoning = "";
   if (isAovPaced) {
     budgetReasoning =
-      `Calibrated for your product's ${formattedAov} price point: Higher-ticket items naturally have longer consideration cycles, so a higher daily budget allows Meta to gather sufficient shopper feedback across your test duration. If you prefer lower upfront risk, the Dip Your Toe option is a valid starting point that simply takes longer to accumulate conclusive signals. ` +
+      `Calibrated for your product's ${formattedAov} price point: Higher-ticket items naturally have longer consideration cycles, so the price-based test rule raises the daily estimate; it does not establish an affordable acquisition cost. If you prefer lower upfront risk, the Dip Your Toe option is a valid starting point that simply takes longer to accumulate conclusive signals. ` +
       adSetReasoning;
     if (avgMonthlyRevenue > 0 && (recommendedDaily * TEST_DURATION_DAYS) > (avgMonthlyRevenue * 0.3)) {
       budgetReasoning += `\n\n💡 Cash Flow Tip: Your recent 30-day store sales were ${formattedMonthlyRev}. If cash flow is tight right now, choose the Dip Your Toe option (${formattedDipDaily}/day) to test with less risk, or wait until your busy season picks up.`;
     }
   } else if (avgMonthlyRevenue > 0) {
     budgetReasoning =
-      `Scaled from your monthly store revenue of ${formattedMonthlyRev} to keep your ad spend comfortable and low-risk. ` +
+      `Based on the ${budgetTier} testing rule and recent store revenue of ${formattedMonthlyRev}. This is a test-spend estimate, not a profitability forecast. ` +
       adSetReasoning;
   } else {
     budgetReasoning =
@@ -1377,9 +1419,7 @@ export async function generateRecommendations(
   ];
 
   // --- PRODUCTS ---
-  const sortedProducts = [...storeData.products].sort(
-    (a, b) => b.revenue - a.revenue
-  );
+  const sortedProducts = [...storeData.products].sort(compareProductsForTest);
   const topProducts = sortedProducts
     .filter((p) => p.should_advertise)
     .slice(0, 5)
@@ -1434,7 +1474,7 @@ export async function generateRecommendations(
     availabilityScore.score;
 
   // --- WARNINGS ---
-  const warnings: string[] = [];
+  const warnings: string[] = [...(storeData.data_quality?.warnings ?? ["History coverage is unverified. Sync the store before relying on historical claims."])];
   const outOfStockCount = storeData.products.filter((p) => !p.in_stock).length;
   if (outOfStockCount > 0) {
     warnings.push(
@@ -1491,7 +1531,7 @@ export async function generateRecommendations(
       name: l.city,
       country: l.country,
       market_type: "domestic" as const,
-      source: "from_data" as const,
+      source: ((storeData.data_quality?.schema_version || 0) >= 2 ? "from_data" : "recommended") as "from_data" | "recommended",
       percentage: l.percentage,
       note: "Top shopping city from your customer orders",
     }));
@@ -1524,7 +1564,7 @@ export async function generateRecommendations(
       name: l.city,
       country: l.country,
       market_type: "international" as const,
-      source: "from_data" as const,
+      source: ((storeData.data_quality?.schema_version || 0) >= 2 ? "from_data" : "recommended") as "from_data" | "recommended",
       percentage: l.percentage,
       note: "Overseas city from your customer orders",
     }));
@@ -1570,23 +1610,20 @@ export async function generateRecommendations(
 
     const domesticBudgetFormatted =
       formatCurrency(
-        adSets === 2 ? Math.round(recommendedDaily * 0.65) : recommendedDaily,
+        recommendedDaily,
         storeCurrency,
         storeData.store.currency_symbol
       ) + "/day";
 
     const intlBudgetFormatted =
       formatCurrency(
-        adSets === 2
-          ? Math.max(Math.round(recommendedDaily * 0.35), MIN_INTL_DAILY_LOCAL)
-          : MIN_INTL_DAILY_LOCAL,
+        MIN_INTL_DAILY_LOCAL,
         storeCurrency,
         storeData.store.currency_symbol
-      ) +
-      "/day" +
-      (adSets === 1 ? " ($18/day min)" : "");
+      ) + "/day ($18/day min)";
 
     return {
+    generation_status: profile.generation_status,
     ...(lowDataWarningCheck(storeData)
       ? {}
       : {
@@ -1625,6 +1662,21 @@ export async function generateRecommendations(
         "Starting interest suggestions to help Meta find your first wave of shoppers.",
     },
     budget: {
+      calculation: {
+        rule_version: "prespend-v1",
+        product_price: targetProductOverride?.price ?? null,
+        price_basis: targetProductOverride?.price ? "selected_product" : "store_aov_or_catalog",
+        effective_price: effectiveAOV,
+        revenue_30d: avgMonthlyRevenue,
+        product_revenue_30d: targetProductOverride?.revenue ? Math.round(targetProductOverride.revenue) : null,
+        baseline_test_usd: totalTestBudgetUSD,
+        baseline_duration_days: TEST_DURATION_DAYS,
+        baseline_daily: totalDailySpendUSD * exchangeRate,
+        price_guardrail_daily: effectiveAOV * 0.5,
+        selected_rule: isAovPaced ? "price_guardrail" : "revenue_tier_baseline",
+        daily_before_strategy: recommendedDaily,
+        fx: { currency: storeCurrency, rate: exchangeRate, source: fx.source, fetched_at: fx.fetched_at },
+      },
       recommended_daily: recommendedDaily,
       recommended_duration_days: TEST_DURATION_DAYS,
       reasoning: budgetReasoning,
@@ -1634,15 +1686,9 @@ export async function generateRecommendations(
       ad_sets: adSets,
       optimization_event: {
         event: guidance.optimization_event,
-        reasoning:
-          profile.optimization_reasoning || guidance.default_reasoning,
-        target_weekly: guidance.optimization_event === "Purchase" ? 20 : 10,
-        upgrade_milestone:
-          guidance.optimization_event === "AddToCart"
-            ? "Switch to InitiateCheckout or Purchase once you see consistent weekly checkout events."
-            : guidance.optimization_event === "InitiateCheckout"
-            ? "Switch to Purchase optimization once you get 15+ weekly purchases."
-            : "Optimize directly for Purchase.",
+        reasoning: guidance.default_reasoning,
+        upgrade_milestone: guidance.event_evidence.conditional_alternative?.condition ||
+          "Confirm the Purchase event in Meta Events Manager before publishing and reassess after measured results.",
       },
       ad_set_reasoning: adSetReasoning,
       breakdown: {

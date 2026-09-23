@@ -4,6 +4,7 @@ import { formatCurrency } from "@/lib/currency";
 
 export interface BuyerProfileProps {
   locationText: string;
+  locationLevel?: "city" | "country" | "commercial_hubs" | "missing";
   peakDays: string[];
   aov: number;
   repeatRate: number;
@@ -41,6 +42,7 @@ function Row({
 
 export function BuyerProfile({
   locationText,
+  locationLevel = "city",
   peakDays,
   aov,
   repeatRate,
@@ -48,29 +50,38 @@ export function BuyerProfile({
   topChannel,
   topChannelPercentage,
 }: BuyerProfileProps) {
-  const hasIntl = /United States|United Kingdom|London|New York|Canada|Ghana/i.test(locationText);
-  const locationSub = hasIntl ? "Overseas orders detected (US/UK)" : undefined;
+  const hasIntl = /United States|United Kingdom|London|New York|Canada|Ghana|Houston/i.test(locationText);
+  const locationSub =
+    locationLevel === "commercial_hubs" || locationLevel === "country"
+      ? hasIntl
+        ? "Top commercial hubs · Cross-border orders recorded (ideal for diaspora targeting)"
+        : "Top commercial hubs · Concentrates budget where courier delivery and purchasing power are highest"
+      : locationLevel === "missing"
+        ? "Broad market targeting recommended for initial ad tests"
+        : hasIntl
+          ? "Cross-border demand recorded in UK & US · Ideal for high-margin diaspora targeting"
+          : "Proven buyer locations recorded directly from your past customer orders";
 
   const isHighAov = currency === "NGN" ? aov >= 100000 : aov >= 75;
   const isMidAov = currency === "NGN" ? aov >= 30000 : aov >= 35;
 
   const spendSub =
     isHighAov
-      ? "Premium shoppers — highlight fabric quality, fit, and craftsmanship"
+      ? "High-ticket luxury basket · Spotlight craftsmanship, unboxing & styling to build trust"
       : isMidAov
-        ? "Mid-market shoppers — highlight style and everyday comfort"
-        : "Budget-friendly — highlight value and best-sellers";
+        ? "Balanced everyday basket · Showcase versatility and real-world styling"
+        : "Accessible impulse price · Highlight bundle value and fast checkout";
 
   const loyaltySub =
     repeatRate < 0.15
-      ? "Most buyers are new — ads will help expand your customer base"
+      ? "Focus ad creative on converting first-time buyers with an irresistible starter piece"
       : repeatRate <= 0.3
-        ? "Healthy repeat rate — great for testing new arrivals"
-        : "High loyalty — your shoppers love returning";
+        ? "Solid repeat baseline · Pair new buyer acquisition with retargeting"
+        : "Exceptional customer loyalty · High repeat value gives you healthy margin for ads";
 
   const whenSub =
     peakDays.length > 0
-      ? `Launch ads before ${peakDays[0]} to catch the shopping rush`
+      ? `Launch fresh creative ahead of ${peakDays.slice(0, 2).join(" & ")} to catch shoppers at their peak`
       : undefined;
 
   return (
@@ -85,7 +96,7 @@ export function BuyerProfile({
             icon={<Compass />}
             label="How they find you"
             value={topChannelPercentage ? `${topChannel} (${topChannelPercentage}% of orders)` : topChannel}
-            sub="Primary customer entry channel"
+            sub="Your top organic conversion channel"
           />
         )}
         <Row

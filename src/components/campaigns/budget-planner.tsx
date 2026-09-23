@@ -33,6 +33,8 @@ export function BudgetPlanner({
   loadingAiInsights,
   selectedIntlStrategyIndex: propSelectedIntlStrategyIndex,
   setSelectedIntlStrategyIndex: propSetSelectedIntlStrategyIndex,
+  selectedIntlDuration: propSelectedIntlDuration,
+  setSelectedIntlDuration: propSetSelectedIntlDuration,
   productPrice,
 }: {
   aiInsights: AiInsights | null;
@@ -44,6 +46,8 @@ export function BudgetPlanner({
   setSelectedIntlStrategyIndex?: (i: number) => void;
   selectedDuration: 7 | 14 | 30;
   setSelectedDuration: (d: 7 | 14 | 30) => void;
+  selectedIntlDuration?: 7 | 14 | 30;
+  setSelectedIntlDuration?: (d: 7 | 14 | 30) => void;
   loadingAiInsights: boolean;
   productPrice?: number;
 }) {
@@ -66,6 +70,9 @@ export function BudgetPlanner({
   const [localSelectedIntlStrategyIndex, setLocalSelectedIntlStrategyIndex] = useState(1);
   const selectedIntlStrategyIndex = propSelectedIntlStrategyIndex ?? localSelectedIntlStrategyIndex;
   const setSelectedIntlStrategyIndex = propSetSelectedIntlStrategyIndex ?? setLocalSelectedIntlStrategyIndex;
+  const [localSelectedIntlDuration, setLocalSelectedIntlDuration] = useState<7 | 14 | 30>(14);
+  const selectedIntlDuration = propSelectedIntlDuration ?? localSelectedIntlDuration;
+  const setSelectedIntlDuration = propSetSelectedIntlDuration ?? setLocalSelectedIntlDuration;
 
   const budget = aiInsights?.budget;
   const strategies = budget?.strategies ?? [];
@@ -107,6 +114,8 @@ export function BudgetPlanner({
             const activeStrategies = isIntlTab ? intlStrategies : strategies;
             const activeStrategyIdx = isIntlTab ? selectedIntlStrategyIndex : selectedStrategyIndex;
             const onSelectStrategy = isIntlTab ? setSelectedIntlStrategyIndex : setSelectedStrategyIndex;
+            const activeDuration = isIntlTab ? selectedIntlDuration : selectedDuration;
+            const onSelectDuration = isIntlTab ? setSelectedIntlDuration : setSelectedDuration;
             const activeCurrentStrategy = isIntlTab ? intlStrategy : localStrategy;
             const activeAdjustedDaily = isIntlTab ? intlAdjustedDaily : localAdjustedDaily;
 
@@ -270,11 +279,11 @@ export function BudgetPlanner({
                   </h4>
                   <div className="grid grid-cols-3 gap-2">
                     {TIMELINES.map((t) => {
-                      const active = selectedDuration === t.days;
+                      const active = activeDuration === t.days;
                       return (
                         <button
                           key={t.days}
-                          onClick={() => setSelectedDuration(t.days)}
+                          onClick={() => onSelectDuration(t.days)}
                           className={cn(
                             "flex flex-col items-center justify-center rounded-xl border p-3 transition-all cursor-pointer",
                             active
@@ -397,6 +406,9 @@ export function BudgetPlanner({
                           <p className="mt-1 text-base font-bold text-foreground">
                             {formatCurrency(localAdjustedDaily, curr, sym)}/day
                           </p>
+                          <p className="text-[11px] font-semibold text-brand-800 mt-0.5">
+                            {selectedDuration} Days · {formatCurrency(localAdjustedDaily * selectedDuration, curr, sym)} Total
+                          </p>
                           <p className="text-[11px] text-muted-foreground mt-1">
                             Your core campaign. Start here to build consistent sales in your home market before spending on foreign ads.
                           </p>
@@ -414,6 +426,9 @@ export function BudgetPlanner({
                           <p className="mt-1 text-base font-bold text-indigo-950">
                             {formatCurrency(intlAdjustedDaily, curr, sym)}/day
                           </p>
+                          <p className="text-[11px] font-semibold text-indigo-800 mt-0.5">
+                            {selectedIntlDuration} Days · {formatCurrency(intlAdjustedDaily * selectedIntlDuration, curr, sym)} Total
+                          </p>
                           <p className="text-[11px] text-muted-foreground mt-1">
                             Should you ever choose to explore foreign buyers, run this as a separate ad set so higher overseas ad costs don&apos;t drain your local budget.
                           </p>
@@ -421,7 +436,7 @@ export function BudgetPlanner({
                       </div>
 
                       <div className="rounded-lg bg-brand-50/60 border border-brand-100 p-2.5 text-[11px] text-brand-900 leading-relaxed">
-                        💡 <strong>Omni Tip:</strong> We show both figures so you have the exact numbers if you ever want to expand abroad. <strong>Do not feel pressured to run both at once.</strong> Starting with your local budget first protects your cash flow and builds early momentum.
+                        💡 <strong>Omni Tip:</strong> Local test ({selectedDuration}d: {formatCurrency(localAdjustedDaily * selectedDuration, curr, sym)}) and Overseas test ({selectedIntlDuration}d: {formatCurrency(intlAdjustedDaily * selectedIntlDuration, curr, sym)}) run on completely independent timelines and budgets. <strong>Do not feel pressured to run both at once.</strong> Starting with your local budget first protects your cash flow and builds early momentum.
                       </div>
                     </div>
                   ) : (
@@ -512,11 +527,11 @@ export function BudgetPlanner({
                               <span className="col-span-2 text-foreground leading-relaxed">
                                 {isTightCashFlow ? (
                                   <>
-                                    <strong>Starter Testing Baseline:</strong> Calibrated as an estimated starting test budget ({sweetSpotDailyStr}) based on your {productPriceFormatted} item price to give Meta enough daily impressions to find interested shoppers. Allocating 5–10% of last month&apos;s quiet sales ({parsed.recentRevenueFormatted || formatCurrency(recentRevNum, curr, sym)}) would stretch data collection over too many weeks.
+                                    <strong>Starter Testing Baseline:</strong> Calibrated as an estimated starting test budget ({sweetSpotDailyStr}) from the {productPriceFormatted} product-price guardrail because the revenue-tier estimate from last month&apos;s sales ({parsed.recentRevenueFormatted || formatCurrency(recentRevNum, curr, sym)}) would be too small for the planned test. This is a learning budget, not an affordable CPA.
                                   </>
                                 ) : recentRevNum > 0 ? (
                                   <>
-                                    <strong>Monthly Revenue Allocation:</strong> Allocates a disciplined ~5–10% testing budget from your store&apos;s regular monthly sales ({parsed.recentRevenueFormatted || formatCurrency(recentRevNum, curr, sym)}), keeping your ad spend comfortable and low-risk.
+                                    <strong>Revenue-Tier Testing Rule:</strong> Uses the stored pre-spend budget rule with recent monthly sales of {parsed.recentRevenueFormatted || formatCurrency(recentRevNum, curr, sym)}. This estimates a test envelope; it does not prove affordability or profitability.
                                   </>
                                 ) : (
                                   <>

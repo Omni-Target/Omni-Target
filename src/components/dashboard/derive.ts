@@ -1,8 +1,10 @@
 // Pure, display-only derivations for the dashboard.
 // Faithfully ported from the previous inline dashboard logic — behavior unchanged.
-import { clamp } from "@/lib/utils";
+import { getAdvantagePlusGuidance } from "@/lib/advantage-plus";
 import { formatCurrency } from "@/lib/currency";
 import { calculateAdReadinessScore } from "@/lib/ad-readiness-score";
+import { detectDiasporaLocations, isFallbackCountryEntry } from "@/lib/market-geography";
+import type { ProductDecisionEvidence, StoreRecentFunnel } from "@/lib/store-data";
 
 export interface OrdersData {
   orders_last_30_days?: number;
@@ -10,6 +12,7 @@ export interface OrdersData {
   repeat_customer_rate?: number;
   revenue_last_30_days?: number;
   top_locations?: Array<{ city?: string; country?: string }>;
+  top_order_countries?: Array<{ country: string; order_count: number }>;
   peak_days?: string[];
   acquisition_channels?: Array<{ channel: string; order_count: number; percentage: number }>;
 }
@@ -32,6 +35,10 @@ export interface StoreProductLike {
   first_time_buyer_ratio?: number;
   repeat_purchase_rate?: number;
   order_velocity?: number;
+  product_decision?: ProductDecisionEvidence;
+  in_stock_variant_count?: number;
+  total_variant_count?: number;
+  unit_cost_coverage?: "complete" | "partial" | "missing";
 }
 
 export type AdReadiness = "ready" | "ready_with_warnings" | "caution" | "not_ready";
@@ -91,7 +98,7 @@ export interface Insight {
   detail: string;
 }
 
-export function deriveInsights(orders: OrdersData, currency = "USD"): Insight[] {
+export function deriveInsights(orders: OrdersData, currency = "USD", recentFunnel?: StoreRecentFunnel | null): Insight[] {
   const insights: Insight[] = [];
   const aov = orders.average_order_value || 0;
   const repeatRate = orders.repeat_customer_rate || 0;
@@ -106,48 +113,36 @@ export function deriveInsights(orders: OrdersData, currency = "USD"): Insight[] 
     const formattedAov = formatCurrency(Math.round(aov), currency);
     insights.push({
       kind: "premium",
-      title: "Showcase the quality & details",
-      detail: `Your average order is ${formattedAov}. Shoppers buy because of your craft and quality. In your ad videos, show close-ups of the fabric, stitching, and styling.`,
+      title: "High-ticket trust strategy",
+      detail: `At an average basket of ${formattedAov}, shoppers need reassurance before checkout. Use video try-ons, customer unboxing, and clear exchange policies to eliminate purchase hesitation.`,
     });
   }
 
-  // 2. Pixel Learning & Signal Density
-  if (orders30d > 0 && orders30d < 30) {
+  // 2. Launch Event & Optimization (Grounded in Storefront Funnel Evidence)
+  if (orders30d > 0 || recentFunnel) {
+    const eventGuidance = getAdvantagePlusGuidance(orders30d, recentFunnel);
+    const funnel = eventGuidance.event_evidence.recent_funnel;
+    const conditionalAlt = eventGuidance.event_evidence.conditional_alternative;
+
+    const detailText = funnel
+      ? `Shopify recorded ${funnel.completed_checkout_sessions} completed checkouts out of ${funnel.checkout_sessions} checkout sessions. Optimizing for Purchase directly targets paying customers. Confirm Purchase is active in Meta Events Manager before launching${conditionalAlt ? `; consider ${conditionalAlt.event === "InitiateCheckout" ? "Initiate Checkout" : "Add to Cart"} only if Meta Purchase signals prove too sparse.` : "."}`
+      : `Shopify recorded ${orders30d} recent orders. Purchase best matches your goal of acquiring paying buyers. Confirm the Purchase event is active in Meta Events Manager before publishing${orders30d < 15 ? "; if measured purchase signals prove too sparse during testing, consider Initiate Checkout as a backup." : "."}`;
+
     insights.push({
       kind: "scale",
-      title: "Start with 'Add to Cart' ads",
-      detail: `With ${orders30d} orders this month, optimizing for 'Add to Cart' trains Meta faster and protects your budget while sales ramp up.`,
-    });
-  } else if (orders30d >= 30) {
-    insights.push({
-      kind: "scale",
-      title: "Ready for direct Purchase ads",
-      detail: `With ${orders30d} monthly orders, your store has strong sales data. You can optimize ads directly for 'Purchase' to maximize revenue.`,
+      title: "Recommended launch event: Purchase",
+      detail: detailText,
     });
   }
 
   // 3. Diaspora Market Opportunity
-  const intlLocs = locations
-    .filter((l) => {
-      const c = (l.country || "").toLowerCase();
-      return (
-        c.includes("united states") ||
-        c.includes("united kingdom") ||
-        c.includes("canada") ||
-        c.includes("ghana") ||
-        c.includes("uae") ||
-        (l.city && ["london", "new york", "houston", "toronto", "atlanta"].some((city) => l.city?.toLowerCase().includes(city)))
-      );
-    })
-    .map((l) => l.city || l.country || "")
-    .filter(Boolean);
-
-  if (intlLocs.length > 0) {
-    const displayCities = Array.from(new Set(intlLocs)).slice(0, 2).join(" and ");
+  const diasporaMatches = detectDiasporaLocations(locations);
+  if (diasporaMatches.length > 0) {
+    const displayCities = diasporaMatches.slice(0, 2).map((m) => m.city).join(" and ");
     insights.push({
       kind: "diaspora",
       title: `International buyers in ${displayCities}`,
-      detail: `Shoppers in ${displayCities} are already buying from your store. Run targeted ads to these overseas cities to capture high-margin orders.`,
+      detail: `You have organic orders coming from ${displayCities}. Test reaching these diaspora communities with clear international shipping terms.`,
     });
   }
 
@@ -156,8 +151,8 @@ export function deriveInsights(orders: OrdersData, currency = "USD"): Insight[] 
     const days = peakDays.slice(0, 2).join(" and ");
     insights.push({
       kind: "timing",
-      title: "Best days to run your ads",
-      detail: `Your shoppers buy most on ${days}. Launch your ads on Thursday evening so they build momentum before the weekend rush.`,
+      title: `Launch around ${peakDays[0]}`,
+      detail: `Shoppers buy most frequently on ${days}. Launch your campaign or scale budget on ${peakDays[0]} to capture buyers during peak shopping momentum.`,
     });
   }
 
@@ -165,8 +160,8 @@ export function deriveInsights(orders: OrdersData, currency = "USD"): Insight[] 
   if (repeatRate > 0.15 && insights.length < 4) {
     insights.push({
       kind: "lookalike",
-      title: "Target people like your top buyers",
-      detail: `${Math.round(repeatRate * 100)}% of your customers come back to buy again. Meta can use your past customer list to automatically find new shoppers with similar taste.`,
+      title: "Turn loyalty into new customers",
+      detail: `${Math.round(repeatRate * 100)}% of your customers buy again. Feature rave customer reviews and product durability to convert hesitant first-time shoppers.`,
     });
   }
 
@@ -176,8 +171,8 @@ export function deriveInsights(orders: OrdersData, currency = "USD"): Insight[] 
     if (top && top.percentage > 0) {
       insights.push({
         kind: "scale",
-        title: `Primary acquisition via ${top.channel}`,
-        detail: `${top.percentage}% of your store's tracked orders come through ${top.channel}. Your ad briefs and hooks are optimized to convert shoppers from this channel.`,
+        title: `${top.channel} is your top acquisition channel`,
+        detail: `${top.percentage}% of your sales come through ${top.channel}. Turn your top-performing organic posts into ad creatives to mirror what already works.`,
       });
     }
   }
@@ -195,17 +190,33 @@ const COUNTRY_CODES: Record<string, string> = {
   BR: "Brazil", MX: "Mexico", AR: "Argentina",
 };
 
+const COMMERCIAL_HUBS: Record<string, string[]> = {
+  nigeria: ["Lagos", "Abuja", "Port Harcourt"],
+  ng: ["Lagos", "Abuja", "Port Harcourt"],
+  unitedkingdom: ["London", "Manchester"],
+  gb: ["London", "Manchester"],
+  uk: ["London", "Manchester"],
+  unitedstates: ["New York", "Houston", "Atlanta"],
+  us: ["New York", "Houston", "Atlanta"],
+  usa: ["New York", "Houston", "Atlanta"],
+  ghana: ["Accra", "Kumasi"],
+  gh: ["Accra", "Kumasi"],
+  kenya: ["Nairobi", "Mombasa"],
+  ke: ["Nairobi", "Mombasa"],
+  southafrica: ["Johannesburg", "Cape Town"],
+  za: ["Johannesburg", "Cape Town"],
+  canada: ["Toronto", "Vancouver"],
+  ca: ["Toronto", "Vancouver"],
+  unitedarabemirates: ["Dubai", "Abu Dhabi"],
+  ae: ["Dubai", "Abu Dhabi"],
+  dubai: ["Dubai", "Abu Dhabi"],
+};
+
+function normalizeCountryKey(c: string): string {
+  return c.toLowerCase().replace(/[^a-z]/g, "");
+}
+
 export function deriveLocationText(orders: OrdersData): string {
-  const isFallbackCountryEntry = (loc: { city?: string; country?: string }): boolean => {
-    const city = loc.city?.trim() || "";
-    const country = loc.country?.trim() || "";
-    if (!city) return true;
-    if (city.toLowerCase() === country.toLowerCase()) return true;
-    if (/^[A-Z]{2}$/.test(city)) return true;
-    const resolvedCountry = COUNTRY_CODES[country] || country;
-    if (city.toLowerCase() === resolvedCountry.toLowerCase()) return true;
-    return false;
-  };
   const formatLocation = (l: { city?: string; country?: string }) => {
     const countryDisplay = COUNTRY_CODES[l.country || ""] || l.country || "";
     return countryDisplay && countryDisplay.toLowerCase() !== l.city?.toLowerCase()
@@ -214,28 +225,54 @@ export function deriveLocationText(orders: OrdersData): string {
   };
   const top = orders.top_locations || [];
   const validLocations = top.filter((loc) => !isFallbackCountryEntry(loc)).slice(0, 3);
-  const countryFallback =
-    validLocations.length === 0
-      ? [
-          ...new Set(
-            top
-              .map(
-                (l) =>
-                  COUNTRY_CODES[l.country || ""] ||
-                  COUNTRY_CODES[l.city || ""] ||
-                  l.country ||
-                  l.city ||
-                  "",
-              )
-              .filter(Boolean),
-          ),
-        ]
-          .slice(0, 3)
-          .join(" · ")
-      : "";
-  return validLocations.length > 0
-    ? validLocations.map(formatLocation).join(" · ")
-    : countryFallback || "Order location data still building";
+  if (validLocations.length > 0) return validLocations.map(formatLocation).join(" · ");
+
+  // When Shopify omits or redacts cities (common under Level 2 customer privacy protection),
+  // map the store's proven order volume to the top commercial ad-targeting hubs (3 to 4 cities)
+  // where courier delivery and purchasing power are concentrated.
+  const countryOrders = (orders.top_order_countries || []).filter((entry) => entry.order_count > 0);
+  const candidateCountries: string[] = countryOrders.length > 0
+    ? countryOrders.map((e) => e.country)
+    : [
+        ...new Set(
+          top
+            .map((l) => COUNTRY_CODES[l.country || ""] || l.country || l.city || "")
+            .filter(Boolean),
+        ),
+      ];
+
+  if (candidateCountries.length > 0) {
+    const primaryCountry = candidateCountries[0];
+    const primaryKey = normalizeCountryKey(primaryCountry);
+    const primaryHubs = COMMERCIAL_HUBS[primaryKey] || [];
+
+    if (primaryHubs.length > 0) {
+      const selectedCities: string[] = [...primaryHubs];
+
+      // If there are secondary cross-border order countries (e.g. US, UK diaspora orders),
+      // include the top commercial diaspora hub for a 4th targeting slot.
+      for (let i = 1; i < candidateCountries.length && selectedCities.length < 4; i++) {
+        const secCountry = candidateCountries[i];
+        const secKey = normalizeCountryKey(secCountry);
+        const secHubs = COMMERCIAL_HUBS[secKey];
+        if (secHubs && secHubs.length > 0) {
+          const topSecHub = secHubs[0];
+          if (!selectedCities.includes(topSecHub)) {
+            selectedCities.push(topSecHub);
+          }
+        }
+      }
+
+      return selectedCities.slice(0, 4).join(" · ");
+    }
+
+    return candidateCountries
+      .slice(0, 3)
+      .map((c) => COUNTRY_CODES[c] || c)
+      .join(" · ");
+  }
+
+  return "No order locations available";
 }
 
 export interface ProductNarrative {
@@ -244,6 +281,36 @@ export interface ProductNarrative {
 }
 
 export function deriveProductNarrative(p: StoreProductLike): ProductNarrative {
+  if (p.product_decision) {
+    const decision = p.product_decision;
+    const role = decision.role === "Gateway"
+      ? decision.role_confidence === "strong"
+        ? "Proven gateway — your top customer acquisition magnet"
+        : "Gateway product — strong entry product for new buyers"
+      : decision.role === "Consideration"
+        ? "Repeat favorite — shines in retargeting and follow-up purchases"
+        : decision.role === "Hybrid"
+          ? "Bestseller — popular with both first-time and returning buyers"
+          : "Catalog contender — test creative to gauge buyer response";
+    const readiness =
+      decision.test_readiness === "hold"
+        ? "Restock inventory before launching ads."
+        : decision.test_readiness === "review"
+          ? "Check variant stock & margins before launching."
+          : "In stock and ready to test with ads.";
+    const primaryMetric =
+      decision.role === "Gateway"
+        ? `${decision.first_order_count} new customer orders`
+        : decision.role === "Consideration"
+          ? `${decision.later_order_count} repeat orders`
+          : decision.role === "Hybrid"
+            ? `${decision.first_order_count} first / ${decision.later_order_count} repeat orders`
+            : `${decision.first_order_count} first orders recorded`;
+    return {
+      subtext: `${role}. ${readiness}`,
+      primaryMetric,
+    };
+  }
   let subtext = "";
   let primaryMetric = "";
 
@@ -258,11 +325,11 @@ export function deriveProductNarrative(p: StoreProductLike): ProductNarrative {
   }
 
   if (p.gateway_classification === "Insufficient Data") {
-    subtext = "New arrival — create an ad brief to introduce it";
+    subtext = "New arrival — create an ad brief to introduce it to shoppers";
   } else if (p.gateway_classification === "Gateway") {
-    subtext = "Gateway product — best for attracting new customers (most sales from first-timers)";
+    subtext = "Top customer acquisition product for winning new shoppers";
   } else if (p.gateway_classification === "Consideration") {
-    subtext = "Loyal customer favorite — drives high repeat purchases";
+    subtext = "Customer favorite for repeat orders and cross-sells";
   } else if (p.gateway_classification === "Hybrid") {
     subtext = "All-around favorite — popular with both new and returning shoppers";
   } else {

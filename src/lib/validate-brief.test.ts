@@ -164,4 +164,96 @@ describe("validateBrief", () => {
       "Looks incredible with Ego Pants (Noir)."
     );
   });
+
+  describe("factual claim validation", () => {
+    it("catches an unsupported material claim", () => {
+      const response: GeneratedBriefResponse = {
+        target_product_title: "Ego Pants (Noir)",
+        creative_hooks: [
+          {
+            angle: "Material / Craftsmanship",
+            visual_cue: "Macro shot",
+            on_screen_text: "Made with genuine leather.",
+            primary_text_hook: "Best genuine leather pants.",
+          },
+          {
+            angle: "Identity / Status",
+            visual_cue: "Visual 2",
+            on_screen_text: "Text 2",
+            primary_text_hook: "Hook 2",
+          },
+          {
+            angle: "Problem / Friction",
+            visual_cue: "Visual 3",
+            on_screen_text: "Text 3",
+            primary_text_hook: "Hook 3",
+          },
+        ],
+      };
+
+      const product = { ...targetProduct, description: "A great pair of pants made from synthetic materials." };
+      const errors = validateBrief(response, product, catalog);
+      expect(errors.some((e) => e.includes("Unsupported factual claim: \"genuine leather\""))).toBe(true);
+    });
+
+    it("allows a supported claim", () => {
+      const response: GeneratedBriefResponse = {
+        target_product_title: "Ego Pants (Noir)",
+        creative_hooks: [
+          {
+            angle: "Material / Craftsmanship",
+            visual_cue: "Macro shot",
+            on_screen_text: "Made with genuine leather.",
+            primary_text_hook: "Best genuine leather pants.",
+          },
+          {
+            angle: "Identity / Status",
+            visual_cue: "Visual 2",
+            on_screen_text: "Text 2",
+            primary_text_hook: "Hook 2",
+          },
+          {
+            angle: "Problem / Friction",
+            visual_cue: "Visual 3",
+            on_screen_text: "Text 3",
+            primary_text_hook: "Hook 3",
+          },
+        ],
+      };
+
+      const product = { ...targetProduct, description: "A great pair of pants made from fine leather." };
+      const errors = validateBrief(response, product, catalog);
+      expect(errors.some((e) => e.includes("Unsupported factual claim"))).toBe(false);
+    });
+
+    it("catches an unsupported certification claim", () => {
+      const response: GeneratedBriefResponse = {
+        target_product_title: "Ego Pants (Noir)",
+        creative_hooks: [
+          {
+            angle: "Material / Craftsmanship",
+            visual_cue: "Macro shot",
+            on_screen_text: "FDA-approved design.",
+            primary_text_hook: "The only FDA-approved pants.",
+          },
+          {
+            angle: "Identity / Status",
+            visual_cue: "Visual 2",
+            on_screen_text: "Text 2",
+            primary_text_hook: "Hook 2",
+          },
+          {
+            angle: "Problem / Friction",
+            visual_cue: "Visual 3",
+            on_screen_text: "Text 3",
+            primary_text_hook: "Hook 3",
+          },
+        ],
+      };
+
+      const product = { ...targetProduct, description: "A great pair of pants." };
+      const errors = validateBrief(response, product, catalog);
+      expect(errors.some((e) => e.includes("Unsupported factual claim: \"FDA-approved\""))).toBe(true);
+    });
+  });
 });

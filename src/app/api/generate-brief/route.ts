@@ -11,15 +11,17 @@ import {
 } from "@/lib/market-geography";
 import {
   validateBrief,
-  sanitizeLeakedTokens,
   type TargetProductContext,
   type CatalogItem,
   type GeneratedBriefResponse,
 } from "@/lib/validate-brief";
 import type { StoreData } from "@/lib/store-data";
+import { summarizeShopifyReadiness } from "@/lib/shopify-readiness";
+import { summarizeMarketingHistory } from "@/lib/marketing-evidence";
 import {
   ADVANTAGE_PLUS_SYSTEM_PROMPT,
   ADVANTAGE_PLUS_TOOL,
+  STRUCTURED_HOOK_THINKING,
 } from "@/lib/insights-engine";
 
 export const runtime = "nodejs";
@@ -73,11 +75,9 @@ export async function POST(request: Request) {
     }
 
     const monthlyOrders =
-      storeSnapshot.orders?.orders_last_30_days ||
-      storeSnapshot.orders?.order_count ||
-      0;
+      storeSnapshot.orders?.orders_last_30_days ?? 0;
     const storeCurrency = storeSnapshot.store?.currency || "USD";
-    const guidance = getAdvantagePlusGuidance(monthlyOrders);
+    const guidance = getAdvantagePlusGuidance(monthlyOrders, storeSnapshot.prespend?.analytics?.recent_funnel);
 
     // Consolidated Buyer Locations
     const consolidatedLocations = (storeSnapshot.orders?.top_locations || [])
@@ -107,6 +107,11 @@ export async function POST(request: Request) {
     const targetProductCtx: TargetProductContext = {
       id: rawTarget.id || targetTitle,
       title: targetTitle,
+      description: [
+        (rawTarget as { description?: string }).description,
+        ...(((rawTarget as { catalog_claims?: StoreData["products"][number]["catalog_claims"] })
+          .catalog_claims || []).map((claim) => `${claim.key}: ${claim.value}`)),
+      ].filter(Boolean).join("\n"),
       tags: rawTarget.tags || [],
       product_type:
         rawTarget.product_type ||
@@ -167,17 +172,20 @@ export async function POST(request: Request) {
         p.name.trim().toLowerCase() === targetTitle.trim().toLowerCase()
     );
 
-    let productRole = "Catalog Bestseller";
-    if (
+    const productDecision = matchedProduct?.product_decision;
+    let productRole = productDecision
+      ? `${productDecision.role === "Gateway" ? "Gateway Product" : productDecision.role === "Consideration" ? "Repeat Favorite" : productDecision.role === "Hybrid" ? "Proven Seller" : productDecision.role}: ${productDecision.role_reason}`
+      : "Catalog role not established";
+    if (!productDecision && (
       matchedProduct?.gateway_classification === "Gateway" ||
       (matchedProduct?.first_time_buyer_ratio || 0) >= 0.5
-    ) {
+    )) {
       const ftbPct = Math.round((matchedProduct?.first_time_buyer_ratio || 0.6) * 100);
-      productRole = `Gateway Product (the front door bringing in ${ftbPct}% new first-time customers)`;
-    } else if (
+      productRole = `Gateway Product (appeared in ${ftbPct}% of identified purchasers' first accessible paid orders)`;
+    } else if (!productDecision && (
       matchedProduct?.gateway_classification === "Consideration" ||
       (matchedProduct?.repeat_purchase_rate || 0) > 0.15
-    ) {
+    )) {
       productRole = "High-Consideration Product (frequently purchased by customers returning to the brand)";
     }
 
@@ -199,6 +207,18 @@ export async function POST(request: Request) {
       .slice(0, 3)
       .map((c) => `${c.channel} (${c.percentage}%)`)
       .join(", ");
+    const catalogClaims = (matchedProduct?.catalog_claims || [])
+      .map((claim) => `${claim.key}: ${claim.value}`)
+      .join("; ") || "None recorded";
+    const analytics = storeSnapshot.prespend?.analytics;
+    const funnelEvidence = analytics
+      ? `${analytics.window_days}-day ShopifyQL funnel: ${analytics.sessions ?? "unknown"} sessions, ${analytics.sessions_with_cart_additions ?? "unknown"} cart sessions, ${analytics.sessions_that_reached_checkout ?? "unknown"} checkout sessions, ${analytics.sessions_that_completed_checkout ?? "unknown"} completed checkout sessions, ${analytics.conversion_rate ?? "unknown"} conversion rate.`
+      : "ShopifyQL funnel analytics unavailable; do not invent store-specific funnel benchmarks.";
+    const economicsEvidence = matchedProduct?.unit_cost != null
+      ? `Recorded average variant unit cost: ${matchedProduct.unit_cost} ${matchedProduct.unit_cost_currency || storeCurrency} (${matchedProduct.unit_cost_coverage || "unknown"} coverage). Price less recorded unit cost: ${matchedProduct.price_less_unit_cost ?? "unknown"}; this is not net profit because shipping, fees, returns, and overhead are not included.`
+      : "No unit cost is recorded in Shopify; do not claim a profitable CPA or margin.";
+    const operationalReadiness = summarizeShopifyReadiness(storeSnapshot.prespend);
+    const marketingEvidence = summarizeMarketingHistory(storeSnapshot.prespend?.marketing_history);
 
     const prompt = `Target Product Context:
 - Product Title: ${targetTitle}
@@ -207,13 +227,19 @@ export async function POST(request: Request) {
 - Tags: ${targetProductTags}
 - Price: ${targetProductPrice} ${storeCurrency}
 - Product URL: ${targetProductUrl}
+- Verified Catalog Claims from Shopify Metafields/Metaobjects: ${catalogClaims}
 ${siblingDenyList ? `\nForbidden Sibling Products (MUST NEVER appear by name or be referenced in any hook):\n${siblingDenyList}` : ""}
 
 Product Performance & Customer Entry Signals:
 - Role in Store: ${productRole}
+- Test Readiness: ${productDecision ? `${productDecision.test_readiness.replaceAll("_", " ")}. ${productDecision.readiness_reasons.join(" ")}` : "Not assessed in this snapshot"}
+- 60-Day Follow-Up: ${productDecision ? productDecision.follow_up_60d.repeat_rate === null ? "No fully observed first-order cohort yet" : `${productDecision.follow_up_60d.buyers_with_another_order} of ${productDecision.follow_up_60d.eligible_first_order_buyers} eligible first-order buyers placed another store order` : "Unavailable"}
 - Primary Customer Traffic Channel: ${primaryTrafficSource}
 - Top Store Acquisition Channels: ${storeTopChannels || "Direct / Organic Discovery"}
 - Customer Reorder Habit: ${reorderHabit}
+- Unit Economics Evidence: ${economicsEvidence}
+- Store Funnel Evidence: ${funnelEvidence}
+- Shopify Marketing History & Ad Activity: ${marketingEvidence}
 
 Store & Market Context:
 - Store Name: ${storeName}
@@ -226,18 +252,23 @@ Store & Market Context:
 - Top Buyer Locations from Order Data: ${consolidatedLocations || "None recorded yet"}
 - Has Recorded Overseas Buyers: ${hasOverseasBuyers ? "Yes" : "No"}
 - Peak Order Days: ${peakDaysStr}
+- Shopify Operational Readiness:
+${operationalReadiness}
 
 Instructions for this generation:
 1. Product Role: This is ${targetTitle}, acting as ${productRole}. Frame your angles around the core emotional or practical trigger that compels cold prospects to buy for the first time.
 2. Cold Acquisition Safeguard: Hook angles must have broad scroll-stopping appeal. Do NOT use hyper-narrow or hyper-local callouts that choke Meta's broad delivery algorithm.
 3. Founder-Friendly Language: Speak directly to the founder in plain, actionable English without confusing corporate jargon or complex acronyms.
 4. Meta Andromeda Timing: Frame timing guidance around weekly sales rhythm and cash-flow predictability (e.g. expected conversion volume surges). Never advise pausing or day-parting active campaigns, which resets Meta's machine learning.
-5. Dynamic Location Intelligence: Analyze the merchant's home country (${storeCountry}), category (${targetProductType}), and unit price (${targetProductPrice} ${storeCurrency}). Infer domestic commercial hubs dynamically based on real urban purchasing power and e-commerce delivery viability in ${storeCountry}. If recommending international expansion, identify affluent global metro hubs with proven affinity for ${targetProductType} at this price point. Do not default to fixed or pre-assumed cities.
+5. Dynamic Location Intelligence: Infer commercial hubs as acquisition hypotheses, then check them against the Shopify operational-readiness evidence above. A city may still be recommended for demand testing, but its note must say fulfillment is unverified or blocked when its country lacks an active market or shipping method. Do not imply Shopify sales prove future conversion.
+6. Hook Diversity: Use three different primary propositions: one practical problem/outcome, one concrete product proof, and one identity/occasion or verified risk reversal. Do not repeat the same comfort, movement, fit, quality, or confidence claim under different labels.
+7. Marketing Context Awareness: Note the merchant's Shopify Marketing History. If the merchant has no prior paid ad spend recorded, guide the founder on respecting the initial 7-day learning phase and establishing baseline metrics. If the store has previously run paid campaigns, tailor the recommendations to build upon and scale their past acquisition channels.
 Generate a high-converting Advantage+ campaign brief for "${targetTitle}" following all rules in the system prompt. Call the generate_advantage_plus_profile tool.`;
 
     const response = await anthropicClient.messages.create({
       model: "claude-sonnet-5",
       max_tokens: 4096,
+      thinking: STRUCTURED_HOOK_THINKING,
       system: [
         {
           type: "text",
@@ -288,12 +319,33 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
         validationErrors
       );
 
-      // Single automatic retry with temperature adjustment (0.2)
+      // Single automatic retry with the validator feedback.
       try {
+        const toolUseBlock = response.content.find((b) => b.type === "tool_use");
+        const retryUserContent =
+          toolUseBlock && toolUseBlock.type === "tool_use"
+            ? [
+                {
+                  type: "tool_result" as const,
+                  tool_use_id: toolUseBlock.id,
+                  is_error: true,
+                  content: `The generated brief failed validation with the following error(s):\n${validationErrors
+                    .map((e) => `- ${e}`)
+                    .join(
+                      "\n"
+                    )}\n\nPlease regenerate the profile strictly addressing these errors. Ensure exactly 3 distinct angles, zero references to sibling catalog items, and describe only "${targetTitle}".`,
+                },
+              ]
+            : `The generated brief failed validation with the following error(s):\n${validationErrors
+                .map((e) => `- ${e}`)
+                .join(
+                  "\n"
+                )}\n\nPlease regenerate the profile strictly addressing these errors. Ensure exactly 3 distinct angles, zero references to sibling catalog items, and describe only "${targetTitle}".`;
+
         const retryResponse = await anthropicClient.messages.create({
           model: "claude-sonnet-5",
           max_tokens: 4096,
-          temperature: 0.2,
+          thinking: STRUCTURED_HOOK_THINKING,
           system: [
             {
               type: "text",
@@ -314,11 +366,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
             },
             {
               role: "user",
-              content: `The generated brief failed validation with the following error(s):\n${validationErrors
-                .map((e) => `- ${e}`)
-                .join(
-                  "\n"
-                )}\n\nPlease regenerate the profile strictly addressing these errors. Ensure exactly 3 distinct angles, zero references to sibling catalog items, and describe only "${targetTitle}".`,
+              content: retryUserContent,
             },
           ],
           tools: [ADVANTAGE_PLUS_TOOL],
@@ -350,13 +398,18 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
         console.error("[Advantage+ Validator] Retry failed:", retryErr);
       }
 
-      // If still invalid after retry, sanitize flagged tokens and log alert
+      // Never return a brief that still contains known validation errors.
       if (validationErrors.length > 0) {
         console.error(
           "[Advantage+ Validator Alert] Brief failed validation after retry:",
           validationErrors
         );
-        profile = sanitizeLeakedTokens(profile, targetProductCtx, catalog);
+        return NextResponse.json(
+          {
+            error: "Generated creative hooks failed validation. Please retry.",
+          },
+          { status: 422 }
+        );
       }
     }
 
@@ -367,8 +420,8 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
       advantage_plus_guidance: {
         campaign_type: guidance.campaign_type,
         optimization_event: guidance.optimization_event,
-        optimization_reasoning:
-          profile.optimization_reasoning || guidance.default_reasoning,
+        optimization_reasoning: guidance.default_reasoning,
+        event_evidence: guidance.event_evidence,
         seed_audience_suggestions: {
           age_min: profile.demographics?.age_min || 25,
           age_max: profile.demographics?.age_max || 44,

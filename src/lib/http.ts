@@ -1,3 +1,22 @@
+import dns from "node:dns";
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {}
+
+if (typeof window === "undefined") {
+  try {
+    // Optional runtime tuning for Node's built-in fetch dispatcher.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Agent, setGlobalDispatcher, getGlobalDispatcher } = require("undici");
+    const current = getGlobalDispatcher();
+    if (!current || !(current as unknown as { __omni_ipv4?: boolean }).__omni_ipv4) {
+      const agent = new Agent({ connect: { family: 4 } });
+      (agent as unknown as { __omni_ipv4?: boolean }).__omni_ipv4 = true;
+      setGlobalDispatcher(agent);
+    }
+  } catch {}
+}
+
 export interface FetchRetryOptions {
   /** Per-attempt timeout before the request is aborted. Default 8s. */
   timeoutMs?: number;

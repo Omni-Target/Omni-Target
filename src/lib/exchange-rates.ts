@@ -38,13 +38,24 @@ const FX_API_URL = "https://open.er-api.com/v6/latest/USD";
  * WARNING: NGN is highly volatile — the 24h cache window can introduce
  * meaningful variance in daily/monthly budget figures during rapid moves.
  */
-export async function fetchExchangeRates(): Promise<Record<string, number>> {
+export interface ExchangeRateSnapshot {
+  rates: Record<string, number>;
+  source: "live" | "cache" | "fallback" | "provided";
+  fetched_at: string | null;
+}
+
+function validRates(value: unknown): value is Record<string, number> {
+  return !!value && typeof value === "object" &&
+    Object.values(value).every((rate) => typeof rate === "number" && Number.isFinite(rate) && rate > 0);
+}
+
+export async function fetchExchangeRateSnapshot(): Promise<ExchangeRateSnapshot> {
   try {
     const cached = await getExchangeRateCache();
-    if (cached && cached.rates && cached.fetched_at) {
+    if (cached && validRates(cached.rates) && cached.fetched_at) {
       const fetchedAt = new Date(cached.fetched_at).getTime();
       if (fetchedAt > Date.now() - CACHE_TTL_MS) {
-        return cached.rates as Record<string, number>;
+        return { rates: cached.rates, source: "cache", fetched_at: cached.fetched_at };
       }
     }
   } catch (err) {
@@ -54,24 +65,28 @@ export async function fetchExchangeRates(): Promise<Record<string, number>> {
   // Cache miss or stale: fetch fresh and repopulate the cache.
   try {
     console.log("Fetching fresh exchange rates from API...");
-    const res = await fetch(FX_API_URL);
+    const res = await fetch(FX_API_URL, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
     const json = await res.json();
     const rates = json.rates as Record<string, number>;
 
-    if (rates && typeof rates === "object") {
+    if (validRates(rates)) {
       try {
         await setExchangeRateCache(rates);
       } catch (cacheErr) {
         console.error("Database write exchange rate cache error:", cacheErr);
       }
-      return rates;
+      return { rates, source: "live", fetched_at: new Date().toISOString() };
     }
   } catch (err) {
     console.error("Failed to fetch fresh exchange rates from API:", err);
   }
 
-  return FALLBACK_RATES;
+  return { rates: FALLBACK_RATES, source: "fallback", fetched_at: null };
+}
+
+export async function fetchExchangeRates(): Promise<Record<string, number>> {
+  return (await fetchExchangeRateSnapshot()).rates;
 }
 
 /**
@@ -80,5 +95,7 @@ export async function fetchExchangeRates(): Promise<Record<string, number>> {
  */
 export async function getUsdRate(currency: string): Promise<number> {
   const rates = await fetchExchangeRates();
-  return rates[currency] ?? FALLBACK_RATES[currency] ?? 1;
+  const rate = rates[currency] ?? FALLBACK_RATES[currency];
+  if (!rate || !Number.isFinite(rate)) throw new Error(`Unsupported currency: ${currency}`);
+  return rate;
 }

@@ -30,6 +30,9 @@ import {
 import { useStoreData, useForceSyncStoreData } from "@/hooks/useStoreData";
 import { PurchaseDialog } from "@/components/pricing";
 import { getPackById, type CreditPack } from "@/lib/credit-packs";
+import { compareProductsForTest } from "@/lib/gateway-decision";
+import type { StorePrespendIntelligence } from "@/lib/store-data";
+import { isFallbackCountryEntry } from "@/lib/market-geography";
 
 function relativeTime(iso?: string): string {
   if (!iso) return "just now";
@@ -50,8 +53,8 @@ function readinessSubtext(
     case "ready":
     case "ready_with_warnings":
       return topProductName
-        ? `${topProductName} is your top Gateway product — proven to turn new shoppers into buyers. Your store is ready to launch ads.`
-        : "You have winning Gateway products in stock and healthy buyer demand. Pick a product below to create your ad brief.";
+        ? `${topProductName} has your strongest first-order purchase signal. It is a high-priority cold-acquisition test candidate.`
+        : "You have in-stock products with strong first-order purchase signals. Pick one below to create an ad brief.";
     case "caution":
       return readiness.hasRecentOrders
         ? "Several of your best-selling styles are currently sold out. Restock your winners to start advertising."
@@ -71,17 +74,35 @@ function DashboardContent() {
   const { data: storeResponse, isLoading: loading } = useStoreData();
   const forceSync = useForceSyncStoreData();
   const [refreshing, setRefreshing] = useState(false);
-  const [needsReauth, setNeedsReauth] = useState(false);
   const [shop, setShop] = useState<string | null>(null);
+  const reconnectSyncStarted = React.useRef(false);
+  const shopifyReconnected = searchParams.get("shopify") === "reconnected";
 
   const connected = storeResponse?.connected ?? false;
   const sessionExpired = !!storeResponse?.reauthRequired;
   const storeData =
     storeResponse?.connected && storeResponse.data ? storeResponse.data : null;
 
-  if (storeResponse?.needsReauthForOrders && !needsReauth) {
-    setNeedsReauth(true);
-  }
+  const needsReauth = !shopifyReconnected && !refreshing && Boolean(
+    storeResponse?.needsShopifyReauthorization ||
+      storeResponse?.needsReauthForOrders,
+  );
+
+  useEffect(() => {
+    if (!shopifyReconnected || reconnectSyncStarted.current) return;
+    reconnectSyncStarted.current = true;
+    forceSync()
+      .catch(() => toast({
+        variant: "danger",
+        title: "Store refresh failed",
+        description: "Your store is connected. Use Refresh data to try the sync again.",
+      }))
+      .finally(() => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("shopify");
+        window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+      });
+  }, [shopifyReconnected, forceSync, toast]);
 
   // Resolve connected shop domain (only needed if store is not connected).
   useEffect(() => {
@@ -185,8 +206,14 @@ function DashboardContent() {
 
   const readiness = deriveAdReadiness(products, orders);
   const healthScore = deriveHealthScore(products, orders);
-  const insights = deriveInsights(orders, currency);
+  const prespend = storeData?.prespend as StorePrespendIntelligence | undefined;
+  const insights = deriveInsights(orders, currency, prespend?.analytics?.recent_funnel);
   const locationText = deriveLocationText(orders);
+  const locationLevel = orders.top_locations?.some((loc) => !isFallbackCountryEntry(loc))
+    ? "city" as const
+    : (orders.top_order_countries?.length || orders.top_locations?.length)
+      ? "commercial_hubs" as const
+      : "missing" as const;
   const peakDays = orders.peak_days || [];
 
   const isGatewayProduct = (p: StoreProductLike) =>
@@ -200,16 +227,9 @@ function DashboardContent() {
     .filter((p) => p.in_stock && (p.units_sold ?? 0) > 0)
     .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0));
 
-  // Combine out-of-stock Gateway champions with top in-stock performers
-  // Prioritize Gateway champions (both in-stock and out-of-stock) by revenue
+  // Historical product role and current test readiness are independent.
   const intelligenceProducts = [...outOfStockGateways, ...inStockProducts]
-    .sort((a, b) => {
-      const aG = isGatewayProduct(a);
-      const bG = isGatewayProduct(b);
-      if (aG && !bG) return -1;
-      if (!aG && bG) return 1;
-      return (b.revenue ?? 0) - (a.revenue ?? 0);
-    })
+    .sort(compareProductsForTest)
     .slice(0, 6);
 
   const topInStockProduct =
@@ -294,16 +314,17 @@ function DashboardContent() {
             subtext={readinessSubtext(readiness, topInStockProduct)}
             healthScore={healthScore}
             onSync={refreshStoreData}
-            syncing={refreshing}
+            syncing={refreshing || shopifyReconnected}
             topProduct={topInStockProduct}
           />
 
           {needsReauth && (
-            <Alert variant="brand" title="Unlock full order history">
+            <Alert variant="brand" title="Unlock upgraded store intelligence">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <span>
-                  Full order history gives you more accurate recommendations. We
-                  recently updated our permissions.
+                  Reconnect once so Omni Target can read the new analytics,
+                  cost, inventory, market, shipping, return, discount, and
+                  policy signals used by the upgraded recommendations.
                 </span>
                 <Link
                   href="/api/auth/shopify/connect?from=dashboard"
@@ -329,6 +350,7 @@ function DashboardContent() {
             <div className="lg:col-span-1">
               <BuyerProfile
                 locationText={locationText}
+                locationLevel={locationLevel}
                 peakDays={peakDays}
                 aov={orders.average_order_value ?? 0}
                 repeatRate={orders.repeat_customer_rate ?? 0}
@@ -359,7 +381,7 @@ function DashboardContent() {
 
           <Section
             title="Products to advertise"
-            description="Your top Gateway products and best performers, ranked for ad readiness"
+            description="First-order product signals and current test readiness, shown separately"
           >
             {outOfStockGateways.length > 0 && (
               <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-amber-300/80 bg-linear-to-r from-amber-500/10 via-amber-500/5 to-transparent p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
@@ -373,13 +395,13 @@ function DashboardContent() {
                         Restock Suggestion: {outOfStockGateways.map((g) => g.name).join(", ")}
                       </p>
                       <Badge variant="brand" size="sm">
-                        Gateway Hero
+                        Gateway signal
                       </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground">
                       {outOfStockGateways.length === 1
-                        ? `95% of people who bought this were brand new to your store (${outOfStockGateways[0].units_sold} sold). Restocking this Gateway Product on Shopify lets you start attracting new shoppers again.`
-                        : "These Gateway Products are your best tools for winning new customers. Restock them on Shopify to start attracting new shoppers again."}
+                        ? `${outOfStockGateways[0].product_decision?.first_order_count ?? "Some"} identified first orders contained this product. Its first-order role remains visible, but the stock check puts an ad test on hold.`
+                        : "These products have first-order signals, but their current stock puts an ad test on hold."}
                     </p>
                   </div>
                 </div>

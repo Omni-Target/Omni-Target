@@ -5,6 +5,7 @@ import {
   addCreditsToUser,
 } from "@/lib/billing-db";
 import { claimPayment, releasePayment, createPayment } from "@/lib/db";
+import { shopifyAdminGraphqlUrl } from "@/lib/shopify-config";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -60,7 +61,7 @@ export async function GET(request: Request) {
       }
     `;
 
-    const shopifyUrl = `https://${shop}/admin/api/2026-01/graphql.json`;
+    const shopifyUrl = shopifyAdminGraphqlUrl(shop);
     const response = await fetch(shopifyUrl, {
       method: "POST",
       headers: {

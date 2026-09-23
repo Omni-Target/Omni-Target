@@ -115,17 +115,15 @@ export async function POST(request: Request) {
     );
 
     const monthlyOrders =
-      storeSnapshot.orders?.orders_last_30_days ||
-      storeSnapshot.orders?.order_count ||
-      0;
-    const guidance = getAdvantagePlusGuidance(monthlyOrders);
+      storeSnapshot.orders?.orders_last_30_days ?? 0;
+    const guidance = getAdvantagePlusGuidance(monthlyOrders, storeSnapshot.prespend?.analytics?.recent_funnel);
 
     const advantagePlusGuidance = targetingProfile
       ? {
           campaign_type: guidance.campaign_type,
           optimization_event: guidance.optimization_event,
-          optimization_reasoning:
-            targetingProfile.optimization_reasoning || guidance.default_reasoning,
+          optimization_reasoning: guidance.default_reasoning,
+          event_evidence: guidance.event_evidence,
           seed_audience_suggestions: {
             age_min: targetingProfile.demographics?.age_min || 25,
             age_max: targetingProfile.demographics?.age_max || 44,

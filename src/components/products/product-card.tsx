@@ -13,13 +13,24 @@ const labelTone: Record<ProductLabel["tone"], string> = {
   faint: "text-faint-foreground",
 };
 
-function classificationBadge(c?: string) {
-  if (!c || c === "Insufficient Data") return null;
-  const variant =
-    c === "Gateway" ? "brand" : c === "Consideration" ? "warning" : "neutral";
+function classificationBadge(c?: string, confidence?: "strong" | "directional" | "insufficient") {
+  if (!c || c.toLowerCase() === "insufficient data") return null;
+  const isGateway = c.toLowerCase() === "gateway";
+  const isConsideration = c.toLowerCase() === "consideration";
+  const isHybrid = c.toLowerCase() === "hybrid";
+
+  const variant = isGateway ? "brand" : isConsideration || isHybrid ? "info" : "neutral";
+  const label = isGateway
+    ? "Gateway Product"
+    : isConsideration
+      ? "Repeat Favorite"
+      : isHybrid
+        ? "Proven Seller"
+        : c;
+
   return (
     <Badge variant={variant} size="sm">
-      {c}
+      {label}
     </Badge>
   );
 }
@@ -37,6 +48,20 @@ export function ProductCard({
   revenueLabel: string;
   onCreateCampaign: (product: ProductRow) => void;
 }) {
+  const hasEstablishedRole = Boolean(
+    product.gateway_classification &&
+    product.gateway_classification !== "Insufficient Data" &&
+    product.gateway_classification.toLowerCase() !== "unknown" &&
+    (product.units_sold ?? 0) >= 3
+  );
+
+  const stockReason = product.product_decision?.readiness_reasons?.find((r) =>
+    r.includes("variants in stock")
+  );
+  const partialStockText = stockReason
+    ? stockReason.replace("variants in stock.", "in stock").replace("variants in stock", "in stock")
+    : null;
+
   return (
     <div className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md">
       <div className="relative aspect-[4/3] overflow-hidden bg-surface-muted">
@@ -79,7 +104,13 @@ export function ProductCard({
         </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {classificationBadge(product.gateway_classification)}
+          {classificationBadge(product.gateway_classification, product.product_decision?.role_confidence)}
+          {hasEstablishedRole && product.product_decision?.test_readiness === "planning_candidate" && (
+            <Badge variant="brand" size="sm">Ready to Test</Badge>
+          )}
+          {hasEstablishedRole && product.product_decision?.test_readiness === "review" && partialStockText && (
+            <Badge variant="warning" size="sm">{partialStockText}</Badge>
+          )}
           {!label.best && (
             <span className={cn("text-xs font-medium", labelTone[label.tone])}>
               {label.text}

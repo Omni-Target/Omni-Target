@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildBriefPdfPayload, buildBriefText } from "@/lib/campaigns/brief";
+import {
+  buildBriefPdfPayload,
+  buildBriefText,
+  rescaleDailyBudgetForDuration,
+} from "@/lib/campaigns/brief";
 import { buildBriefHTML } from "@/lib/brief-html-template";
 import { formatCurrency } from "@/lib/currency";
 import type {
@@ -79,6 +83,11 @@ function baseInsights(
 }
 
 describe("buildBriefPdfPayload", () => {
+  it("preserves the test-spend envelope when duration changes", () => {
+    expect(rescaleDailyBudgetForDuration(20, 14, 7)).toBe(40);
+    expect(rescaleDailyBudgetForDuration(20, 14, 28)).toBe(10);
+  });
+
   it("computes recommended/goal-adjusted daily, tier, creative hooks, and advantage_plus_guidance", () => {
     const payload = buildBriefPdfPayload({
       brandName: "Acme",
@@ -108,8 +117,9 @@ describe("buildBriefPdfPayload", () => {
       "Manual Sales with Advantage+ Audience"
     );
     expect(payload.advantage_plus_guidance?.optimization_event).toBe(
-      "InitiateCheckout"
+      "Purchase"
     );
+    expect(payload.advantage_plus_guidance?.event_evidence?.meta_event_status).toBe("unverified");
     expect(payload.implementation_steps?.length).toBe(3);
   });
 
@@ -134,12 +144,13 @@ describe("buildBriefPdfPayload", () => {
     expect(payload.budget.reasoning).toBe(
       `Spend ${formatCurrency(30, "USD")}/day to start.`
     );
+    expect(payload.budget.recommended_daily).toBe(20);
     expect(payload.budget.goal_adjusted_daily).toBe(60);
     expect(payload.budget.goal_label).toBe("grow brand awareness");
     expect(payload.copy.cta).toBe("Shop Now");
   });
 
-  it("builds productUrl from the store domain and matching product handle", () => {
+  it("builds productUrl without inventing creative hooks when none were generated", () => {
     const storeInsights: StoreInsights = {
       store: { domain: "shop.example.com" },
       products: [{ id: "1", name: "Tee", handle: "classic-tee" }],
@@ -163,7 +174,7 @@ describe("buildBriefPdfPayload", () => {
       "https://shop.example.com/products/classic-tee"
     );
     expect(payload.isNewLaunch).toBe(true);
-    expect(payload.creative_hooks?.length).toBe(3);
+    expect(payload.creative_hooks).toEqual([]);
   });
 
   it("appends the limited-data warning and preserves existing warnings", () => {
@@ -216,6 +227,29 @@ describe("buildBriefPdfPayload", () => {
     expect(payload.budget.international_budget_formatted).toBe("$40/day");
     expect(payload.targeting?.international_budget_formatted).toBe("$40/day");
   });
+
+  it("keeps local and overseas daily budgets independent and unscaled when 7-day duration is chosen", () => {
+    const payload = buildBriefPdfPayload({
+      brandName: "Acme",
+      productName: "Tee",
+      goal: "Drive Website Sales",
+      generatedCopy: copy,
+      selectedCta: "Shop Now",
+      aiInsights: baseInsights(1),
+      storeInsights: null,
+      selectedDuration: 7,
+      selectedStrategyIndex: 1, // Balanced (20)
+      selectedIntlStrategyIndex: 2, // Full Send (40)
+      gatewayInsight: null,
+      isNewLaunch: false,
+    });
+
+    expect(payload.budget.recommended_duration_days).toBe(7);
+    expect(payload.budget.recommended_daily).toBe(20);
+    expect(payload.budget.goal_adjusted_daily).toBe(40); // 20 * 2 ad sets
+    expect(payload.budget.international_daily).toBe(40); // Full Send
+    expect(payload.budget.international_tier).toBe("Full Send");
+  });
 });
 
 describe("buildBriefText", () => {
@@ -239,7 +273,8 @@ describe("buildBriefText", () => {
     expect(text).toContain("Hook 1 [Problem / Friction]:");
     expect(text).toContain("── TARGET AUDIENCE & CAMPAIGN SETTINGS ──");
     expect(text).toContain("Campaign Type: Manual Sales with Advantage+ Audience");
-    expect(text).toContain("Optimization Event: InitiateCheckout");
+    expect(text).toContain("Optimization Event: Purchase");
+    expect(text).toContain("confirm the Purchase event is active");
     expect(text).toContain("Suggested Age: 25 — 45");
     expect(text).toContain("Suggested Gender: Women");
     expect(text).toContain("Suggested Interests (AI Starting Hints): Fashion, Shopping");
@@ -248,9 +283,101 @@ describe("buildBriefText", () => {
     expect(text).toContain(`Recommended Daily: ${formatCurrency(40, "USD")}/day`);
     expect(text).toContain("Best days: Friday, Saturday");
   });
+
+  it("includes independent overseas strategy and combined spend in brief text", () => {
+    const text = buildBriefText({
+      generatedCopy: copy,
+      selectedCta: "Buy Now",
+      aiInsights: baseInsights(1),
+      storeInsights: {
+        orders: { peak_days: ["Friday"] },
+        store: { currency: "USD" },
+      },
+      goal: "Drive Website Sales",
+      selectedStrategyIndex: 1, // Balanced (20) * 2 ad sets = 40/day
+      selectedIntlStrategyIndex: 2, // Full Send (40/day)
+      selectedDuration: 7,
+    });
+
+    expect(text).toContain("Strategy: Balanced");
+    expect(text).toContain(`Recommended Daily: ${formatCurrency(40, "USD")}/day`);
+    expect(text).toContain(`Total Test Spend: ${formatCurrency(280, "USD")}`); // 40 * 7
+    expect(text).toContain("Optional Overseas Strategy: Full Send");
+    expect(text).toContain(`Optional Overseas Daily: ${formatCurrency(40, "USD")}/day`);
+    expect(text).toContain(`Optional Overseas Test Spend: ${formatCurrency(280, "USD")} (1 separate ad set)`);
+    expect(text).toContain(`Combined Total Daily: ${formatCurrency(80, "USD")}/day`);
+    expect(text).toContain(`Combined Total Test Spend: ${formatCurrency(560, "USD")} (7 days)`);
+  });
 });
 
 describe("buildBriefHTML tests", () => {
+  it("shows observed storefront funnel and flags the Meta event as unverified", async () => {
+    const payload = buildBriefPdfPayload({
+      brandName: "Acme",
+      productName: "Tee",
+      goal: "Drive Website Sales",
+      generatedCopy: copy,
+      selectedCta: "Shop Now",
+      aiInsights: baseInsights(),
+      storeInsights: {
+        orders: { orders_last_30_days: 80 },
+        prespend: {
+          granted_scopes: ["read_reports"],
+          missing_required_scopes: [],
+          capabilities: {},
+          markets: [],
+          shipping_zones: [],
+          fulfillment_locations: [],
+          active_discounts: [],
+          marketing_history: [],
+          policies: [],
+          locales: [],
+          analytics: {
+            source: "shopifyql",
+            window_days: 90,
+            sessions: null,
+            visitors: null,
+            sessions_with_cart_additions: null,
+            sessions_that_reached_checkout: null,
+            sessions_that_completed_checkout: null,
+            added_to_cart_rate: null,
+            checkout_conversion_rate: null,
+            conversion_rate: null,
+            gross_sales: null,
+            discounts: null,
+            returns: null,
+            net_sales: null,
+            shipping_charges: null,
+            taxes: null,
+            total_sales: null,
+            order_count: null,
+            average_order_value: null,
+            top_countries: [],
+            recent_funnel: {
+              source: "shopifyql_sessions",
+              window_days: 30,
+              sessions: 400,
+              cart_sessions: 50,
+              checkout_sessions: 25,
+              completed_checkout_sessions: 12,
+              checkout_conversion_rate: 0.48,
+            },
+          },
+        },
+      },
+      selectedDuration: 14,
+      selectedStrategyIndex: 1,
+      gatewayInsight: null,
+      isNewLaunch: false,
+    });
+
+    const html = await buildBriefHTML(payload);
+    expect(payload.advantage_plus_guidance?.optimization_event).toBe("Purchase");
+    expect(html).toContain("Shopify 30-day sessions: 50 cart additions, 25 reached checkout, 12 completed checkout");
+    expect(html).toContain("Shopify sessions do not verify Meta event health");
+    expect(html).toContain("confirm the Purchase event is active");
+  });
+
   it("never includes the redundant 'Before you launch' checklist card", async () => {
     const payload = buildBriefPdfPayload({
       brandName: "K | KASA",
@@ -414,11 +541,55 @@ describe("buildBriefHTML tests", () => {
     const html = await buildBriefHTML(payload);
     expect(html).toContain("✓ Strong first-purchase signal:");
     expect(html).toContain(
-      "46 of 49 unique customers (94%) who purchased this item were first-time customers of your store (based on lifetime store order history)."
+      "46 of 49 unique customers (94%) who purchased this item were first-time customers of your store (based on accessible paid-order history)."
     );
     expect(html).toContain(
       "Try a 9:16 vertical video (Instagram Reels &amp; Stories) showing the product in motion on a real person, paired with a clean square photo for feed placements."
     );
+  });
+
+  it("shows first-order role and stock hold as separate, sourced decisions in the brief", async () => {
+    const productDecision = {
+      logic_version: 1 as const,
+      source: "shopify_accessible_paid_orders_and_catalog" as const,
+      as_of: "2026-09-22T00:00:00.000Z",
+      role: "Gateway" as const,
+      role_confidence: "directional" as const,
+      first_order_count: 8,
+      identified_first_orders: 12,
+      first_order_reach: 0.6667,
+      later_order_count: 1,
+      identified_later_orders: 12,
+      later_order_reach: 0.0833,
+      role_reason: "8 of 12 identified first orders contained this product, compared with 1 of 12 later orders.",
+      follow_up_60d: { eligible_first_order_buyers: 8, buyers_with_another_order: 3, repeat_rate: 0.375 },
+      test_readiness: "hold" as const,
+      readiness_reasons: ["No catalog variant currently shows positive stock."],
+      limitations: ["First means first accessible paid order."],
+    };
+    const payload = buildBriefPdfPayload({
+      brandName: "Acme",
+      productName: "Ego Pants",
+      goal: "Drive Website Sales",
+      generatedCopy: copy,
+      selectedCta: "Shop Now",
+      aiInsights: baseInsights(),
+      storeInsights: null,
+      selectedDuration: 14,
+      selectedStrategyIndex: 1,
+      gatewayInsight: {
+        currentProductClassification: "Gateway",
+        currentProductName: "Ego Pants",
+        productDecision,
+      },
+      isNewLaunch: false,
+    });
+    const html = await buildBriefHTML(payload);
+    expect(html).toContain("Possible First-Order Gateway");
+    expect(html).toContain("8 of 12 identified first orders");
+    expect(html).toContain("3 of 8 buyers placed another store order");
+    expect(html).toContain("Hold the ad test until stock returns");
+    expect(html).toContain("Shopify accessible paid orders and catalog, synced 2026-09-22");
   });
 
   it("matches Page 1 flight deck and Page 4 audience locations without 3-city truncation", async () => {
@@ -495,9 +666,9 @@ describe("buildBriefHTML tests", () => {
     expect(html).toContain("Lower-Spend Option (Dip Your Toe)");
     expect(html).toContain("3 Creative angles to test");
     expect(html).toContain("Suggested starting age");
-    expect(html).toContain("8–12 Add to Carts");
-    expect(html).toContain("Target ad cost: under ~30% of item price");
-    expect(html).toContain("Money Made − Ad Spend − Making the Product − Delivery − Card Fees = Real Profit in Your Pocket");
+    expect(html).toContain("Strong interest: shoppers adding to cart, but drop-offs before checkout");
+    expect(html).toContain("Target ad spend per sale");
+    expect(html).toContain("Founder Profit Check: Money Made − Ad Spend − Product Cost − Delivery − Payment Fees = Real Cash in Pocket");
     expect(html).not.toContain("TikTok");
   });
 
@@ -567,11 +738,11 @@ describe("buildBriefHTML tests", () => {
     const html = await buildBriefHTML(payload);
     expect(html).toContain("✓ Strong first-purchase signal:");
     expect(html).toContain(
-      "46 of 49 unique customers (94%) who purchased this item were first-time customers of your store (based on lifetime store order history)."
+      "46 of 49 unique customers (94%) who purchased this item were first-time customers of your store (based on accessible paid-order history)."
     );
   });
 
-  it("renders Monthly Revenue Allocation and NO cash flow warning for healthy stores with adequate revenue", async () => {
+  it("renders the revenue-tier rule and no cash flow warning for healthy stores with adequate revenue", async () => {
     const payload = buildBriefPdfPayload({
       brandName: "Acme Apparel",
       productName: "Basic Tee",
@@ -602,13 +773,13 @@ describe("buildBriefHTML tests", () => {
     });
 
     const html = await buildBriefHTML(payload);
-    expect(html).toContain("Monthly Revenue Allocation");
+    expect(html).toContain("Revenue-Tier Testing Rule");
     expect(html).toContain("₦3,000,000 verified over latest 30 days");
     expect(html).not.toContain("Cash Flow Advisory");
     expect(html).not.toContain("If cash is tight right now");
   });
 
-  it("dynamically adjusts cart checkpoint to 15–20 for accessible items and displays verified order history peak days", async () => {
+  it("uses a store-specific or explicitly unavailable cart baseline and displays verified order history peak days", async () => {
     const payload = buildBriefPdfPayload({
       brandName: "Acme",
       productName: "Beanie",
@@ -627,7 +798,7 @@ describe("buildBriefHTML tests", () => {
     });
 
     const html = await buildBriefHTML(payload);
-    expect(html).toContain("15–20 Add to Carts");
+    expect(html).toContain("Strong interest: shoppers adding to cart, but drop-offs before checkout");
     expect(html).toContain("Peak buying days (from your Shopify orders)");
     expect(html).toContain(
       "✓ Based on order history: Shoppers placed the most orders on Monday, Friday, Sunday. Past order timing reflects historical customer activity, not an algorithmic guarantee of future ad performance."
@@ -695,24 +866,22 @@ describe("buildBriefHTML tests", () => {
     });
 
     const html = await buildBriefHTML(payload);
-    // Card 8 intro rule
-    expect(html).toContain("Rule #1: Give it 3 full days before touching anything");
+    // Card 8 uses budget-relative checkpoints rather than generic day counts.
+    expect(html).toContain("Founder Rule: Give Meta 48–72 hours before making changes");
 
     // Green Light scaling & profit check
     expect(html).toContain("🟢 It's Working · Profitable Orders");
     expect(html).toContain("Founder Profit Check");
-    expect(html).toContain("at least 3–5 steady orders");
-    expect(html).toContain("~20% every 3 to 4 days");
+    expect(html).toContain("Verify net profit");
 
     // Yellow Light friction checks & benchmark
     expect(html).toContain("🟡 High Carts, Low Orders");
-    expect(html).toContain("8–12 Add to Carts, but few or no orders");
-    expect(html).toContain("typical cart checkout rates are 10–20%");
+    expect(html).toContain("Strong interest: shoppers adding to cart, but drop-offs before checkout");
     expect(html).toContain("Surprise delivery fees");
 
     // Red Light 3-4 days spend range & action
     expect(html).toContain("🔴 Low Clicks / Refresh Hook");
-    expect(html).toContain("After 3–4 days (₦42,681–₦56,908 spent): Link CTR &lt; 0.6% &amp; 0 carts");
+    expect(html).toContain("At 50% of test budget (₦49,795 spent): link CTR &lt; 0.8% and few page visits");
     expect(html).toContain("Don't start over or delete your campaign");
   });
 
@@ -751,5 +920,89 @@ describe("buildBriefHTML tests", () => {
     expect(html).toContain("12:00 AM (midnight Lagos time) as Monday begins");
     expect(html).not.toContain("on a Sunday");
   });
-});
 
+  it("handles independent duration timelines for Primary Local and Overseas markets cleanly", async () => {
+    const customInsights: AiInsights = {
+      ...baseInsights(1),
+      budget: {
+        currency: "NGN",
+        currency_symbol: "₦",
+        recommended_daily: 28466,
+        recommended_duration_days: 14,
+        tier: "Sweet Spot",
+        reasoning: "Test budget for local and overseas.",
+        strategies: [
+          { label: "Dip Your Toe", daily: 14233, total_daily: 14233, description: "" },
+          { label: "Sweet Spot", daily: 28466, total_daily: 28466, description: "" },
+          { label: "Full Send", daily: 56932, total_daily: 56932, description: "" },
+        ],
+        international_strategies: [
+          { label: "Dip Your Toe", daily: 26568, total_daily: 26568, description: "" },
+          { label: "Sweet Spot", daily: 39851, total_daily: 39851, description: "" },
+          { label: "Full Send", daily: 53135, total_daily: 53135, description: "" },
+        ],
+      },
+      targeting: {
+        locations: [{ name: "Lagos, Nigeria", country: "Nigeria", market_type: "domestic" }],
+        international_locations: [{ name: "London, United Kingdom", country: "United Kingdom", market_type: "international" }],
+      },
+    };
+
+    const payload = buildBriefPdfPayload({
+      brandName: "Acme Nigeria",
+      productName: "Silk Shirt",
+      productPrice: 45000,
+      goal: "Drive Website Sales",
+      generatedCopy: copy,
+      selectedCta: "Shop Now",
+      aiInsights: customInsights,
+      storeInsights: {
+        store: { country: "NG", currency: "NGN" },
+      },
+      selectedDuration: 14,
+      selectedIntlDuration: 7,
+      selectedStrategyIndex: 1, // Sweet Spot: 28466
+      selectedIntlStrategyIndex: 2, // Full Send: 53135
+      gatewayInsight: null,
+      isNewLaunch: false,
+    });
+
+    expect(payload.budget.recommended_duration_days).toBe(14);
+    expect(payload.budget.international_duration_days).toBe(7);
+    expect(payload.budget.recommended_daily).toBe(28466);
+    expect(payload.budget.international_daily).toBe(53135);
+
+    // Plain-text brief check
+    const briefText = buildBriefText({
+      generatedCopy: copy,
+      selectedCta: "Shop Now",
+      aiInsights: customInsights,
+      storeInsights: {
+        store: { country: "NG", currency: "NGN" },
+      },
+      goal: "Drive Website Sales",
+      selectedStrategyIndex: 1,
+      selectedIntlStrategyIndex: 2,
+      selectedDuration: 14,
+      selectedIntlDuration: 7,
+      gatewayInsight: null,
+    });
+
+    expect(briefText).toContain("Test Duration: 14 days");
+    expect(briefText).toContain("Total Test Spend: ₦398,524");
+    expect(briefText).toContain("Optional Overseas Strategy: Full Send");
+    expect(briefText).toContain("Optional Overseas Test Duration: 7 days");
+    expect(briefText).toContain("Optional Overseas Test Spend: ₦371,945 (1 separate ad set)");
+    expect(briefText).toContain("Combined Total Daily: ₦81,601/day");
+    expect(briefText).toContain("Combined Total Test Spend: ₦770,469 (Local 14d + Overseas 7d)");
+
+    // HTML / PDF template check
+    const html = await buildBriefHTML(payload);
+    expect(html).toContain("Local 14d + Overseas 7d: ₦770,469");
+    expect(html).toContain('<span class="row-label">Test Duration</span><span class="row-value">14 days</span>');
+    expect(html).toContain('<span class="row-label">Total Test Spend</span><span class="row-value">₦398,524</span>');
+    expect(html).toContain('<span class="row-label">Optional Duration</span><span class="row-value">7 days</span>');
+    expect(html).toContain('<span class="row-label">Estimated Test Spend</span><span class="row-value">₦371,945</span>');
+    expect(html).toContain("Local: ₦398,524 (14d) + Overseas: ₦371,945 (7d) = Total ₦770,469");
+  });
+});

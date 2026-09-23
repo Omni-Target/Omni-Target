@@ -32,6 +32,7 @@ const PdfBriefModal = dynamic(
 // Full brief context persisted at finalize time (campaigns.brief_data). Optional
 // throughout: if finalize didn't run, we fall back to the campaign's columns.
 interface BriefData {
+  generatedAt?: string;
   brandName?: string;
   productName?: string;
   goal?: string;
@@ -44,6 +45,7 @@ interface BriefData {
   selectedStrategyIndex?: number;
   selectedIntlStrategyIndex?: number;
   selectedDuration?: 7 | 14 | 30;
+  selectedIntlDuration?: 7 | 14 | 30;
   gatewayInsight?: BriefPDFParams["gatewayInsight"] | null;
   isNewLaunch?: boolean;
   productPrice?: number;
@@ -60,9 +62,11 @@ export interface BriefCampaign {
   cta: string | null;
   copywriter_note: string | null;
   brief_data: BriefData | null;
+  product_price?: string | null;
 }
 
 export interface BriefVersionRow {
+  brief_data?: BriefData | null;
   id: string;
   attempt_number: number;
   headline: string | null;
@@ -94,7 +98,16 @@ export function BriefView({
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const bd: BriefData = campaign.brief_data ?? {};
+  // Open on the finalized variation (or the first attempt); clicking any
+  // variation in the rail switches the whole brief to it — and the active one is
+  // always the "Chosen" one, so there's never more than one marked.
+  const finalizedId = versions.find((v) => v.is_selected)?.id ?? null;
+  const [activeVersionId, setActiveVersionId] = useState<string | null>(
+    finalizedId ?? versions[0]?.id ?? null,
+  );
+  const activeVersion = versions.find((v) => v.id === activeVersionId) ?? null;
+
+  const bd: BriefData = activeVersion?.brief_data ?? campaign.brief_data ?? {};
 
   // The campaign's persisted (finalized) copy — prefer the rich brief_data, fall
   // back to columns so the page still renders if only the generate-time write
@@ -136,16 +149,7 @@ export function BriefView({
   const storeInsights = bd.storeInsights ?? null;
   const gatewayInsight = bd.gatewayInsight ?? null;
   const isNewLaunch = bd.isNewLaunch ?? false;
-  const productPrice = bd.productPrice;
-
-  // Open on the finalized variation (or the first attempt); clicking any
-  // variation in the rail switches the whole brief to it — and the active one is
-  // always the "Chosen" one, so there's never more than one marked.
-  const finalizedId = versions.find((v) => v.is_selected)?.id ?? null;
-  const [activeVersionId, setActiveVersionId] = useState<string | null>(
-    finalizedId ?? versions[0]?.id ?? null,
-  );
-  const activeVersion = versions.find((v) => v.id === activeVersionId) ?? null;
+  const productPrice = bd.productPrice ?? (campaign.product_price ? Number(campaign.product_price) : undefined);
 
   // The copy shown + exported is whichever variation is being viewed.
   const displayedCopy: GeneratedCopy = activeVersion
@@ -166,14 +170,19 @@ export function BriefView({
   const [selectedDuration, setSelectedDuration] = useState<7 | 14 | 30>(
     bd.selectedDuration ?? 14,
   );
+  const [selectedIntlDuration, setSelectedIntlDuration] = useState<7 | 14 | 30>(
+    bd.selectedIntlDuration ?? 14,
+  );
   const [modalOpen, setModalOpen] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   // PDF params for the currently viewed variation — the modal builds the PDF
   // from this (preview + download are the same document).
   const pdfParams = useMemo(
     () =>
       buildBriefPdfPayload({
+        generatedAt: bd.generatedAt,
         brandName,
         productName,
         productPrice,
@@ -183,12 +192,14 @@ export function BriefView({
         aiInsights,
         storeInsights,
         selectedDuration,
+        selectedIntlDuration,
         selectedStrategyIndex,
         selectedIntlStrategyIndex,
         gatewayInsight,
         isNewLaunch,
       }),
     [
+      bd.generatedAt,
       brandName,
       productName,
       productPrice,
@@ -198,6 +209,7 @@ export function BriefView({
       aiInsights,
       storeInsights,
       selectedDuration,
+      selectedIntlDuration,
       selectedStrategyIndex,
       selectedIntlStrategyIndex,
       gatewayInsight,
@@ -219,7 +231,9 @@ export function BriefView({
       storeInsights,
       goal,
       selectedStrategyIndex,
+      selectedIntlStrategyIndex,
       selectedDuration,
+      selectedIntlDuration,
       gatewayInsight,
     });
     navigator.clipboard.writeText(briefText);
@@ -231,19 +245,25 @@ export function BriefView({
   // the dashboard. Best-effort persistence never blocks the redirect.
   const handleFinalize = async () => {
     setFinalizing(true);
+    setSaveError("");
     try {
-      await fetch(`/api/campaigns/${campaign.id}`, {
+      const response = await fetch(`/api/campaigns/${campaign.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           versionId: activeVersionId,
           copy: displayedCopy,
           status: "complete",
+          briefData: { ...bd, selectedStrategyIndex, selectedIntlStrategyIndex, selectedDuration, selectedIntlDuration, selectedCta: displayedCta },
         }),
       });
+      if (!response.ok) throw new Error("Save failed");
       queryClient.invalidateQueries({ queryKey: BRIEFS_QUERY_KEY });
     } catch (err) {
-      console.error("Failed to finalize campaign:", err);
+      setSaveError("Your brief could not be saved. Please retry.");
+      return;
+    } finally {
+      setFinalizing(false);
     }
     router.push("/dashboard");
   };
@@ -252,6 +272,7 @@ export function BriefView({
 
   return (
     <>
+      {saveError && <p role="alert" className="mb-4 text-red-600">{saveError}</p>}
       <div
         className={cn(
           hasRail &&
@@ -270,7 +291,14 @@ export function BriefView({
                   <button
                     key={v.id}
                     type="button"
-                    onClick={() => setActiveVersionId(v.id)}
+                    onClick={() => {
+                      setActiveVersionId(v.id);
+                      const context = v.brief_data ?? campaign.brief_data;
+                      setSelectedStrategyIndex(context?.selectedStrategyIndex ?? 1);
+                      setSelectedIntlStrategyIndex(context?.selectedIntlStrategyIndex ?? 1);
+                      setSelectedDuration(context?.selectedDuration ?? 14);
+                      setSelectedIntlDuration(context?.selectedIntlDuration ?? 14);
+                    }}
                     aria-current={isActive ? "true" : undefined}
                     className={cn(
                       "flex items-center justify-between rounded-xl border px-3 py-2.5 text-left text-sm font-medium transition-colors",
@@ -313,6 +341,8 @@ export function BriefView({
             setSelectedIntlStrategyIndex={setSelectedIntlStrategyIndex}
             selectedDuration={selectedDuration}
             setSelectedDuration={setSelectedDuration}
+            selectedIntlDuration={selectedIntlDuration}
+            setSelectedIntlDuration={setSelectedIntlDuration}
             isDownloadingPdf={false}
             onDownloadPdf={() => setModalOpen(true)}
             onCopyBrief={handleCopyBrief}

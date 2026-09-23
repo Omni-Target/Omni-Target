@@ -24,6 +24,8 @@ export interface BriefStepProps {
   setSelectedIntlStrategyIndex?: React.Dispatch<React.SetStateAction<number>>;
   selectedDuration: 7 | 14 | 30;
   setSelectedDuration: React.Dispatch<React.SetStateAction<7 | 14 | 30>>;
+  selectedIntlDuration?: 7 | 14 | 30;
+  setSelectedIntlDuration?: React.Dispatch<React.SetStateAction<7 | 14 | 30>>;
   isDownloadingPdf: boolean;
   onDownloadPdf: () => void;
   onCopyBrief: () => void;
@@ -51,6 +53,8 @@ export function BriefStep({
   setSelectedIntlStrategyIndex,
   selectedDuration,
   setSelectedDuration,
+  selectedIntlDuration,
+  setSelectedIntlDuration,
   isDownloadingPdf,
   onDownloadPdf,
   onCopyBrief,
@@ -80,14 +84,14 @@ export function BriefStep({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-brand-950">
-                Signature Gateway
+                Gateway Champion
               </span>
               <span className="rounded-full bg-brand-200/80 px-2 py-0.5 text-[11px] font-semibold text-brand-800">
-                New Buyer Gateway
+                Top Acquisition Magnet
               </span>
             </div>
             <p className="mt-1 text-xs leading-relaxed text-brand-800">
-              This product is verified as your Signature Gateway — your iconic entry piece with the strongest historical first-purchase signal in your store. The hooks, copy, and targeting below are crafted to attract new buyers to your store.
+              This product is your top customer magnet — it appears most frequently in new buyers&apos; first orders. That makes it your highest-potential candidate for winning cold shoppers on Meta.
             </p>
             {gatewayInsight?.firstTimeBuyerRatio ? (() => {
               const ftbPct = Math.round(gatewayInsight.firstTimeBuyerRatio * 100);
@@ -99,12 +103,12 @@ export function BriefStep({
                   : undefined);
               const detailStr =
                 ftbCount && totalCust
-                  ? `${ftbCount} of ${totalCust} unique customers (${ftbPct}%) who purchased this item were first-time customers of your store (based on lifetime store order history)`
-                  : `${ftbPct}% of customers who purchased this item were first-time customers of your store (based on lifetime store order history)`;
+                  ? `${ftbCount} of ${totalCust} buyers (${ftbPct}%) chose this item as their very first purchase from your store.`
+                  : `${ftbPct}% of customers who bought this item chose it as their very first purchase.`;
 
               return (
                 <div className="mt-2.5 rounded-lg border border-emerald-200 bg-emerald-50/80 p-2.5 text-xs text-emerald-900 leading-relaxed">
-                  <strong className="font-semibold text-emerald-950">✓ Strong first-purchase signal:</strong>{" "}
+                  <strong className="font-semibold text-emerald-950">✓ Top first-purchase piece:</strong>{" "}
                   <span>{detailStr}</span>
                 </div>
               );
@@ -162,7 +166,9 @@ export function BriefStep({
           storeInsights={storeInsights}
           aiInsights={aiInsights}
           loadingAiInsights={loadingAiInsights}
+          selectedStrategyIndex={selectedStrategyIndex}
           selectedIntlStrategyIndex={selectedIntlStrategyIndex}
+          goal={goal}
         />
 
         <BudgetPlanner
@@ -175,6 +181,8 @@ export function BriefStep({
           setSelectedIntlStrategyIndex={setSelectedIntlStrategyIndex}
           selectedDuration={selectedDuration}
           setSelectedDuration={setSelectedDuration}
+          selectedIntlDuration={selectedIntlDuration}
+          setSelectedIntlDuration={setSelectedIntlDuration}
           loadingAiInsights={loadingAiInsights}
           productPrice={productPrice}
         />

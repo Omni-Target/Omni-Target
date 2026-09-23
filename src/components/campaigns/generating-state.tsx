@@ -20,16 +20,16 @@ const GENERATION_STEPS: StepItem[] = [
     detail: "Reading description, price point, and unique craft details…",
   },
   {
-    title: "Formulating 3 Proven Creative Angles",
-    detail: "Developing Craft & Quality, Effortless Fit, and Scroll-Stopper angles…",
+    title: "Developing 3 Creative Angles to Test",
+    detail: "Developing distinct concepts grounded in your product details…",
   },
   {
     title: "Drafting Hook-Driven Copy & Headlines",
     detail: "Writing thumb-stopping primary text and high-intent call-to-actions…",
   },
   {
-    title: "Assembling Creative Previews",
-    detail: "Formatting ad previews and on-screen text for your review…",
+    title: "Validating & Saving Your Brief",
+    detail: "Checking product claims and saving your complete campaign plan…",
   },
 ];
 
@@ -45,11 +45,11 @@ export function GeneratingState({ productName, brandName }: GeneratingStateProps
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [tipIndex, setTipIndex] = useState(0);
 
-  // Progressive step advancement
+  // Progressive step advancement paced to real multi-stage AI generation (~40-75s)
   useEffect(() => {
-    const timer1 = setTimeout(() => setActiveStepIndex(1), 2200);
-    const timer2 = setTimeout(() => setActiveStepIndex(2), 4800);
-    const timer3 = setTimeout(() => setActiveStepIndex(3), 7800);
+    const timer1 = setTimeout(() => setActiveStepIndex(1), 10000);
+    const timer2 = setTimeout(() => setActiveStepIndex(2), 24000);
+    const timer3 = setTimeout(() => setActiveStepIndex(3), 42000);
 
     return () => {
       clearTimeout(timer1);

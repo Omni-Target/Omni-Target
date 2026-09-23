@@ -34,7 +34,9 @@ export function buildGenerationContext(
     const topGateway =
       gatewayProducts.length > 0
         ? [...gatewayProducts].sort(
-            (a, b) => (b.revenue ?? 0) - (a.revenue ?? 0),
+            (a, b) =>
+              (b.product_decision?.first_order_count ?? b.first_time_buyer_count ?? 0) -
+              (a.product_decision?.first_order_count ?? a.first_time_buyer_count ?? 0),
           )[0]
         : null;
 
@@ -46,6 +48,7 @@ export function buildGenerationContext(
     );
 
     gatewayInsight = {
+      productDecision: currentProduct?.product_decision,
       currentProductClassification:
         currentProduct?.gateway_classification || "Unknown",
       currentProductName: currentProduct?.name,

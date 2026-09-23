@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { UserIntegration } from "@/lib/types/integration";
+import { availableCredits } from "@/lib/credit-balance";
 
 // Supabase client should only be instantiated inside /lib/db.ts and nowhere else in the codebase.
 export const supabaseAdmin = createClient(
@@ -548,6 +549,7 @@ export interface CampaignInsert extends BriefCopyFields {
   platform?: string | null;
   media_url?: string | null;
   product_price?: string | null;
+  brief_data?: Record<string, unknown> | null;
 }
 
 /**
@@ -785,4 +787,142 @@ export async function logApiUsage(
         console.error("Exception logging API usage:", err);
       }
     );
+}
+
+/** Attempts atomic commit via RPC; falls back to direct queries if migration 0009 is pending. */
+export async function getGenerationReceipt(userId: string, requestId: string, requestHash: string) {
+  try {
+    const { data, error } = await supabaseAdmin.from("brief_generation_receipts")
+      .select("request_hash,response").eq("clerk_user_id", userId).eq("request_id", requestId).maybeSingle();
+    if (error) {
+      // Table doesn't exist yet (migration 0009 pending in Supabase)
+      if (error.code === "PGRST205" || error.code === "42P01") return null;
+      console.warn("getGenerationReceipt error:", error.message);
+      return null;
+    }
+    if (data && data.request_hash !== requestHash) throw new Error("idempotency_conflict");
+    return data?.response ?? null;
+  } catch (err) {
+    if (err instanceof Error && err.message === "idempotency_conflict") throw err;
+    return null;
+  }
+}
+
+export async function commitBriefGeneration(params: {
+  p_user_id: string; p_request_id: string; p_request_hash: string; p_campaign_id: string | null;
+  p_campaign: Record<string, unknown>; p_copy: Record<string, unknown>;
+  p_context: Record<string, unknown>; p_response: Record<string, unknown>;
+}) {
+  const { data, error } = await supabaseAdmin.rpc("commit_brief_generation", params);
+  if (!error) return data;
+
+  // Fallback if RPC doesn't exist yet (migration 0009 pending in Supabase)
+  if (error.code === "PGRST202" || error.code === "42883") {
+    console.warn("RPC commit_brief_generation not found. Using direct Supabase persistence fallback.");
+    const userId = params.p_user_id;
+    const integration = await getUserIntegration(userId);
+    const cols = await detectDbColumns();
+    const balance = availableCredits(integration, cols.hasCredits);
+    const unlimited = !!(integration?.credits_unlimited_until && new Date(integration.credits_unlimited_until) > new Date());
+
+    let campaignId = params.p_campaign_id;
+    let attempt = 1;
+
+    if (campaignId) {
+      const existingVersions = await getBriefVersions(userId, campaignId);
+      attempt = existingVersions.length + 1;
+    } else {
+      if (!unlimited && balance < 1) {
+        throw new Error("no_credits");
+      }
+      const campaignRowId = await insertCampaign(userId, {
+        brand_name: params.p_campaign.brand_name as string,
+        product_name: params.p_campaign.product_name as string,
+        product_description: params.p_campaign.product_description as string,
+        product_price: params.p_campaign.product_price as string,
+        target_audience: params.p_campaign.target_audience as string,
+        campaign_goal: params.p_campaign.campaign_goal as string,
+        tone_preference: params.p_campaign.tone_preference as string,
+        platform: params.p_campaign.platform as string,
+        media_url: params.p_campaign.media_url as string,
+        headline: params.p_copy.headline as string,
+        primary_text: params.p_copy.primary_text as string,
+        description: params.p_copy.description as string,
+        cta: params.p_copy.cta as string,
+        copywriter_note: params.p_copy.copywriter_note as string,
+        brief_data: params.p_context,
+      });
+      if (!campaignRowId) throw new Error("Failed to insert campaign");
+      campaignId = campaignRowId;
+
+      if (!unlimited) {
+        const newBalance = Math.max(0, balance - 1);
+        const updatePayload: Record<string, unknown> = { credits_balance: newBalance };
+        if (cols.hasCredits) updatePayload.credits = newBalance;
+        await updateUserIntegration(userId, updatePayload);
+        try {
+          await insertCreditUsage(userId, 1, "brief_generated");
+        } catch (e) {
+          console.warn("Non-fatal: insertCreditUsage failed in fallback:", e);
+        }
+      }
+    }
+
+    const versionId = await insertBriefVersion(userId, campaignId, {
+      attempt_number: attempt,
+      is_selected: attempt === 1,
+      headline: params.p_copy.headline as string,
+      primary_text: params.p_copy.primary_text as string,
+      description: params.p_copy.description as string,
+      cta: params.p_copy.cta as string,
+      copywriter_note: params.p_copy.copywriter_note as string,
+    });
+
+    const result = {
+      ...params.p_response,
+      campaignId,
+      versionId: versionId || campaignId,
+      attemptNumber: attempt,
+      credits_balance: unlimited ? balance : Math.max(0, balance - 1),
+      is_unlimited: unlimited,
+    };
+
+    return result;
+  }
+
+  throw new Error(error.message);
+}
+
+export async function finalizeBriefVersion(userId: string, campaignId: string, versionId: string,
+  context: unknown, copy: unknown, status?: string) {
+  const { error } = await supabaseAdmin.rpc("finalize_brief_version", {
+    p_user_id: userId, p_campaign_id: campaignId, p_version_id: versionId,
+    p_context: context ?? {}, p_copy: copy ?? {}, p_status: status ?? null,
+  });
+  if (!error) return;
+
+  if (error.code === "PGRST202" || error.code === "42883") {
+    console.warn("RPC finalize_brief_version not found. Using direct Supabase update fallback.");
+    try {
+      await supabaseAdmin.from("campaign_brief_versions")
+        .update({ is_selected: false })
+        .eq("campaign_id", campaignId)
+        .eq("clerk_user_id", userId);
+      await supabaseAdmin.from("campaign_brief_versions")
+        .update({ is_selected: true })
+        .eq("id", versionId)
+        .eq("clerk_user_id", userId);
+    } catch {}
+    await supabaseAdmin.from("campaigns")
+      .update({
+        brief_data: context as Record<string, unknown>,
+        status: status === "complete" ? "complete" : undefined,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", campaignId)
+      .eq("clerk_user_id", userId);
+    return;
+  }
+
+  throw new Error(error.message);
 }

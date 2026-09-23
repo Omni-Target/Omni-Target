@@ -16,11 +16,7 @@ export function RestockingPanel({
   currency: string;
   shop?: string | null;
 }) {
-  const gatewayCount = products.filter(
-    (p) =>
-      p.gateway_classification === "Gateway" ||
-      ((p.first_time_buyer_ratio ?? 0) >= 0.7 && (p.units_sold ?? 0) >= 3),
-  ).length;
+  const gatewayCount = products.filter((p) => p.gateway_classification === "Gateway").length;
 
   const [open, setOpen] = React.useState(gatewayCount > 0);
   if (products.length === 0) return null;
@@ -50,7 +46,7 @@ export function RestockingPanel({
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {gatewayCount > 0
-              ? "Critical: Restock your top cold traffic acquisition magnets to run Meta ads"
+              ? "First-order gateway signals are on stock hold; restock before testing them"
               : "Restock these proven sellers before running ads"}
           </p>
         </div>

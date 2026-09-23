@@ -6,16 +6,28 @@ import type { AiInsights, StoreInsights } from "./types";
 import { isDomesticCity, getInternationalBudgetFloor, getEffectiveStoreCountry, getInternationalStrategies, isTier1Market } from "@/lib/market-geography";
 import { formatCurrency } from "@/lib/currency";
 
+type DisplayLocation = {
+  name?: string;
+  city?: string;
+  country?: string;
+  market_type?: string;
+  source?: string;
+};
+
 export function TargetingSummary({
   storeInsights,
   aiInsights,
   loadingAiInsights,
+  selectedStrategyIndex,
   selectedIntlStrategyIndex,
+  goal,
 }: {
   storeInsights: StoreInsights | null;
   aiInsights: AiInsights | null;
   loadingAiInsights: boolean;
+  selectedStrategyIndex?: number;
   selectedIntlStrategyIndex?: number;
+  goal?: string;
 }) {
   const guidance = aiInsights?.advantage_plus_guidance;
   const seed = guidance?.seed_audience_suggestions;
@@ -29,6 +41,8 @@ export function TargetingSummary({
 
   const seedInterests =
     seed?.seed_interests ?? legacyTargeting?.interests ?? [];
+  const analytics = storeInsights?.prespend?.analytics;
+  const recentFunnel = analytics?.recent_funnel;
 
   const topOrderLocs = storeInsights?.orders?.top_locations || [];
   const effectiveStoreCountry = getEffectiveStoreCountry(
@@ -72,7 +86,7 @@ export function TargetingSummary({
           isDomesticCity(l.city || "", l.country, effectiveStoreCountry, storeCurrency, topOrderLocs)
         );
 
-  const isProvenDom = (l: any) =>
+  const isProvenDom = (l: DisplayLocation) =>
     l?.source === "from_data" ||
     topOrderLocs.some(
       (t) =>
@@ -83,24 +97,6 @@ export function TargetingSummary({
 
   const provenDomesticLocs = domesticLocs.filter(isProvenDom);
   const recommendedDomesticLocs = domesticLocs.filter((l) => !isProvenDom(l));
-
-  const domesticLocationText = (() => {
-    if (isTier1 && isUS) {
-      const cities = domesticLocs
-        .map((l) => (l?.name || l?.city || "").split(",")[0].trim())
-        .filter((c) => Boolean(c) && !c.toLowerCase().includes("united states"));
-      if (cities.length > 0) {
-        return `United States (Nationwide) · Top buyer hubs: ${cities.slice(0, 5).join(", ")}`;
-      }
-      return "United States (Nationwide)";
-    }
-    return domesticLocs.length > 0
-      ? domesticLocs
-          .map((l) => (l?.name || l?.city || "").split(",")[0].trim())
-          .filter(Boolean)
-          .join(" · ")
-      : "No domestic order data yet — add locations manually based on your target market";
-  })();
 
   const hasOverseasOrders = topOrderLocs.some(
     (l) => !isDomesticCity(l.city || "", l.country, effectiveStoreCountry, storeCurrency, topOrderLocs)
@@ -119,10 +115,10 @@ export function TargetingSummary({
           .map((name) => ({ name, source: "from_data" as const }));
 
   const provenIntlLocs = intlLocs.filter(
-    (l: any) => l?.source === "from_data"
+    (l: DisplayLocation) => l?.source === "from_data"
   );
   const recommendedIntlLocs = intlLocs.filter(
-    (l: any) => l?.source !== "from_data"
+    (l: DisplayLocation) => l?.source !== "from_data"
   );
 
   const intlLocationText =
@@ -139,9 +135,24 @@ export function TargetingSummary({
           .filter(Boolean)
           .join(" · ");
 
+  const chosenDomesticStrategy =
+    aiInsights?.budget?.strategies?.[selectedStrategyIndex ?? 1] ||
+    aiInsights?.budget?.strategies?.[1];
+  const domesticBaseDaily =
+    chosenDomesticStrategy?.daily ?? aiInsights?.budget?.recommended_daily;
+  const domesticGoalMult =
+    goal && aiInsights?.budget?.breakdown?.goal_multipliers?.[goal]
+      ? aiInsights.budget.breakdown.goal_multipliers[goal]
+      : 1;
+  const domesticAdjustedDaily = domesticBaseDaily
+    ? Math.round(domesticBaseDaily * domesticGoalMult)
+    : undefined;
+
   const domesticBudgetFormatted =
     legacyTargeting?.domestic_budget_formatted ||
-    (aiInsights?.budget?.recommended_daily
+    (domesticAdjustedDaily
+      ? `${formatCurrency(domesticAdjustedDaily, storeCurrency || "USD", storeInsights?.store?.currency_symbol || aiInsights?.budget?.currency_symbol)}/day (${chosenDomesticStrategy?.label || "Sweet Spot"})`
+      : aiInsights?.budget?.recommended_daily
       ? `${aiInsights.budget.recommended_daily.toLocaleString()} ${storeCurrency || ""}/day`
       : undefined);
 
@@ -166,11 +177,11 @@ export function TargetingSummary({
   const optimizationEvent =
     guidance?.optimization_event ??
     aiInsights?.budget?.optimization_event?.event ??
-    "AddToCart";
+    "Purchase";
   const optimizationReasoning =
     guidance?.optimization_reasoning ??
     aiInsights?.budget?.optimization_event?.reasoning ??
-    "Selected so Meta can find your first buyers quickly without wasting ad spend.";
+    "Purchase is a sales-goal hypothesis. Confirm that the website event is active in Meta Events Manager before publishing.";
 
   return (
     <Card className="p-6">
@@ -202,10 +213,18 @@ export function TargetingSummary({
             <p className="text-[11px] leading-snug text-brand-700/80">
               {optimizationReasoning}
             </p>
+            <p className="mt-2 text-[11px] font-medium text-amber-900">
+              Meta event status is unverified. Confirm the selected website event in Events Manager before publishing.
+            </p>
+            {recentFunnel && recentFunnel.cart_sessions !== null && recentFunnel.checkout_sessions !== null && recentFunnel.completed_checkout_sessions !== null && (
+              <p className="mt-2 text-[11px] text-brand-700/80">
+                Shopify, last {recentFunnel.window_days} days: {recentFunnel.cart_sessions} cart sessions · {recentFunnel.checkout_sessions} checkout sessions · {recentFunnel.completed_checkout_sessions} completed-checkout sessions. These are not Meta events.
+              </p>
+            )}
             {optimizationEvent === "AddToCart" && (
               <div className="mt-2.5 rounded-lg border border-amber-200/80 bg-amber-50/90 p-2.5 text-[11px] leading-relaxed text-amber-900">
-                <span className="font-semibold text-amber-950">💡 Quality Check (Cart-to-Purchase Ratio):</span>{" "}
-                Optimizing for Add to Cart helps Meta find shoppers interested in your product quickly, but keep an eye on checkouts. If you see over 20 cart adds without a single completed purchase (&lt;5% conversion), check your store for unexpected shipping fees or payment friction, and consider shifting your campaign to optimize for <strong>Initiate Checkout</strong> or <strong>Purchase</strong>.
+                <span className="font-semibold text-amber-950">Quality check:</span>{" "}
+                Cart additions are early intent, not completed purchases. Compare observed cart, checkout and purchase outcomes; check delivery fees, mobile payments, sizing clarity and return-policy terms before changing the event.
               </div>
             )}
           </div>
@@ -231,7 +250,7 @@ export function TargetingSummary({
                   </span>
                   <p className="font-semibold text-foreground text-sm">
                     {provenDomesticLocs
-                      .map((l: any) => (l?.name || l?.city || "").split(",")[0].trim())
+                      .map((l: DisplayLocation) => (l?.name || l?.city || "").split(",")[0].trim())
                       .filter(Boolean)
                       .join(" · ")}
                   </p>
@@ -246,7 +265,7 @@ export function TargetingSummary({
                   </span>
                   <p className="font-semibold text-foreground text-sm">
                     {recommendedDomesticLocs
-                      .map((l: any) => (l?.name || l?.city || "").split(",")[0].trim())
+                      .map((l: DisplayLocation) => (l?.name || l?.city || "").split(",")[0].trim())
                       .filter(Boolean)
                       .join(" · ")}
                   </p>
@@ -259,7 +278,7 @@ export function TargetingSummary({
               <div className="rounded-xl border border-border bg-surface-subtle p-3.5 space-y-1">
                 <p className="font-semibold text-foreground text-sm">
                   {provenDomesticLocs
-                    .map((l: any) => (l?.name || l?.city || "").split(",")[0].trim())
+                    .map((l: DisplayLocation) => (l?.name || l?.city || "").split(",")[0].trim())
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
@@ -271,7 +290,7 @@ export function TargetingSummary({
               <div className="rounded-xl border border-border bg-surface-subtle p-3.5 space-y-1">
                 <p className="font-semibold text-foreground text-sm">
                   {recommendedDomesticLocs
-                    .map((l: any) => (l?.name || l?.city || "").split(",")[0].trim())
+                    .map((l: DisplayLocation) => (l?.name || l?.city || "").split(",")[0].trim())
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
@@ -313,7 +332,7 @@ export function TargetingSummary({
                     </span>
                     <p className="font-semibold text-foreground text-sm">
                       {provenIntlLocs
-                        .map((l: any) => (l?.name || l?.city || "").split(",")[0].trim())
+                        .map((l: DisplayLocation) => (l?.name || l?.city || "").split(",")[0].trim())
                         .filter(Boolean)
                         .join(" · ")}
                     </p>
@@ -327,7 +346,7 @@ export function TargetingSummary({
                     </span>
                     <p className="font-semibold text-foreground text-sm">
                       {recommendedIntlLocs
-                        .map((l: any) => (l?.name || l?.city || "").split(",")[0].trim())
+                        .map((l: DisplayLocation) => (l?.name || l?.city || "").split(",")[0].trim())
                         .filter(Boolean)
                         .join(" · ")}
                     </p>
@@ -340,7 +359,7 @@ export function TargetingSummary({
                 <div>
                   <p className="font-semibold text-foreground text-sm">
                     {provenIntlLocs
-                      .map((l: any) => (l?.name || l?.city || "").split(",")[0].trim())
+                      .map((l: DisplayLocation) => (l?.name || l?.city || "").split(",")[0].trim())
                       .filter(Boolean)
                       .join(" · ")}
                   </p>
@@ -352,7 +371,7 @@ export function TargetingSummary({
                 <div>
                   <p className="font-semibold text-foreground text-sm">
                     {recommendedIntlLocs
-                      .map((l: any) => (l?.name || l?.city || "").split(",")[0].trim())
+                      .map((l: DisplayLocation) => (l?.name || l?.city || "").split(",")[0].trim())
                       .filter(Boolean)
                       .join(" · ")}
                   </p>
@@ -411,11 +430,9 @@ export function TargetingSummary({
                 </span>
               )}
             </div>
-            <p className="mt-2 text-[11px] text-subtle-foreground">
+            <p className="mt-2 text-[11px] leading-relaxed text-subtle-foreground">
               <Sparkles className="mr-1 inline size-3 text-brand-600" />
-              Meta uses these starting interests to find your first shoppers. As
-              soon as people start engaging, Meta automatically branches out to
-              find more buyers just like them.
+              Store-informed suggestions based on your catalog and buyer interests. Enter these under Detailed Targeting in Ads Manager to guide Meta&apos;s Advantage+ audience discovery.
             </p>
           </div>
         </div>

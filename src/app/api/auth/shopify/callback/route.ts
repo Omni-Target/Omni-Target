@@ -1,6 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { getExistingIntegrationByStore, upsertUserIntegration, updateUserIntegration } from "@/lib/db";
 import { createHmac } from "crypto";
+import { fetchWithRetry } from "@/lib/http";
+import { shopifyAdminGraphqlUrl, shopifyAdminRestUrl } from "@/lib/shopify-config";
 
 export async function GET(request: Request) {
   const { userId } = await auth();
@@ -52,7 +54,7 @@ export async function GET(request: Request) {
     // The key parameter is "expiring": 1 — this tells Shopify
     // to return an expiring token + refresh token instead of the
     // now-deprecated non-expiring token.
-    const tokenRes = await fetch(
+    const tokenRes = await fetchWithRetry(
       `https://${shop}/admin/oauth/access_token`,
       {
         method: "POST",
@@ -65,7 +67,8 @@ export async function GET(request: Request) {
           code,
           expiring: 1,
         }),
-      }
+      },
+      { timeoutMs: 12000, retries: 2 }
     );
 
     const tokenData = await tokenRes.json();
@@ -89,7 +92,7 @@ export async function GET(request: Request) {
 
     // Fetch shop details to get the primary custom domain
     const shopDetailsRes = await fetch(
-      `https://${shop}/admin/api/2026-01/shop.json`,
+      shopifyAdminRestUrl(shop, "shop.json"),
       {
         headers: {
           "X-Shopify-Access-Token": accessToken
@@ -122,7 +125,6 @@ export async function GET(request: Request) {
     console.log("Shopify store email:", storeEmail);
 
     // Extract store branding (official brand logo from Shopify GraphQL, or fallback to high-res storefront favicon)
-    const effectiveDomain = customDomain || myshopifyUrl || shop;
     let storeLogoUrl: string | null = null;
     let storeName: string = shopData.name || "Store";
 
@@ -147,7 +149,7 @@ export async function GET(request: Request) {
         }
       `;
       const brandRes = await fetch(
-        `https://${shop}/admin/api/2026-01/graphql.json`,
+        shopifyAdminGraphqlUrl(shop),
         {
           method: "POST",
           headers: {
@@ -313,7 +315,7 @@ export async function GET(request: Request) {
 
     try {
       const webhookRes = await fetch(
-        `https://${shop}/admin/api/2026-01/webhooks.json`,
+        shopifyAdminRestUrl(shop, "webhooks.json"),
         {
           method: "POST",
           headers: {
@@ -374,6 +376,9 @@ export async function GET(request: Request) {
     let destination = shouldSkipAudit ? "/dashboard" : "/onboarding/audit";
     if (selectedPlan) {
       destination += `?plan=${encodeURIComponent(selectedPlan)}`;
+    }
+    if (isFromDashboard) {
+      destination += `${destination.includes("?") ? "&" : "?"}shopify=reconnected`;
     }
 
     // Helper to build redirect with cookie

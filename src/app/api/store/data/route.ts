@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getUserIntegration, updateUserIntegration } from "@/lib/db";
 import { fetchShopifyStoreData } from "@/lib/connectors/shopify";
 import { getValidShopifyToken } from "@/lib/shopify-token";
+import { getMissingShopifyScopes } from "@/lib/shopify-config";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -35,7 +36,10 @@ export async function GET(request: Request) {
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
       const cachedSnapshotAt = (cached.data as { snapshotAt?: string })?.snapshotAt;
       const cachedAge = cachedSnapshotAt ? Date.now() - new Date(cachedSnapshotAt).getTime() : 0;
-      if (cachedAge < SNAPSHOT_MAX_AGE_MS) {
+      const cachedSchemaVersion = (cached.data as { data?: { data_quality?: { schema_version?: number } } }).data?.data_quality?.schema_version;
+      const cachedNeedsReauth = (cached.data as { needsShopifyReauthorization?: boolean; needsReauthForOrders?: boolean }).needsShopifyReauthorization ||
+        (cached.data as { needsReauthForOrders?: boolean }).needsReauthForOrders;
+      if (cachedAge < SNAPSHOT_MAX_AGE_MS && cachedSchemaVersion === 6 && !cachedNeedsReauth) {
         return Response.json(cached.data, {
           headers: {
             "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
@@ -58,13 +62,20 @@ export async function GET(request: Request) {
 
   // INSTANT CACHE HIT: If store data is already cached, NOT stale, and this is not a forced sync,
   // return immediately and warm the hot in-memory cache.
-  if (!force && !isStale && creditsRow?.store_snapshot) {
+  const missingShopifyScopes = getMissingShopifyScopes(creditsRow?.shopify_scopes);
+  const reauthMetadata = {
+    needsReauthForOrders: missingShopifyScopes.includes("read_all_orders"),
+    needsShopifyReauthorization: missingShopifyScopes.length > 0,
+    missingShopifyScopes,
+  };
+
+  if (!force && !isStale && creditsRow?.store_snapshot?.data_quality?.schema_version === 6) {
     const payload = {
       connected: true,
       data: creditsRow.store_snapshot,
       credits_balance: creditsRow?.credits_balance || 0,
       credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
-      needsReauthForOrders: !creditsRow?.shopify_scopes?.includes("read_all_orders"),
+      ...reauthMetadata,
       snapshotAt: creditsRow?.store_snapshot_at,
     };
     serverSnapshotCache.set(userId, { data: payload, timestamp: Date.now() });
@@ -132,7 +143,7 @@ export async function GET(request: Request) {
       data: storeData,
       credits_balance: creditsRow?.credits_balance || 0,
       credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
-      needsReauthForOrders: !creditsRow?.shopify_scopes?.includes("read_all_orders"),
+      ...reauthMetadata,
       snapshotAt: new Date().toISOString(),
     };
     serverSnapshotCache.set(userId, { data: syncPayload, timestamp: Date.now() });
@@ -151,7 +162,7 @@ export async function GET(request: Request) {
         data: creditsRow.store_snapshot,
         credits_balance: creditsRow?.credits_balance || 0,
         credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
-        needsReauthForOrders: !creditsRow?.shopify_scopes?.includes("read_all_orders"),
+        ...reauthMetadata,
         snapshotAt: creditsRow?.store_snapshot_at,
       };
       return Response.json(fallbackPayload, {

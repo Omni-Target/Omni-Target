@@ -11,6 +11,7 @@ export interface ProductRow {
   has_partial_stock?: boolean;
   in_stock_variant_names?: string[];
   gateway_classification?: string;
+  product_decision?: import("@/lib/store-data").ProductDecisionEvidence;
 }
 
 export interface ProductLabel {

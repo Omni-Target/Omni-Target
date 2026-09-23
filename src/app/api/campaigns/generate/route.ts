@@ -1,20 +1,28 @@
+import { fetchSafeImage } from "@/lib/safe-image-fetch";
+import { createHash, randomUUID } from "node:crypto";
+import { buildGenerationContext } from "@/lib/campaigns/insights";
+import { validateCopy } from "@/lib/campaigns/validate-copy";
 import { NextResponse } from "next/server";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { queryUserIntegrationSelect, updateUserIntegration, insertCreditUsage, logApiUsage, insertCampaign, insertBriefVersion, getBriefVersions } from "@/lib/db";
+import { queryUserIntegrationSelect, logApiUsage, getBriefVersions, getCampaignById, getGenerationReceipt, commitBriefGeneration } from "@/lib/db";
 import sharp from "sharp";
-import { generateTargetingProfile } from "@/lib/insights-engine";
-import { getAdvantagePlusGuidance } from "@/lib/advantage-plus";
+import {
+  CreativeHookGenerationError,
+  generateRecommendations,
+} from "@/lib/insights-engine";
 import type { StoreProduct } from "@/lib/store-data";
 
 import { detectColumns } from "@/lib/billing-db";
+import { availableCredits } from "@/lib/credit-balance";
 import { getChannelBehavioralGuidance, getGeographicBuyingDynamics } from "@/lib/campaigns/qualitative-guidance";
+import { summarizeMarketingHistory } from "@/lib/marketing-evidence";
 
 // Credit-gating: check balance before generation
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 180;
 
 // Global client removed in favor of explicit initialization per request
 
@@ -48,6 +56,7 @@ interface GenerateRequest {
   // Present on regenerations: attaches the new attempt to the existing brief
   // session instead of creating a fresh campaign.
   campaignId?: string | null;
+  requestId?: string;
 }
 
 interface GatewayInsight {
@@ -62,94 +71,6 @@ interface CustomerLocation {
   city?: string;
   province?: string;
   country?: string;
-}
-
-interface CopyOutput {
-  headline?: string;
-  primaryText?: string;
-  description?: string;
-  cta?: string;
-  copywriterNote?: string;
-}
-
-/**
- * Code-side enforcement of the rules the COPYWRITER_SYSTEM_PROMPT promises.
- *
- * Two passes:
- * 1. Banned string scan — catches exclamation marks, announcement clichés,
- *    unverified demand/scarcity claims, and universal fit assertions that the
- *    system prompt bans but previously had zero code enforcement behind them.
- * 2. Closure/material hallucination check — extracts verifiable product-fact
- *    terms (fabric types, closures, construction details) from the generated
- *    copy and confirms each one is present in the product description. A term
- *    in the copy that isn't in the description is a hallucination risk.
- */
-function validateCopy(copy: CopyOutput, productDescription: string): string[] {
-  const errors: string[] = [];
-  const allText = [copy.headline, copy.primaryText, copy.description]
-    .filter(Boolean)
-    .join(" ");
-
-  // ── Pass 1: Banned string patterns ──────────────────────────────────────
-  const bannedPatterns: Array<{ pattern: RegExp; message: string }> = [
-    { pattern: /!/,                                          message: "Exclamation mark detected — banned for premium copy" },
-    { pattern: /\bIntroducing\b/i,                           message: "Banned announcement phrase: 'Introducing'" },
-    { pattern: /\bMeet the\b/i,                              message: "Banned announcement phrase: 'Meet the'" },
-    { pattern: /\bThe .{1,40} (is here|arrives|has arrived)\b/i, message: "Banned passive announcement headline" },
-    { pattern: /\bflatters (all|every) body\b/i,             message: "Unverified universal fit claim" },
-    { pattern: /\bmade for every body\b/i,                   message: "Unverified universal fit claim" },
-    { pattern: /\bloved by thousands\b/i,                    message: "Unverified social proof claim" },
-    { pattern: /\b(selling|sold) out fast\b/i,               message: "Unverified scarcity claim" },
-    { pattern: /\bback by popular demand\b/i,                message: "Unverified demand claim" },
-    { pattern: /\b(our |the )?fastest.selling\b/i,           message: "Unverified demand claim: 'fastest-selling'" },
-    { pattern: /\bkeep(s)? selling out\b/i,                  message: "Unverified demand claim: 'keeps selling out'" },
-    { pattern: /\balways sold out\b/i,                       message: "Unverified demand claim: 'always sold out'" },
-    { pattern: /\bgame.?changer\b/i,                         message: "Banned cliché: 'game changer'" },
-    { pattern: /\bElevate your\b/i,                          message: "Banned cliché: 'Elevate your'" },
-    { pattern: /\bStep into\b/i,                             message: "Banned cliché: 'Step into'" },
-    { pattern: /\bThere is a version of you\b/i,             message: "Banned abstract cliché" },
-    { pattern: /\bImagine a world\b/i,                       message: "Banned abstract cliché" },
-    { pattern: /\bLook no further\b/i,                       message: "Banned cliché: 'Look no further'" },
-  ];
-
-  for (const { pattern, message } of bannedPatterns) {
-    if (pattern.test(allText)) {
-      errors.push(message);
-    }
-  }
-
-  // ── Pass 2: Closure & material hallucination check ───────────────────────
-  // Terms that are specific and verifiable — if the copy claims them, they
-  // must appear in the product description. Generic words (dress, style, etc.)
-  // are intentionally excluded from this list.
-  const verifiableTerms = [
-    // Closures & fastenings
-    "zipper", "zip", "drawstring", "elastic", "button", "buttons",
-    "buckle", "velcro", "snap", "hook-and-eye", "lace-up", "belt", "sash",
-    // Fabrics & materials
-    "linen", "silk", "cotton", "wool", "cashmere", "satin", "chiffon",
-    "velvet", "leather", "denim", "suede", "nylon", "polyester", "rayon",
-    "viscose", "modal", "bamboo", "jersey", "tweed", "organza", "tulle",
-    "crepe", "georgette", "brocade", "twill", "poplin",
-    // Embellishments & construction
-    "embroidery", "embroidered", "beaded", "beading", "cowrie", "sequin",
-    "sequined", "lace", "crochet", "smocking", "pleated", "pleats",
-    "ruffle", "ruffles", "fringe", "tassels", "pockets",
-    // Specific fit/construction claims
-    "unisex", "genderless", "adjustable", "stretch", "lined", "lining",
-  ];
-
-  const descLower = (productDescription || "").toLowerCase();
-  const copyLower = allText.toLowerCase();
-
-  for (const term of verifiableTerms) {
-    const termRegex = new RegExp(`\\b${term}\\b`, "i");
-    if (termRegex.test(copyLower) && !termRegex.test(descLower)) {
-      errors.push(`Possible hallucination: "${term}" is in copy but not in product description`);
-    }
-  }
-
-  return errors;
 }
 
 export const COPYWRITER_SYSTEM_PROMPT = `You are a world-class senior direct-response performance copywriter who writes exceptionally high-converting Meta ad copy for high-growth e-commerce brands.
@@ -304,17 +225,34 @@ export async function POST(request: Request) {
     integration?.credits_unlimited_until &&
     new Date(integration.credits_unlimited_until) > new Date();
 
-  const currentCredits = integration
-    ? (cols.hasCredits ? integration.credits : integration.credits_balance) ?? integration.credits_balance ?? 0
-    : 0;
+  const currentCredits = availableCredits(integration, cols.hasCredits);
 
   const hasCredits = currentCredits > 0;
 
   try {
     const body: Partial<GenerateRequest> = await request.json();
 
-    // Extract isRegeneration early — regenerations bypass the credit gate entirely.
-    const isRegeneration = body.isRegeneration ?? false;
+    const requestId = body.requestId || randomUUID();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+      return NextResponse.json({ error: "Invalid request ID" }, { status: 400 });
+    }
+    const requestInput = { ...body };
+    delete requestInput.requestId;
+    const requestHash = createHash("sha256").update(JSON.stringify(requestInput)).digest("hex");
+    const receipt = await getGenerationReceipt(userId!, requestId, requestHash);
+    if (receipt) return NextResponse.json(receipt);
+    const isRegeneration = body.isRegeneration === true;
+    if (isRegeneration) {
+      const campaign = body.campaignId ? await getCampaignById(userId!, body.campaignId) : null;
+      const versions = campaign ? await getBriefVersions(userId!, campaign.id) : [];
+      if (!campaign || !versions.length || versions.length >= 4 ||
+          campaign.product_name !== body.productName ||
+          campaign.product_description !== body.productDescription ||
+          campaign.campaign_goal !== (body.campaignGoal || "Drive Website Sales") ||
+          campaign.product_price !== (body.productPrice || null)) {
+        return NextResponse.json({ error: "Free regeneration requires the same saved product and allows up to three alternatives." }, { status: 409 });
+      }
+    }
 
     // Credit gate: block only if user has no credits AND it's not a free regeneration
     if (!hasUnlimited && !hasCredits && !isRegeneration) {
@@ -341,7 +279,6 @@ export async function POST(request: Request) {
       isNewLaunch,
       shopifyStoreCountry,
       topCustomerLocations,
-      skipTargeting = false,
     } = body;
 
     const currency = integration?.store_snapshot?.store?.currency || "USD";
@@ -356,10 +293,16 @@ export async function POST(request: Request) {
     const client = new Anthropic({ apiKey });
 
     // Validate required fields
-    if (!brandName || !productName || !productDescription) {
+    if (![brandName, productName, productDescription].every((v) => typeof v === "string" && v.trim().length > 0 && v.length <= 20000)) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
+    if (typeof brandName !== "string" || typeof productName !== "string" || typeof productDescription !== "string") {
+      return NextResponse.json({ error: "Invalid product fields" }, { status: 400 });
+    }
+    if (!integration?.store_snapshot) {
+      return NextResponse.json({ error: "Sync your Shopify store before generating a brief." }, { status: 409 });
+    }
     console.log("Selected platform:", platform);
 
 
@@ -382,6 +325,14 @@ export async function POST(request: Request) {
       : "Unknown";
 
     const storeSnapshot = integration?.store_snapshot;
+    const catalogEvidenceProduct = (storeSnapshot?.products || []).find(
+      (product: StoreProduct) =>
+        product.name.trim().toLowerCase() === productName.trim().toLowerCase() ||
+        (product.id && String(product.id) === String(productName)),
+    ) as StoreProduct | undefined;
+    const catalogClaimEvidence = (catalogEvidenceProduct?.catalog_claims || [])
+      .map((claim) => `${claim.key}: ${claim.value}`)
+      .join("; ");
     const topChannel = storeSnapshot?.orders?.acquisition_channels?.[0];
     const channelGuidance = getChannelBehavioralGuidance(
       topChannel?.channel,
@@ -392,6 +343,9 @@ export async function POST(request: Request) {
       currency,
       topCustomerLocations
     );
+    const marketingEvidence = summarizeMarketingHistory(
+      storeSnapshot?.prespend?.marketing_history
+    );
 
     const textContent = 
 `Generate Meta ad copy for:
@@ -399,12 +353,14 @@ export async function POST(request: Request) {
 Brand: ${brandName}
 Product: ${productName}
 Description: ${productDescription}
+Verified Shopify catalog claims: ${catalogClaimEvidence || "None recorded"}
 
 Store Primary Country: ${shopifyStoreCountry || "Unknown"}
 Top Customer Locations: ${formattedLocations}
 Product Price: ${productPrice || "Unknown"}
 Store AOV: ${storeAov || "Unknown"}
 Store Currency: ${currency}
+Shopify Marketing History: ${marketingEvidence}
 
 Audience: ${targetAudience || "Not specified"}
 Goal: ${campaignGoal}
@@ -499,11 +455,11 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
 
         console.log("Fetching image for AI (URL):", fetchUrl.slice(0, 120));
 
-        let res = await fetch(fetchUrl);
+        let res = await fetchSafeImage(fetchUrl);
         // If resized CDN URL failed (e.g. 404 or CDN rejection), fallback to the original raw URL
         if (!res.ok && fetchUrl !== url) {
           console.warn(`Resized image URL returned ${res.status} ${res.statusText}, retrying with original URL: ${url}`);
-          res = await fetch(url);
+          res = await fetchSafeImage(url);
         }
         if (!res.ok) throw new Error(`Failed to fetch image: ${res.status} ${res.statusText}`);
 
@@ -639,7 +595,7 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
 
     // Resolve matching StoreProduct or construct targetProductOverride for strict single-SKU isolation
     const storeProducts = (integration?.store_snapshot?.products || []) as StoreProduct[];
-    const matchedProduct = storeProducts.find(
+    const matchedProduct = catalogEvidenceProduct || storeProducts.find(
       (p) =>
         p.name.trim().toLowerCase() === productName.trim().toLowerCase() ||
         (p.id && String(p.id) === String(productName))
@@ -761,7 +717,18 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
     // Runs banned-string scan + hallucination check. On failure, fires one
     // targeted retry at temp 0.2 with a specific error message before the
     // credit is deducted — so a failed generation never costs the founder a credit.
-    let copyValidationErrors = validateCopy(parsedResponse, productDescription || "");
+    const groundedProductEvidence = [
+      productDescription || matchedProduct?.description || "",
+      catalogClaimEvidence,
+    ].filter(Boolean).join("\n");
+    const forbiddenProductNames = storeProducts
+      .filter((product) => product.id !== matchedProduct?.id)
+      .map((product) => product.name);
+    let copyValidationErrors = validateCopy(
+      parsedResponse,
+      groundedProductEvidence,
+      forbiddenProductNames,
+    );
 
     if (copyValidationErrors.length > 0) {
       console.warn("[Copy Validator] Initial copy failed validation:", copyValidationErrors);
@@ -770,7 +737,6 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
         const retryMessage = await client.messages.create({
           model: "claude-sonnet-5",
           max_tokens: 4096,
-          temperature: 0.2,
           system: [
             {
               type: "text",
@@ -809,13 +775,17 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
             }
             retryParsed.copywriterNote = retryParsed.copywriterNote || copywriterNote;
 
-            copyValidationErrors = validateCopy(retryParsed, productDescription || "");
+            copyValidationErrors = validateCopy(
+              retryParsed,
+              groundedProductEvidence,
+              forbiddenProductNames,
+            );
             if (copyValidationErrors.length === 0) {
               parsedResponse = retryParsed;
               console.log("[Copy Validator] Retry passed validation.");
             } else {
               console.error("[Copy Validator Alert] Copy still failed after retry:", copyValidationErrors);
-              // Ship the original — a live but imperfect brief is better than blocking the founder.
+              // Reject below; never deliver known-invalid facts.
             }
           } catch (retryParseErr) {
             console.error("[Copy Validator] Retry JSON parse failed:", retryParseErr);
@@ -824,6 +794,10 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
       } catch (retryErr) {
         console.error("[Copy Validator] Retry API call failed:", retryErr);
       }
+    }
+
+    if (copyValidationErrors.length > 0) {
+      return NextResponse.json({ error: "We could not validate the product claims in this copy. Please retry. No credit was charged." }, { status: 422 });
     }
 
     // ── Step 2: Generate targeting profile with copy angle as exclusion ──────
@@ -838,184 +812,64 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
         ? parsedResponse.angleUsed.trim() || null
         : null;
 
-    const targetingProfile = !skipTargeting && integration?.store_snapshot
-      ? await generateTargetingProfile(
-          integration.store_snapshot,
-          1,
-          50,
-          userId,
-          targetProductOverride,
-          angleUsed
-        ).catch((profileErr: unknown) => {
-          console.error("Targeting profile generation error:", profileErr);
-          return null;
-        })
-      : null;
-
-    // Deduct credit after successful generation, ONLY if it's not a free regeneration
-
-    if (!hasUnlimited && !isRegeneration) {
-      const newCredits = Math.max(0, currentCredits - 1);
-      const updateData: Record<string, unknown> = {};
-      if (cols.hasCredits) {
-        updateData.credits = newCredits;
-      }
-      updateData.credits_balance = newCredits;
-
-      await updateUserIntegration(userId!, updateData);
-      await insertCreditUsage(userId!, 1, "brief_generated");
-
-      if (newCredits === 1 || newCredits === 0) {
-        try {
-          const { clerkClient } = await import("@clerk/nextjs/server");
-          const user = await (await clerkClient()).users.getUser(userId!);
-          const email = user.emailAddresses[0]?.emailAddress;
-          
-          if (email) {
-            const { sendEmail } = await import("@/lib/email");
-            
-            if (newCredits === 1) {
-              const { creditLowEmailHtml } = await import("@/emails/credit-low");
-              await sendEmail({
-                to: email,
-                subject: "1 brief credit left",
-                html: creditLowEmailHtml(),
-                userId: userId!,
-                templateName: "credit-low"
-              });
-            } else if (newCredits === 0) {
-              const { creditExhaustedEmailHtml } = await import("@/emails/credit-exhausted");
-              await sendEmail({
-                to: email,
-                subject: "You've used all your credits",
-                html: creditExhaustedEmailHtml(),
-                userId: userId!,
-                templateName: "credit-exhausted"
-              });
-            }
-          }
-        } catch (emailErr) {
-          console.error("Failed to send credit alert email:", emailErr);
-        }
-      }
-    }
-
-    // Persist the brief so it survives refresh, lives at a stable URL, and keeps
-    // every regeneration attempt for later comparison/history. Best-effort: a
-    // persistence failure must never break generation, so errors are swallowed
-    // and we simply return without ids (the client falls back to the in-app view).
-    const copyFields = {
-      headline: parsedResponse.headline ?? null,
-      primary_text: parsedResponse.primaryText ?? null,
-      description: parsedResponse.description ?? null,
-      cta: parsedResponse.cta ?? null,
-      copywriter_note: parsedResponse.copywriterNote ?? null,
-    };
-    let campaignId: string | null = body.campaignId ?? null;
-    let versionId: string | null = null;
-    let attemptNumber = 1;
-    try {
-      if (campaignId) {
-        // Regeneration attaching to an existing session: append the next attempt.
-        // getBriefVersions is owner-scoped, so a spoofed id resolves to [] and we
-        // safely fall through to creating a fresh campaign.
-        const versions = await getBriefVersions(userId!, campaignId);
-        if (versions.length === 0) {
-          campaignId = null;
-        } else {
-          attemptNumber = versions.length + 1;
-        }
-      }
-      if (!campaignId) {
-        campaignId = await insertCampaign(userId!, {
-          brand_name: brandName ?? null,
-          product_name: productName ?? null,
-          product_description: productDescription ?? null,
-          target_audience: targetAudience ?? null,
-          campaign_goal: campaignGoal ?? null,
-          tone_preference: tonePreference ?? null,
-          platform: platform ?? null,
-          media_url: body.mediaUrl ?? imageUrl ?? null,
-          product_price: productPrice ?? null,
-          ...copyFields,
-        });
-        attemptNumber = 1;
-      }
-      if (campaignId) {
-        versionId = await insertBriefVersion(userId!, campaignId, {
-          attempt_number: attemptNumber,
-          is_selected: attemptNumber === 1,
-          ...copyFields,
-        });
-      }
-    } catch (persistErr) {
-      console.error("Brief persistence failed (continuing):", persistErr);
-      campaignId = null;
-      versionId = null;
-    }
-
-    // Balance after this request. Deduction above runs only for the first,
-    // non-unlimited generation; regenerations and unlimited users are unchanged.
-    // Returned so the client can update the shared credits cache instantly
-    // instead of waiting for a refetch.
-    const creditsBalanceAfter =
-      !hasUnlimited && !isRegeneration
-        ? Math.max(0, currentCredits - 1)
-        : currentCredits;
-
-    const monthlyOrders =
-      integration?.store_snapshot?.orders?.orders_last_30_days ||
-      integration?.store_snapshot?.orders?.order_count ||
-      0;
-    const guidance = getAdvantagePlusGuidance(monthlyOrders);
-
-    const advantagePlusGuidance = targetingProfile
-      ? {
-          campaign_type: guidance.campaign_type,
-          optimization_event: guidance.optimization_event,
-          optimization_reasoning:
-            targetingProfile.optimization_reasoning || guidance.default_reasoning,
-          seed_audience_suggestions: {
-            age_min: targetingProfile.demographics?.age_min || 25,
-            age_max: targetingProfile.demographics?.age_max || 44,
-            gender: targetingProfile.demographics?.gender || "All",
-            demographic_justification:
-              targetingProfile.demographics?.demographic_justification ||
-              "Demographic profile aligned with product price point and buyer history.",
-            seed_interests: targetingProfile.seed_interests || ["Online Shopping"],
-          },
-        }
-      : null;
-
-    // ── Diagnostic logging: trace what the targeting profile returned ──
-    console.log("[GENERATE] targetProductOverride.name:", targetProductOverride.name);
-    console.log("[GENERATE] targetProductOverride.description:", targetProductOverride.description?.slice(0, 80));
-    console.log("[GENERATE] targetingProfile is null?", targetingProfile === null);
-    if (targetingProfile) {
-      console.log("[GENERATE] targetingProfile.creative_hooks count:", targetingProfile.creative_hooks?.length);
-      console.log("[GENERATE] targetingProfile.demographics.gender:", targetingProfile.demographics?.gender);
-      console.log("[GENERATE] hook[0] angle:", targetingProfile.creative_hooks?.[0]?.angle);
-      console.log("[GENERATE] hook[0] visual_cue (first 80 chars):", targetingProfile.creative_hooks?.[0]?.visual_cue?.slice(0, 80));
-    }
-
-    // Return the parsed copy, the authoritative balance, and the single-SKU targeting profile.
-    return NextResponse.json(
-      {
-        ...parsedResponse,
-        angleUsed,
-        creative_hooks: targetingProfile?.creative_hooks || null,
-        advantage_plus_guidance: advantagePlusGuidance,
-        targeting_profile: targetingProfile,
-        credits_balance: creditsBalanceAfter,
-        is_unlimited: !!hasUnlimited,
-        campaignId,
-        versionId,
-        attemptNumber,
-      },
-      { status: 200 },
+    const recommendations = await generateRecommendations(
+      integration.store_snapshot, undefined, userId, targetProductOverride, angleUsed
     );
+    const generatedAt = new Date().toISOString();
+    const context = {
+      schemaVersion: 2,
+      generatedAt,
+      ruleVersion: "prespend-v1",
+      model: "claude-sonnet-5",
+      brandName, productName, productPrice: parsedPrice, goal: campaignGoal,
+      generatedCopy: parsedResponse, selectedCta: parsedResponse.cta,
+      aiInsights: recommendations,
+      storeInsights: integration.store_snapshot,
+      gatewayInsight: buildGenerationContext(integration.store_snapshot, productName).gatewayInsight,
+      isNewLaunch: !!isNewLaunch,
+      selectedDuration: 14, selectedIntlDuration: 14, selectedStrategyIndex: 1, selectedIntlStrategyIndex: 1,
+    };
+    const result = await commitBriefGeneration({
+      p_user_id: userId!, p_request_id: requestId, p_request_hash: requestHash,
+      p_campaign_id: isRegeneration ? body.campaignId! : null,
+      p_campaign: {
+        brand_name: brandName, product_name: productName, product_description: productDescription,
+        target_audience: targetAudience, campaign_goal: campaignGoal, tone_preference: tonePreference,
+        platform: platform ?? null, media_url: body.mediaUrl ?? imageUrl ?? null,
+        product_price: productPrice || null,
+      },
+      p_copy: {
+        headline: parsedResponse.headline, primary_text: parsedResponse.primaryText,
+        description: parsedResponse.description, cta: parsedResponse.cta, copywriter_note: parsedResponse.copywriterNote,
+      },
+      p_context: context,
+      p_response: {
+        ...parsedResponse, angleUsed, aiInsights: recommendations, briefData: context,
+        creative_hooks: recommendations.creative_hooks,
+        advantage_plus_guidance: recommendations.advantage_plus_guidance,
+      },
+    });
+    return NextResponse.json(result);
   } catch (error) {
     console.error("Campaign API Generation Error:", error);
+
+    if (error instanceof Error && error.message === "no_credits") {
+      return NextResponse.json({
+        error: "no_credits",
+        message: "You have no briefs remaining. Purchase a pack to continue.",
+        redirect: "/pricing",
+      }, { status: 402 });
+    }
+
+    if (error instanceof CreativeHookGenerationError) {
+      return NextResponse.json(
+        {
+          error:
+            "Creative hooks could not be generated. Please retry. No credit was charged.",
+        },
+        { status: 502 }
+      );
+    }
 
     // Map known Anthropic error types to user-friendly messages
     const err = error as { status?: number; message?: string };

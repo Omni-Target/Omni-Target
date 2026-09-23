@@ -50,3 +50,8 @@ shopify.app.*.toml
 /.shopify/
 
 /docs
+
+# Agent tools & notes
+/.agents/
+skills-lock.json
+SUPABASE_MIGRATION_HANDOFF.md

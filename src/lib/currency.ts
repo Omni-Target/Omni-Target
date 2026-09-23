@@ -67,5 +67,11 @@ export function formatCurrency(
   currencySymbol?: string
 ): string {
   const symbol = currencySymbol || getCurrencySymbol(currency);
-  return `${symbol}${amount.toLocaleString()}`;
+  const isZeroDecimal =
+    ["NGN", "JPY", "KRW", "VND", "IDR", "CLP", "HUF", "UGX", "RWF"].includes(currency) ||
+    Number.isInteger(amount);
+  const formatted = isZeroDecimal
+    ? Math.round(amount).toLocaleString()
+    : amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return `${symbol}${formatted}`;
 }

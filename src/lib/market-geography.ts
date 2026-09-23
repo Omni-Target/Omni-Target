@@ -595,3 +595,89 @@ export function getStoreTimezoneName(country?: string, currency?: string): strin
   return "local store time";
 }
 
+/** Diaspora hub cities frequently reached by African/emerging-market merchants. */
+const DIASPORA_HUBS: Record<string, string[]> = {
+  "United States": ["houston", "new york", "atlanta", "dallas", "los angeles", "chicago", "brooklyn", "miami"],
+  "United Kingdom": ["london", "manchester", "birmingham"],
+  "Canada": ["toronto", "calgary", "edmonton", "ottawa"],
+  "Ghana": ["accra", "kumasi"],
+  "UAE": ["dubai", "abu dhabi", "sharjah"],
+};
+
+const DIASPORA_COUNTRY_ALIASES = new Set([
+  "united states", "us", "usa",
+  "united kingdom", "uk", "gb",
+  "canada", "ca",
+  "ghana", "gh",
+  "uae", "ae", "united arab emirates",
+]);
+
+export interface DiasporaMatch {
+  city: string;
+  country: string;
+  source: "from_data";
+}
+
+/**
+ * Detects diaspora hub locations from a store's order locations.
+ * Used by both the dashboard insights and the brief pipeline to ensure
+ * consistent diaspora market identification.
+ */
+export function detectDiasporaLocations(
+  topLocations: Array<{ city?: string; country?: string; percentage?: number }>,
+  storeCountry?: string,
+): DiasporaMatch[] {
+  const storeCountryLower = (storeCountry || "").toLowerCase();
+  const matches: DiasporaMatch[] = [];
+
+  for (const loc of topLocations) {
+    const city = (loc.city || "").toLowerCase().trim();
+    const country = (loc.country || "").toLowerCase().trim();
+    if (!city || !country) continue;
+
+    // Skip if the location is in the store's own country
+    if (isSameCountry(country, storeCountryLower)) continue;
+
+    // Check if the country is a known diaspora destination
+    const isKnownCountry = DIASPORA_COUNTRY_ALIASES.has(country);
+    if (!isKnownCountry) continue;
+
+    // Check if it's a known hub city (or accept any city in a diaspora country)
+    const hubCities = Object.values(DIASPORA_HUBS).flat();
+    const isHubCity = hubCities.some((hub) => city.includes(hub) || hub.includes(city));
+
+    if (isHubCity || isKnownCountry) {
+      matches.push({
+        city: loc.city || "",
+        country: loc.country || "",
+        source: "from_data",
+      });
+    }
+  }
+
+  return matches;
+}
+
+/**
+ * A location entry is a "fallback country entry" when the city field holds a
+ * country name or ISO code rather than an actual city — common when Shopify
+ * has country but no city on an order.
+ */
+export function isFallbackCountryEntry(loc: { city?: string; country?: string }): boolean {
+  const city = (loc.city || "").trim();
+  const country = (loc.country || "").trim();
+  if (!city) return true;
+  if (city.toLowerCase() === country.toLowerCase()) return true;
+  if (/^[A-Z]{2}$/.test(city)) return true;
+  // Check against common country name resolutions
+  const COMMON_CODES: Record<string, string> = {
+    NG: "Nigeria", GB: "United Kingdom", US: "United States", AE: "UAE", GH: "Ghana",
+    KE: "Kenya", ZA: "South Africa", CA: "Canada", AU: "Australia",
+    DE: "Germany", FR: "France", IT: "Italy", ES: "Spain", NL: "Netherlands",
+    IN: "India", CN: "China", JP: "Japan", BR: "Brazil",
+  };
+  const resolvedCountry = COMMON_CODES[country] || country;
+  if (city.toLowerCase() === resolvedCountry.toLowerCase()) return true;
+  return false;
+}
+

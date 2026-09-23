@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/require-user";
 import { listUserBriefCampaigns } from "@/lib/db";
 
-const campaignsCache = new Map<string, { campaigns: any[]; timestamp: number }>();
+type CampaignList = Awaited<ReturnType<typeof listUserBriefCampaigns>>;
+const campaignsCache = new Map<string, { campaigns: CampaignList; timestamp: number }>();
 const CAMPAIGNS_CACHE_TTL = 60_000; // 60 seconds
 
 export function invalidateCampaignsCache(userId: string) {
