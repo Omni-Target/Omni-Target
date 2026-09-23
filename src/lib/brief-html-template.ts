@@ -1511,7 +1511,7 @@ export async function buildBriefHTML(
     --border:#e6e7ea; --border-2:#dcdde1;
     --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
   }
-  @page{ size:auto; margin:14mm 0; }
+  @page { size: auto; margin: 0; }
   html{ -webkit-print-color-adjust:exact!important; print-color-adjust:exact!important; background:var(--bg); }
   body{ font-family:var(--font); background:var(--bg); color:var(--text-1); font-size:11.5px; line-height:1.6; padding:16px 0 0; }
 
@@ -1720,13 +1720,16 @@ export async function buildBriefHTML(
   .btn:hover{ background:var(--ink-2); }
 
   @media print{
+    @page { size: auto; margin: 0; }
     .no-print{ display:none!important; }
-    body{ background:#fff; padding:0; }
-    .sheet{ width:100%; max-width:100%; border:none; border-radius:0; box-shadow:none; }
-    .header,.content{ padding-left:40px; padding-right:40px; }
+    html, body{ background:#fff!important; margin:0!important; padding:0!important; }
+    .sheet{ width:100%!important; max-width:100%!important; border:none!important; border-radius:0!important; box-shadow:none!important; margin:0!important; }
+    .header{ padding:14mm 40px 10mm!important; }
+    .content{ padding:0 40px 14mm!important; }
+    .footer{ padding:10mm 40px 14mm!important; }
     .card{ page-break-inside:auto; break-inside:auto; margin-bottom:14px; }
     .card-head, .field, .engine-logic, .two-col, .decision-card, .step, .budget-card, .intel, .cheat-sheet, .clip-card, .hook-box{ page-break-inside:avoid!important; break-inside:avoid!important; }
-    .page-break-before{ page-break-before:always!important; break-before:page!important; }
+    .page-break-before{ page-break-before:always!important; break-before:page!important; padding-top:14mm!important; }
   }
 </style>
 </head>

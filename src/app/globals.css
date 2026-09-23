@@ -511,3 +511,11 @@ div:has(> a[href*="clerk.dev"]),
     scroll-behavior: auto !important;
   }
 }
+
+@media print {
+  @page {
+    size: auto;
+    margin: 0;
+  }
+}
+

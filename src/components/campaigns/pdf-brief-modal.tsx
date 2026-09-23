@@ -82,6 +82,9 @@ export function PdfBriefModal({
     try {
       if (iframeRef.current?.contentDocument) {
         iframeRef.current.contentDocument.title = dynamicTitle;
+        const style = iframeRef.current.contentDocument.createElement("style");
+        style.textContent = "@page { size: auto; margin: 0 !important; } @media print { @page { size: auto; margin: 0 !important; } }";
+        iframeRef.current.contentDocument.head.appendChild(style);
       }
     } catch {
       /* ignore */
