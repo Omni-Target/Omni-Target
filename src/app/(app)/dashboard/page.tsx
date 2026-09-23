@@ -28,6 +28,8 @@ import {
   type StoreProductLike,
 } from "@/components/dashboard";
 import { useStoreData, useForceSyncStoreData } from "@/hooks/useStoreData";
+import { useCredits, CREDITS_QUERY_KEY } from "@/hooks/useCredits";
+import { useQueryClient } from "@tanstack/react-query";
 import { PurchaseDialog } from "@/components/pricing";
 import { getPackById, type CreditPack } from "@/lib/credit-packs";
 import { compareProductsForTest } from "@/lib/gateway-decision";
@@ -68,6 +70,8 @@ function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { shop: creditsShop } = useCredits();
 
   // Store snapshot from the shared cache — deduped with the products & campaigns
   // pages, so navigating between them doesn't re-hit Shopify.
@@ -107,11 +111,10 @@ function DashboardContent() {
   // Resolve connected shop domain (only needed if store is not connected).
   useEffect(() => {
     if (connected) return;
-    fetch("/api/user/credits")
-      .then((r) => r.json())
-      .then((data) => setShop(data.shop))
-      .catch(() => {});
-  }, [connected]);
+    if (creditsShop) {
+      setShop(creditsShop);
+    }
+  }, [connected, creditsShop]);
 
   // Success toasts from redirect params.
   const paymentSuccess = searchParams.get("payment");
@@ -121,6 +124,7 @@ function DashboardContent() {
 
   useEffect(() => {
     if (paymentSuccess === "success") {
+      queryClient.invalidateQueries({ queryKey: CREDITS_QUERY_KEY });
       toast({
         variant: "success",
         title: "Payment successful",
@@ -129,7 +133,7 @@ function DashboardContent() {
       });
       window.history.replaceState({}, "", "/dashboard");
     }
-  }, [paymentSuccess, toast]);
+  }, [paymentSuccess, toast, queryClient]);
 
   const billingMessage = searchParams.get("message");
 
@@ -156,6 +160,7 @@ function DashboardContent() {
 
   useEffect(() => {
     if (billingSuccess === "success") {
+      queryClient.invalidateQueries({ queryKey: CREDITS_QUERY_KEY });
       toast({
         variant: "success",
         title: "Billing successful",
@@ -176,7 +181,7 @@ function DashboardContent() {
       });
       window.history.replaceState({}, "", "/dashboard");
     }
-  }, [billingSuccess, billingCredits, billingPlan, billingMessage, toast]);
+  }, [billingSuccess, billingCredits, billingPlan, billingMessage, toast, queryClient]);
 
   const refreshStoreData = () => {
     setRefreshing(true);

@@ -18,15 +18,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { CreditPackCard, PurchaseDialog } from "@/components/pricing";
 import { CREDIT_PACKS, type CreditPack } from "@/lib/credit-packs";
+import { useCredits } from "@/hooks/useCredits";
 
 // All 4 plans matching Shopify App Store listing (single-brief is kept for fallback)
 const STOREFRONT_PLANS = CREDIT_PACKS.filter((p) => p.id !== "single");
-
-interface CreditsState {
-  credits_balance: number;
-  shop: string | null;
-  is_unlimited: boolean;
-}
 
 const ASSURANCES = [
   { icon: ShieldCheck, title: "Secure checkout", body: "Billed safely through Shopify." },
@@ -39,24 +34,9 @@ function PricingContent() {
   const searchParams = useSearchParams();
   // Shopify Billing is USD-only, so the currency toggle is disabled for now.
   const currency = "USD" as const;
-  const [state, setState] = React.useState<CreditsState | null>(null);
-  const [loading, setLoading] = React.useState(true);
+  const { credits, isUnlimited, shop, isLoading: loading } = useCredits();
   const [selected, setSelected] = React.useState<CreditPack | null>(null);
   const [dialogOpen, setDialogOpen] = React.useState(false);
-
-  React.useEffect(() => {
-    fetch("/api/user/credits")
-      .then((r) => r.json())
-      .then((d) => {
-        setState({
-          credits_balance: d.credits_balance ?? 0,
-          shop: d.shop ?? null,
-          is_unlimited: !!d.is_unlimited,
-        });
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
 
   React.useEffect(() => {
     if (searchParams.get("status") === "cancelled") {
@@ -91,7 +71,7 @@ function PricingContent() {
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-surface px-5 py-4 shadow-xs">
         <div className="flex items-center gap-3">
           <span className="grid size-10 place-items-center rounded-xl bg-brand-50 text-brand-600">
-            {state?.is_unlimited ? (
+            {isUnlimited ? (
               <InfinityIcon className="size-5" />
             ) : (
               <Sparkles className="size-5" />
@@ -105,17 +85,17 @@ function PricingContent() {
               <Skeleton className="mt-1 h-6 w-24" />
             ) : (
               <p className="text-lg font-semibold text-foreground">
-                {state?.is_unlimited
+                {isUnlimited
                   ? "Unlimited access"
-                  : `${state?.credits_balance ?? 0} credit${state?.credits_balance === 1 ? "" : "s"}`}
+                  : `${credits ?? 0} credit${credits === 1 ? "" : "s"}`}
               </p>
             )}
           </div>
         </div>
-        {state?.shop && (
+        {shop && (
           <p className="text-sm text-muted-foreground">
             Connected store ·{" "}
-            <span className="font-medium text-foreground">{state.shop}</span>
+            <span className="font-medium text-foreground">{shop}</span>
           </p>
         )}
       </div>
@@ -129,7 +109,7 @@ function PricingContent() {
               pack={pack}
               currency={currency}
               onBuy={onBuy}
-              hasStore={Boolean(state?.shop)}
+              hasStore={Boolean(shop)}
             />
           ))}
         </div>
@@ -160,7 +140,7 @@ function PricingContent() {
         pack={selected}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        shop={state?.shop ?? null}
+        shop={shop}
         currency={currency}
       />
     </PageContainer>
