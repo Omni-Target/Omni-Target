@@ -649,7 +649,13 @@ function CampaignsContent() {
   if (viewState === "generating") {
     return (
       <PageContainer width="wide">
-        <GeneratingState productName={productName} brandName={brandName} />
+        <GeneratingState
+          productName={productName}
+          brandName={brandName}
+          tonePreference={tone}
+          isGateway={!isNewLaunch && !!productName}
+          isNewLaunch={isNewLaunch}
+        />
       </PageContainer>
     );
   }

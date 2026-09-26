@@ -255,5 +255,116 @@ describe("validateBrief", () => {
       const errors = validateBrief(response, product, catalog);
       expect(errors.some((e) => e.includes("Unsupported factual claim: \"FDA-approved\""))).toBe(true);
     });
+
+    it("permits sibling references that are explicitly endorsed in the target product description", () => {
+      const productWithSiblingRef: TargetProductContext = {
+        id: "prod-1",
+        title: "Ego Pants (Noir)",
+        tags: ["pants", "bottoms"],
+        description: "Wide-legged linen pants. Pair with the Ego Dress for an elevated set.",
+      };
+      const extendedCatalog: CatalogItem[] = [
+        ...catalog,
+        { id: "prod-5", title: "Ego Dress" },
+      ];
+      const response: GeneratedBriefResponse = {
+        target_product_title: "Ego Pants (Noir)",
+        creative_hooks: [
+          {
+            angle: "Problem / Friction",
+            visual_cue: "Visual shot of pants",
+            on_screen_text: "Breathable comfort.",
+            primary_text_hook: "Stop compromising on fit.",
+          },
+          {
+            angle: "Identity / Status",
+            visual_cue: "Pair with the Ego Dress for an elevated complete set",
+            on_screen_text: "Pair with the Ego Dress.",
+            primary_text_hook: "The effortless set you reach for first.",
+          },
+          {
+            angle: "Material / Craftsmanship",
+            visual_cue: "Close-up of fabric",
+            on_screen_text: "Pure linen weave.",
+            primary_text_hook: "Crafted for hot summer days.",
+          },
+        ],
+      };
+
+      const errors = validateBrief(response, productWithSiblingRef, extendedCatalog);
+      expect(errors).toEqual([]);
+    });
+
+    it("does not flag salient overlap for core product attributes present in the description", () => {
+      const productWithAttributes: TargetProductContext = {
+        id: "prod-1",
+        title: "Ego Pants (Noir)",
+        tags: ["pants"],
+        description: "100% breathable linen pants featuring hand-beaded cowrie details along the hem.",
+      };
+      const response: GeneratedBriefResponse = {
+        target_product_title: "Ego Pants (Noir)",
+        creative_hooks: [
+          {
+            angle: "Problem / Friction",
+            visual_cue: "Macro shot of cowrie hem",
+            on_screen_text: "Breathable linen designed with cowrie details.",
+            primary_text_hook: "No more hot, restrictive trousers.",
+          },
+          {
+            angle: "Material / Craftsmanship",
+            visual_cue: "Close-up of hand-beaded cowrie stitch",
+            on_screen_text: "Delicate cowrie accents on airy breathable linen.",
+            primary_text_hook: "Artisanal detail at every seam.",
+          },
+          {
+            angle: "Identity / Status",
+            visual_cue: "Model in natural setting",
+            on_screen_text: "Effortless silhouette.",
+            primary_text_hook: "Stand out quietly.",
+          },
+        ],
+      };
+
+      const errors = validateBrief(response, productWithAttributes, catalog);
+      expect(errors).toEqual([]);
+    });
+
+    it("normalizes exclamation marks into periods without throwing errors", () => {
+      const product: TargetProductContext = {
+        id: "prod-1",
+        title: "Ego Pants (Noir)",
+        tags: ["pants"],
+        description: "Clean linen pants.",
+      };
+      const response: GeneratedBriefResponse = {
+        target_product_title: "Ego Pants (Noir)",
+        creative_hooks: [
+          {
+            angle: "Problem / Friction",
+            visual_cue: "Visual 1",
+            on_screen_text: "Feel the breeze!",
+            primary_text_hook: "Never settle for uncomfortable trousers again!",
+          },
+          {
+            angle: "Identity / Status",
+            visual_cue: "Visual 2",
+            on_screen_text: "Pure silhouette.",
+            primary_text_hook: "Everyday luxury.",
+          },
+          {
+            angle: "Material / Craftsmanship",
+            visual_cue: "Visual 3",
+            on_screen_text: "True craft.",
+            primary_text_hook: "Made to last.",
+          },
+        ],
+      };
+
+      const errors = validateBrief(response, product, catalog);
+      expect(errors).toEqual([]);
+      expect(response.creative_hooks[0].on_screen_text).toBe("Feel the breeze.");
+      expect(response.creative_hooks[0].primary_text_hook).toBe("Never settle for uncomfortable trousers again.");
+    });
   });
 });

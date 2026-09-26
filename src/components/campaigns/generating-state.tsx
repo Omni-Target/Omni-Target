@@ -7,6 +7,9 @@ import { useState, useEffect } from "react";
 interface GeneratingStateProps {
   productName?: string;
   brandName?: string;
+  tonePreference?: string;
+  isGateway?: boolean;
+  isNewLaunch?: boolean;
 }
 
 interface StepItem {
@@ -14,24 +17,14 @@ interface StepItem {
   detail: string;
 }
 
-const GENERATION_STEPS: StepItem[] = [
-  {
-    title: "Checking sales data → Identifying your Gateway Product",
-    detail: "Reviewing customer purchase patterns and catalog signals…",
-  },
-  {
-    title: "Matching store pricing → Calculating safe daily test budget",
-    detail: "Finding your store's sweet-spot Meta test spend…",
-  },
-  {
-    title: "Tuning your brand voice & ad posture",
-    detail: "Applying clean, authentic, hype-free copywriting guidelines…",
-  },
-  {
-    title: "Writing 3 scroll-stopping ad angles & hooks",
-    detail: "Synthesizing high-converting primary text, headlines, and CTAs…",
-  },
-];
+function formatToneLabel(tone?: string): string {
+  if (!tone || tone === "ai" || tone.toLowerCase().includes("let ai decide")) return "Balanced & Authentic";
+  if (tone.toLowerCase().includes("bold")) return "Bold & Direct";
+  if (tone.toLowerCase().includes("warm")) return "Warm & Conversational";
+  if (tone.toLowerCase().includes("minimal")) return "Minimal & Editorial";
+  if (tone.toLowerCase().includes("premium")) return "Premium & Aspirational";
+  return tone;
+}
 
 const OMNI_TIPS = [
   "Up next: You'll review 3 ready-to-use hooks and ad copy tailored for this product, then get your complete targeting and budget plan.",
@@ -41,9 +34,48 @@ const OMNI_TIPS = [
   "Give new ads at least 3 to 5 days before touching them. Meta needs a few days to find the buyers who love your product.",
 ];
 
-export function GeneratingState({ productName, brandName }: GeneratingStateProps) {
+export function GeneratingState({
+  productName,
+  brandName,
+  tonePreference,
+  isGateway,
+  isNewLaunch,
+}: GeneratingStateProps) {
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [tipIndex, setTipIndex] = useState(0);
+
+  const generationSteps: StepItem[] = [
+    {
+      title: productName
+        ? isNewLaunch
+          ? `Calibrating New Arrival launch for ${productName}`
+          : isGateway
+          ? `Confirming Gateway signals for ${productName}`
+          : `Analyzing customer signals for ${productName}`
+        : "Checking sales data → Identifying your Gateway Product",
+      detail: productName
+        ? isNewLaunch
+          ? "Evaluating launch positioning and catalog claims…"
+          : isGateway
+          ? "Reviewing verified first-time buyer patterns and catalog signals…"
+          : "Reviewing customer purchase patterns and catalog signals…"
+        : "Reviewing customer purchase patterns and catalog signals…",
+    },
+    {
+      title: "Matching store pricing → Calculating safe daily test budget",
+      detail: "Finding your store's sweet-spot Meta test spend…",
+    },
+    {
+      title: `Tuning your brand voice → ${formatToneLabel(tonePreference)}`,
+      detail: `Applying ${formatToneLabel(tonePreference).toLowerCase()} tone guidelines for an authentic, hype-free ad…`,
+    },
+    {
+      title: productName
+        ? `Writing 3 scroll-stopping ad angles & hooks for ${productName}`
+        : "Writing 3 scroll-stopping ad angles & hooks",
+      detail: "Synthesizing high-converting primary text, headlines, and CTAs…",
+    },
+  ];
 
   // Progressive step advancement paced to real multi-stage AI generation (~40-75s)
   useEffect(() => {
@@ -109,7 +141,7 @@ export function GeneratingState({ productName, brandName }: GeneratingStateProps
         <div className="mb-6 space-y-1.5">
           <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <span>Step {activeStepIndex + 1} of {GENERATION_STEPS.length}</span>
+              <span>Step {activeStepIndex + 1} of {generationSteps.length}</span>
             </span>
             <span className="tabular-nums font-bold text-brand-600 dark:text-brand-400">
               {progressPercent}%
@@ -127,7 +159,7 @@ export function GeneratingState({ productName, brandName }: GeneratingStateProps
 
         {/* Dynamic Step Checklist */}
         <div className="space-y-2.5 mb-6">
-          {GENERATION_STEPS.map((step, idx) => {
+          {generationSteps.map((step, idx) => {
             const isDone = activeStepIndex > idx;
             const isCurrent = activeStepIndex === idx;
             const isPending = activeStepIndex < idx;

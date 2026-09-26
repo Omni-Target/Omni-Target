@@ -91,7 +91,10 @@ function extractSalientTokens(text: string, productTokens?: Set<string>): Set<st
     "top", "tops", "shorts", "tee", "tees", "blouse", "blouses", "jeans",
     "fabric", "fabrics", "material", "materials", "natural", "everyday", "daily",
     "comfort", "comfortable", "silhouette", "crafted", "craft", "finish", "fitting",
-    "relax", "relaxed",
+    "relax", "relaxed", "linen", "cotton", "denim", "leather", "wool", "silk",
+    "breathable", "cowrie", "waistband", "elastic", "oversized", "unisex", "beaded",
+    "elevated", "styling", "handcrafted", "handmade", "simple", "season", "rotation",
+    "staple", "staples", "favorite", "favorites", "texture", "details",
   ]);
 
   const salient = new Set<string>();
@@ -114,14 +117,29 @@ export function validateBrief(
 ): string[] {
   const errors: string[] = [];
 
+  // Normalize exclamation marks on hooks into calm, premium punctuation
+  for (const hook of response.creative_hooks || []) {
+    if (hook.on_screen_text) {
+      hook.on_screen_text = hook.on_screen_text.replace(/!+/g, ".").replace(/\.\.+/g, ".");
+    }
+    if (hook.primary_text_hook) {
+      hook.primary_text_hook = hook.primary_text_hook.replace(/!+/g, ".").replace(/\.\.+/g, ".");
+    }
+  }
+
   if (targetProduct.description !== undefined) {
     for (const hook of response.creative_hooks || []) {
-      errors.push(...validateCopy({
-        headline: hook.on_screen_text,
-        primaryText: hook.primary_text_hook,
-        description: hook.visual_cue,
-        cta: "Shop Now",
-      }, `${targetProduct.title} ${targetProduct.description}`).map((error) => `Hook ${hook.angle}: ${error}`));
+      errors.push(
+        ...validateCopy(
+          {
+            headline: hook.on_screen_text,
+            primaryText: hook.primary_text_hook,
+            description: "Elevated staple.", // Neutral placeholder so visual_cue is not judged as consumer ad copy
+            cta: "Shop Now",
+          },
+          `${targetProduct.title} ${targetProduct.description}`
+        ).map((error) => `Hook ${hook.angle}: ${error}`)
+      );
     }
   }
 
@@ -134,21 +152,23 @@ export function validateBrief(
     errors.push(`Duplicate angle detected: ${angles.join(", ")}`);
   }
 
+  const allProductTokens = tokenize(
+    `${targetProduct.title} ${targetProduct.tags?.join(" ") || ""} ${targetProduct.description || ""}`
+  );
   const targetTokens = tokenize(
     `${targetProduct.title} ${targetProduct.tags?.join(" ") || ""}`
   );
 
   // 2. Cross-hook conceptual overlap detection
   // Compares the salient (claim-bearing) tokens across every hook pair.
-  // Two hooks sharing 2+ salient tokens are centering on the same underlying
-  // claim even if their angle enum labels differ — the threshold of 2 avoids
-  // false positives from product-specific words that legitimately appear once.
+  // Uses allProductTokens (including description) so legitimate product attributes
+  // (e.g. linen, cowrie, breathable) don't trigger false overlap errors between hooks.
   if ((response.creative_hooks?.length || 0) >= 2) {
     const hookProfiles = (response.creative_hooks || []).map((hook) => ({
       angle: hook.angle,
       salient: extractSalientTokens(
         `${hook.visual_cue || ""} ${hook.on_screen_text || ""} ${hook.primary_text_hook || ""}`,
-        targetTokens
+        allProductTokens
       ),
     }));
 
@@ -167,12 +187,20 @@ export function validateBrief(
     }
   }
 
-  // 3. Filter sibling products dynamically (Token-Subset Exclusion)
+  // 3. Filter sibling products dynamically (Token-Subset Exclusion & Description Reference Exclusion)
+  const targetDescLower = (targetProduct.description || "").toLowerCase();
   const verifiableSiblings = catalog.filter((sibling) => {
     if (
       sibling.id === targetProduct.id ||
       sibling.title.trim().toLowerCase() === targetProduct.title.trim().toLowerCase()
     ) {
+      return false;
+    }
+
+    // If the merchant explicitly mentions this sibling product in the target product's own description
+    // (e.g. "Pair with the Ego Dress for an elevated set"), it is legitimate cross-styling advice, not an error!
+    const normalizedSiblingTitle = sibling.title.trim().toLowerCase();
+    if (normalizedSiblingTitle.length >= 3 && targetDescLower.includes(normalizedSiblingTitle)) {
       return false;
     }
 
@@ -297,12 +325,17 @@ export function sanitizeLeakedTokens(
   const targetTokens = tokenize(
     `${targetProduct.title} ${targetProduct.tags?.join(" ") || ""}`
   );
+  const targetDescLower = (targetProduct.description || "").toLowerCase();
 
   const verifiableSiblings = catalog.filter((sibling) => {
     if (
       sibling.id === targetProduct.id ||
       sibling.title.trim().toLowerCase() === targetProduct.title.trim().toLowerCase()
     ) {
+      return false;
+    }
+    const normalizedSiblingTitle = sibling.title.trim().toLowerCase();
+    if (normalizedSiblingTitle.length >= 3 && targetDescLower.includes(normalizedSiblingTitle)) {
       return false;
     }
     const siblingTokens = Array.from(tokenize(sibling.title));
@@ -312,8 +345,8 @@ export function sanitizeLeakedTokens(
 
   const sanitizedHooks = (response.creative_hooks || []).map((hook) => {
     let visual_cue = hook.visual_cue || "";
-    let on_screen_text = hook.on_screen_text || "";
-    let primary_text_hook = hook.primary_text_hook || "";
+    let on_screen_text = (hook.on_screen_text || "").replace(/!+/g, ".").replace(/\.\.+/g, ".");
+    let primary_text_hook = (hook.primary_text_hook || "").replace(/!+/g, ".").replace(/\.\.+/g, ".");
 
     for (const sibling of verifiableSiblings) {
       // Escape the original sibling title for use as a regex pattern
@@ -323,7 +356,7 @@ export function sanitizeLeakedTokens(
         .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       if (!escapedTitle) continue;
 
-      const regex = new RegExp(escapedTitle, "gi");
+      const regex = new RegExp(`\\b${escapedTitle}\\b`, "gi");
       visual_cue = visual_cue.replace(regex, targetProduct.title);
       on_screen_text = on_screen_text.replace(regex, targetProduct.title);
       primary_text_hook = primary_text_hook.replace(regex, targetProduct.title);
