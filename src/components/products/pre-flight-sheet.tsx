@@ -65,28 +65,28 @@ const TONE_OPTIONS = [
   {
     id: "Let AI decide",
     label: "Let AI Decide",
-    preview: "Auto-tuned to your catalog price point and category",
+    description: "Auto-selects the optimal tone based on your price point and store data.",
     recommended: true,
-  },
-  {
-    id: "Minimal & Editorial",
-    label: "Minimal & Editorial",
-    preview: "Clean lines. Intentional details. Zero distractions.",
-  },
-  {
-    id: "Bold & Direct",
-    label: "Bold & Direct",
-    preview: "Immediate impact. Clear results. Zero fluff.",
   },
   {
     id: "Warm & Conversational",
     label: "Warm & Conversational",
-    preview: "Your new daily favorite. Genuine, approachable, and proven.",
+    description: "Talks like a trusted friend recommending their personal daily favorite.",
+  },
+  {
+    id: "Bold & Direct",
+    label: "Bold & Direct",
+    description: "Punchy, fast-paced, and straight to the point with zero fluff.",
+  },
+  {
+    id: "Minimal & Editorial",
+    label: "Minimal & Editorial",
+    description: "Understated and calm. Lets the product design speak for itself.",
   },
   {
     id: "Premium & Aspirational",
     label: "Premium & Aspirational",
-    preview: "Refined craftsmanship, designed for lasting distinction.",
+    description: "Refined and high-status. Focuses on craft and lasting prestige.",
   },
 ] as const;
 
@@ -325,8 +325,8 @@ export function PreFlightSheet({
                         <Check className="size-3 text-brand-600" />
                       )}
                     </div>
-                    <p className="mt-1 line-clamp-2 text-[0.6875rem] italic text-muted-foreground">
-                      &ldquo;{t.preview}&rdquo;
+                    <p className="mt-1 line-clamp-2 text-[0.6875rem] leading-relaxed text-muted-foreground">
+                      {t.description}
                     </p>
                   </button>
                 );
