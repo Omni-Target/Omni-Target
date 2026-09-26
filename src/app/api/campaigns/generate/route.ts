@@ -144,22 +144,22 @@ Strictly calibrate cadence, rhythm, vocabulary, and sentence structure according
    - Assertive, decisive syntax. Ban passive hedging ("might", "could", "perhaps").
    - Command presence through brevity and punch rather than volume (still zero exclamation marks).
 2. "Warm & Conversational":
-   - Write like an insider friend or trusted stylist recommending their holy-grail piece.
-   - Intimate, empathetic second-person perspective. Ground the piece in relatable, lived moments (the morning rush, weekend escape, long dinner).
+   - Write like an insider friend or trusted advisor recommending their personal favorite.
+   - Intimate, empathetic second-person perspective. Ground the product in relatable, lived moments (the morning rush, weekend rituals, unwinding at home).
    - Natural cadence that sounds spoken aloud, yet polished. Approachable and welcoming without sounding cheap or colloquial.
 3. "Minimal & Editorial":
-   - High-fashion magazine curation (think Kinfolk, Vogue, or high-end architectural lookbooks).
-   - Sparse, deliberate wording. Maximum verbal whitespace. Let the imagery carry the weight.
-   - Focus intensely on material truth, drape, tactile structure, and silhouette.
+   - Curated architectural and editorial posture (clean, understated, intentional design aesthetic).
+   - Sparse, deliberate wording. Maximum verbal whitespace. Let the product imagery carry the weight.
+   - Focus intensely on design truth, form, materials, tactile structure, and precision finish.
    - Cool, effortless nonchalance. Never feels like it is trying to sell you anything.
 4. "Premium & Aspirational":
    - High-status elevation, timeless heirloom mindset, and quiet luxury posture.
-   - Celebrate heritage, bespoke tailoring, tactile craft, and uncompromised fabric integrity.
-   - Speaks to discerning collectors who value longevity and distinction over loud logos.
+   - Celebrate heritage, meticulous craft, premium materials, and uncompromised quality integrity.
+   - Speaks to discerning buyers who value longevity, performance, and distinction over loud hype.
 5. "Let AI decide":
    - Silently select the voice that maximizes ROAS for this specific product's price tier and category:
      * Luxury & High-AOV products → Minimal & Editorial or Premium & Aspirational.
-     * Practical utility & daily rotation pieces → Bold & Direct or Warm & Conversational.
+     * Practical utility & daily rotation products → Bold & Direct or Warm & Conversational.
 
 ═══════════════════════════════════════════════════════════════════
 PILLAR 4: UNIVERSAL COPYWRITING MANDATES & CONSTRAINTS
@@ -170,11 +170,11 @@ PILLAR 4: UNIVERSAL COPYWRITING MANDATES & CONSTRAINTS
    - ABSOLUTE BAN on false urgency or unverified demand claims: No countdowns, no "Hurry!", no "Don't miss out!", no "Selling out fast!", no "Keep selling out", no "Always sold out", no "Back by popular demand" unless verified store history explicitly documents repeated stockouts.
    - Build desire through precision, posture, and descriptive sensory power.
 2. Creative Visual Grounding:
-   - When an image is provided: Root the copy in visual truth — silhouette, texture, color tones, cut, and occasion mood.
+   - When an image is provided: Root the copy in visual truth — form, texture, color tones, materials, and real-world setting.
    - When a video storyboard is provided: Write copy that complements motion, pacing, and dynamic on-screen transitions. Never refer to "this picture" or static imagery when a video storyboard is provided.
 3. Sell the Outcome, Not the Specs:
    - Do not merely summarize the raw product description.
-   - Pull 1 or 2 striking physical or material details to anchor credibility, then sell how wearing/using the product feels, transforms, or functions.
+   - Pull 1 or 2 striking physical or material details to anchor credibility, then sell how using, owning, or experiencing the product transforms daily life.
 4. Ban on Abstract Clichés:
    - Never use: "There is a version of you...", "Imagine a world...", "Step into...", "Elevate your...", "Look no further...", "Game changer".
    - Never use passive announcement headlines: "Introducing...", "Meet the...", "The [Product] is here", "The [Product] arrives in [Color]". Every headline must be an active, arresting hook or sensory product truth.
@@ -184,12 +184,12 @@ PILLAR 4: UNIVERSAL COPYWRITING MANDATES & CONSTRAINTS
    - NEVER reference stock counts (e.g. "only 3 left") — stock goes stale and violates advertising policies.
    - NEVER assume the reader's geographic location or local currency.
 6. Grounded Material, Demand & Feature Truthfulness (Strict Zero-Hallucination Mandate):
-   - ONLY reference physical materials (e.g. linen, silk, wool, cotton, cowrie shells), closures (e.g. drawstring, zipper, elastic waist, buttons), or silhouettes that are EXPLICITLY documented in the product title/description or clearly visible in the product image.
-   - NEVER invent or assume closures: do not claim "drawstring waist", "hidden zipper", or "button fly" unless explicitly stated in the product details.
-   - NEVER invent unstated fabrics, linings, or material blends.
-   - NEVER claim an item is "unisex", "genderless", or "for him and her" unless the product description explicitly uses those terms. If the product is womenswear, write with female styling nuance; if menswear, write with male nuance.
-   - NEVER claim an item "fits every body", "made for every body", or "flatters all body types" unless explicit universal sizing or adjustable wrap specifications are documented in the product description.
-   - NEVER make unverified demand claims like "why these keep selling out" or "our fastest-selling piece" — write from observed product craftsmanship, drape, silhouette, and utility instead.
+   - ONLY reference physical materials (e.g. linen, silk, leather, titanium, ceramic, organic botanicals), closures/hardware (e.g. drawstring, zipper, magnetic, snap), or physical attributes that are EXPLICITLY documented in the product title/description or clearly visible in the product image.
+   - NEVER invent or assume closures, components, mechanisms, or unstated ingredients.
+   - NEVER invent unstated fabrics, materials, ingredients, or formulations.
+   - For apparel products: NEVER claim an item is "unisex" unless documented. If womenswear, write with female styling nuance; if menswear, write with male nuance.
+   - NEVER claim a product "fits every body" or "works for everyone" unless explicit universal specifications are documented in the product description.
+   - NEVER make unverified demand claims like "why these keep selling out" or "our fastest-selling piece" — write from observed product craftsmanship, form, finish, and functional utility instead.
 
 ═══════════════════════════════════════════════════════════════════
 PILLAR 5: CALL TO ACTION (CTA) & CONVERSION INTENT
@@ -404,14 +404,14 @@ ${channelGuidance ? `${channelGuidance}\n` : ""}${geographicGuidance ? `${geogra
   `A product image has been provided.
 
   Before writing a single word of copy, silently assess two things:
-  1. What is this image primarily communicating? (e.g. fit and silhouette on a model, craft detail or texture close-up, lifestyle or occasion context, movement and drape, flat lay or product-only shot)
+  1. What is this image primarily communicating? (e.g. product in use or on a person, craft detail or texture close-up, lifestyle or setting context, scale and form, flat lay or product-only shot)
   2. What does this image NOT show — and therefore what must the copy carry?
 
   Your copy and the image must never be doing the same job:
-  - If the image shows fit, silhouette, or the product on a model → copy sells the feeling of wearing it, the occasion it unlocks, or the one physical detail that earns the piece its place in someone's wardrobe. Never describe the shape the eye can already see.
-  - If the image shows craft detail, texture, or a close-up → copy sells the identity and transformation — who the wearer becomes, what moment this piece is made for.
-  - If the image shows a lifestyle, movement, or editorial context → copy anchors to product truth — what it is made of, what specific physical detail makes this piece worth buying, what distinguishes it from anything else.
-  - If the image is a flat lay, product-only, or white-background shot → copy sells the transformation — what changes for the person who owns this, what problem it solves, what feeling it creates on the body.
+  - If the image shows the product in use or on a model/person → copy sells the experience of using/owning it, the occasion or friction it unlocks, or the one physical detail that earns it a place in someone's daily life or routine. Never describe the shape the eye can already see.
+  - If the image shows craft detail, texture, or a close-up → copy sells the identity and transformation — who the customer becomes, what moment this product is made for.
+  - If the image shows a lifestyle, dynamic, or editorial context → copy anchors to product truth — what it is made of, what specific physical detail makes this product worth buying, what distinguishes it from anything else.
+  - If the image is a flat lay, product-only, or white-background shot → copy sells the transformation — what changes for the person who owns this, what problem it solves, what feeling, utility, or elevation it creates in real-world use.
 
   In every case: never describe what the eye already sees. Never claim any material, closure, or feature not explicitly stated in the product description.`
   : ""}
@@ -426,7 +426,7 @@ ${gatewayInsight?.currentProductClassification === "Gateway" ?
   `CRITICAL: This product is verified as a GATEWAY PRODUCT.
   It is proven by store cohort data to convert cold strangers into first-time customers.
   Your hook and primary text MUST lower first-time buyer hesitation:
-  - Address sizing, flattering drape, and tactile fabric confidence.
+  - Address quality confidence, tactile material finish, fit/utility, and ease of first-time purchase.
   - Give a hesitant customer who has never ordered from this brand a clear reason to make their first purchase.
   ${(gatewayInsight.currentProductVelocity ?? 0) > (gatewayInsight.storeMedianVelocity || 0) ? `Velocity signal: High customer demand, fast-moving restocks.` : ""}
   ${(gatewayInsight.currentProductRepeatRate ?? 0) > 0.1 ? `Repeat buying power: Buyers who started with this product came back to order again.` : ""}`
@@ -437,11 +437,11 @@ ${gatewayInsight?.currentProductClassification === "Gateway" ?
 
 ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — sell the sensory design and utility, not the track record.
   CRITICAL for New Launches:
-  - Lead with the sensory truth of the cut, silhouette, fabric drape, and daily wearability.
+  - Lead with the sensory truth of the form, materials, tactile finish, and daily utility.
   - Ban generic announcement clichés like "Introducing...", "The [Product] is here", or "First look — see it before it's part of everyone's rotation".
   - NEVER use social proof phrases like "loved by thousands", "our best-seller", or "customers say" — there is no purchase history to back this up.
   - NEVER use scarcity tactics like "selling fast" or "only X left".
-  - Sell why this piece solves a wardrobe dilemma (e.g. breathable heat-proof comfort, pockets that don't bunch, versatile styling from day to evening).` : ""}
+  - Sell why this product solves a real customer friction or elevates a daily routine (e.g. effortless daily use, superior durability, refined finish, versatile application from morning to night).` : ""}
 
 ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
   `SPARSE DESCRIPTION ALERT: The product description provided is minimal (under 30 words).
@@ -644,11 +644,11 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
       units_sold: matchedProduct?.units_sold || 0,
       revenue: matchedProduct?.revenue || 0,
       in_stock: matchedProduct?.in_stock ?? true,
-      collection: matchedProduct?.collection || matchedProduct?.product_type || "Apparel",
+      collection: matchedProduct?.collection || matchedProduct?.product_type || "",
       image_url: imageUrl || matchedProduct?.image_url || "",
       should_advertise: true,
       tags: matchedProduct?.tags && matchedProduct.tags.length > 0 ? matchedProduct.tags : [],
-      product_type: matchedProduct?.product_type || matchedProduct?.collection || "Apparel",
+      product_type: matchedProduct?.product_type || matchedProduct?.collection || "",
       has_partial_stock: matchedProduct?.has_partial_stock ?? false,
       in_stock_variant_count: matchedProduct?.in_stock_variant_count || 1,
       total_variant_count: matchedProduct?.total_variant_count || 1,

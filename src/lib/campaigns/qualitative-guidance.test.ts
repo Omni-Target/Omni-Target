@@ -15,7 +15,7 @@ describe("getChannelBehavioralGuidance", () => {
     const result = getChannelBehavioralGuidance("Instagram", 48);
     expect(result).toContain("Instagram (48% of historical store orders)");
     expect(result).toContain("visual scrolling mode");
-    expect(result).toContain("tactile movement, fabric drape");
+    expect(result).toContain("real-world product demonstrations, tactile finish");
   });
 
   it("handles TikTok with candid UGC authenticity guidance", () => {

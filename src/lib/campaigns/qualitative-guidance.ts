@@ -18,7 +18,7 @@ export function getChannelBehavioralGuidance(
   if (ch.includes("instagram") || ch.includes("facebook") || ch.includes("meta")) {
     return `BEHAVIORAL ACQUISITION CHANNEL CONTEXT:
 - Primary Entry Channel: ${channel}${pctStr}
-- Customer Psychology: Shoppers primarily discover this store in visual scrolling mode on ${channel}. They ignore corporate slogans and dry spec sheets. Write for cold, visual-first scrollers who respond to tactile movement, fabric drape, silhouette fit, and relatable real-world styling over retail claims.`;
+- Customer Psychology: Shoppers primarily discover this store in visual scrolling mode on ${channel}. They ignore corporate slogans and dry spec sheets. Write for cold, visual-first scrollers who respond to real-world product demonstrations, tactile finish, design craft, and relatable daily utility over retail claims.`;
   }
 
   if (ch.includes("tiktok")) {

@@ -86,7 +86,7 @@ export async function POST(request: Request) {
       revenue: matchedProduct?.revenue || 0,
       in_stock: matchedProduct?.in_stock ?? true,
       collection:
-        matchedProduct?.collection || matchedProduct?.product_type || "Apparel",
+        matchedProduct?.collection || matchedProduct?.product_type || "",
       image_url: matchedProduct?.image_url || "",
       should_advertise: true,
       tags:
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
       product_type:
         matchedProduct?.product_type ||
         matchedProduct?.collection ||
-        "Apparel",
+        "",
       has_partial_stock: matchedProduct?.has_partial_stock ?? false,
       in_stock_variant_count: matchedProduct?.in_stock_variant_count || 1,
       total_variant_count: matchedProduct?.total_variant_count || 1,

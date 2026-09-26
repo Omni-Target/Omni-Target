@@ -44,8 +44,8 @@ const GOAL_OPTIONS = [
   {
     id: "Promote a New Collection",
     label: "Promote a New Collection",
-    shortLabel: "New Drop Launch",
-    tagline: "Build inaugural curiosity and launch velocity for fresh arrivals",
+    shortLabel: "New Arrival Launch",
+    tagline: "Build curiosity and launch velocity for fresh arrivals",
   },
   {
     id: "Retarget Past Visitors",
@@ -71,22 +71,22 @@ const TONE_OPTIONS = [
   {
     id: "Minimal & Editorial",
     label: "Minimal & Editorial",
-    preview: "Pure drape. Tactile texture. Zero distractions.",
+    preview: "Clean lines. Intentional details. Zero distractions.",
   },
   {
     id: "Bold & Direct",
     label: "Bold & Direct",
-    preview: "Made to turn heads. Fast. Unapologetic.",
+    preview: "Immediate impact. Clear results. Zero fluff.",
   },
   {
     id: "Warm & Conversational",
     label: "Warm & Conversational",
-    preview: "Your new everyday staple just arrived.",
+    preview: "Your new daily favorite. Genuine, approachable, and proven.",
   },
   {
     id: "Premium & Aspirational",
     label: "Premium & Aspirational",
-    preview: "Bespoke craftsmanship, cut for timeless longevity.",
+    preview: "Refined craftsmanship, designed for lasting distinction.",
   },
 ] as const;
 
@@ -240,7 +240,7 @@ export function PreFlightSheet({
               {isGateway
                 ? "This product is verified as your Gateway Product — proven to attract cold strangers. We pre-selected an Acquisition campaign to maximize first-time buyers."
                 : isNew
-                  ? "This is a fresh product with no ad history yet. We pre-selected a New Drop Launch to spark initial discovery and early sales."
+                  ? "This is a fresh product with no ad history yet. We pre-selected a New Arrival Launch to spark initial discovery and early sales."
                   : "We calibrated this strategy based on your store's sales history, product pricing, and verified catalog claims."}
             </p>
           </div>
