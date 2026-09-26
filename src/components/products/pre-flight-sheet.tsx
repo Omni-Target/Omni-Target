@@ -233,15 +233,17 @@ export function PreFlightSheet({
           {/* AI Intelligence Note */}
           <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-3.5 text-xs text-brand-950">
             <div className="flex items-center gap-1.5 font-semibold text-brand-800">
-              <Wand2 className="size-3.5" />
-              Pre-Calibrated Strategy
+              <Sparkles className="size-3.5 text-brand-600" />
+              Why we recommend this
             </div>
             <p className="mt-1 leading-relaxed text-brand-900/90">
               {isGateway
-                ? "This product is verified as your Gateway Product — proven to attract cold strangers. We pre-selected an Acquisition campaign to maximize first-time buyers."
+                ? "This is your Gateway Product — your sales data shows it's your best product for converting new shoppers. We've set your goal to Drive Website Sales to win more first-time buyers."
                 : isNew
-                  ? "This is a fresh product with no ad history yet. We pre-selected a New Arrival Launch to spark initial discovery and early sales."
-                  : "We calibrated this strategy based on your store's sales history, product pricing, and verified catalog claims."}
+                  ? "A fresh arrival with no ad history yet. We've set your goal to New Arrival Launch to introduce it to interested shoppers and spark your first orders."
+                  : isRepeat
+                    ? "A customer favorite with high repeat appeal. We've set your goal to Retarget Past Visitors to bring back shoppers and drive repeat sales."
+                    : "Matched to your product price point and customer buying patterns to help you get the most out of your test budget."}
             </p>
           </div>
 
