@@ -816,81 +816,103 @@ export async function commitBriefGeneration(params: {
   const { data, error } = await supabaseAdmin.rpc("commit_brief_generation", params);
   if (!error) return data;
 
-  // Fallback if RPC doesn't exist yet (migration 0009 pending in Supabase)
-  if (error.code === "PGRST202" || error.code === "42883") {
-    console.warn("RPC commit_brief_generation not found. Using direct Supabase persistence fallback.");
-    const userId = params.p_user_id;
-    const integration = await getUserIntegration(userId);
-    const cols = await detectDbColumns();
-    const balance = availableCredits(integration, cols.hasCredits);
-    const unlimited = !!(integration?.credits_unlimited_until && new Date(integration.credits_unlimited_until) > new Date());
+  // Known intentional business validation exceptions from the RPC
+  const knownBusinessErrors = [
+    "no_credits",
+    "regeneration_limit",
+    "regeneration_product_changed",
+    "invalid_regeneration",
+    "idempotency_conflict",
+    "integration_not_found",
+  ];
+  if (knownBusinessErrors.includes(error.message)) {
+    throw new Error(error.message);
+  }
 
-    let campaignId = params.p_campaign_id;
-    let attempt = 1;
+  // If the RPC failed due to any unexpected error (function error, column ambiguity, missing RPC, etc.),
+  // use direct Supabase persistence fallback so user generation does not fail.
+  console.warn("RPC commit_brief_generation non-fatal failure:", error.message, error.code, "Falling back to direct Supabase persistence.");
+  const userId = params.p_user_id;
+  const integration = await getUserIntegration(userId);
+  const cols = await detectDbColumns();
+  const balance = availableCredits(integration, cols.hasCredits);
+  const unlimited = !!(integration?.credits_unlimited_until && new Date(integration.credits_unlimited_until) > new Date());
 
-    if (campaignId) {
-      const existingVersions = await getBriefVersions(userId, campaignId);
-      attempt = existingVersions.length + 1;
-    } else {
-      if (!unlimited && balance < 1) {
-        throw new Error("no_credits");
-      }
-      const campaignRowId = await insertCampaign(userId, {
-        brand_name: params.p_campaign.brand_name as string,
-        product_name: params.p_campaign.product_name as string,
-        product_description: params.p_campaign.product_description as string,
-        product_price: params.p_campaign.product_price as string,
-        target_audience: params.p_campaign.target_audience as string,
-        campaign_goal: params.p_campaign.campaign_goal as string,
-        tone_preference: params.p_campaign.tone_preference as string,
-        platform: params.p_campaign.platform as string,
-        media_url: params.p_campaign.media_url as string,
-        headline: params.p_copy.headline as string,
-        primary_text: params.p_copy.primary_text as string,
-        description: params.p_copy.description as string,
-        cta: params.p_copy.cta as string,
-        copywriter_note: params.p_copy.copywriter_note as string,
-        brief_data: params.p_context,
-      });
-      if (!campaignRowId) throw new Error("Failed to insert campaign");
-      campaignId = campaignRowId;
+  let campaignId = params.p_campaign_id;
+  let attempt = 1;
 
-      if (!unlimited) {
-        const newBalance = Math.max(0, balance - 1);
-        const updatePayload: Record<string, unknown> = { credits_balance: newBalance };
-        if (cols.hasCredits) updatePayload.credits = newBalance;
-        await updateUserIntegration(userId, updatePayload);
-        try {
-          await insertCreditUsage(userId, 1, "brief_generated");
-        } catch (e) {
-          console.warn("Non-fatal: insertCreditUsage failed in fallback:", e);
-        }
-      }
+  if (campaignId) {
+    const existingVersions = await getBriefVersions(userId, campaignId);
+    attempt = existingVersions.length + 1;
+    if (attempt > 4) {
+      throw new Error("regeneration_limit");
     }
-
-    const versionId = await insertBriefVersion(userId, campaignId, {
-      attempt_number: attempt,
-      is_selected: attempt === 1,
+  } else {
+    if (!unlimited && balance < 1) {
+      throw new Error("no_credits");
+    }
+    const campaignRowId = await insertCampaign(userId, {
+      brand_name: params.p_campaign.brand_name as string,
+      product_name: params.p_campaign.product_name as string,
+      product_description: params.p_campaign.product_description as string,
+      product_price: params.p_campaign.product_price as string,
+      target_audience: params.p_campaign.target_audience as string,
+      campaign_goal: params.p_campaign.campaign_goal as string,
+      tone_preference: params.p_campaign.tone_preference as string,
+      platform: params.p_campaign.platform as string,
+      media_url: params.p_campaign.media_url as string,
       headline: params.p_copy.headline as string,
       primary_text: params.p_copy.primary_text as string,
       description: params.p_copy.description as string,
       cta: params.p_copy.cta as string,
       copywriter_note: params.p_copy.copywriter_note as string,
+      brief_data: params.p_context,
     });
+    if (!campaignRowId) throw new Error("Failed to insert campaign");
+    campaignId = campaignRowId;
 
-    const result = {
-      ...params.p_response,
-      campaignId,
-      versionId: versionId || campaignId,
-      attemptNumber: attempt,
-      credits_balance: unlimited ? balance : Math.max(0, balance - 1),
-      is_unlimited: unlimited,
-    };
-
-    return result;
+    if (!unlimited) {
+      const newBalance = Math.max(0, balance - 1);
+      const updatePayload: Record<string, unknown> = { credits_balance: newBalance };
+      if (cols.hasCredits) updatePayload.credits = newBalance;
+      await updateUserIntegration(userId, updatePayload);
+      try {
+        await insertCreditUsage(userId, 1, "brief_generated");
+      } catch (e) {
+        console.warn("Non-fatal: insertCreditUsage failed in fallback:", e);
+      }
+    }
   }
 
-  throw new Error(error.message);
+  const versionId = await insertBriefVersion(userId, campaignId, {
+    attempt_number: attempt,
+    is_selected: attempt === 1,
+    headline: params.p_copy.headline as string,
+    primary_text: params.p_copy.primary_text as string,
+    description: params.p_copy.description as string,
+    cta: params.p_copy.cta as string,
+    copywriter_note: params.p_copy.copywriter_note as string,
+  });
+
+  const result = {
+    ...params.p_response,
+    campaignId,
+    versionId: versionId || campaignId,
+    attemptNumber: attempt,
+    credits_balance: unlimited ? balance : Math.max(0, balance - 1),
+    is_unlimited: unlimited,
+  };
+
+  try {
+    await supabaseAdmin.from("brief_generation_receipts").insert({
+      clerk_user_id: userId,
+      request_id: params.p_request_id,
+      request_hash: params.p_request_hash,
+      response: result,
+    });
+  } catch {}
+
+  return result;
 }
 
 export async function finalizeBriefVersion(userId: string, campaignId: string, versionId: string,

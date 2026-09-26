@@ -27,6 +27,7 @@ import {
   buildCampaignDraft,
   type StoreProductLike,
 } from "@/components/dashboard";
+import { PreFlightSheet, type ProductRow } from "@/components/products";
 import { useStoreData, useForceSyncStoreData } from "@/hooks/useStoreData";
 import { useCredits, CREDITS_QUERY_KEY } from "@/hooks/useCredits";
 import { useQueryClient } from "@tanstack/react-query";
@@ -188,10 +189,59 @@ function DashboardContent() {
     forceSync().finally(() => setRefreshing(false));
   };
 
+  const [selectedProductForPreFlight, setSelectedProductForPreFlight] =
+    useState<ProductRow | null>(null);
+  const [preFlightOpen, setPreFlightOpen] = useState(false);
+
   const onCreateBrief = (product: StoreProductLike, isNewLaunch: boolean) => {
+    setSelectedProductForPreFlight(product as ProductRow);
+    setPreFlightOpen(true);
+  };
+
+  const handleLaunchExpress = ({
+    product,
+    goal,
+    tone,
+  }: {
+    product: ProductRow;
+    goal: string;
+    tone: string;
+  }) => {
     sessionStorage.setItem(
       "campaign_draft",
-      JSON.stringify(buildCampaignDraft(product, isNewLaunch)),
+      JSON.stringify({
+        product_name: product.name,
+        product_description: product.description || product.name,
+        product_image: product.image_url || "",
+        product_variants:
+          product.has_partial_stock && product.in_stock_variant_names
+            ? product.in_stock_variant_names.join(", ")
+            : "",
+        product_price: product.price ? String(product.price) : "",
+        is_new_launch: (product.units_sold ?? 0) < 3,
+        campaign_goal: goal,
+        tone_preference: tone,
+        express_launch: true,
+      }),
+    );
+    router.push("/campaigns?express=true");
+  };
+
+  const handleCustomizeManual = (product: ProductRow) => {
+    sessionStorage.setItem(
+      "campaign_draft",
+      JSON.stringify({
+        product_name: product.name,
+        product_description: product.description || product.name,
+        product_image: product.image_url || "",
+        product_variants:
+          product.has_partial_stock && product.in_stock_variant_names
+            ? product.in_stock_variant_names.join(", ")
+            : "",
+        product_price: product.price ? String(product.price) : "",
+        is_new_launch: (product.units_sold ?? 0) < 3,
+        express_launch: false,
+      }),
     );
     router.push("/campaigns");
   };
@@ -488,6 +538,15 @@ function DashboardContent() {
         onOpenChange={setPurchaseDialogOpen}
         shop={activeShop}
         currency="USD"
+      />
+
+      <PreFlightSheet
+        product={selectedProductForPreFlight}
+        open={preFlightOpen}
+        onOpenChange={setPreFlightOpen}
+        currency={currency}
+        onLaunchExpress={handleLaunchExpress}
+        onCustomizeManual={handleCustomizeManual}
       />
     </PageContainer>
   );
