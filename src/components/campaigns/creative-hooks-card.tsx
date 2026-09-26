@@ -36,9 +36,15 @@ export const ANGLE_DISPLAY_MAP: Record<string, { label: string; focus: string }>
 export function CreativeHooksCard({
   hooks,
   loading,
+  generationStatus,
+  onRetry,
+  retryError,
 }: {
   hooks?: CreativeHook[];
   loading?: boolean;
+  generationStatus?: "generated" | "fallback";
+  onRetry?: () => void;
+  retryError?: string | null;
 }) {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
@@ -109,8 +115,30 @@ export function CreativeHooksCard({
     );
   }
 
-  if (!hooks || hooks.length === 0) {
-    return null;
+  const legacyTemplateHooks = hooks?.some((hook) =>
+    hook.on_screen_text === "A closer look at the details." ||
+    hook.on_screen_text === "Style it your way."
+  );
+  if (generationStatus === "fallback" || legacyTemplateHooks || !hooks || hooks.length !== 3) {
+    if (!onRetry && generationStatus !== "fallback") return null;
+    return (
+      <Card className="border-amber-200 bg-amber-50/50 p-6">
+        <h3 className="text-sm font-semibold text-foreground">Creative hooks need another try</h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          We saved your ad copy, but could not verify three product-specific hooks. Retry just this step while your copy and campaign settings stay in place.
+        </p>
+        {retryError && <p role="alert" className="mt-3 text-sm text-red-600">{retryError}</p>}
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+          >
+            Retry hooks only
+          </button>
+        )}
+      </Card>
+    );
   }
 
   return (

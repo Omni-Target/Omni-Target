@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   validateBrief,
   sanitizeLeakedTokens,
+  finalizeCreativeHooks,
+  buildVerifiedFallbackHooks,
+  getForbiddenSiblingProducts,
   type TargetProductContext,
   type CatalogItem,
   type GeneratedBriefResponse,
@@ -77,6 +80,39 @@ describe("validateBrief", () => {
 
     const errors = validateBrief(response, targetProduct, catalog);
     expect(errors.some((e) => e.includes("Duplicate angle detected"))).toBe(true);
+  });
+
+  it("ignores shared camera direction while detecting repeated customer claims", () => {
+    const response: GeneratedBriefResponse = {
+      target_product_title: targetProduct.title,
+      creative_hooks: [
+        {
+          angle: "Daily utility",
+          visual_cue: "Macro close-up capturing storefront reflections",
+          on_screen_text: "Comfort through the commute.",
+          primary_text_hook: "Freedom on busy mornings.",
+        },
+        {
+          angle: "Evening style",
+          visual_cue: "Macro close-up capturing storefront reflections",
+          on_screen_text: "A polished evening choice.",
+          primary_text_hook: "Confidence after sunset.",
+        },
+        {
+          angle: "Quiet ritual",
+          visual_cue: "Macro close-up capturing storefront reflections",
+          on_screen_text: "A softer daily ritual.",
+          primary_text_hook: "Calm in every transition.",
+        },
+      ],
+    };
+    expect(validateBrief(response, targetProduct, catalog)).toEqual([]);
+
+    response.creative_hooks[1].on_screen_text = "Freedom through the commute.";
+    response.creative_hooks[1].primary_text_hook = "Confidence on busy mornings.";
+    expect(validateBrief(response, targetProduct, catalog)).toContainEqual(
+      expect.stringContaining("share overlapping claims"),
+    );
   });
 
   it("ignores subset tokens (e.g. Noir) but flags genuine sibling leaks (e.g. Silk Blazer)", () => {
@@ -165,6 +201,81 @@ describe("validateBrief", () => {
     );
   });
 
+  it("repairs punctuated sibling titles using the validator's matching rules", () => {
+    const response: GeneratedBriefResponse = {
+      target_product_title: targetProduct.title,
+      creative_hooks: [{
+        angle: "Identity / Status",
+        visual_cue: "Style the Silk-Blazer beside the pants",
+        on_screen_text: "Silk-Blazer pairing.",
+        primary_text_hook: "A look with Silk-Blazer.",
+      }],
+    };
+    const sanitized = sanitizeLeakedTokens(response, targetProduct, catalog);
+    expect(JSON.stringify(sanitized)).not.toMatch(/Silk-Blazer/i);
+  });
+
+  it("falls back instead of turning a sibling pairing into a self-pairing ad", () => {
+    const product = { ...targetProduct, description: "Cotton pants with a clean silhouette." };
+    const hooks = buildVerifiedFallbackHooks(product, catalog)!;
+    hooks[0].primary_text_hook = "Pair with the Silk Blazer.";
+    expect(finalizeCreativeHooks({ target_product_title: product.title, creative_hooks: hooks }, product, catalog)).toBeNull();
+  });
+
+  it("rejects a partial or unsupported final hook set", () => {
+    const product = { ...targetProduct, description: "Linen pants with cowrie details." };
+    const partial: GeneratedBriefResponse = {
+      target_product_title: product.title,
+      creative_hooks: [{
+        angle: "Material / Craftsmanship",
+        visual_cue: "Close-up of the pants",
+        on_screen_text: "Pure silk fabric.",
+        primary_text_hook: "Discover pure silk in Ego Pants.",
+      }],
+    };
+    expect(finalizeCreativeHooks(partial, product, catalog)).toBeNull();
+    const complete = buildVerifiedFallbackHooks(product, catalog)!;
+    complete[0].primary_text_hook = "Discover pure silk in Ego Pants.";
+    expect(finalizeCreativeHooks({ target_product_title: product.title, creative_hooks: complete }, product, catalog)).toBeNull();
+    expect(finalizeCreativeHooks(
+      { target_product_title: 7, creative_hooks: complete } as unknown as GeneratedBriefResponse,
+      product,
+      catalog,
+    )).toBeNull();
+  });
+
+  it("builds and validates three hooks from a verified product detail", () => {
+    const product = {
+      ...targetProduct,
+      description: "Wide-legged linen pants with hand-beaded cowrie details.",
+    };
+    const hooks = buildVerifiedFallbackHooks(product, catalog);
+    expect(hooks).toHaveLength(3);
+    expect(hooks?.[2].primary_text_hook).toContain("cowrie details");
+    expect(validateBrief({ target_product_title: product.title, creative_hooks: hooks || [] }, product, catalog)).toEqual([]);
+  });
+
+  it("does not invent fallback product features when the description has none", () => {
+    expect(buildVerifiedFallbackHooks({ ...targetProduct, description: "A lovely piece." }, catalog)).toBeNull();
+    expect(buildVerifiedFallbackHooks({ ...targetProduct, description: "Made without leather." }, catalog)).toBeNull();
+    expect(buildVerifiedFallbackHooks(
+      { ...targetProduct, description: "Pants to pair with the Silk Blazer." },
+      catalog,
+    )).toBeNull();
+  });
+
+  it("does not treat a sibling's title as evidence for the target product", () => {
+    const product = { ...targetProduct, description: "Cotton pants. Pair with the Silk Blazer." };
+    const hooks = buildVerifiedFallbackHooks(product, catalog)!;
+    expect(hooks[2].primary_text_hook).toContain("cotton fabric");
+    const response: GeneratedBriefResponse = {
+      target_product_title: product.title,
+      creative_hooks: hooks.map((hook) => ({ ...hook })),
+    };
+    response.creative_hooks[0].primary_text_hook = "Discover pure silk in Ego Pants.";
+    expect(finalizeCreativeHooks(response, product, catalog)).toBeNull();
+  });
+
   describe("factual claim validation", () => {
     it("catches an unsupported material claim", () => {
       const response: GeneratedBriefResponse = {
@@ -221,7 +332,7 @@ describe("validateBrief", () => {
         ],
       };
 
-      const product = { ...targetProduct, description: "A great pair of pants made from fine leather." };
+      const product = { ...targetProduct, description: "A great pair of pants made from genuine leather." };
       const errors = validateBrief(response, product, catalog);
       expect(errors.some((e) => e.includes("Unsupported factual claim"))).toBe(false);
     });
@@ -261,7 +372,7 @@ describe("validateBrief", () => {
         id: "prod-1",
         title: "Ego Pants (Noir)",
         tags: ["pants", "bottoms"],
-        description: "Wide-legged linen pants. Pair with the Ego Dress for an elevated set.",
+        description: "Wide-legged pure linen pants. Pair with the Ego Dress for an elevated set.",
       };
       const extendedCatalog: CatalogItem[] = [
         ...catalog,
@@ -293,6 +404,8 @@ describe("validateBrief", () => {
 
       const errors = validateBrief(response, productWithSiblingRef, extendedCatalog);
       expect(errors).toEqual([]);
+      expect(getForbiddenSiblingProducts(productWithSiblingRef, extendedCatalog).map((item) => item.title))
+        .not.toContain("Ego Dress");
     });
 
     it("does not flag salient overlap for core product attributes present in the description", () => {
@@ -328,6 +441,13 @@ describe("validateBrief", () => {
 
       const errors = validateBrief(response, productWithAttributes, catalog);
       expect(errors).toEqual([]);
+    });
+
+    it("treats director notes as visual cues, not customer copy", () => {
+      const product = { ...targetProduct, description: "Cotton pants for everyday styling." };
+      const hooks = buildVerifiedFallbackHooks(product, catalog)!;
+      hooks[0].visual_cue = "Director: use a dramatic silk-like light flare!";
+      expect(validateBrief({ target_product_title: product.title, creative_hooks: hooks }, product, catalog)).toEqual([]);
     });
 
     it("normalizes exclamation marks into periods without throwing errors", () => {

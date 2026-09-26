@@ -1,27 +1,48 @@
+import { validateFactualClaims, type ProductFactualEvidence } from "./factual-claims";
+
 interface CopyOutput {
   headline?: string;
   primaryText?: string;
+  primary_text?: string;
   description?: string;
   cta?: string;
   copywriterNote?: string;
 }
 
+/** Repair punctuation-only violations before spending tokens on a retry. */
+export function normalizeCopyPunctuation<T extends CopyOutput>(copy: T): T {
+  const normalized = { ...copy } as unknown as Record<string, unknown>;
+  for (const field of ["headline", "primaryText", "primary_text", "description"]) {
+    const value = normalized[field];
+    if (typeof value === "string") {
+      normalized[field] = value
+        .replace(/\?+!+/g, "?")
+        .replace(/!+(?=\?)/g, "")
+        .replace(/!+/g, ".")
+        .replace(/\.{2,}/g, ".");
+    }
+  }
+  return normalized as T;
+}
+
 /**
  * Code-side enforcement of the rules the COPYWRITER_SYSTEM_PROMPT promises.
  *
- * Two passes:
+ * Three passes:
  * 1. Banned string scan — catches exclamation marks, announcement clichés,
  *    unverified demand/scarcity claims, and universal fit assertions that the
  *    system prompt bans but previously had zero code enforcement behind them.
  * 2. Closure/material hallucination check — extracts verifiable product-fact
  *    terms (fabric types, closures, construction details) from the generated
- *    copy and confirms each one is present in the product description. A term
- *    in the copy that isn't in the description is a hallucination risk.
+ *    copy and confirms each one is present in the product evidence.
+ * 3. Shared factual-claim validation — requires the exact material,
+ *    certification, provenance, or commercial claim in product evidence.
  */
 export function validateCopy(
   copy: CopyOutput,
   productDescription: string,
   forbiddenProductNames: string[] = [],
+  factualEvidence?: ProductFactualEvidence,
 ): string[] {
   const errors: string[] = [];
   for (const field of ["headline", "primaryText", "description", "cta"] as const) {
@@ -126,29 +147,26 @@ export function validateCopy(
           "i"
         );
         if (!negativeContrastRegex.test(copyLower)) {
-          errors.push(`Possible hallucination: "${term}" is in copy but not in product description`);
+          errors.push(`Possible hallucination: "${term}" is in copy but not in product evidence`);
         }
       }
     }
   }
 
+  errors.push(...validateFactualClaims(
+    [copy.headline, copy.primaryText, copy.description]
+      .filter((value): value is string => typeof value === "string"),
+    factualEvidence ?? { description: productDescription },
+  ));
+
   const factPatterns = [
-    /\bhand[- ](?:made|crafted|sewn|beaded|woven|finished)\b/gi,
     /\b(?:free (?:shipping|delivery|returns|exchanges)|lifetime guarantee|money[- ]back guarantee)\b/gi,
-    /\b(?:made|manufactured) in [a-z]+\b/gi,
   ];
   const normalizedDescription = descLower.replace(/-/g, " ");
-  const hasHandCraftsmanshipEvidence =
-    /\bhand[- ](?:made|crafted|sewn|beaded|woven|finished|stitched|pleated|dyed|painted)\b/i.test(descLower) ||
-    /\b(?:handmade|handcrafted|artisan|artisanal)\b/i.test(descLower);
 
   for (const pattern of factPatterns) {
     for (const match of allText.matchAll(pattern)) {
       const matchNorm = match[0].toLowerCase().replace(/-/g, " ");
-      const isHandClaim = matchNorm.startsWith("hand ");
-      if (isHandClaim && hasHandCraftsmanshipEvidence) {
-        continue;
-      }
       if (!normalizedDescription.includes(matchNorm)) {
         errors.push(`Unsupported claim: "${match[0]}"`);
       }

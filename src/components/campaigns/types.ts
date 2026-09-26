@@ -62,6 +62,7 @@ export interface AiTargeting {
 export interface AiInsights {
   error?: string;
   generation_status?: "generated" | "fallback";
+  creative_hooks_status?: "generated" | "fallback";
   creative_hooks?: CreativeHook[];
   advantage_plus_guidance?: AdvantagePlusGuidance;
   implementation_steps?: ImplementationStep[];

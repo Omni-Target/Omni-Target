@@ -3,6 +3,7 @@ import { StoreData, StoreProduct } from "./store-data";
 import Anthropic from "@anthropic-ai/sdk";
 import { formatCurrency } from "@/lib/currency";
 import { fetchExchangeRateSnapshot } from "./exchange-rates";
+import { estimateDailyTestBudget } from "./budget-evidence";
 import { getAdvantagePlusGuidance } from "./advantage-plus";
 import { summarizeShopifyReadiness } from "./shopify-readiness";
 import { summarizeMarketingHistory } from "./marketing-evidence";
@@ -21,11 +22,11 @@ import type {
 } from "./brief-pdf-types";
 import {
   validateBrief,
-  sanitizeLeakedTokens,
+  finalizeCreativeHooks,
+  getForbiddenSiblingProducts,
   type TargetProductContext,
   type CatalogItem,
   type GeneratedBriefResponse,
-  type CreativeHookResponse,
 } from "./validate-brief";
 
 const anthropicClient = new Anthropic();
@@ -73,6 +74,33 @@ export interface TargetingProfile {
   optimization_reasoning: string;
   timing: TimingOutput;
 }
+
+const CREATIVE_HOOKS_TOOL: Anthropic.Tool = {
+  name: "generate_product_hooks",
+  description: "Three distinct, verified creative hooks for one product.",
+  input_schema: {
+    type: "object",
+    properties: {
+      target_product_title: { type: "string" },
+      creative_hooks: {
+        type: "array",
+        minItems: 3,
+        maxItems: 3,
+        items: {
+          type: "object",
+          properties: {
+            angle: { type: "string", enum: ["Problem / Friction", "Identity / Status", "Material / Craftsmanship", "Usability / Transformation", "Contrarian / Curiosity", "Offer / Risk Reversal"] },
+            visual_cue: { type: "string" },
+            on_screen_text: { type: "string" },
+            primary_text_hook: { type: "string" },
+          },
+          required: ["angle", "visual_cue", "on_screen_text", "primary_text_hook"],
+        },
+      },
+    },
+    required: ["target_product_title", "creative_hooks"],
+  },
+};
 
 export const ADVANTAGE_PLUS_SYSTEM_PROMPT = `You are a world-class senior Meta Ads media buyer and direct-response performance strategist briefing a busy e-commerce founder on a single-product Meta Advantage+ campaign.
 
@@ -326,30 +354,6 @@ export const ADVANTAGE_PLUS_TOOL: Anthropic.Tool = {
   },
 };
 
-function buildDefaultProductHooks(targetProductTitle: string): CreativeHookResponse[] {
-  const title = targetProductTitle || "Your Product";
-  return [
-    {
-      angle: "Problem / Friction",
-      visual_cue: `Macro close-up highlighting the fabric texture, silhouette, and craft details of the ${title}.`,
-      on_screen_text: `Finally, ${title.toLowerCase()} designed for real comfort.`,
-      primary_text_hook: `Stop compromising between style and ease.`,
-    },
-    {
-      angle: "Identity / Status",
-      visual_cue: `Model styled in the ${title} in natural daylight with an elevated, effortless posture.`,
-      on_screen_text: "Clean silhouette, zero compromise.",
-      primary_text_hook: `An effortless upgrade to your weekly rotation.`,
-    },
-    {
-      angle: "Material / Craftsmanship",
-      visual_cue: `Close-up shot capturing unique seam, hem, and finishing details on the ${title}.`,
-      on_screen_text: "Thoughtful craft in every detail.",
-      primary_text_hook: `Feel the difference of authentic quality.`,
-    },
-  ];
-}
-
 /**
  * ─── 1. Consolidate AI Calls (Single-Pass Intelligence) ───
  * Makes a single call to Anthropic's Message API using structured tool use
@@ -448,13 +452,8 @@ async function generateRawTargetingProfile(
       ? storeData.orders.peak_days.join(", ")
       : "None recorded yet";
 
-  // Build the sibling deny-list from catalog (all products except the target)
-  const siblingDenyList = catalog
-    .filter(
-      (c) =>
-        c.id !== targetProductCtx.id &&
-        c.title.trim().toLowerCase() !== targetProductCtx.title.trim().toLowerCase()
-    )
+  // Keep the prompt's deny-list aligned with code-side validation.
+  const siblingDenyList = getForbiddenSiblingProducts(targetProductCtx, catalog)
     .map((c) => `  - "${c.title}"`)
     .join("\n");
 
@@ -635,7 +634,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
         output_tokens: response.usage.output_tokens,
       });
     } else {
-      let profile = toolUseBlock.input as GeneratedBriefResponse;
+      const profile = toolUseBlock.input as GeneratedBriefResponse;
 
       if (userId) {
         logApiUsage(
@@ -646,118 +645,10 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
         );
       }
 
-      // Code-Side Deterministic Validator
-      let validationErrors = validateBrief(
-        profile,
-        targetProductCtx,
-        catalog
-      );
-
-      if (validationErrors.length > 0) {
-        console.warn(
-          "[Advantage+ Validator] Initial validation failed:",
-          validationErrors
-        );
-
-        // Single automatic retry with the validator feedback.
-        try {
-          const toolUseBlock = response.content.find((b) => b.type === "tool_use");
-          const retryUserContent =
-            toolUseBlock && toolUseBlock.type === "tool_use"
-              ? [
-                  {
-                    type: "tool_result" as const,
-                    tool_use_id: toolUseBlock.id,
-                    is_error: true,
-                    content: `The generated brief failed validation with the following error(s):\n${validationErrors
-                      .map((e) => `- ${e}`)
-                      .join(
-                        "\n"
-                      )}\n\nPlease regenerate the profile strictly addressing these errors. Ensure exactly 3 distinct angles, zero references to sibling catalog items, zero unsupported factual claims, and describe only "${targetProductTitle}".`,
-                  },
-                ]
-              : `The generated brief failed validation with the following error(s):\n${validationErrors
-                  .map((e) => `- ${e}`)
-                  .join(
-                    "\n"
-                  )}\n\nPlease regenerate the profile strictly addressing these errors. Ensure exactly 3 distinct angles, zero references to sibling catalog items, zero unsupported factual claims, and describe only "${targetProductTitle}".`;
-
-          const retryResponse = await anthropicClient.messages.create({
-            model: "claude-sonnet-5",
-            max_tokens: 4096,
-            thinking: STRUCTURED_HOOK_THINKING,
-            system: [
-              {
-                type: "text",
-                text: ADVANTAGE_PLUS_SYSTEM_PROMPT,
-                cache_control: { type: "ephemeral" },
-              },
-            ],
-            messages: [
-              { role: "user", content: prompt },
-              {
-                role: "assistant",
-                content: response.content.map((block, idx) => {
-                  if (idx === response.content.length - 1) {
-                    return { ...block, cache_control: { type: "ephemeral" as const } };
-                  }
-                  return block;
-                }),
-              },
-              {
-                role: "user",
-                content: retryUserContent,
-              },
-            ],
-            tools: [ADVANTAGE_PLUS_TOOL],
-            tool_choice: {
-              type: "tool",
-              name: "generate_advantage_plus_profile",
-            },
-          });
-
-          console.log("[Anthropic Prompt Caching - Targeting Profile Retry]", {
-            input_tokens: retryResponse.usage.input_tokens,
-            output_tokens: retryResponse.usage.output_tokens,
-            stop_reason: retryResponse.stop_reason,
-            cache_creation_input_tokens:
-              (retryResponse.usage as unknown as { cache_creation_input_tokens?: number })
-                .cache_creation_input_tokens ?? 0,
-            cache_read_input_tokens:
-              (retryResponse.usage as unknown as { cache_read_input_tokens?: number })
-                .cache_read_input_tokens ?? 0,
-          });
-
-          const retryToolBlock = retryResponse.content.find(
-            (c) => c.type === "tool_use"
-          );
-          if (retryToolBlock && retryToolBlock.type === "tool_use") {
-            profile = retryToolBlock.input as GeneratedBriefResponse;
-            validationErrors = validateBrief(
-              profile,
-              targetProductCtx,
-              catalog
-            );
-          }
-        } catch (retryErr) {
-          console.error("[Advantage+ Validator] Retry failed:", retryErr);
-        }
-
-        // Sanitize hooks rather than throwing fatal error if minor validation feedback remains after retry
-        if (validationErrors.length > 0) {
-          console.warn(
-            "[Advantage+ Validator Alert] Brief had validation warnings after retry; proceeding with sanitization:",
-            validationErrors
-          );
-        }
-      }
-
-      if (
-        profile &&
-        Array.isArray(profile.creative_hooks) &&
-        profile.creative_hooks.length > 0
-      ) {
-        const sanitized = sanitizeLeakedTokens(profile, targetProductCtx, catalog);
+      // Apply safe local repairs before judging the result. A rejected profile
+      // must not trigger another full, expensive targeting generation call.
+      const sanitized = finalizeCreativeHooks(profile, targetProductCtx, catalog);
+      if (sanitized) {
         return {
           generation_status: "generated",
           locations:
@@ -779,7 +670,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
             Array.isArray(sanitized.seed_interests) && sanitized.seed_interests.length > 0
               ? sanitized.seed_interests
               : ["Online Shopping", "Fashion"],
-          creative_hooks: sanitized.creative_hooks.slice(0, 3),
+          creative_hooks: sanitized.creative_hooks,
           optimization_reasoning: guidance.default_reasoning,
           timing: sanitized.timing || {
             peak_days:
@@ -792,18 +683,17 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
               "Maintaining continuous 24/7 ad delivery allows Meta to optimize across your entire weekly sales rhythm. Past order timing reflects historical customer activity, not an algorithmic guarantee of future ad performance.",
           },
         };
+      } else {
+        console.warn("[Advantage+ Validator] Hook profile rejected:",
+          validateBrief(profile, targetProductCtx, catalog));
       }
     }
   } catch (err) {
     console.error("AI Advantage+ profile generation error:", err);
   }
 
-  const fallbackHooks = targetProductTitle
-    ? buildDefaultProductHooks(targetProductTitle)
-    : [];
-
   return {
-    generation_status: fallbackHooks.length > 0 ? "generated" : "fallback",
+    generation_status: "fallback",
     locations: defaultLocations,
     demographics: {
       gender: "All",
@@ -815,7 +705,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
         "Standard e-commerce age targeting (25-44) is recommended for early validation campaigns.",
     },
     seed_interests: ["Online Shopping", "Fashion"],
-    creative_hooks: fallbackHooks,
+    creative_hooks: [],
     optimization_reasoning: guidance.default_reasoning,
     timing: {
       peak_days:
@@ -838,6 +728,54 @@ export async function generateTargetingProfile(
   ...args: Parameters<typeof generateRawTargetingProfile>
 ): Promise<TargetingProfile> {
   return groundTargetingProfile(await generateRawTargetingProfile(...args), args[0]);
+}
+
+/** A small, credit-free recovery call when a saved brief is missing hooks. */
+export async function generateCreativeHooksOnly(
+  storeData: StoreData,
+  product: StoreProduct,
+  excludedAngle?: string | null,
+  userId?: string | null,
+): Promise<CreativeHook[]> {
+  const target: TargetProductContext = {
+    id: product.id || product.name,
+    title: product.name,
+    description: [
+      product.description,
+      ...(product.catalog_claims || []).map((claim) => `${claim.key}: ${claim.value}`),
+    ].filter(Boolean).join("\n"),
+    tags: product.tags,
+    product_type: product.product_type,
+    price: product.price,
+  };
+  const catalog: CatalogItem[] = (storeData.products || []).map((item) => ({
+    id: item.id || item.name,
+    title: item.name,
+  }));
+  const response = await anthropicClient.messages.create({
+    model: "claude-sonnet-5",
+    max_tokens: 1200,
+    thinking: STRUCTURED_HOOK_THINKING,
+    system: `Write three distinct Meta feed creative hooks for one product. Use only the verified product facts supplied by the merchant. Each hook must have a specific opening visual, on-screen text of at most eight words, and an opening primary-text line. Use one practical benefit, one concrete construction or material proof, and one styling or identity angle. Give each hook a different angle from the tool enum. Avoid generic lines such as "Style it your way" or "A closer look at the details". Never invent guarantees, certifications, reviews, or features. Echo the exact product title.`,
+    messages: [{
+      role: "user",
+      content: `Product: ${target.title}\nCategory: ${target.product_type || "unspecified"}\nVerified description and catalog claims: ${target.description || "No details supplied"}\nTags: ${(target.tags || []).join(", ") || "none"}${excludedAngle ? `\nAd copy already leads with: ${excludedAngle}. Make the three hooks additive.` : ""}`,
+    }],
+    tools: [CREATIVE_HOOKS_TOOL],
+    tool_choice: { type: "tool", name: "generate_product_hooks" },
+  });
+  if (userId) {
+    logApiUsage(userId, "creative_hooks_retry", response.usage.input_tokens, response.usage.output_tokens);
+  }
+  const block = response.content.find((item) => item.type === "tool_use");
+  if (!block || block.type !== "tool_use") throw new CreativeHookGenerationError();
+  const verified = finalizeCreativeHooks(block.input as GeneratedBriefResponse, target, catalog);
+  if (!verified) {
+    console.warn("[Creative Hooks Retry] Hook validation failed:",
+      validateBrief(block.input as GeneratedBriefResponse, target, catalog));
+    throw new CreativeHookGenerationError();
+  }
+  return verified.creative_hooks;
 }
 
 // ─── Health Scoring Functions ───
@@ -903,6 +841,7 @@ function scoreAvailability(products: StoreData["products"]): {
 
 export interface MetaRecommendations {
   generation_status?: "generated" | "fallback";
+  creative_hooks_status?: "generated" | "fallback";
   lowDataWarning?: boolean;
   lowDataMessage?: string;
   newStoreCaution?: boolean;
@@ -1021,6 +960,7 @@ export async function generateRecommendations(
 
     return {
       generation_status: "fallback",
+      creative_hooks_status: "fallback",
       lowDataWarning: true,
       lowDataMessage:
         "We need at least 20 orders to generate reliable recommendations. Keep selling and check back soon.",
@@ -1266,21 +1206,17 @@ export async function generateRecommendations(
   const aovUSD = effectiveAOV / exchangeRate;
   const aovGuardrailUSD = aovUSD * 0.5;
 
-  let finalDailyUSD: number;
   let budgetWarning = false;
   let budgetWarningMessage: string | undefined;
 
   if (aovGuardrailUSD > totalDailySpendUSD * 3) {
-    finalDailyUSD = totalDailySpendUSD;
     budgetWarning = true;
     const guardrailLocal = Math.round(aovGuardrailUSD * exchangeRate);
     const tierLocal = Math.round(totalDailySpendUSD * exchangeRate);
     budgetWarningMessage = `For a premium product at this price point, a daily budget of ${storeData.store.currency_symbol || ""}${guardrailLocal.toLocaleString()}/day may give the test more room to gather evidence. Starting at ${storeData.store.currency_symbol || ""}${tierLocal.toLocaleString()}/day limits the amount you risk, but results may be inconclusive. Verify the Purchase event in Meta Events Manager before launch and reassess any event change using measured campaign results.`;
-  } else if (aovGuardrailUSD > totalDailySpendUSD) {
-    finalDailyUSD = aovGuardrailUSD;
-  } else {
-    finalDailyUSD = totalDailySpendUSD;
   }
+
+  const finalDailyUSD = estimateDailyTestBudget(totalDailySpendUSD, aovUSD);
 
   const recommendedDailyLocal = finalDailyUSD * exchangeRate;
   const recommendedDaily = Math.round(recommendedDailyLocal);
@@ -1330,13 +1266,9 @@ export async function generateRecommendations(
     },
   };
 
-  if (targetProductOverride && (!profile.creative_hooks || profile.creative_hooks.length === 0)) {
-    console.error(
-      "Product-specific hook generation failed for:",
-      targetProductOverride.name
-    );
-    throw new CreativeHookGenerationError();
-  }
+  // The validated copy and deterministic recommendations remain useful when
+  // hooks fail. Return an explicit empty hook set so the client can retry only
+  // this step without paying for another copywriter call.
   const creative_hooks = profile.creative_hooks;
 
   // --- TARGETING (Backward compatibility) ---
@@ -1652,6 +1584,7 @@ export async function generateRecommendations(
 
     return {
     generation_status: profile.generation_status,
+    creative_hooks_status: profile.generation_status,
     ...(lowDataWarningCheck(storeData)
       ? {}
       : {

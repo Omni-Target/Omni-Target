@@ -40,6 +40,7 @@ interface BriefData {
   selectedCta?: string;
   aiInsights?: AiInsights | null;
   creative_hooks?: CreativeHook[];
+  recovered_creative_hooks?: CreativeHook[];
   advantage_plus_guidance?: AdvantagePlusGuidance;
   storeInsights?: StoreInsights | null;
   selectedStrategyIndex?: number;
@@ -63,6 +64,7 @@ export interface BriefCampaign {
   copywriter_note: string | null;
   brief_data: BriefData | null;
   product_price?: string | null;
+  product_description?: string | null;
 }
 
 export interface BriefVersionRow {
@@ -106,6 +108,9 @@ export function BriefView({
     finalizedId ?? versions[0]?.id ?? null,
   );
   const activeVersion = versions.find((v) => v.id === activeVersionId) ?? null;
+  const [localRecoveredHooks, setLocalRecoveredHooks] = useState<Record<string, CreativeHook[]>>({});
+  const [hooksLoading, setHooksLoading] = useState(false);
+  const [hooksRetryError, setHooksRetryError] = useState<string | null>(null);
 
   const bd: BriefData = activeVersion?.brief_data ?? campaign.brief_data ?? {};
 
@@ -129,23 +134,28 @@ export function BriefView({
   const brandName = bd.brandName ?? campaign.brand_name ?? "";
   const productName = bd.productName ?? campaign.product_name ?? "";
   const goal = bd.goal ?? campaign.campaign_goal ?? "";
+  const recoveredHooks = (activeVersionId ? localRecoveredHooks[activeVersionId] : undefined) ?? bd.recovered_creative_hooks;
   const aiInsights: AiInsights | null = useMemo(() => {
     if (bd.aiInsights) {
       return {
         ...bd.aiInsights,
-        creative_hooks: bd.creative_hooks ?? bd.aiInsights.creative_hooks,
+        creative_hooks: recoveredHooks ?? bd.creative_hooks ?? bd.aiInsights.creative_hooks,
+        creative_hooks_status: recoveredHooks?.length === 3
+          ? "generated"
+          : bd.aiInsights.creative_hooks_status,
         advantage_plus_guidance:
           bd.advantage_plus_guidance ?? bd.aiInsights.advantage_plus_guidance,
       };
     }
-    if (bd.creative_hooks || bd.advantage_plus_guidance) {
+    if (recoveredHooks || bd.creative_hooks || bd.advantage_plus_guidance) {
       return {
-        creative_hooks: bd.creative_hooks,
+        creative_hooks: recoveredHooks ?? bd.creative_hooks,
+        creative_hooks_status: recoveredHooks?.length === 3 ? "generated" : undefined,
         advantage_plus_guidance: bd.advantage_plus_guidance,
       } as AiInsights;
     }
     return null;
-  }, [bd.aiInsights, bd.creative_hooks, bd.advantage_plus_guidance]);
+  }, [bd.aiInsights, bd.creative_hooks, bd.advantage_plus_guidance, recoveredHooks]);
   const storeInsights = bd.storeInsights ?? null;
   const gatewayInsight = bd.gatewayInsight ?? null;
   const isNewLaunch = bd.isNewLaunch ?? false;
@@ -241,6 +251,36 @@ export function BriefView({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
+  const handleRetryHooks = async () => {
+    if (hooksLoading || !activeVersionId) return;
+    setHooksLoading(true);
+    setHooksRetryError(null);
+    try {
+      const response = await fetch("/api/campaigns/generate/targeting", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productName,
+          productDescription: campaign.product_description ?? undefined,
+          productPrice,
+          campaignId: campaign.id,
+          versionId: activeVersionId,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok || !Array.isArray(result.creative_hooks) || result.creative_hooks.length !== 3) {
+        throw new Error(result.error || "Could not generate verified hooks. Please try again.");
+      }
+      setLocalRecoveredHooks((current) => ({ ...current, [activeVersionId]: result.creative_hooks }));
+      queryClient.invalidateQueries({ queryKey: BRIEFS_QUERY_KEY });
+      router.refresh();
+    } catch (error) {
+      setHooksRetryError(error instanceof Error ? error.message : "Could not generate hooks. Please try again.");
+    } finally {
+      setHooksLoading(false);
+    }
+  };
+
   // Finalize: persist the chosen variation + mark complete, then head back to
   // the dashboard. Best-effort persistence never blocks the redirect.
   const handleFinalize = async () => {
@@ -334,6 +374,9 @@ export function BriefView({
             storeInsights={storeInsights}
             aiInsights={aiInsights}
             loadingAiInsights={false}
+            hooksLoading={hooksLoading}
+            onRetryHooks={activeVersionId ? handleRetryHooks : undefined}
+            hooksRetryError={hooksRetryError}
             goal={goal}
             selectedStrategyIndex={selectedStrategyIndex}
             setSelectedStrategyIndex={setSelectedStrategyIndex}

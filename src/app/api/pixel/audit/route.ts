@@ -96,8 +96,37 @@ export async function GET() {
 
   if (bestProduct) {
     if (isGatewayPick) {
+      const decision = bestProduct.product_decision;
+      let conversionText = "It is your highest-converting entry point for new buyers.";
+      if (decision?.first_order_count && decision.identified_first_orders) {
+        const pct = Math.round((decision.first_order_count / decision.identified_first_orders) * 100);
+        if (pct >= 20) {
+          const ratio = Math.round(decision.identified_first_orders / decision.first_order_count);
+          const ratioText = ratio >= 2 && ratio <= 5 ? `1 in every ${ratio} new shoppers (${pct}%)` : `${pct}% of new shoppers`;
+          conversionText = `${ratioText} bought this piece on their very first order, making it your highest-converting entry point.`;
+        } else {
+          conversionText = `${decision.first_order_count} first-time customers started with this product, making it your top entry point for new buyers.`;
+        }
+      }
+
+      const totalVariants = bestProduct.total_variant_count || 0;
+      const inStockVariants = bestProduct.in_stock_variant_count || 0;
+      const stockText =
+        totalVariants === 0
+          ? "In stock and ready to promote."
+          : inStockVariants === totalVariants
+            ? "All variants are in stock and ready to promote."
+            : inStockVariants > 0
+              ? `${inStockVariants} of ${totalVariants} variants in stock.`
+              : "Currently low or out of stock — replenish inventory before spending ad dollars.";
+
+      const marginText =
+        bestProduct.unit_cost_coverage === "complete"
+          ? "Unit costs are recorded — verify your target margin covers fulfillment before launching."
+          : "Make sure your unit profit margin leaves healthy room for ad spend before launching.";
+
       positives.push(
-        `Consider "${bestProduct.name}" for a first test. ${bestProduct.product_decision?.role_reason || "It has a first-order gateway signal in accessible Shopify history."} ${bestProduct.product_decision?.readiness_reasons.join(" ") || "Confirm stock and full costs before spending."}`
+        `Start with "${bestProduct.name}". ${conversionText} ${stockText} ${marginText}`
       );
     } else if ((bestProduct.units_sold || 0) > 0) {
       positives.push(
@@ -112,7 +141,7 @@ export async function GET() {
 
   if (orders30d >= 10) {
     positives.push(
-      `${orders30d} orders were recorded in Shopify in the last 30 days. Confirm the relevant website events are firing in Meta Events Manager before choosing an optimization goal.`
+      `${orders30d} orders recorded in Shopify in the last 30 days. You have solid sales momentum to give Meta's algorithm clear purchase signals.`
     );
   }
 
@@ -165,12 +194,12 @@ export async function GET() {
       : topByUnitsSold[1];
     if (secondProduct) {
       recommendations.push(
-      `Test "${bestProduct.name}" before adding "${secondProduct.name}" so you can evaluate one product hypothesis at a time. Check stock, costs and measured results before expanding.`
+        `Test "${bestProduct.name}" first before testing "${secondProduct.name}". Focusing your budget on one winner gives Meta cleaner data and protects your ad spend.`
       );
     }
   } else if (bestProduct) {
     recommendations.push(
-      `Start with a controlled test of "${bestProduct.name}" and compare the result with its Shopify evidence. Set a spending limit you can support; profitability is not yet established.`
+      `Start with a focused test on "${bestProduct.name}". Set a comfortable daily budget to validate your returns before scaling.`
     );
   }
 

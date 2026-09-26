@@ -3,6 +3,8 @@
 import { motion } from "motion/react";
 import { Sparkles, Check, Loader2, Lightbulb } from "lucide-react";
 import { useState, useEffect } from "react";
+import { formatCurrency } from "@/lib/currency";
+import { estimateDailyTestBudget, type BudgetCalculation } from "@/lib/budget-evidence";
 
 interface GeneratingStateProps {
   productName?: string;
@@ -10,6 +12,9 @@ interface GeneratingStateProps {
   tonePreference?: string;
   isGateway?: boolean;
   isNewLaunch?: boolean;
+  productPrice?: string;
+  storeCurrency?: string;
+  budgetCalculation?: BudgetCalculation;
 }
 
 interface StepItem {
@@ -40,30 +45,41 @@ export function GeneratingState({
   tonePreference,
   isGateway,
   isNewLaunch,
+  productPrice,
+  storeCurrency,
+  budgetCalculation,
 }: GeneratingStateProps) {
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [tipIndex, setTipIndex] = useState(0);
+  const numericPrice = Number((productPrice || "").replace(/[^0-9.]/g, ""));
+  const budgetPreview = numericPrice > 0 && budgetCalculation?.baseline_daily && storeCurrency === budgetCalculation.fx.currency
+    ? Math.round(estimateDailyTestBudget(budgetCalculation.baseline_daily, numericPrice))
+    : null;
 
   const generationSteps: StepItem[] = [
     {
       title: productName
-        ? isNewLaunch
-          ? `Calibrating New Arrival launch for ${productName}`
-          : isGateway
+        ? isGateway
           ? `Confirming Gateway signals for ${productName}`
+          : isNewLaunch
+          ? `Calibrating New Arrival launch for ${productName}`
           : `Analyzing customer signals for ${productName}`
         : "Checking sales data → Identifying your Gateway Product",
       detail: productName
-        ? isNewLaunch
-          ? "Evaluating launch positioning and catalog claims…"
-          : isGateway
+        ? isGateway
           ? "Reviewing verified first-time buyer patterns and catalog signals…"
+          : isNewLaunch
+          ? "Evaluating launch positioning and catalog claims…"
           : "Reviewing customer purchase patterns and catalog signals…"
         : "Reviewing customer purchase patterns and catalog signals…",
     },
     {
       title: "Matching store pricing → Calculating safe daily test budget",
-      detail: "Finding your store's sweet-spot Meta test spend…",
+      detail: budgetPreview !== null && storeCurrency
+        ? `Estimated ${formatCurrency(budgetPreview, storeCurrency)}/day from your product price and store sales. Your final plan follows…`
+        : numericPrice > 0 && storeCurrency
+        ? `Using ${formatCurrency(numericPrice, storeCurrency)} product price and store sales signals to calculate your daily recommendation…`
+        : "Using store sales signals to calculate your daily recommendation…",
     },
     {
       title: `Tuning your brand voice → ${formatToneLabel(tonePreference)}`,

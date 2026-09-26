@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { queryUserIntegrationSelect } from "@/lib/db";
-import { generateTargetingProfile } from "@/lib/insights-engine";
-import { getAdvantagePlusGuidance } from "@/lib/advantage-plus";
+import { getBriefVersions, getCampaignById, queryUserIntegrationSelect, saveRecoveredCreativeHooks } from "@/lib/db";
+import { generateCreativeHooksOnly } from "@/lib/insights-engine";
 import type { StoreData, StoreProduct } from "@/lib/store-data";
 
 export const runtime = "nodejs";
@@ -48,6 +47,24 @@ export async function POST(request: Request) {
       );
     }
 
+    if (Boolean(body.campaignId) !== Boolean(body.versionId)) {
+      return NextResponse.json({ error: "Campaign and version are required together." }, { status: 400 });
+    }
+    let savedProductDescription: string | null = null;
+    let savedProductPrice: string | number | null = null;
+    if (body.campaignId && body.versionId) {
+      const campaign = await getCampaignById(userId, body.campaignId);
+      const versions = campaign ? await getBriefVersions(userId, body.campaignId) : [];
+      if (!campaign || !versions.some((version) => version.id === body.versionId)) {
+        return NextResponse.json({ error: "Brief version not found." }, { status: 404 });
+      }
+      if (campaign.product_name?.trim().toLowerCase() !== productName.trim().toLowerCase()) {
+        return NextResponse.json({ error: "Product does not match this brief." }, { status: 400 });
+      }
+      savedProductDescription = campaign.product_description;
+      savedProductPrice = campaign.product_price;
+    }
+
     const integration = await queryUserIntegrationSelect(
       userId!,
       "store_snapshot"
@@ -70,9 +87,9 @@ export async function POST(request: Request) {
 
     const storeAov = storeSnapshot.orders?.average_order_value || 50;
     const parsedPrice =
-      typeof productPrice === "number"
-        ? productPrice
-        : parseFloat(String(productPrice || "0").replace(/[^0-9.]/g, "")) ||
+      typeof (savedProductPrice ?? productPrice) === "number"
+        ? Number(savedProductPrice ?? productPrice)
+        : parseFloat(String(savedProductPrice ?? productPrice ?? "0").replace(/[^0-9.]/g, "")) ||
           matchedProduct?.price ||
           Math.round(storeAov);
 
@@ -80,7 +97,7 @@ export async function POST(request: Request) {
       ...(matchedProduct || {}),
       id: matchedProduct?.id || "selected-product",
       name: productName,
-      description: productDescription || matchedProduct?.description || "",
+      description: savedProductDescription || productDescription || matchedProduct?.description || "",
       price: parsedPrice,
       units_sold: matchedProduct?.units_sold || 0,
       revenue: matchedProduct?.revenue || 0,
@@ -105,53 +122,24 @@ export async function POST(request: Request) {
     const cleanAngleUsed =
       typeof angleUsed === "string" ? angleUsed.trim() || null : null;
 
-    const targetingProfile = await generateTargetingProfile(
-      storeSnapshot,
-      1,
-      50,
-      userId,
-      targetProductOverride,
-      cleanAngleUsed
+    const creativeHooks = await generateCreativeHooksOnly(
+      storeSnapshot, targetProductOverride, cleanAngleUsed, userId
     );
-
-    const monthlyOrders =
-      storeSnapshot.orders?.orders_last_30_days ?? 0;
-    const guidance = getAdvantagePlusGuidance(monthlyOrders, storeSnapshot.prespend?.analytics?.recent_funnel);
-
-    const advantagePlusGuidance = targetingProfile
-      ? {
-          campaign_type: guidance.campaign_type,
-          optimization_event: guidance.optimization_event,
-          optimization_reasoning: guidance.default_reasoning,
-          event_evidence: guidance.event_evidence,
-          seed_audience_suggestions: {
-            age_min: targetingProfile.demographics?.age_min || 25,
-            age_max: targetingProfile.demographics?.age_max || 44,
-            gender: targetingProfile.demographics?.gender || "All",
-            demographic_justification:
-              targetingProfile.demographics?.demographic_justification ||
-              "Demographic profile aligned with product price point and buyer history.",
-            seed_interests: targetingProfile.seed_interests || [
-              "Online Shopping",
-            ],
-          },
-        }
-      : null;
+    if (body.campaignId && body.versionId) {
+      await saveRecoveredCreativeHooks(userId, body.campaignId, body.versionId, creativeHooks);
+    }
 
     return NextResponse.json({
       success: true,
-      creative_hooks: targetingProfile?.creative_hooks || null,
-      advantage_plus_guidance: advantagePlusGuidance,
-      targeting_profile: targetingProfile,
+      creative_hooks: creativeHooks,
     });
   } catch (error) {
     console.error("[/api/campaigns/generate/targeting] Error:", error);
     return NextResponse.json(
       {
-        error: "Failed to generate targeting and creative hooks",
-        detail: error instanceof Error ? error.message : String(error),
+        error: "Creative hooks could not be generated. Your ad copy is safe; retry hooks only.",
       },
-      { status: 500 }
+      { status: 502 }
     );
   }
 }

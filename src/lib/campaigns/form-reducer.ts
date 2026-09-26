@@ -8,6 +8,7 @@ export interface CampaignFormState {
   goal: string;
   tone: string;
   isNewLaunch: boolean;
+  gatewayClassification: string;
   autoFilledFromStore: boolean;
 }
 
@@ -18,8 +19,9 @@ export const initialCampaignForm: CampaignFormState = {
   productPrice: "",
   productVariants: "",
   goal: "Drive Website Sales",
-  tone: "Let AI decide (recommended)",
+  tone: "Let AI decide",
   isNewLaunch: false,
+  gatewayClassification: "",
   autoFilledFromStore: false,
 };
 

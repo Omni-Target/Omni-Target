@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { ArrowRight, Check, FileText, ImageIcon, Info, Layers, Loader2, RefreshCw, RotateCcw, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import type { GeneratedCopy, AiInsights, CreativeHook } from "../types";
 export interface BriefVariation {
   versionId: string | null;
   copy: GeneratedCopy;
+  tone: string;
   aiInsights?: AiInsights | null;
 }
 
@@ -46,8 +47,13 @@ export interface ReviewStepProps {
   onRegenerate: (newTone?: string) => void;
   onStartOver: () => void;
   onGenerateBrief: () => void;
+  isFinalizing?: boolean;
+  errorMsg?: string;
   hooks?: CreativeHook[];
   hooksLoading?: boolean;
+  hooksGenerationStatus?: "generated" | "fallback";
+  onRetryHooks?: () => void;
+  hooksRetryError?: string | null;
   goal?: string;
   tone?: string;
   gatewayClassification?: string | null;
@@ -74,8 +80,13 @@ export function ReviewStep({
   onRegenerate,
   onStartOver,
   onGenerateBrief,
+  isFinalizing = false,
+  errorMsg,
   hooks,
   hooksLoading = false,
+  hooksGenerationStatus,
+  onRetryHooks,
+  hooksRetryError,
   goal,
   tone,
   gatewayClassification,
@@ -84,15 +95,11 @@ export function ReviewStep({
     tone || "Let AI decide",
   );
 
-  useEffect(() => {
-    if (tone) setSelectedVoice(tone);
-  }, [tone]);
-
   return (
     <div>
       <div className="mb-6">
         <Badge variant="success" className="mb-3">
-          <Check className="size-3" /> Creatives ready
+          <Check className="size-3" /> {hooksGenerationStatus === "fallback" ? "Ad copy ready" : "Creatives ready"}
         </Badge>
         <h1 className="text-2xl font-semibold tracking-[-0.02em] text-foreground sm:text-3xl">
           Review generated copy
@@ -305,20 +312,28 @@ export function ReviewStep({
         </div>
       </div>
 
-      {(hooksLoading || (hooks && hooks.length > 0)) && (
-        <div className="mt-8">
-          <CreativeHooksCard hooks={hooks} loading={hooksLoading} />
-        </div>
-      )}
+      <div className="mt-8">
+        <CreativeHooksCard
+          hooks={hooks}
+          loading={hooksLoading}
+          generationStatus={hooksGenerationStatus}
+          onRetry={onRetryHooks}
+          retryError={hooksRetryError}
+        />
+      </div>
 
       <div className="mx-auto mt-8 max-w-3xl">
         <Button
           size="xl"
           className="w-full"
           onClick={onGenerateBrief}
-          disabled={hooksLoading}
+          disabled={hooksLoading || isFinalizing}
         >
-          {hooksLoading ? (
+          {isFinalizing ? (
+            <>
+              <Loader2 className="size-4 animate-spin" /> Finalizing campaign brief…
+            </>
+          ) : hooksLoading ? (
             <>
               <Loader2 className="size-4 animate-spin" /> Adding your 3 creative angles…
             </>
@@ -329,10 +344,17 @@ export function ReviewStep({
             </>
           )}
         </Button>
+        {errorMsg && (
+          <p role="alert" className="mt-2 text-center text-xs font-medium text-red-600">
+            {errorMsg}
+          </p>
+        )}
         <p className="mt-3 text-center text-xs text-subtle-foreground">
           {hooksLoading
             ? "Preparing 3 ready-to-use hooks so you have multiple creative options to test…"
-            : "Your brief will contain everything you need to set up this campaign in Meta Ads Manager."}
+            : hooksGenerationStatus === "fallback"
+              ? "Your copy and campaign settings are saved. Retry hooks above to complete the creative options."
+              : "Your brief will contain everything you need to set up this campaign in Meta Ads Manager."}
         </p>
       </div>
     </div>

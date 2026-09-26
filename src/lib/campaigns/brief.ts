@@ -31,6 +31,17 @@ export interface BuildBriefPdfPayloadParams {
   isNewLaunch: boolean;
 }
 
+function usableCreativeHooks(aiInsights: AiInsights | null | undefined): CreativeHook[] {
+  const status = aiInsights?.creative_hooks_status ?? aiInsights?.generation_status;
+  if (status === "fallback") return [];
+  const hooks = aiInsights?.creative_hooks ?? [];
+  if (hooks.length !== 3 || hooks.some((hook) =>
+    hook.on_screen_text === "A closer look at the details." ||
+    hook.on_screen_text === "Style it your way."
+  )) return [];
+  return hooks;
+}
+
 /** Keeps the approved test-spend envelope constant when the founder changes
  * the test duration in the brief UI. */
 export function rescaleDailyBudgetForDuration(
@@ -129,10 +140,7 @@ export function buildBriefPdfPayload({
     },
   };
 
-  const creative_hooks: CreativeHook[] =
-    aiInsights?.creative_hooks && aiInsights.creative_hooks.length > 0
-      ? aiInsights.creative_hooks
-      : [];
+  const creative_hooks = usableCreativeHooks(aiInsights);
 
   const warnings = (() => {
     const cp = storeInsights?.products?.find((p) => p.name === productName);
@@ -418,7 +426,7 @@ export function buildBriefText({
     },
   };
 
-  const hooks = aiInsights?.creative_hooks ?? [];
+  const hooks = usableCreativeHooks(aiInsights);
 
   const hooksSection =
     hooks.length > 0

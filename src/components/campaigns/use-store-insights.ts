@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useStoreData } from "@/hooks/useStoreData";
 import type { AiInsights, StoreInsights } from "@/components/campaigns/types";
 
@@ -11,28 +11,20 @@ export interface UseStoreInsightsParams {
 
 export interface UseStoreInsightsResult {
   storeInsights: StoreInsights | null;
+  storeLoading: boolean;
   aiInsights: AiInsights | null;
   loadingAiInsights: boolean;
 }
 
 /**
- * Loads the connected store's data and — only if connected — its AI insights.
- *
- * The store snapshot now comes from the shared `["store-data"]` query, so this
- * dedupes with the dashboard/products pages instead of issuing its own
- * `/api/store/data` fetch on every mount. The insights fetch is still a
- * WATERFALL (it starts only once the store resolves as `connected`), preserved
- * from the original. The cross-domain effects — redirect on a dead session,
- * one-time brand-name prefill — are surfaced via the callbacks. Callers MUST
- * pass stable callbacks.
+ * Loads the connected store snapshot. Campaign-specific AI insights are
+ * generated with the selected product, not speculatively on page load.
  */
 export function useStoreInsights({
   onReauthRequired,
   onStoreName,
 }: UseStoreInsightsParams): UseStoreInsightsResult {
-  const { data: storeResponse } = useStoreData();
-  const [aiInsights, setAiInsights] = useState<AiInsights | null>(null);
-  const [loadingAiInsights, setLoadingAiInsights] = useState(false);
+  const { data: storeResponse, isPending: storeLoading } = useStoreData();
   const namedRef = useRef(false);
 
   const connected = !!(storeResponse?.connected && storeResponse.data);
@@ -59,27 +51,5 @@ export function useStoreInsights({
     }
   }, [storeResponse, onReauthRequired, onStoreName]);
 
-  // Dependent insights fetch — only once the store is connected.
-  useEffect(() => {
-    if (!connected) return;
-    let cancelled = false;
-    Promise.resolve().then(() => {
-      if (!cancelled) setLoadingAiInsights(true);
-    });
-    fetch("/api/store/insights", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((insights) => {
-        if (cancelled) return;
-        if (!insights.error) setAiInsights(insights);
-        setLoadingAiInsights(false);
-      })
-      .catch(() => {
-        if (!cancelled) setLoadingAiInsights(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [connected]);
-
-  return { storeInsights, aiInsights, loadingAiInsights };
+  return { storeInsights, storeLoading, aiInsights: null, loadingAiInsights: false };
 }

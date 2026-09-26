@@ -199,6 +199,12 @@ export function TargetingSummary({
         </Badge>
       </div>
 
+      {aiInsights?.generation_status === "fallback" && (
+        <Alert variant="warning" className="mb-5">
+          Audience age and interests are starting defaults because AI targeting did not complete. Locations marked as past orders still come from your Shopify data.
+        </Alert>
+      )}
+
       {storeInsights ? (
         <div className="space-y-5">
           {/* Optimization event callout */}

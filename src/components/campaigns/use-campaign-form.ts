@@ -35,7 +35,7 @@ export function useCampaignForm(): UseCampaignFormResult {
   );
   const setProductName = useCallback(
     (value: string) =>
-      dispatch({ type: "merge", values: { productName: value } }),
+      dispatch({ type: "merge", values: { productName: value, gatewayClassification: "" } }),
     [],
   );
   const setDescription = useCallback(

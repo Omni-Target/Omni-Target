@@ -28,10 +28,11 @@ function AuditContent() {
   useEffect(() => {
     let isCancelled = false;
 
-    // 1. Kick off store data sync and audit computation IMMEDIATELY on mount
+    // 1. Kick off store data sync in background and audit computation IMMEDIATELY on mount
     const fetchPromise = (async () => {
-      await fetch("/api/store/data").catch((e) =>
-        console.warn("Pre-audit store/data fetch non-critical notice:", e)
+      // Refresh latest store data in background without blocking the audit response
+      fetch("/api/store/data").catch((e) =>
+        console.warn("Background store/data fetch non-critical notice:", e)
       );
 
       const res = await fetch("/api/pixel/audit");
@@ -44,13 +45,13 @@ function AuditContent() {
       return data;
     })();
 
-    // 2. Step through scanning animation crisply (800ms per step = 2.4s total)
+    // 2. Step through scanning animation smoothly (1600ms per step)
     const stepInterval = setInterval(() => {
       setCurrentStep((prev) => (prev < AUDIT_STEPS.length - 1 ? prev + 1 : prev));
-    }, 800);
+    }, 1600);
 
-    // 3. Ensure a minimum 2.2s visual animation so the merchant experiences the AI analysis
-    const minTimePromise = new Promise((resolve) => setTimeout(resolve, 2200));
+    // 3. Ensure a minimum 2.0s visual animation so the merchant experiences the AI analysis
+    const minTimePromise = new Promise((resolve) => setTimeout(resolve, 2000));
 
     Promise.all([fetchPromise, minTimePromise])
       .then(([data]) => {

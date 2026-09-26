@@ -11,6 +11,9 @@ import {
 } from "@/lib/market-geography";
 import {
   validateBrief,
+  finalizeCreativeHooks,
+  buildVerifiedFallbackHooks,
+  getForbiddenSiblingProducts,
   type TargetProductContext,
   type CatalogItem,
   type GeneratedBriefResponse,
@@ -25,7 +28,7 @@ import {
 } from "@/lib/insights-engine";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 180;
 
 const anthropicClient = new Anthropic();
 
@@ -155,13 +158,8 @@ export async function POST(request: Request) {
         ? storeSnapshot.orders.peak_days.join(", ")
         : "None recorded yet";
 
-    // Build the sibling deny-list from catalog (all products except the target)
-    const siblingDenyList = catalog
-      .filter(
-        (c) =>
-          c.id !== targetProductCtx.id &&
-          c.title.trim().toLowerCase() !== targetProductCtx.title.trim().toLowerCase()
-      )
+    // Keep the prompt's deny-list aligned with code-side validation.
+    const siblingDenyList = getForbiddenSiblingProducts(targetProductCtx, catalog)
       .map((c) => `  - "${c.title}"`)
       .join("\n");
 
@@ -265,7 +263,38 @@ Instructions for this generation:
 7. Marketing Context Awareness: Note the merchant's Shopify Marketing History. If the merchant has no prior paid ad spend recorded, guide the founder on respecting the initial 7-day learning phase and establishing baseline metrics. If the store has previously run paid campaigns, tailor the recommendations to build upon and scale their past acquisition channels.
 Generate a high-converting Advantage+ campaign brief for "${targetTitle}" following all rules in the system prompt. Call the generate_advantage_plus_profile tool.`;
 
-    const response = await anthropicClient.messages.create({
+    const respond = (brief: GeneratedBriefResponse, generationStatus: "generated" | "fallback") => NextResponse.json({
+      success: true,
+      generation_status: generationStatus,
+      target_product: targetProductCtx,
+      profile: brief,
+      advantage_plus_guidance: {
+        campaign_type: guidance.campaign_type,
+        optimization_event: guidance.optimization_event,
+        optimization_reasoning: guidance.default_reasoning,
+        event_evidence: guidance.event_evidence,
+        seed_audience_suggestions: {
+          age_min: brief.demographics?.age_min || 25,
+          age_max: brief.demographics?.age_max || 44,
+          gender: brief.demographics?.gender || "All",
+          demographic_justification: brief.demographics?.demographic_justification ||
+            "Demographic profile aligned with product price point and buyer history.",
+          seed_interests: brief.seed_interests || ["Online Shopping"],
+        },
+      },
+    });
+    const verifiedFallback = (): GeneratedBriefResponse | null => {
+      const hooks = buildVerifiedFallbackHooks(targetProductCtx, catalog);
+      return hooks ? { target_product_title: targetProductCtx.title, creative_hooks: hooks } : null;
+    };
+    const unavailableResponse = () => NextResponse.json(
+      { error: "Creative hooks could not be verified from this product's details. Please add product details and retry." },
+      { status: 422 },
+    );
+
+    let response: Anthropic.Message;
+    try {
+      response = await anthropicClient.messages.create({
       model: "claude-sonnet-5",
       max_tokens: 4096,
       thinking: STRUCTURED_HOOK_THINKING,
@@ -282,7 +311,12 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
         type: "tool",
         name: "generate_advantage_plus_profile",
       },
-    });
+      });
+    } catch (error) {
+      console.error("[Standalone Brief] Model request failed:", error);
+      const fallback = verifiedFallback();
+      return fallback ? respond(fallback, "fallback") : unavailableResponse();
+    }
 
     console.log("[Anthropic Prompt Caching - Standalone Brief]", {
       input_tokens: response.usage.input_tokens,
@@ -298,7 +332,8 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
 
     const toolUseBlock = response.content.find((c) => c.type === "tool_use");
     if (!toolUseBlock || toolUseBlock.type !== "tool_use") {
-      throw new Error("No structured brief profile returned from LLM");
+      const fallback = verifiedFallback();
+      return fallback ? respond(fallback, "fallback") : unavailableResponse();
     }
 
     let profile = toolUseBlock.input as GeneratedBriefResponse;
@@ -398,41 +433,20 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
         console.error("[Advantage+ Validator] Retry failed:", retryErr);
       }
 
-      // Never return a brief that still contains known validation errors.
-      if (validationErrors.length > 0) {
-        console.error(
-          "[Advantage+ Validator Alert] Brief failed validation after retry:",
-          validationErrors
-        );
-        return NextResponse.json(
-          {
-            error: "Generated creative hooks failed validation. Please retry.",
-          },
-          { status: 422 }
-        );
-      }
     }
 
-    return NextResponse.json({
-      success: true,
-      target_product: targetProductCtx,
-      profile,
-      advantage_plus_guidance: {
-        campaign_type: guidance.campaign_type,
-        optimization_event: guidance.optimization_event,
-        optimization_reasoning: guidance.default_reasoning,
-        event_evidence: guidance.event_evidence,
-        seed_audience_suggestions: {
-          age_min: profile.demographics?.age_min || 25,
-          age_max: profile.demographics?.age_max || 44,
-          gender: profile.demographics?.gender || "All",
-          demographic_justification:
-            profile.demographics?.demographic_justification ||
-            "Demographic profile aligned with product price point and buyer history.",
-          seed_interests: profile.seed_interests || ["Online Shopping"],
-        },
-      },
-    });
+    const finalized = finalizeCreativeHooks(profile, targetProductCtx, catalog);
+    let generationStatus: "generated" | "fallback" = "generated";
+    if (finalized) {
+      profile = finalized;
+    } else {
+      const fallback = verifiedFallback();
+      if (!fallback) return unavailableResponse();
+      profile = { ...profile, ...fallback };
+      generationStatus = "fallback";
+    }
+
+    return respond(profile, generationStatus);
   } catch (error) {
     console.error("[/api/generate-brief] Error:", error);
     return NextResponse.json(

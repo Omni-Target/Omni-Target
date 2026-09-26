@@ -103,6 +103,7 @@ function CampaignsContent() {
     goal,
     tone,
     isNewLaunch,
+    gatewayClassification,
     autoFilledFromStore,
     setBrandName,
     setProductName,
@@ -127,7 +128,7 @@ function CampaignsContent() {
     () => router.replace("/dashboard"),
     [router],
   );
-  const { storeInsights, aiInsights, loadingAiInsights } = useStoreInsights({
+  const { storeInsights, storeLoading, aiInsights, loadingAiInsights } = useStoreInsights({
     onReauthRequired: handleReauthRequired,
     onStoreName: setBrandName,
   });
@@ -176,7 +177,9 @@ function CampaignsContent() {
   // compare variations; selectedVariationIndex is the one shown/proceeded with.
   const [variations, setVariations] = useState<BriefVariation[]>([]);
   const [selectedVariationIndex, setSelectedVariationIndex] = useState(0);
+  const [isFinalizingBrief, setIsFinalizingBrief] = useState(false);
   const [hooksLoading, setHooksLoading] = useState(false);
+  const [hooksRetryError, setHooksRetryError] = useState<string | null>(null);
 
   const [pendingExpressDraft, setPendingExpressDraft] = useState<{
     product_name: string;
@@ -185,6 +188,7 @@ function CampaignsContent() {
     product_variants?: string;
     product_image?: string;
     is_new_launch?: boolean;
+    gateway_classification?: string;
     campaign_goal?: string;
     tone_preference?: string;
     express_launch?: boolean;
@@ -207,6 +211,7 @@ function CampaignsContent() {
           if (draft.product_variants)
             formValues.productVariants = draft.product_variants;
           if (draft.is_new_launch) formValues.isNewLaunch = true;
+          if (draft.gateway_classification) formValues.gatewayClassification = draft.gateway_classification;
           if (draft.campaign_goal) formValues.goal = draft.campaign_goal;
           if (draft.tone_preference) formValues.tone = draft.tone_preference;
           applyDraft(formValues);
@@ -227,26 +232,30 @@ function CampaignsContent() {
     setLoadingDraft(false);
   }, [applyDraft, applyDraftImage]);
 
-  // Trigger express generation once store insights are available
+  // The draft can load before the shared store query on a cold navigation.
   useEffect(() => {
-    if (pendingExpressDraft && !loadingDraft) {
-      const draft = pendingExpressDraft;
+    if (!pendingExpressDraft || loadingDraft || storeLoading) return;
+    if (!storeInsights) {
       setPendingExpressDraft(null);
-      const bName = brandName || storeInsights?.store?.name || "Your Brand";
-      handleGenerate(false, {
-        brandName: bName,
-        productName: draft.product_name,
-        description: draft.product_description || draft.product_name,
-        goal: draft.campaign_goal || "Drive Website Sales",
-        tone: draft.tone_preference || "Let AI decide",
-        productPrice: draft.product_price,
-        productVariants: draft.product_variants,
-        imageUrl: draft.product_image,
-        isNewLaunch: !!draft.is_new_launch,
-      });
+      setErrorMsg("Store data could not be loaded. Check your connection and try again.");
+      setViewState("input");
+      return;
     }
+    const draft = pendingExpressDraft;
+    setPendingExpressDraft(null);
+    handleGenerate(false, {
+      brandName: storeInsights.store?.name || brandName,
+      productName: draft.product_name,
+      description: draft.product_description || draft.product_name,
+      goal: draft.campaign_goal || "Drive Website Sales",
+      tone: draft.tone_preference || "Let AI decide",
+      productPrice: draft.product_price,
+      productVariants: draft.product_variants,
+      imageUrl: draft.product_image,
+      isNewLaunch: !!draft.is_new_launch,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingExpressDraft, loadingDraft]);
+  }, [pendingExpressDraft, loadingDraft, storeLoading, storeInsights]);
 
   const resolvedStoreDomain = resolveStoreDomain(storeInsights, storeUrl);
 
@@ -321,6 +330,7 @@ function CampaignsContent() {
     setViewState("generating");
     setErrorMsg("");
     setShowBuyCredits(false);
+    setHooksRetryError(null);
 
     const {
       gatewayInsight: derivedGatewayInsight,
@@ -395,6 +405,7 @@ function CampaignsContent() {
       const generatedCopyData: GeneratedCopy = data;
       const newVersionId: string | null = data.versionId ?? null;
       setGeneratedCopy(generatedCopyData);
+      setTone(activeTone);
       setSelectedCta(generatedCopyData.cta);
 
       // Track the persisted brief so regenerations append to the same session
@@ -408,6 +419,7 @@ function CampaignsContent() {
         const entry: BriefVariation = {
           versionId: newVersionId,
           copy: generatedCopyData,
+          tone: activeTone,
           aiInsights: data.aiInsights,
         };
         const next = isRegeneration ? [...prev, entry] : [entry];
@@ -460,7 +472,9 @@ function CampaignsContent() {
     setCurrentVersionId(null);
     setVariations([]);
     setSelectedVariationIndex(0);
+    setIsFinalizingBrief(false);
     setHooksLoading(false);
+    setHooksRetryError(null);
     resetMedia();
     setViewState(finalState);
   };
@@ -468,13 +482,57 @@ function CampaignsContent() {
   // Switch which retained variation is shown; the shown one is what proceeds to
   // the brief (and gets marked selected on finalize).
   const handleSelectVariation = (index: number) => {
+    if (hooksLoading) return;
     const v = variations[index];
     if (!v) return;
     setSelectedVariationIndex(index);
     setGeneratedCopy(v.copy);
     setCurrentVersionId(v.versionId);
+    setTone(v.tone);
     setSelectedCta(v.copy.cta);
     setProductAiInsights(v.aiInsights ?? null);
+    setHooksRetryError(null);
+  };
+
+  const handleRetryHooks = async () => {
+    if (hooksLoading || !generatedCopy) return;
+    setHooksLoading(true);
+    setHooksRetryError(null);
+    try {
+      const response = await fetch("/api/campaigns/generate/targeting", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productName,
+          productDescription: description,
+          productPrice,
+          angleUsed: (generatedCopy as GeneratedCopy & { angleUsed?: string }).angleUsed,
+          campaignId: campaignId && currentVersionId ? campaignId : null,
+          versionId: campaignId && currentVersionId ? currentVersionId : null,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not generate hooks. Please try again.");
+      const hooks = result.creative_hooks as AiInsights["creative_hooks"];
+      if (hooks?.length !== 3) {
+        throw new Error("Could not generate three verified hooks. Please try again.");
+      }
+      const updateInsights = (current: AiInsights | null | undefined): AiInsights => ({
+        ...(current ?? {}),
+        creative_hooks_status: "generated",
+        creative_hooks: hooks,
+      });
+      setProductAiInsights((current) => updateInsights(current));
+      setVariations((current) => current.map((variation, index) =>
+        index === selectedVariationIndex
+          ? { ...variation, aiInsights: updateInsights(variation.aiInsights) }
+          : variation
+      ));
+    } catch (error) {
+      setHooksRetryError(error instanceof Error ? error.message : "Could not generate hooks. Please try again.");
+    } finally {
+      setHooksLoading(false);
+    }
   };
 
   const pdfParams = useMemo(() => {
@@ -574,6 +632,7 @@ function CampaignsContent() {
     setCurrentVersionId(null);
     setVariations([]);
     setSelectedVariationIndex(0);
+    setIsFinalizingBrief(false);
     setHooksLoading(false);
     setViewState("media");
   };
@@ -586,6 +645,10 @@ function CampaignsContent() {
       setViewState("brief");
       return;
     }
+    setIsFinalizingBrief(true);
+    setErrorMsg("");
+    const targetVersionId =
+      currentVersionId || variations[selectedVariationIndex]?.versionId || null;
     try {
       const briefData = {
         generatedAt,
@@ -610,24 +673,27 @@ function CampaignsContent() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          versionId: currentVersionId,
+          versionId: targetVersionId,
           copy: generatedCopy,
           briefData,
         }),
       });
-      if (!saveResponse.ok) throw new Error("Your brief could not be saved. Please retry.");
+      if (!saveResponse.ok) {
+        console.warn("Brief finalize PUT returned non-ok status:", saveResponse.status);
+      }
       // The brief is now finalized — refresh the history so it appears there.
       queryClient.invalidateQueries({ queryKey: BRIEFS_QUERY_KEY });
     } catch (err) {
+      console.warn("Brief finalize PUT failed:", err);
       // Copy is already persisted from generation; brief_data just enriches the
       // page. Navigate regardless so the user always reaches their brief.
-      setErrorMsg("Your brief could not be saved. Please retry.");
-      return;
+    } finally {
+      setIsFinalizingBrief(false);
     }
     router.replace(`/campaigns/${campaignId}`);
   };
 
-  if (loadingDraft) {
+  if (loadingDraft || (pendingExpressDraft && storeLoading)) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <Spinner size="lg" />
@@ -653,7 +719,14 @@ function CampaignsContent() {
           productName={productName}
           brandName={brandName}
           tonePreference={tone}
-          isGateway={!isNewLaunch && !!productName}
+          productPrice={productPrice}
+          storeCurrency={storeInsights?.store?.currency}
+          budgetCalculation={aiInsights?.budget?.calculation}
+          isGateway={(
+            gatewayInsight?.currentProductName?.toLowerCase() === productName.trim().toLowerCase()
+              ? gatewayInsight.currentProductClassification
+              : gatewayClassification
+          )?.toLowerCase() === "gateway"}
           isNewLaunch={isNewLaunch}
         />
       </PageContainer>
@@ -723,6 +796,7 @@ function CampaignsContent() {
           {/* -- REVIEW -- */}
           {viewState === "review" && generatedCopy && (
             <ReviewStep
+              key={selectedVariationIndex}
               generatedCopy={generatedCopy}
               previewPlatform={previewPlatform}
               onPlatformChange={setPreviewPlatform}
@@ -741,7 +815,6 @@ function CampaignsContent() {
               onUploadDifferent={() => setViewState("media")}
               onRegenerate={(newTone) => {
                 if (newTone && newTone !== tone) {
-                  setTone(newTone);
                   handleGenerate(true, { tone: newTone });
                 } else {
                   handleGenerate(true);
@@ -749,15 +822,22 @@ function CampaignsContent() {
               }}
               onStartOver={handleStartOver}
               onGenerateBrief={handleGenerateBrief}
+              isFinalizing={isFinalizingBrief}
+              errorMsg={errorMsg}
               hooks={
                 variations[selectedVariationIndex]?.aiInsights?.creative_hooks ??
                 effectiveAiInsights?.creative_hooks
               }
               hooksLoading={hooksLoading}
+              hooksGenerationStatus={variations[selectedVariationIndex]?.aiInsights?.creative_hooks_status ?? variations[selectedVariationIndex]?.aiInsights?.generation_status ?? effectiveAiInsights?.creative_hooks_status ?? effectiveAiInsights?.generation_status}
+              onRetryHooks={handleRetryHooks}
+              hooksRetryError={hooksRetryError}
               goal={goal}
               tone={tone}
               gatewayClassification={
-                gatewayInsight?.currentProductClassification
+                gatewayInsight?.currentProductClassification === "Unknown"
+                  ? gatewayClassification
+                  : gatewayInsight?.currentProductClassification || gatewayClassification
               }
             />
           )}

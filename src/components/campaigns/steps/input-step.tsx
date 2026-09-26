@@ -249,7 +249,7 @@ export function InputStep({
               value={tone}
               onChange={(e) => onToneChange(e.target.value)}
             >
-              <option>Let AI decide (recommended)</option>
+              <option value="Let AI decide">Let AI decide (recommended)</option>
               <option>Premium &amp; Aspirational</option>
               <option>Bold &amp; Direct</option>
               <option>Warm &amp; Conversational</option>

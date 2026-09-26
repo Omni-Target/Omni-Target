@@ -144,8 +144,8 @@ export function buildProductDecisions(
               ? `${inStock} of ${variants.length} variants in stock.`
               : "All catalog variants in stock and ready to promote.",
             product.unit_cost_coverage !== "complete"
-              ? "Recorded variant costs are incomplete; verify margins before setting target CPA."
-              : "Unit costs recorded — verify target CPA covers fulfillment and processing costs.",
+              ? "Variant costs are unrecorded in Shopify — verify your profit margins before setting ad budget."
+              : "Unit costs recorded — verify target margin covers fulfillment before setting ad budget.",
           ];
     const eligible = options.ingestionComplete ? eligibleCounts.get(product.id) || 0 : 0;
     const repeated = options.ingestionComplete ? repeatCounts.get(product.id) || 0 : 0;

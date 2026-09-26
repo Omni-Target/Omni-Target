@@ -1,12 +1,13 @@
 import { fetchSafeImage } from "@/lib/safe-image-fetch";
 import { createHash, randomUUID } from "node:crypto";
 import { buildGenerationContext } from "@/lib/campaigns/insights";
-import { validateCopy } from "@/lib/campaigns/validate-copy";
+import { normalizeCopyPunctuation, validateCopy } from "@/lib/campaigns/validate-copy";
+import { buildCopyValidationEvidence } from "@/lib/campaigns/copy-evidence";
 import { NextResponse } from "next/server";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { queryUserIntegrationSelect, logApiUsage, getBriefVersions, getCampaignById, getGenerationReceipt, commitBriefGeneration } from "@/lib/db";
+import { queryUserIntegrationSelect, logApiUsage, getBriefVersions, getCampaignById, getGenerationReceipt, isBriefRegenerationCommitReady, commitBriefGeneration } from "@/lib/db";
 import sharp from "sharp";
 import {
   CreativeHookGenerationError,
@@ -184,7 +185,7 @@ PILLAR 4: UNIVERSAL COPYWRITING MANDATES & CONSTRAINTS
    - NEVER reference stock counts (e.g. "only 3 left") — stock goes stale and violates advertising policies.
    - NEVER assume the reader's geographic location or local currency.
 6. Grounded Material, Demand & Feature Truthfulness (Strict Zero-Hallucination Mandate):
-   - ONLY reference physical materials (e.g. linen, silk, leather, titanium, ceramic, organic botanicals), closures/hardware (e.g. drawstring, zipper, magnetic, snap), or physical attributes that are EXPLICITLY documented in the product title/description or clearly visible in the product image.
+   - ONLY reference physical materials (e.g. linen, silk, leather, titanium, ceramic, organic botanicals), closures/hardware (e.g. drawstring, zipper, magnetic, snap), or physical attributes that are EXPLICITLY documented in the product title, description, verified catalog tags/claims, or clearly visible in the product image.
    - NEVER invent or assume closures, components, mechanisms, or unstated ingredients.
    - NEVER invent unstated fabrics, materials, ingredients, or formulations.
    - For apparel products: NEVER claim an item is "unisex" unless documented. If womenswear, write with female styling nuance; if menswear, write with male nuance.
@@ -278,6 +279,11 @@ export async function POST(request: Request) {
           campaign.campaign_goal !== (body.campaignGoal || "Drive Website Sales") ||
           campaign.product_price !== (body.productPrice || null)) {
         return NextResponse.json({ error: "Free regeneration requires the same saved product and allows up to three alternatives." }, { status: 409 });
+      }
+      if (!await isBriefRegenerationCommitReady()) {
+        return NextResponse.json({
+          error: "Voice variations are temporarily unavailable while the brief save is being updated. No AI call was made. Please try again later.",
+        }, { status: 503 });
       }
     }
 
@@ -380,6 +386,7 @@ export async function POST(request: Request) {
 Brand: ${brandName}
 Product: ${productName}
 Description: ${productDescription}
+Verified Shopify catalog tags: ${catalogEvidenceProduct?.tags?.join(", ") || "None recorded"}
 Verified Shopify catalog claims: ${catalogClaimEvidence || "None recorded"}
 
 Store Primary Country: ${shopifyStoreCountry || "Unknown"}
@@ -413,7 +420,7 @@ ${channelGuidance ? `${channelGuidance}\n` : ""}${geographicGuidance ? `${geogra
   - If the image shows a lifestyle, dynamic, or editorial context → copy anchors to product truth — what it is made of, what specific physical detail makes this product worth buying, what distinguishes it from anything else.
   - If the image is a flat lay, product-only, or white-background shot → copy sells the transformation — what changes for the person who owns this, what problem it solves, what feeling, utility, or elevation it creates in real-world use.
 
-  In every case: never describe what the eye already sees. Never claim any material, closure, or feature not explicitly stated in the product description.`
+  In every case: never describe what the eye already sees. Never claim any material, closure, or feature not explicitly stated in the product title, description, verified catalog tags, or catalog claims.`
   : ""}
   
 ${productVariants ? 
@@ -446,7 +453,7 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — sell
 ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
   `SPARSE DESCRIPTION ALERT: The product description provided is minimal (under 30 words).
   CRITICAL — do NOT extrapolate, invent, or assume any material, closure, fabric blend, fit detail, or feature not explicitly stated.
-  Stay anchored exclusively to what is confirmed in the description and what is directly visible in the image.
+  Stay anchored exclusively to what is confirmed in the product title, description, verified catalog tags and claims, or what is directly visible in the image.
   Narrow and specific copy grounded in confirmed truth always outperforms broad plausible-sounding copy. Write less and mean more.` : ""}`;
 
     const messageContent: Anthropic.ContentBlockParam[] = [];
@@ -618,6 +625,9 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
     messageContent.push({
       type: "text",
       text: textContent,
+      // Write the image/storyboard and prompt prefix on the first request so a
+      // validator retry can read it from cache rather than paying to reprocess it.
+      cache_control: { type: "ephemeral" },
     });
 
     // Resolve matching StoreProduct or construct targetProductOverride for strict single-SKU isolation
@@ -739,22 +749,28 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
       `Written to catch feed attention, highlight the genuine craftsmanship of ${productName}, and encourage shoppers to visit your store and buy.`;
 
     parsedResponse.copywriterNote = copywriterNote;
+    parsedResponse = normalizeCopyPunctuation(parsedResponse);
 
     // ─── Code-Side Copy Validator ────────────────────────────────────────────
     // Runs banned-string scan + hallucination check. On failure, fires one
     // targeted retry at temp 0.2 with a specific error message before the
     // credit is deducted — so a failed generation never costs the founder a credit.
-    const groundedProductEvidence = [
-      productDescription || matchedProduct?.description || "",
+    const { groundedProductEvidence, forbiddenProductNames, factualEvidence } = buildCopyValidationEvidence(
+      {
+        id: String(targetProductOverride.id),
+        name: productName,
+        description: productDescription || matchedProduct?.description || "",
+        tags: matchedProduct?.tags || [],
+        product_type: matchedProduct?.product_type || "",
+      },
+      storeProducts.map((product) => ({ id: String(product.id), name: product.name })),
       catalogClaimEvidence,
-    ].filter(Boolean).join("\n");
-    const forbiddenProductNames = storeProducts
-      .filter((product) => product.id !== matchedProduct?.id)
-      .map((product) => product.name);
+    );
     let copyValidationErrors = validateCopy(
       parsedResponse,
       groundedProductEvidence,
       forbiddenProductNames,
+      factualEvidence,
     );
 
     if (copyValidationErrors.length > 0) {
@@ -796,16 +812,18 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
               const e = retryCleaned.lastIndexOf("}");
               if (s !== -1 && e !== -1 && e > s) retryCleaned = retryCleaned.substring(s, e + 1);
             }
-            const retryParsed = JSON.parse(retryCleaned);
+            let retryParsed = JSON.parse(retryCleaned);
             if (retryParsed.primary_text && !retryParsed.primaryText) {
               retryParsed.primaryText = retryParsed.primary_text;
             }
             retryParsed.copywriterNote = retryParsed.copywriterNote || copywriterNote;
+            retryParsed = normalizeCopyPunctuation(retryParsed);
 
             copyValidationErrors = validateCopy(
               retryParsed,
               groundedProductEvidence,
               forbiddenProductNames,
+              factualEvidence,
             );
             if (copyValidationErrors.length === 0) {
               parsedResponse = retryParsed;
@@ -886,6 +904,10 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
         message: "You have no briefs remaining. Purchase a pack to continue.",
         redirect: "/pricing",
       }, { status: 402 });
+    }
+
+    if (error instanceof Error && error.message === "Could not confirm the brief was saved. Please retry.") {
+      return NextResponse.json({ error: error.message }, { status: 503 });
     }
 
     if (error instanceof CreativeHookGenerationError) {

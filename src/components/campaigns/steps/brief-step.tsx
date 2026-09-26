@@ -17,6 +17,9 @@ export interface BriefStepProps {
   storeInsights: StoreInsights | null;
   aiInsights: AiInsights | null;
   loadingAiInsights: boolean;
+  hooksLoading?: boolean;
+  onRetryHooks?: () => void;
+  hooksRetryError?: string | null;
   goal: string;
   selectedStrategyIndex: number;
   setSelectedStrategyIndex: React.Dispatch<React.SetStateAction<number>>;
@@ -46,6 +49,9 @@ export function BriefStep({
   storeInsights,
   aiInsights,
   loadingAiInsights,
+  hooksLoading,
+  onRetryHooks,
+  hooksRetryError,
   goal,
   selectedStrategyIndex,
   setSelectedStrategyIndex,
@@ -64,15 +70,18 @@ export function BriefStep({
   className = "mx-auto max-w-3xl",
 }: BriefStepProps) {
   const isGateway = gatewayInsight?.currentProductClassification === "Gateway";
+  const hooksMissing = (aiInsights?.creative_hooks_status ?? aiInsights?.generation_status) === "fallback";
 
   return (
     <div className={className}>
       <div className="mb-8">
         <h1 className="text-2xl font-semibold tracking-[-0.02em] text-foreground sm:text-3xl">
-          Your campaign brief is ready
+          {hooksMissing ? "Your ad copy and campaign plan are ready" : "Your campaign brief is ready"}
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Take this into Meta Ads Manager to set up your Advantage+ campaign.
+          {hooksMissing
+            ? "Retry the creative hooks below before using this as a complete campaign brief."
+            : "Take this into Meta Ads Manager to set up your Advantage+ campaign."}
         </p>
       </div>
 
@@ -159,7 +168,10 @@ export function BriefStep({
 
         <CreativeHooksCard
           hooks={aiInsights?.creative_hooks}
-          loading={loadingAiInsights}
+          loading={hooksLoading ?? loadingAiInsights}
+          generationStatus={aiInsights?.creative_hooks_status ?? aiInsights?.generation_status}
+          onRetry={onRetryHooks}
+          retryError={hooksRetryError}
         />
 
         <TargetingSummary

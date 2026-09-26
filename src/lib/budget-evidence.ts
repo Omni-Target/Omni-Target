@@ -14,3 +14,11 @@ export interface BudgetCalculation {
   daily_before_strategy: number;
   fx: { currency: string; rate: number; source: string; fetched_at: string | null };
 }
+
+/** The product-price guardrail used for the domestic daily test budget. */
+export function estimateDailyTestBudget(baselineDaily: number, productPrice: number): number {
+  const guardrail = productPrice * 0.5;
+  return guardrail > baselineDaily * 3
+    ? baselineDaily
+    : Math.max(baselineDaily, guardrail);
+}

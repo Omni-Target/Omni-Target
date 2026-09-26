@@ -79,7 +79,7 @@ function DashboardContent() {
   const { data: storeResponse, isLoading: loading } = useStoreData();
   const forceSync = useForceSyncStoreData();
   const [refreshing, setRefreshing] = useState(false);
-  const [shop, setShop] = useState<string | null>(null);
+  const shop = creditsShop ?? null;
   const reconnectSyncStarted = React.useRef(false);
   const shopifyReconnected = searchParams.get("shopify") === "reconnected";
 
@@ -108,14 +108,6 @@ function DashboardContent() {
         window.history.replaceState({}, "", `${url.pathname}${url.search}`);
       });
   }, [shopifyReconnected, forceSync, toast]);
-
-  // Resolve connected shop domain (only needed if store is not connected).
-  useEffect(() => {
-    if (connected) return;
-    if (creditsShop) {
-      setShop(creditsShop);
-    }
-  }, [connected, creditsShop]);
 
   // Success toasts from redirect params.
   const paymentSuccess = searchParams.get("payment");
@@ -219,6 +211,7 @@ function DashboardContent() {
             : "",
         product_price: product.price ? String(product.price) : "",
         is_new_launch: (product.units_sold ?? 0) < 3,
+        gateway_classification: product.gateway_classification || "",
         campaign_goal: goal,
         tone_preference: tone,
         express_launch: true,
@@ -227,7 +220,15 @@ function DashboardContent() {
     router.push("/campaigns?express=true");
   };
 
-  const handleCustomizeManual = (product: ProductRow) => {
+  const handleCustomizeManual = ({
+    product,
+    goal,
+    tone,
+  }: {
+    product: ProductRow;
+    goal: string;
+    tone: string;
+  }) => {
     sessionStorage.setItem(
       "campaign_draft",
       JSON.stringify({
@@ -240,6 +241,9 @@ function DashboardContent() {
             : "",
         product_price: product.price ? String(product.price) : "",
         is_new_launch: (product.units_sold ?? 0) < 3,
+        gateway_classification: product.gateway_classification || "",
+        campaign_goal: goal,
+        tone_preference: tone,
         express_launch: false,
       }),
     );

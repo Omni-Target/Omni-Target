@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState } from "react";
 import Image from "next/image";
 import {
   Sparkles,
@@ -10,8 +10,6 @@ import {
   Check,
   Flame,
   Layers,
-  Wand2,
-  X,
 } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { Badge } from "@/components/ui/badge";
@@ -31,7 +29,7 @@ interface PreFlightSheetProps {
     tone: string;
     useCustomCreative?: boolean;
   }) => void;
-  onCustomizeManual: (product: ProductRow) => void;
+  onCustomizeManual: (params: { product: ProductRow; goal: string; tone: string }) => void;
 }
 
 const GOAL_OPTIONS = [
@@ -156,36 +154,34 @@ export function PreFlightSheet({
       open={open}
       onOpenChange={onOpenChange}
       side="right"
+      title="Generate Campaign Brief"
+      description="Tailored ad copy, audience targeting, and budget plan"
+      footer={
+        <div className="w-full space-y-3">
+          <Button
+            size="xl"
+            className="w-full shadow-sm"
+            onClick={() => onLaunchExpress({ product, goal: selectedGoal, tone: selectedTone })}
+          >
+            <Zap className="size-4" />
+            Generate Meta Brief (1 Credit)
+            <ArrowRight className="size-4" />
+          </Button>
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={() => onCustomizeManual({ product, goal: selectedGoal, tone: selectedTone })}
+              className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors underline-offset-4 hover:underline"
+            >
+              Need to upload a custom video or edit product copy? Customize manually
+            </button>
+          </div>
+        </div>
+      }
       width="max-w-lg"
       className="p-0 sm:max-w-lg"
     >
-      <div className="flex h-full flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-border-subtle p-5">
-          <div className="flex items-center gap-2">
-            <div className="grid size-8 place-items-center rounded-lg bg-brand-50 text-brand-600">
-              <Zap className="size-4" />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold text-foreground">
-                Express Campaign Launch
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                1-Click Meta Ad &amp; Budget Generation
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            className="rounded-lg p-1.5 text-muted-foreground hover:bg-surface-subtle hover:text-foreground"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-
-        {/* Scrollable Content */}
-        <div className="flex-1 space-y-6 overflow-y-auto p-5">
+      <div className="space-y-6">
           {/* Product Snapshot */}
           <div className="flex gap-4 rounded-xl border border-border bg-surface-subtle p-3.5">
             <div className="relative size-20 shrink-0 overflow-hidden rounded-lg bg-surface-muted ring-1 ring-border-subtle">
@@ -335,36 +331,6 @@ export function PreFlightSheet({
               })}
             </div>
           </div>
-        </div>
-
-        {/* Sticky Launch Footer */}
-        <div className="border-t border-border-subtle bg-surface p-5 space-y-3">
-          <Button
-            size="xl"
-            className="w-full shadow-sm"
-            onClick={() =>
-              onLaunchExpress({
-                product,
-                goal: selectedGoal,
-                tone: selectedTone,
-              })
-            }
-          >
-            <Zap className="size-4" />
-            Generate Meta Brief (1 Credit)
-            <ArrowRight className="size-4" />
-          </Button>
-
-          <div className="text-center">
-            <button
-              type="button"
-              onClick={() => onCustomizeManual(product)}
-              className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors underline-offset-4 hover:underline"
-            >
-              Need to upload a custom video or edit product copy? Customize manually
-            </button>
-          </div>
-        </div>
       </div>
     </Drawer>
   );

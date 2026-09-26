@@ -125,6 +125,7 @@ export default function ProductsPage() {
             : "",
         product_price: product.price ? String(product.price) : "",
         is_new_launch: (product.units_sold ?? 0) < 3,
+        gateway_classification: product.gateway_classification || "",
         campaign_goal: goal,
         tone_preference: tone,
         express_launch: true,
@@ -133,7 +134,15 @@ export default function ProductsPage() {
     router.push("/campaigns?express=true");
   };
 
-  const handleCustomizeManual = (product: ProductRow) => {
+  const handleCustomizeManual = ({
+    product,
+    goal,
+    tone,
+  }: {
+    product: ProductRow;
+    goal: string;
+    tone: string;
+  }) => {
     sessionStorage.setItem(
       "campaign_draft",
       JSON.stringify({
@@ -146,6 +155,9 @@ export default function ProductsPage() {
             : "",
         product_price: product.price ? String(product.price) : "",
         is_new_launch: (product.units_sold ?? 0) < 3,
+        gateway_classification: product.gateway_classification || "",
+        campaign_goal: goal,
+        tone_preference: tone,
         express_launch: false,
       }),
     );

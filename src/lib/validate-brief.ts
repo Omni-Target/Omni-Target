@@ -1,4 +1,5 @@
 import { validateCopy } from "./campaigns/validate-copy";
+export { validateFactualClaims } from "./campaigns/factual-claims";
 export interface TargetProductContext {
   id: string;
   title: string;
@@ -54,6 +55,47 @@ export function tokenize(text: string): Set<string> {
       .split(/\s+/)
       .filter((token) => token.length > 1)
   );
+}
+
+function siblingTitlePattern(title: string): RegExp | null {
+  const words = title.toLowerCase().match(/[a-z0-9]+/g);
+  if (!words?.length) return null;
+  return new RegExp(`\\b${words.join("[^a-z0-9]+")}\\b`, "gi");
+}
+
+export function getForbiddenSiblingProducts(
+  targetProduct: TargetProductContext,
+  catalog: CatalogItem[],
+): CatalogItem[] {
+  const targetTokens = tokenize(`${targetProduct.title} ${targetProduct.tags?.join(" ") || ""}`);
+  const targetDescLower = (targetProduct.description || "").toLowerCase();
+  return catalog.filter((sibling) => {
+    if (
+      sibling.id === targetProduct.id ||
+      sibling.title.trim().toLowerCase() === targetProduct.title.trim().toLowerCase()
+    ) return false;
+    const siblingTitle = sibling.title.trim().toLowerCase();
+    if (siblingTitle.length >= 3 && targetDescLower.includes(siblingTitle)) return false;
+    const siblingTokens = Array.from(tokenize(sibling.title));
+    return siblingTokens.length > 0 && !siblingTokens.every((token) => targetTokens.has(token));
+  });
+}
+
+function productEvidenceDescription(
+  targetProduct: TargetProductContext,
+  catalog: CatalogItem[],
+): string {
+  let description = targetProduct.description || "";
+  const targetTokens = tokenize(targetProduct.title);
+  for (const sibling of catalog) {
+    if (sibling.id === targetProduct.id ||
+        sibling.title.trim().toLowerCase() === targetProduct.title.trim().toLowerCase()) continue;
+    const words = Array.from(tokenize(sibling.title));
+    if (words.length === 0 || words.every((word) => targetTokens.has(word))) continue;
+    const pattern = siblingTitlePattern(sibling.title);
+    if (pattern) description = description.replace(pattern, " ");
+  }
+  return description;
 }
 
 /**
@@ -116,6 +158,18 @@ export function validateBrief(
   catalog: CatalogItem[]
 ): string[] {
   const errors: string[] = [];
+  if (!response || !Array.isArray(response.creative_hooks) ||
+      response.creative_hooks.some((hook) =>
+        !hook || typeof hook !== "object" ||
+        [hook.angle, hook.visual_cue, hook.on_screen_text, hook.primary_text_hook]
+          .some((field) => typeof field !== "string" || !field.trim())
+      )) {
+    return ["Creative hooks are missing or malformed"];
+  }
+  if (typeof response.target_product_title !== "string" || !response.target_product_title.trim()) {
+    errors.push("Target product title is missing");
+  }
+  const evidenceDescription = productEvidenceDescription(targetProduct, catalog);
 
   // Normalize exclamation marks on hooks into calm, premium punctuation
   for (const hook of response.creative_hooks || []) {
@@ -127,20 +181,32 @@ export function validateBrief(
     }
   }
 
-  if (targetProduct.description !== undefined) {
-    for (const hook of response.creative_hooks || []) {
-      errors.push(
-        ...validateCopy(
-          {
-            headline: hook.on_screen_text,
-            primaryText: hook.primary_text_hook,
-            description: "Elevated staple.", // Neutral placeholder so visual_cue is not judged as consumer ad copy
-            cta: "Shop Now",
-          },
-          `${targetProduct.title} ${targetProduct.description}`
-        ).map((error) => `Hook ${hook.angle}: ${error}`)
-      );
-    }
+  const factualEvidence = {
+    title: targetProduct.title,
+    description: evidenceDescription,
+    tags: targetProduct.tags || [],
+    product_type: targetProduct.product_type || "",
+  };
+  const hookEvidence = [
+    factualEvidence.title,
+    factualEvidence.description,
+    ...factualEvidence.tags,
+    factualEvidence.product_type,
+  ].join(" ");
+  for (const hook of response.creative_hooks || []) {
+    errors.push(
+      ...validateCopy(
+        {
+          headline: hook.on_screen_text,
+          primaryText: hook.primary_text_hook,
+          description: "Elevated staple.", // Neutral placeholder so visual_cue is not judged as consumer ad copy
+          cta: "Shop Now",
+        },
+        hookEvidence,
+        [],
+        factualEvidence,
+      ).map((error) => `Hook ${hook.angle}: ${error}`)
+    );
   }
 
   // 1. Enforce exactly 3 distinct angles
@@ -153,21 +219,17 @@ export function validateBrief(
   }
 
   const allProductTokens = tokenize(
-    `${targetProduct.title} ${targetProduct.tags?.join(" ") || ""} ${targetProduct.description || ""}`
+    `${targetProduct.title} ${targetProduct.tags?.join(" ") || ""} ${evidenceDescription}`
   );
-  const targetTokens = tokenize(
-    `${targetProduct.title} ${targetProduct.tags?.join(" ") || ""}`
-  );
-
-  // 2. Cross-hook conceptual overlap detection
-  // Compares the salient (claim-bearing) tokens across every hook pair.
+  // 2. Cross-hook customer-facing claim overlap detection.
+  // Director notes describe camera treatment rather than ad claims.
   // Uses allProductTokens (including description) so legitimate product attributes
   // (e.g. linen, cowrie, breathable) don't trigger false overlap errors between hooks.
   if ((response.creative_hooks?.length || 0) >= 2) {
     const hookProfiles = (response.creative_hooks || []).map((hook) => ({
       angle: hook.angle,
       salient: extractSalientTokens(
-        `${hook.visual_cue || ""} ${hook.on_screen_text || ""} ${hook.primary_text_hook || ""}`,
+        `${hook.on_screen_text || ""} ${hook.primary_text_hook || ""}`,
         allProductTokens
       ),
     }));
@@ -188,31 +250,7 @@ export function validateBrief(
   }
 
   // 3. Filter sibling products dynamically (Token-Subset Exclusion & Description Reference Exclusion)
-  const targetDescLower = (targetProduct.description || "").toLowerCase();
-  const verifiableSiblings = catalog.filter((sibling) => {
-    if (
-      sibling.id === targetProduct.id ||
-      sibling.title.trim().toLowerCase() === targetProduct.title.trim().toLowerCase()
-    ) {
-      return false;
-    }
-
-    // If the merchant explicitly mentions this sibling product in the target product's own description
-    // (e.g. "Pair with the Ego Dress for an elevated set"), it is legitimate cross-styling advice, not an error!
-    const normalizedSiblingTitle = sibling.title.trim().toLowerCase();
-    if (normalizedSiblingTitle.length >= 3 && targetDescLower.includes(normalizedSiblingTitle)) {
-      return false;
-    }
-
-    const siblingTokens = Array.from(tokenize(sibling.title));
-    if (siblingTokens.length === 0) return false;
-
-    // Exclude sibling if ALL of its tokens exist within the target's tokens (e.g., 'Noir' inside 'Ego Pants (Noir)')
-    const isSubsetOfTarget = siblingTokens.every((token) =>
-      targetTokens.has(token)
-    );
-    return !isSubsetOfTarget;
-  });
+  const verifiableSiblings = getForbiddenSiblingProducts(targetProduct, catalog);
 
   // 4. Scan generated creative hooks for sibling title leaks
   for (const hook of response.creative_hooks || []) {
@@ -254,63 +292,6 @@ export function validateBrief(
     );
   }
 
-  // 6. Factual claim validation
-  const allCopyTexts = (response.creative_hooks || []).flatMap((h) => [
-    h.primary_text_hook,
-    h.on_screen_text,
-  ].filter((text): text is string => typeof text === 'string'));
-
-  const factualErrors = validateFactualClaims(allCopyTexts, {
-    title: targetProduct.title,
-    description: targetProduct.description || "",
-    tags: targetProduct.tags || [],
-    product_type: targetProduct.product_type || "",
-  });
-  errors.push(...factualErrors);
-
-  return errors;
-}
-
-/**
- * Material-claim patterns the AI might assert. Each regex is tested against
- * generated copy; a match is only valid if a corresponding token appears in
- * the product's own description, tags, or product_type.
- */
-const MATERIAL_CLAIM_PATTERNS: { pattern: RegExp; evidenceTokens: string[] }[] = [
-  { pattern: /\b(?:100%|pure|genuine|real)\s+(?:leather|silk|cotton|linen|wool|cashmere|suede)/i, evidenceTokens: ["leather", "silk", "cotton", "linen", "wool", "cashmere", "suede"] },
-  { pattern: /\bhand[- ]?(?:made|crafted|stitched|sewn|woven|painted|dyed|beaded|finished)/i, evidenceTokens: ["handmade", "handcrafted", "hand-stitched", "hand-sewn", "hand-woven", "hand-painted", "hand-dyed", "hand-beaded", "hand-finished", "hand stitched", "hand sewn", "hand woven", "hand painted", "hand dyed", "hand beaded", "hand finished", "artisan", "craftsmanship"] },
-  { pattern: /\b(?:organic|vegan|cruelty[- ]?free|eco[- ]?friendly|sustainable|fair[- ]?trade|recyclable|biodegradable)/i, evidenceTokens: ["organic", "vegan", "cruelty-free", "cruelty free", "eco-friendly", "eco friendly", "sustainable", "fair-trade", "fair trade", "recyclable", "biodegradable"] },
-  { pattern: /\b(?:medical[- ]?grade|clinical(?:ly)?[- ]?(?:tested|proven)|dermatologist[- ]?(?:tested|approved|recommended)|FDA[- ]?approved)/i, evidenceTokens: ["medical-grade", "medical grade", "clinically tested", "clinically proven", "dermatologist", "fda"] },
-  { pattern: /\b(?:patented|award[- ]?winning|best[- ]?selling|#1|number one)/i, evidenceTokens: ["patented", "award-winning", "award winning", "best-selling", "best selling", "#1", "number one"] },
-  { pattern: /\bmade in (?:italy|france|japan|usa|uk|switzerland|germany)/i, evidenceTokens: ["made in italy", "made in france", "made in japan", "made in usa", "made in uk", "made in switzerland", "made in germany", "italian", "french", "japanese", "american", "british", "swiss", "german"] },
-];
-
-/** Checks generated copy for factual claims not supported by the product's own data. */
-export function validateFactualClaims(
-  copyTexts: string[],
-  productEvidence: { title?: string; description: string; tags: string[]; product_type: string },
-): string[] {
-  const errors: string[] = [];
-  const evidenceCorpus = [
-    productEvidence.title || "",
-    productEvidence.description,
-    ...productEvidence.tags,
-    productEvidence.product_type,
-  ].join(" ").toLowerCase();
-
-  for (const text of copyTexts) {
-    for (const { pattern, evidenceTokens } of MATERIAL_CLAIM_PATTERNS) {
-      const match = text.match(pattern);
-      if (match) {
-        const claimSupported = evidenceTokens.some((token) => evidenceCorpus.includes(token.toLowerCase()));
-        if (!claimSupported) {
-          errors.push(
-            `Unsupported factual claim: "${match[0]}" — not found in the product's description, tags, or type. Remove or rephrase.`
-          );
-        }
-      }
-    }
-  }
   return errors;
 }
 
@@ -322,26 +303,7 @@ export function sanitizeLeakedTokens(
   targetProduct: TargetProductContext,
   catalog: CatalogItem[]
 ): GeneratedBriefResponse {
-  const targetTokens = tokenize(
-    `${targetProduct.title} ${targetProduct.tags?.join(" ") || ""}`
-  );
-  const targetDescLower = (targetProduct.description || "").toLowerCase();
-
-  const verifiableSiblings = catalog.filter((sibling) => {
-    if (
-      sibling.id === targetProduct.id ||
-      sibling.title.trim().toLowerCase() === targetProduct.title.trim().toLowerCase()
-    ) {
-      return false;
-    }
-    const normalizedSiblingTitle = sibling.title.trim().toLowerCase();
-    if (normalizedSiblingTitle.length >= 3 && targetDescLower.includes(normalizedSiblingTitle)) {
-      return false;
-    }
-    const siblingTokens = Array.from(tokenize(sibling.title));
-    if (siblingTokens.length === 0) return false;
-    return !siblingTokens.every((token) => targetTokens.has(token));
-  });
+  const verifiableSiblings = getForbiddenSiblingProducts(targetProduct, catalog);
 
   const sanitizedHooks = (response.creative_hooks || []).map((hook) => {
     let visual_cue = hook.visual_cue || "";
@@ -349,14 +311,9 @@ export function sanitizeLeakedTokens(
     let primary_text_hook = (hook.primary_text_hook || "").replace(/!+/g, ".").replace(/\.\.+/g, ".");
 
     for (const sibling of verifiableSiblings) {
-      // Escape the original sibling title for use as a regex pattern
-      // e.g. "Ego Pants (Noir)" → /Ego Pants \(Noir\)/gi  — matches the literal parentheses
-      const escapedTitle = sibling.title
-        .trim()
-        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      if (!escapedTitle) continue;
-
-      const regex = new RegExp(`\\b${escapedTitle}\\b`, "gi");
+      // Match the same title words across spaces or punctuation.
+      const regex = siblingTitlePattern(sibling.title);
+      if (!regex) continue;
       visual_cue = visual_cue.replace(regex, targetProduct.title);
       on_screen_text = on_screen_text.replace(regex, targetProduct.title);
       primary_text_hook = primary_text_hook.replace(regex, targetProduct.title);
@@ -375,4 +332,93 @@ export function sanitizeLeakedTokens(
     target_product_title: targetProduct.title,
     creative_hooks: sanitizedHooks,
   };
+}
+
+/** A final gate shared by every hook generation route. */
+export function finalizeCreativeHooks(
+  response: GeneratedBriefResponse,
+  targetProduct: TargetProductContext,
+  catalog: CatalogItem[],
+): GeneratedBriefResponse | null {
+  if (!response || !Array.isArray(response.creative_hooks) ||
+      response.creative_hooks.some((hook) =>
+        !hook || typeof hook !== "object" ||
+        [hook.angle, hook.visual_cue, hook.on_screen_text, hook.primary_text_hook]
+          .some((field) => typeof field !== "string")
+      ) || typeof response.target_product_title !== "string" ||
+      response.target_product_title.trim().toLowerCase() !== targetProduct.title.trim().toLowerCase()) return null;
+  // Replacing a sibling inside public copy can turn "Pair with X" into a
+  // nonsensical self-reference. Use the verified fallback for that case.
+  const forbiddenSiblings = getForbiddenSiblingProducts(targetProduct, catalog);
+  const customerCopyHasSibling = response.creative_hooks.some((hook) =>
+    forbiddenSiblings.some((sibling) => {
+      const pattern = siblingTitlePattern(sibling.title);
+      return pattern?.test(`${hook.on_screen_text} ${hook.primary_text_hook}`) || false;
+    })
+  );
+  if (customerCopyHasSibling) return null;
+  const sanitized = sanitizeLeakedTokens(response, targetProduct, catalog);
+  return validateBrief(sanitized, targetProduct, catalog).length === 0
+    ? sanitized
+    : null;
+}
+
+const VERIFIED_FEATURES = [
+  { pattern: /\bcowrie\b/i, label: "cowrie details" },
+  { pattern: /\bhand[- ]beaded\b/i, label: "hand-beaded details" },
+  { pattern: /\bembroider(?:y|ed)\b/i, label: "embroidered details" },
+  { pattern: /\bpleat(?:s|ed)?\b/i, label: "pleated details" },
+  { pattern: /\blinen\b/i, label: "linen fabric" },
+  { pattern: /\bcotton\b/i, label: "cotton fabric" },
+  { pattern: /\bsilk\b/i, label: "silk fabric" },
+  { pattern: /\bdenim\b/i, label: "denim fabric" },
+  { pattern: /\bwool\b/i, label: "wool fabric" },
+  { pattern: /\bleather\b/i, label: "leather material" },
+  { pattern: /\bpockets?\b/i, label: "pocket details" },
+  { pattern: /\bwaistband\b/i, label: "waistband details" },
+  { pattern: /\bzipper\b/i, label: "zipper details" },
+  { pattern: /\bbuttons?\b/i, label: "button details" },
+];
+
+/** Construct conservative hooks only when the merchant supplied a usable product fact. */
+export function buildVerifiedFallbackHooks(
+  targetProduct: TargetProductContext,
+  catalog: CatalogItem[],
+): CreativeHookResponse[] | null {
+  const description = productEvidenceDescription(targetProduct, catalog).replace(/<[^>]*>/g, " ");
+  const feature = VERIFIED_FEATURES.find(({ pattern }) => {
+    const match = pattern.exec(description);
+    if (!match) return false;
+    const precedingWords = description.slice(Math.max(0, match.index - 35), match.index);
+    return !/\b(?:without|no|not|unlike|free of|instead of)\s+(?:\w+\s+){0,2}$/i.test(precedingWords);
+  });
+  if (!feature || !targetProduct.title.trim()) return null;
+
+  const title = targetProduct.title;
+  const candidate: GeneratedBriefResponse = {
+    target_product_title: title,
+    creative_hooks: [
+      {
+        angle: "Problem / Friction",
+        visual_cue: `Show ${title} in a simple everyday styling scene.`,
+        on_screen_text: "A closer look at the details.",
+        primary_text_hook: `Looking for a fresh approach to your daily look? Explore ${title}.`,
+      },
+      {
+        angle: "Identity / Status",
+        visual_cue: `Show ${title} from several angles in natural light.`,
+        on_screen_text: "Style it your way.",
+        primary_text_hook: `Make ${title} part of a look that feels like yours.`,
+      },
+      {
+        angle: "Material / Craftsmanship",
+        visual_cue: `Film a close-up of the ${feature.label} on ${title}.`,
+        on_screen_text: `${feature.label} in focus.`,
+        primary_text_hook: `Take a closer look at the ${feature.label} on ${title}.`,
+      },
+    ],
+  };
+  return validateBrief(candidate, targetProduct, catalog).length === 0
+    ? candidate.creative_hooks
+    : null;
 }

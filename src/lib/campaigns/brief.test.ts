@@ -83,6 +83,40 @@ function baseInsights(
 }
 
 describe("buildBriefPdfPayload", () => {
+  it("omits fallback hooks from exported briefs even when legacy data contains three templates", () => {
+    const insights = baseInsights();
+    insights.generation_status = "fallback";
+    const payload = buildBriefPdfPayload({
+      brandName: "Acme",
+      productName: "Tee",
+      goal: "Drive Website Sales",
+      generatedCopy: copy,
+      selectedCta: "Shop Now",
+      aiInsights: insights,
+      storeInsights: null,
+      selectedDuration: 14,
+      selectedStrategyIndex: 1,
+      gatewayInsight: null,
+      isNewLaunch: false,
+    });
+    expect(payload.creative_hooks).toEqual([]);
+
+    insights.creative_hooks_status = "generated";
+    expect(buildBriefPdfPayload({
+      brandName: "Acme",
+      productName: "Tee",
+      goal: "Drive Website Sales",
+      generatedCopy: copy,
+      selectedCta: "Shop Now",
+      aiInsights: insights,
+      storeInsights: null,
+      selectedDuration: 14,
+      selectedStrategyIndex: 1,
+      gatewayInsight: null,
+      isNewLaunch: false,
+    }).creative_hooks).toHaveLength(3);
+  });
+
   it("preserves the test-spend envelope when duration changes", () => {
     expect(rescaleDailyBudgetForDuration(20, 14, 7)).toBe(40);
     expect(rescaleDailyBudgetForDuration(20, 14, 28)).toBe(10);
