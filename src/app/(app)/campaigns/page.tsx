@@ -178,6 +178,18 @@ function CampaignsContent() {
   const [selectedVariationIndex, setSelectedVariationIndex] = useState(0);
   const [hooksLoading, setHooksLoading] = useState(false);
 
+  const [pendingExpressDraft, setPendingExpressDraft] = useState<{
+    product_name: string;
+    product_description?: string;
+    product_price?: string;
+    product_variants?: string;
+    product_image?: string;
+    is_new_launch?: boolean;
+    campaign_goal?: string;
+    tone_preference?: string;
+    express_launch?: boolean;
+  } | null>(null);
+
   // Read from sessionStorage for auto-fill (client-only init from external store)
   useEffect(() => {
     const draftStr = sessionStorage.getItem("campaign_draft");
@@ -195,9 +207,17 @@ function CampaignsContent() {
           if (draft.product_variants)
             formValues.productVariants = draft.product_variants;
           if (draft.is_new_launch) formValues.isNewLaunch = true;
+          if (draft.campaign_goal) formValues.goal = draft.campaign_goal;
+          if (draft.tone_preference) formValues.tone = draft.tone_preference;
           applyDraft(formValues);
           if (draft.product_image) applyDraftImage(draft.product_image);
-          setViewState("input");
+
+          if (draft.express_launch) {
+            setPendingExpressDraft(draft);
+            setViewState("generating");
+          } else {
+            setViewState("input");
+          }
           sessionStorage.removeItem("campaign_draft");
         }
       } catch (e) {
@@ -206,6 +226,27 @@ function CampaignsContent() {
     }
     setLoadingDraft(false);
   }, [applyDraft, applyDraftImage]);
+
+  // Trigger express generation once store insights are available
+  useEffect(() => {
+    if (pendingExpressDraft && !loadingDraft) {
+      const draft = pendingExpressDraft;
+      setPendingExpressDraft(null);
+      const bName = brandName || storeInsights?.store?.name || "Your Brand";
+      handleGenerate(false, {
+        brandName: bName,
+        productName: draft.product_name,
+        description: draft.product_description || draft.product_name,
+        goal: draft.campaign_goal || "Drive Website Sales",
+        tone: draft.tone_preference || "Let AI decide",
+        productPrice: draft.product_price,
+        productVariants: draft.product_variants,
+        imageUrl: draft.product_image,
+        isNewLaunch: !!draft.is_new_launch,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingExpressDraft, loadingDraft]);
 
   const resolvedStoreDomain = resolveStoreDomain(storeInsights, storeUrl);
 
@@ -235,15 +276,44 @@ function CampaignsContent() {
     setTimeout(() => setCopiedField(null), 1500);
   };
 
-  const handleGenerate = async (isRegeneration = false) => {
+  const handleGenerate = async (
+    isRegeneration = false,
+    overrides?: {
+      brandName?: string;
+      productName?: string;
+      description?: string;
+      goal?: string;
+      tone?: string;
+      productPrice?: string;
+      productVariants?: string;
+      imageUrl?: string;
+      isNewLaunch?: boolean;
+    },
+  ) => {
     // Guard against double-submission, including same-tick double-clicks that a
     // state-based check would miss (state updates are async). A ref flips
     // synchronously so the second call returns immediately.
     if (generatingRef.current) return;
 
-    const errors = validateCampaignForm({ brandName, productName, description });
+    const activeBrandName = overrides?.brandName ?? brandName;
+    const activeProductName = overrides?.productName ?? productName;
+    const activeDescription = overrides?.description ?? description;
+    const activeGoal = overrides?.goal ?? goal;
+    const activeTone = overrides?.tone ?? tone;
+    const activeProductPrice = overrides?.productPrice ?? productPrice;
+    const activeProductVariants = overrides?.productVariants ?? productVariants;
+    const activeImageUrl =
+      overrides?.imageUrl ?? mediaCloudUrl ?? mediaPreviewUrl ?? null;
+    const activeIsNewLaunch = overrides?.isNewLaunch ?? isNewLaunch;
+
+    const errors = validateCampaignForm({
+      brandName: activeBrandName,
+      productName: activeProductName,
+      description: activeDescription,
+    });
     if (errors.length > 0) {
       setErrorMsg(errors.join(". "));
+      setViewState("input");
       return;
     }
 
@@ -256,11 +326,21 @@ function CampaignsContent() {
       gatewayInsight: derivedGatewayInsight,
       storeDataForApi,
       storePrices,
-    } = buildGenerationContext(storeInsights, productName);
+    } = buildGenerationContext(storeInsights, activeProductName);
     if (derivedGatewayInsight) setGatewayInsight(derivedGatewayInsight);
 
     try {
-      const requestKey = JSON.stringify([brandName, productName, description, goal, tone, productPrice, mediaCloudUrl, campaignId, isRegeneration]);
+      const requestKey = JSON.stringify([
+        activeBrandName,
+        activeProductName,
+        activeDescription,
+        activeGoal,
+        activeTone,
+        activeProductPrice,
+        activeImageUrl,
+        campaignId,
+        isRegeneration,
+      ]);
       if (generationRequestRef.current?.key !== requestKey) {
         generationRequestRef.current = { key: requestKey, id: crypto.randomUUID() };
       }
@@ -268,20 +348,20 @@ function CampaignsContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          brandName,
-          productName,
-          productDescription: description,
-          campaignGoal: goal,
-          tonePreference: tone,
-          mediaUrl: mediaCloudUrl || mediaPreviewUrl || null,
-          imageUrl: mediaCloudUrl || null,
-          productPrice: productPrice || null,
+          brandName: activeBrandName,
+          productName: activeProductName,
+          productDescription: activeDescription,
+          campaignGoal: activeGoal,
+          tonePreference: activeTone,
+          mediaUrl: activeImageUrl,
+          imageUrl: activeImageUrl,
+          productPrice: activeProductPrice || null,
           storeAov: storeInsights?.orders?.average_order_value ?? null,
           storePrices,
-          productVariants: productVariants || null,
+          productVariants: activeProductVariants || null,
           gatewayInsight: derivedGatewayInsight,
           storeDataForApi,
-          isNewLaunch,
+          isNewLaunch: activeIsNewLaunch,
           campaignId,
           isRegeneration,
           shopifyStoreCountry: storeInsights?.store?.country || null,
@@ -653,7 +733,14 @@ function CampaignsContent() {
               selectedVariationIndex={selectedVariationIndex}
               onSelectVariation={handleSelectVariation}
               onUploadDifferent={() => setViewState("media")}
-              onRegenerate={() => handleGenerate(true)}
+              onRegenerate={(newTone) => {
+                if (newTone && newTone !== tone) {
+                  setTone(newTone);
+                  handleGenerate(true, { tone: newTone });
+                } else {
+                  handleGenerate(true);
+                }
+              }}
               onStartOver={handleStartOver}
               onGenerateBrief={handleGenerateBrief}
               hooks={
@@ -661,6 +748,11 @@ function CampaignsContent() {
                 effectiveAiInsights?.creative_hooks
               }
               hooksLoading={hooksLoading}
+              goal={goal}
+              tone={tone}
+              gatewayClassification={
+                gatewayInsight?.currentProductClassification
+              }
             />
           )}
 

@@ -1,4 +1,5 @@
-import { ArrowRight, Check, FileText, ImageIcon, Info, Layers, Loader2, RefreshCw, RotateCcw } from "lucide-react";
+import { useState, useEffect } from "react";
+import { ArrowRight, Check, FileText, ImageIcon, Info, Layers, Loader2, RefreshCw, RotateCcw, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -14,6 +15,14 @@ export interface BriefVariation {
   copy: GeneratedCopy;
   aiInsights?: AiInsights | null;
 }
+
+const COCKPIT_TONES = [
+  { id: "Minimal & Editorial", label: "Minimal & Editorial" },
+  { id: "Bold & Direct", label: "Bold & Direct" },
+  { id: "Warm & Conversational", label: "Warm & Conversational" },
+  { id: "Premium & Aspirational", label: "Premium & Aspirational" },
+  { id: "Let AI decide", label: "AI Auto" },
+] as const;
 
 export interface ReviewStepProps {
   generatedCopy: GeneratedCopy;
@@ -34,11 +43,14 @@ export interface ReviewStepProps {
   selectedVariationIndex: number;
   onSelectVariation: (index: number) => void;
   onUploadDifferent: () => void;
-  onRegenerate: () => void;
+  onRegenerate: (newTone?: string) => void;
   onStartOver: () => void;
   onGenerateBrief: () => void;
   hooks?: CreativeHook[];
   hooksLoading?: boolean;
+  goal?: string;
+  tone?: string;
+  gatewayClassification?: string | null;
 }
 
 /** "Review generated copy" step — ad preview, copy fields, CTA, hooks, and next actions. */
@@ -64,10 +76,21 @@ export function ReviewStep({
   onGenerateBrief,
   hooks,
   hooksLoading = false,
+  goal,
+  tone,
+  gatewayClassification,
 }: ReviewStepProps) {
+  const [selectedVoice, setSelectedVoice] = useState<string>(
+    tone || "Let AI decide",
+  );
+
+  useEffect(() => {
+    if (tone) setSelectedVoice(tone);
+  }, [tone]);
+
   return (
     <div>
-      <div className="mb-8">
+      <div className="mb-6">
         <Badge variant="success" className="mb-3">
           <Check className="size-3" /> Creatives ready
         </Badge>
@@ -77,6 +100,73 @@ export function ReviewStep({
         <p className="mt-2 text-sm text-muted-foreground">
           Preview your personalised Meta ad and fine-tune the call to action.
         </p>
+      </div>
+
+      {/* Strategy & Voice Cockpit */}
+      <div className="mb-6 rounded-2xl border border-border bg-surface-subtle p-4 sm:p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600 border border-brand-200/80 dark:bg-brand-950/40 dark:border-brand-900">
+              <Sparkles className="size-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-faint-foreground">
+                  Active Strategy
+                </span>
+                {gatewayClassification?.toLowerCase() === "gateway" && (
+                  <Badge variant="brand" size="sm">
+                    Gateway Product
+                  </Badge>
+                )}
+              </div>
+              <p className="text-sm font-semibold text-foreground">
+                {goal || "Drive Website Sales"} ·{" "}
+                <span className="font-normal text-muted-foreground">
+                  Active Voice: {tone || "Let AI decide"}
+                </span>
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Voice Switcher */}
+          {regenerateCount < 3 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-muted-foreground mr-1">
+                Try another voice:
+              </span>
+              {COCKPIT_TONES.map((t) => {
+                const isActive = selectedVoice === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setSelectedVoice(t.id)}
+                    className={cn(
+                      "rounded-lg border px-2.5 py-1 text-xs font-medium transition-all",
+                      isActive
+                        ? "border-brand-600 bg-brand-50 text-brand-700 font-semibold dark:bg-brand-950/60 dark:text-brand-300"
+                        : "border-border bg-surface text-muted-foreground hover:border-border-strong hover:text-foreground",
+                    )}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+              {selectedVoice !== tone && (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  className="ml-2 h-7 px-2.5 text-xs"
+                  onClick={() => onRegenerate(selectedVoice)}
+                >
+                  <RefreshCw className="size-3" />
+                  Apply Voice
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {variations.length > 1 && (
@@ -189,12 +279,18 @@ export function ReviewStep({
               </Button>
               {regenerateCount < 3 && (
                 <Button
-                  variant="secondary"
+                  variant={selectedVoice !== tone ? "primary" : "secondary"}
                   className="w-full"
-                  onClick={onRegenerate}
+                  onClick={() =>
+                    onRegenerate(
+                      selectedVoice !== tone ? selectedVoice : undefined,
+                    )
+                  }
                 >
-                  <RefreshCw className="size-4" /> Generate another variation (
-                  {3 - regenerateCount} free left)
+                  <RefreshCw className="size-4" />
+                  {selectedVoice !== tone
+                    ? `Generate in ${selectedVoice} (${3 - regenerateCount} free left)`
+                    : `Generate another variation (${3 - regenerateCount} free left)`}
                 </Button>
               )}
               <Button

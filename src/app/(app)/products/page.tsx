@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import {
   ProductCard,
   OutOfStockCard,
+  PreFlightSheet,
   ProductsToolbar,
   type SortKey,
   type StockFilter,
@@ -94,20 +95,58 @@ export default function ProductsPage() {
 
   const filteredOut = outOfStockProducts.filter(matchesSearch);
 
+  const [selectedProductForPreFlight, setSelectedProductForPreFlight] =
+    useState<ProductRow | null>(null);
+  const [preFlightOpen, setPreFlightOpen] = useState(false);
+
   const onCreateCampaign = (product: ProductRow) => {
+    setSelectedProductForPreFlight(product);
+    setPreFlightOpen(true);
+  };
+
+  const handleLaunchExpress = ({
+    product,
+    goal,
+    tone,
+  }: {
+    product: ProductRow;
+    goal: string;
+    tone: string;
+  }) => {
     sessionStorage.setItem(
       "campaign_draft",
       JSON.stringify({
         product_name: product.name,
         product_description: product.description || product.name,
-        // product_price is intentionally excluded — price flows to the AI
-        // only as a qualitative tier, never as a raw number in copy.
         product_image: product.image_url || "",
         product_variants:
           product.has_partial_stock && product.in_stock_variant_names
             ? product.in_stock_variant_names.join(", ")
             : "",
+        product_price: product.price ? String(product.price) : "",
         is_new_launch: (product.units_sold ?? 0) < 3,
+        campaign_goal: goal,
+        tone_preference: tone,
+        express_launch: true,
+      }),
+    );
+    router.push("/campaigns?express=true");
+  };
+
+  const handleCustomizeManual = (product: ProductRow) => {
+    sessionStorage.setItem(
+      "campaign_draft",
+      JSON.stringify({
+        product_name: product.name,
+        product_description: product.description || product.name,
+        product_image: product.image_url || "",
+        product_variants:
+          product.has_partial_stock && product.in_stock_variant_names
+            ? product.in_stock_variant_names.join(", ")
+            : "",
+        product_price: product.price ? String(product.price) : "",
+        is_new_launch: (product.units_sold ?? 0) < 3,
+        express_launch: false,
       }),
     );
     router.push("/campaigns");
@@ -192,6 +231,15 @@ export default function ProductsPage() {
           )}
         </div>
       )}
+
+      <PreFlightSheet
+        product={selectedProductForPreFlight}
+        open={preFlightOpen}
+        onOpenChange={setPreFlightOpen}
+        currency={storeCurrency}
+        onLaunchExpress={handleLaunchExpress}
+        onCustomizeManual={handleCustomizeManual}
+      />
     </PageContainer>
   );
 }

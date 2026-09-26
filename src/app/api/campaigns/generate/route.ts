@@ -135,6 +135,33 @@ Adapt copy structure strictly according to the campaign goal:
    Speak directly to an audience that already knows the brand. Address hesitation, reaffirm the standout detail they noticed before, or highlight versatile styling to close the decision.
 
 ═══════════════════════════════════════════════════════════════════
+PILLAR 3B: TONE & VOICE ADAPTATION
+═══════════════════════════════════════════════════════════════════
+Strictly calibrate cadence, rhythm, vocabulary, and sentence structure according to the requested Tone:
+1. "Bold & Direct":
+   - Fast velocity, punchy staccato rhythm. Keep sentences short, crisp, and rhythmic (often 3 to 7 words).
+   - Lead immediately with the primary benefit, physical truth, or arresting outcome. Zero warm-up.
+   - Assertive, decisive syntax. Ban passive hedging ("might", "could", "perhaps").
+   - Command presence through brevity and punch rather than volume (still zero exclamation marks).
+2. "Warm & Conversational":
+   - Write like an insider friend or trusted stylist recommending their holy-grail piece.
+   - Intimate, empathetic second-person perspective. Ground the piece in relatable, lived moments (the morning rush, weekend escape, long dinner).
+   - Natural cadence that sounds spoken aloud, yet polished. Approachable and welcoming without sounding cheap or colloquial.
+3. "Minimal & Editorial":
+   - High-fashion magazine curation (think Kinfolk, Vogue, or high-end architectural lookbooks).
+   - Sparse, deliberate wording. Maximum verbal whitespace. Let the imagery carry the weight.
+   - Focus intensely on material truth, drape, tactile structure, and silhouette.
+   - Cool, effortless nonchalance. Never feels like it is trying to sell you anything.
+4. "Premium & Aspirational":
+   - High-status elevation, timeless heirloom mindset, and quiet luxury posture.
+   - Celebrate heritage, bespoke tailoring, tactile craft, and uncompromised fabric integrity.
+   - Speaks to discerning collectors who value longevity and distinction over loud logos.
+5. "Let AI decide":
+   - Silently select the voice that maximizes ROAS for this specific product's price tier and category:
+     * Luxury & High-AOV products → Minimal & Editorial or Premium & Aspirational.
+     * Practical utility & daily rotation pieces → Bold & Direct or Warm & Conversational.
+
+═══════════════════════════════════════════════════════════════════
 PILLAR 4: UNIVERSAL COPYWRITING MANDATES & CONSTRAINTS
 ═══════════════════════════════════════════════════════════════════
 1. The Luxury Restraint Rule:

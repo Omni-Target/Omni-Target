@@ -16,20 +16,20 @@ interface StepItem {
 
 const GENERATION_STEPS: StepItem[] = [
   {
-    title: "Analyzing Product Details & Story",
-    detail: "Reading description, price point, and unique craft details…",
+    title: "Checking sales data → Identifying your Gateway Product",
+    detail: "Reviewing customer purchase patterns and catalog signals…",
   },
   {
-    title: "Developing 3 Creative Angles to Test",
-    detail: "Developing distinct concepts grounded in your product details…",
+    title: "Matching store pricing → Calculating safe daily test budget",
+    detail: "Finding your store's sweet-spot Meta test spend…",
   },
   {
-    title: "Drafting Hook-Driven Copy & Headlines",
-    detail: "Writing thumb-stopping primary text and high-intent call-to-actions…",
+    title: "Tuning your brand voice & ad posture",
+    detail: "Applying clean, authentic, hype-free copywriting guidelines…",
   },
   {
-    title: "Validating & Saving Your Brief",
-    detail: "Checking product claims and saving your complete campaign plan…",
+    title: "Writing 3 scroll-stopping ad angles & hooks",
+    detail: "Synthesizing high-converting primary text, headlines, and CTAs…",
   },
 ];
 
