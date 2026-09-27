@@ -12,14 +12,12 @@ export async function POST() {
   if (!shop) return Response.json({ logoUrl: null }, { headers: { "Cache-Control": "no-store" } });
 
   const logoUrl = await fetchShopifyStoreLogo(shop, integration?.shopify_custom_domain);
-  if (logoUrl) {
-    const clerk = await clerkClient();
-    const updates: Record<string, unknown> = { storeLogoUrl: logoUrl };
-    if (shop) updates.shopifyStoreUrl = shop;
-    await clerk.users.updateUserMetadata(authResult.userId, {
-      publicMetadata: updates,
-    });
-  }
+  const clerk = await clerkClient();
+  const updates: Record<string, unknown> = { storeLogoUrl: logoUrl ?? null };
+  if (shop) updates.shopifyStoreUrl = shop;
+  await clerk.users.updateUserMetadata(authResult.userId, {
+    publicMetadata: updates,
+  });
 
   return Response.json({ logoUrl }, { headers: { "Cache-Control": "no-store" } });
 }

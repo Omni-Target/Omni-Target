@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { SHOPIFY_API_VERSION } from "@/lib/shopify-config";
 import { normalizeStoreLogoUrl } from "@/lib/store-logo-url";
 
 function decodeAttribute(value: string): string {
@@ -31,8 +32,8 @@ function organizationLogo(value: unknown): string | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Record<string, unknown>;
   const types = Array.isArray(item["@type"]) ? item["@type"] : [item["@type"]];
-  if (types.some((type) => typeof type === "string" && /^(Organization|Store|OnlineStore)$/i.test(type))) {
-    return imageUrl(item.logo);
+  if (types.some((type) => typeof type === "string" && /^(Organization|Store|OnlineStore|Brand|WebSite)$/i.test(type))) {
+    return imageUrl(item.logo) ?? imageUrl(item.image);
   }
   return organizationLogo(item["@graph"]);
 }
@@ -46,7 +47,7 @@ function resolveLogo(raw: string | null, origin: string): string | null {
   }
 }
 
-/** Read only explicit logo signals; never substitute the homepage hero image. */
+/** Read only explicit logo signals; never substitute the browser favicon or homepage hero image. */
 export function extractStoreLogoFromHtml(html: string, origin: string): string | null {
   for (const script of html.matchAll(/<script\b[^>]*>[\s\S]*?<\/script>/gi)) {
     const tag = script[0].slice(0, script[0].indexOf(">") + 1);
@@ -61,8 +62,11 @@ export function extractStoreLogoFromHtml(html: string, origin: string): string |
   }
 
   for (const tag of html.match(/<img\b[^>]*>/gi) ?? []) {
-    const marker = `${attribute(tag, "class") ?? ""} ${attribute(tag, "id") ?? ""} ${attribute(tag, "alt") ?? ""}`;
+    const marker = `${attribute(tag, "class") ?? ""} ${attribute(tag, "id") ?? ""} ${attribute(tag, "alt") ?? ""} ${attribute(tag, "itemprop") ?? ""}`;
     if (!/(?:^|[\s_-])logo(?:[\s_-]|$)/i.test(marker)) continue;
+    // Reject anything associated with favicons, flags, currency, badges, payment methods, or social icons
+    if (/(?:favicon|touch-icon|flag|currency|payment|badge|social|trust)/i.test(marker)) continue;
+
     let rawSrc = attribute(tag, "data-src") ?? attribute(tag, "src");
     if (!rawSrc || rawSrc.startsWith("data:")) {
       const srcset = attribute(tag, "srcset");
@@ -71,15 +75,13 @@ export function extractStoreLogoFromHtml(html: string, origin: string): string |
         rawSrc = candidates[candidates.length - 1] || candidates[0] || null;
       }
     }
+    if (!rawSrc || /(?:favicon|apple-touch-icon)/i.test(rawSrc)) continue;
     const logo = resolveLogo(rawSrc, origin);
     if (logo) return logo;
   }
 
-  for (const tag of html.match(/<link\b[^>]*>/gi) ?? []) {
-    if (!/\b(?:icon|apple-touch-icon|shortcut\s+icon)\b/i.test(attribute(tag, "rel") ?? "")) continue;
-    const logo = resolveLogo(attribute(tag, "href"), origin);
-    if (logo && /(?:cdn\.shopify\.com|\/cdn\/shop\/)/i.test(logo)) return logo;
-  }
+  // NOTE: Browser favicons (<link rel="icon">, <link rel="apple-touch-icon">, etc.) are NOT store logos
+  // and must never be extracted or substituted as the merchant's brand profile picture.
 
   return null;
 }
@@ -114,6 +116,52 @@ async function readLimitedHtml(response: Response): Promise<string | null> {
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
+async function fetchBrandFromStorefrontApi(host: string): Promise<string | null> {
+  try {
+    const query = `
+      query StorefrontBrand {
+        shop {
+          brand {
+            squareLogo {
+              image {
+                url
+              }
+            }
+            logo {
+              image {
+                url
+              }
+            }
+          }
+        }
+      }
+    `;
+    const response = await fetch(`https://${host}/api/${SHOPIFY_API_VERSION}/graphql.json`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ query }),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!response.ok) return null;
+    const json = await response.json();
+    const brand = json?.data?.shop?.brand;
+    // Prefer squareLogo (purpose-built for profile pictures & app avatars), then general brand logo
+    const squareCandidate = normalizeStoreLogoUrl(brand?.squareLogo?.image?.url);
+    if (squareCandidate) return squareCandidate;
+
+    const logoCandidate = normalizeStoreLogoUrl(brand?.logo?.image?.url);
+    if (logoCandidate) return logoCandidate;
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchShopifyStoreLogo(
   myshopifyDomain: string,
   customDomain?: string | null,
@@ -123,6 +171,13 @@ export async function fetchShopifyStoreLogo(
   const custom = safeStorefrontHost(customDomain);
   const hosts = [...new Set([custom, shop].filter((host): host is string => !!host))];
 
+  // 1. Check official Shopify Brand settings first (Settings > Brand in Shopify Admin)
+  for (const host of hosts) {
+    const brandLogo = await fetchBrandFromStorefrontApi(host);
+    if (brandLogo) return brandLogo;
+  }
+
+  // 2. Fall back to theme storefront HTML (JSON-LD structured data or header logo image)
   for (const host of hosts) {
     try {
       let currentHost: string | null = host;

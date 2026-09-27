@@ -43,10 +43,10 @@ export default async function SettingsPage() {
       integration.shopify_store_url,
       integration.shopify_custom_domain
     );
-    if (storeLogo) {
+    if (storeLogo || metadata.storeLogoUrl) {
       clerk.users
         .updateUserMetadata(userId, {
-          publicMetadata: { storeLogoUrl: storeLogo },
+          publicMetadata: { storeLogoUrl: storeLogo ?? null },
         })
         .catch(() => {});
     }

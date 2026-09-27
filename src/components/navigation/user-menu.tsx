@@ -28,7 +28,7 @@ export function UserMenu({ variant = "compact" }: { variant?: "compact" | "full"
   // Refresh branding once for stores connected before logo discovery was fixed.
   useEffect(() => {
     if (!user?.id || officialLogo) return;
-    const key = `store-logo-sync:${user.id}`;
+    const key = `store-logo-sync-v2:${user.id}`;
     if (sessionStorage.getItem(key)) return;
 
     fetch("/api/user/sync-store-logo", { method: "POST" })
