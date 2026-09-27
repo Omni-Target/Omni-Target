@@ -2,7 +2,9 @@ import { auth } from "@clerk/nextjs/server";
 import { getExistingIntegrationByStore, upsertUserIntegration, updateUserIntegration } from "@/lib/db";
 import { createHmac } from "crypto";
 import { fetchWithRetry } from "@/lib/http";
-import { shopifyAdminGraphqlUrl, shopifyAdminRestUrl } from "@/lib/shopify-config";
+import { shopifyAdminRestUrl } from "@/lib/shopify-config";
+import { fetchShopifyStoreLogo } from "@/lib/shopify-store-logo";
+import { normalizeStoreLogoUrl } from "@/lib/store-logo-url";
 
 export async function GET(request: Request) {
   const { userId } = await auth();
@@ -124,59 +126,10 @@ export async function GET(request: Request) {
     console.log("Shopify myshopify URL:", myshopifyUrl);
     console.log("Shopify store email:", storeEmail);
 
-    // Extract store branding (official brand logo from Shopify GraphQL, or fallback to high-res storefront favicon)
-    let storeLogoUrl: string | null = null;
-    let storeName: string = shopData.name || "Store";
-
-    try {
-      const brandGqlQuery = `
-        query {
-          shop {
-            name
-            brand {
-              squareLogo {
-                image {
-                  url
-                }
-              }
-              logo {
-                image {
-                  url
-                }
-              }
-            }
-          }
-        }
-      `;
-      const brandRes = await fetch(
-        shopifyAdminGraphqlUrl(shop),
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": accessToken,
-          },
-          body: JSON.stringify({ query: brandGqlQuery }),
-          signal: AbortSignal.timeout(4000),
-        }
-      );
-
-      if (brandRes.ok) {
-        const brandData = await brandRes.json();
-        const shopBrand = brandData?.data?.shop;
-        if (shopBrand?.name) {
-          storeName = shopBrand.name;
-        }
-        const officialLogo =
-          shopBrand?.brand?.squareLogo?.image?.url ||
-          shopBrand?.brand?.logo?.image?.url;
-        if (officialLogo && typeof officialLogo === "string") {
-          storeLogoUrl = officialLogo;
-        }
-      }
-    } catch (brandErr) {
-      console.warn("Could not fetch brand logo from Shopify GraphQL:", brandErr);
-    }
+    // The Online Store theme exposes its own logo, even when the merchant has
+    // not configured Shopify Brand assets. Use its original image size.
+    const storeLogoUrl = await fetchShopifyStoreLogo(myshopifyUrl, customDomain);
+    const storeName: string = shopData.name || "Store";
 
     console.log("Shopify store branding resolved:", { storeName, storeLogoUrl });
 
@@ -364,7 +317,11 @@ export async function GET(request: Request) {
       ...existingMeta,
       shopifyStoreUrl: myshopifyUrl,
       onboardingStep: shouldSkipAudit ? "complete" : "audit",
-      storeLogoUrl: storeLogoUrl || null,
+      storeLogoUrl:
+        storeLogoUrl ||
+        (existingMeta.shopifyStoreUrl === myshopifyUrl
+          ? normalizeStoreLogoUrl(existingMeta.storeLogoUrl as string | undefined)
+          : null),
     };
     if (storeName) updatedMeta.storeName = storeName;
 

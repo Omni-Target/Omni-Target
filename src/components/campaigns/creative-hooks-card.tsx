@@ -115,11 +115,18 @@ export function CreativeHooksCard({
     );
   }
 
-  const legacyTemplateHooks = hooks?.some((hook) =>
-    hook.on_screen_text === "A closer look at the details." ||
-    hook.on_screen_text === "Style it your way."
-  );
-  if (generationStatus === "fallback" || legacyTemplateHooks || !hooks || hooks.length !== 3) {
+  const hasValidHooks =
+    Array.isArray(hooks) &&
+    hooks.length === 3 &&
+    !hooks.some((hook) =>
+      !hook ||
+      !hook.on_screen_text?.trim() ||
+      !hook.primary_text_hook?.trim() ||
+      hook.on_screen_text === "A closer look at the details." ||
+      hook.on_screen_text === "Style it your way."
+    );
+
+  if (!hasValidHooks) {
     if (!onRetry && generationStatus !== "fallback") return null;
     return (
       <Card className="border-amber-200 bg-amber-50/50 p-6">

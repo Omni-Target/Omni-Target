@@ -90,27 +90,36 @@ export function validateCopy(
   }
 
   // ── Pass 2: Closure & material hallucination check ───────────────────────
-  // Terms that are specific and verifiable — if the copy claims them, they
-  // must appear in the product description. Generic words (dress, style, etc.)
-  // are intentionally excluded from this list.
+  // Terms that assert a specific, non-obvious material composition or closure.
+  // Fit descriptors, styling suggestions, and generic properties (e.g. stretch,
+  // unisex, adjustable, belt, pockets) are intentionally excluded so natural,
+  // evocative copywriting is never falsely flagged.
   const verifiableTerms = [
     // Closures & fastenings
     "zipper", "zip", "drawstring", "elastic", "button", "buttons",
-    "buckle", "velcro", "snap", "hook-and-eye", "lace-up", "belt", "sash",
+    "buckle", "velcro", "snap", "hook-and-eye", "lace-up",
     // Fabrics & materials
     "linen", "silk", "cotton", "wool", "cashmere", "satin", "chiffon",
     "velvet", "leather", "denim", "suede", "nylon", "polyester", "rayon",
     "viscose", "modal", "bamboo", "jersey", "tweed", "organza", "tulle",
     "crepe", "georgette", "brocade", "twill", "poplin",
-    // Embellishments & construction
+    // Embellishments & specialized construction
     "embroidery", "embroidered", "beaded", "beading", "cowrie", "sequin",
     "sequined", "lace", "crochet", "smocking", "pleated", "pleats",
-    "ruffle", "ruffles", "fringe", "tassels", "pockets",
-    // Specific fit/construction claims
-    "unisex", "genderless", "adjustable", "stretch", "lined", "lining",
+    "ruffle", "ruffles", "fringe", "tassels",
   ];
 
   const descLower = (productDescription || "").toLowerCase();
+  const evidenceLower = [
+    productDescription,
+    factualEvidence?.title,
+    ...(factualEvidence?.tags || []),
+    factualEvidence?.product_type,
+    factualEvidence?.catalog_claims,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
   const copyLower = allText.toLowerCase();
 
   const lemmaVariants: Record<string, string[]> = {
@@ -128,22 +137,48 @@ export function validateCopy(
     ruffle: ["ruffle", "ruffles", "ruffled"],
     sequin: ["sequin", "sequins", "sequined"],
     sequined: ["sequin", "sequins", "sequined"],
-    lining: ["line", "lined", "lining", "linings"],
-    lined: ["line", "lined", "lining", "linings"],
-    pocket: ["pocket", "pockets"],
-    pockets: ["pocket", "pockets"],
-    elastic: ["elastic", "elasticated", "waistband"],
+    elastic: ["elastic", "elasticated", "waistband", "smocked", "smocking", "stretch"],
   };
+
+  const FABRIC_MATERIALS = new Set([
+    "linen", "silk", "cotton", "wool", "cashmere", "satin", "chiffon",
+    "velvet", "leather", "denim", "suede", "nylon", "polyester", "rayon",
+    "viscose", "modal", "bamboo", "jersey", "tweed", "organza", "tulle",
+    "crepe", "georgette", "brocade", "twill", "poplin",
+  ]);
+
+  function isFabricCompositionClaim(term: string, text: string): boolean {
+    const pattern = new RegExp(
+      `\\b(?:(?:cut|crafted|made|woven|tailored|stitched|spun)\\s+(?:from|in|with|of)\\s+(?:(?:pure|fine|raw|heavy|lightweight)\\s+)?${term}|(?:100%|pure|genuine|all)\\s+${term}|(?:our|this|the|a|an)\\s+${term}\\s+(?:dress|top|shirt|skirt|pant|pants|trousers|jacket|blazer|coat|robe|scarf|garment|piece|layer|wrap|set|suit|item|apparel|outfit|fabric|textile|material))\\b`,
+      "i"
+    );
+    return pattern.test(text);
+  }
+
+  const NON_APPAREL_REGEX = /\b(?:coffee|tea|food|beverage|snack|skincare|serum|cream|cosmetic|makeup|beauty|fragrance|candle|soap|perfume|electronics|gadget|software|digital|book|audio)\b/i;
+  const isNonApparel = NON_APPAREL_REGEX.test(
+    `${factualEvidence?.product_type || ""} ${(factualEvidence?.tags || []).join(" ")} ${factualEvidence?.title || ""}`
+  );
 
   for (const term of verifiableTerms) {
     const termRegex = new RegExp(`\\b${term}\\b`, "i");
     if (termRegex.test(copyLower)) {
+      // If it's a fabric material, only flag when the copy asserts the product is composed of that fabric,
+      // avoiding false positives on finish/texture metaphors (e.g. "satin finish", "velvety texture").
+      if (FABRIC_MATERIALS.has(term) && !isFabricCompositionClaim(term, copyLower)) {
+        continue;
+      }
+      // Non-apparel products (coffee, skincare, electronics, etc.) do not have garment closures/embellishments.
+      if (isNonApparel && !FABRIC_MATERIALS.has(term)) {
+        continue;
+      }
+
       const allowedVariants = lemmaVariants[term] || [term];
-      const isSupportedInDesc = allowedVariants.some((v) => new RegExp(`\\b${v}\\b`, "i").test(descLower));
+      const isSupportedInDesc = allowedVariants.some((v) => new RegExp(`\\b${v}\\b`, "i").test(evidenceLower));
       if (!isSupportedInDesc) {
         // Check if it's used in a negative contrast context (e.g. "no polyester", "unlike synthetic polyester", "goodbye to polyester")
         const negativeContrastRegex = new RegExp(
-          `\\b(?:not|no|never|unlike|without|instead of|goodbye to|ditch(?:ing)?|forget(?:ting)?|stop wearing|free of|zero)\\s+(?:(?:cheap|stiff|sweaty|synthetic|scratchy|heavy|plastic)\\s+)?${term}\\b`,
+          `\\b(?:not|no|never|unlike|without|instead of|goodbye to|ditch(?:ing)?|forget(?:ting)?|skip(?:s|ping)?|stop wearing|free of|zero)\\s+(?:(?:cheap|stiff|sweaty|synthetic|scratchy|heavy|plastic)\\s+)?${term}\\b`,
           "i"
         );
         if (!negativeContrastRegex.test(copyLower)) {

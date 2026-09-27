@@ -23,6 +23,7 @@ import type {
 import {
   validateBrief,
   finalizeCreativeHooks,
+  buildVerifiedFallbackHooks,
   getForbiddenSiblingProducts,
   type TargetProductContext,
   type CatalogItem,
@@ -61,6 +62,7 @@ export interface TimingOutput {
 
 export interface TargetingProfile {
   generation_status?: "generated" | "fallback";
+  creative_hooks_status?: "generated" | "fallback";
   locations: LocationResult[];
   demographics: {
     gender: "All" | "Men" | "Women";
@@ -638,48 +640,79 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
     } else {
       const profile = toolUseBlock.input as GeneratedBriefResponse;
 
-      // Apply safe local repairs before judging the result. A rejected profile
-      // must not trigger another full, expensive targeting generation call.
-      const sanitized = finalizeCreativeHooks(profile, targetProductCtx, catalog);
-      if (sanitized) {
-        return {
-          generation_status: "generated",
-          locations:
-            Array.isArray(sanitized.locations) && sanitized.locations.length > 0
-              ? sanitized.locations
-              : defaultLocations,
-          demographics: {
-            gender: sanitized.demographics?.gender || "All",
+      // Extract valid demographics from AI response
+      const hasAiDemographics =
+        profile.demographics &&
+        ["All", "Men", "Women"].includes(profile.demographics.gender) &&
+        typeof profile.demographics.age_min === "number" &&
+        typeof profile.demographics.age_max === "number" &&
+        profile.demographics.age_min >= 18 &&
+        profile.demographics.age_max >= profile.demographics.age_min;
+
+      const demographics = hasAiDemographics
+        ? {
+            gender: profile.demographics!.gender,
             demographic_justification:
-              sanitized.demographics?.demographic_justification ||
+              profile.demographics!.demographic_justification ||
               "Demographic profile aligned with product price point and buyer history.",
-            age_min: sanitized.demographics?.age_min || 25,
-            age_max: sanitized.demographics?.age_max || 44,
+            age_min: profile.demographics!.age_min,
+            age_max: profile.demographics!.age_max,
             age_reasoning:
-              sanitized.demographics?.age_reasoning ||
+              profile.demographics!.age_reasoning ||
               "Age range structured for core buyer purchasing power.",
-          },
-          seed_interests:
-            Array.isArray(sanitized.seed_interests) && sanitized.seed_interests.length > 0
-              ? sanitized.seed_interests
-              : ["Online Shopping", "Fashion"],
-          creative_hooks: sanitized.creative_hooks,
-          optimization_reasoning: guidance.default_reasoning,
-          timing: sanitized.timing || {
-            peak_days:
-              storeData.orders?.peak_days && storeData.orders.peak_days.length > 0
-                ? storeData.orders.peak_days
-                : ["Monday", "Friday", "Sunday"],
-            launch_recommendation:
-              `Launch on ${storeData.orders?.peak_days?.[0] || "Monday"} at 12:00 AM (midnight) in your store's timezone leading into your peak sales days.`,
-            reasoning:
-              "Maintaining continuous 24/7 ad delivery allows Meta to optimize across your entire weekly sales rhythm. Past order timing reflects historical customer activity, not an algorithmic guarantee of future ad performance.",
-          },
-        };
-      } else {
-        console.warn("[Advantage+ Validator] Hook profile rejected:",
+          }
+        : {
+            gender: "All" as const,
+            demographic_justification:
+              "Starting with broad gender targeting gives Meta the freedom to find the shoppers most interested in this product across your market.",
+            age_min: 25,
+            age_max: 44,
+            age_reasoning:
+              "Standard e-commerce age targeting (25-44) is recommended for early validation campaigns.",
+          };
+
+      const seed_interests =
+        Array.isArray(profile.seed_interests) && profile.seed_interests.length > 0
+          ? profile.seed_interests.filter((i): i is string => typeof i === "string" && i.trim().length > 0)
+          : ["Online Shopping", "Fashion"];
+
+      const locations =
+        Array.isArray(profile.locations) && profile.locations.length > 0
+          ? profile.locations
+          : defaultLocations;
+
+      const timing = profile.timing || {
+        peak_days:
+          storeData.orders?.peak_days && storeData.orders.peak_days.length > 0
+            ? storeData.orders.peak_days
+            : ["Monday", "Friday", "Sunday"],
+        launch_recommendation:
+          `Launch on ${storeData.orders?.peak_days?.[0] || "Monday"} at 12:00 AM (midnight) in your store's timezone leading into your peak sales days.`,
+        reasoning:
+          "Maintaining continuous 24/7 ad delivery allows Meta to optimize across your entire weekly sales rhythm. Past order timing reflects historical customer activity, not an algorithmic guarantee of future ad performance.",
+      };
+
+      // Apply safe local repairs before judging the result.
+      const sanitized = finalizeCreativeHooks(profile, targetProductCtx, catalog);
+      const verifiedHooks = sanitized?.creative_hooks || [];
+
+      if (!sanitized) {
+        console.warn("[Advantage+ Validator] Hook profile rejected, requiring explicit retry:",
           validateBrief(profile, targetProductCtx, catalog));
       }
+
+      return {
+        generation_status: hasAiDemographics ? "generated" : "fallback",
+        creative_hooks_status: sanitized?.creative_hooks?.length
+          ? "generated"
+          : "fallback",
+        locations,
+        demographics,
+        seed_interests,
+        creative_hooks: verifiedHooks,
+        optimization_reasoning: guidance.default_reasoning,
+        timing,
+      };
     }
   } catch (err) {
     console.error("AI Advantage+ profile generation error:", err);
@@ -687,6 +720,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
 
   return {
     generation_status: "fallback",
+    creative_hooks_status: "fallback",
     locations: defaultLocations,
     demographics: {
       gender: "All",
@@ -1575,7 +1609,7 @@ export async function generateRecommendations(
 
     return {
     generation_status: profile.generation_status,
-    creative_hooks_status: profile.generation_status,
+    creative_hooks_status: profile.creative_hooks_status ?? (creative_hooks.length === 3 ? "generated" : "fallback"),
     ...(lowDataWarningCheck(storeData)
       ? {}
       : {

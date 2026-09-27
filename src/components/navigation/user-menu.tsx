@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useUser, useClerk } from "@clerk/nextjs";
 import { Settings, LogOut, CreditCard, ChevronsUpDown } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
+import { normalizeStoreLogoUrl } from "@/lib/store-logo-url";
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -22,25 +23,27 @@ export function UserMenu({ variant = "compact" }: { variant?: "compact" | "full"
   };
 
   const storeName = metadata.storeName;
-  const storeLogoUrl = metadata.storeLogoUrl;
+  const officialLogo = normalizeStoreLogoUrl(metadata.storeLogoUrl);
 
-  // Check and reject any favicon URLs (stale or cached)
-  const isFavicon = (url?: string | null) =>
-    !url ||
-    url.includes("google.com/s2/favicons") ||
-    url.includes("favicon") ||
-    url.includes(".ico");
-
-  // Cleanse any stale favicon URL stored in Clerk metadata in the background
+  // Refresh branding once for stores connected before logo discovery was fixed.
   useEffect(() => {
-    if (storeLogoUrl && isFavicon(storeLogoUrl)) {
-      fetch("/api/user/update-metadata", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storeLogoUrl: null }),
-      }).catch(() => {});
-    }
-  }, [storeLogoUrl]);
+    if (!user?.id || officialLogo) return;
+    const key = `store-logo-sync:${user.id}`;
+    if (sessionStorage.getItem(key)) return;
+
+    fetch("/api/user/sync-store-logo", { method: "POST" })
+      .then((response) => {
+        if (!response.ok) throw new Error("Logo sync failed");
+        return response.json() as Promise<{ logoUrl: string | null }>;
+      })
+      .then(({ logoUrl }) => {
+        sessionStorage.setItem(key, "done");
+        if (logoUrl) return user.reload();
+      })
+      .catch(() => {
+        // Allow retry on error
+      });
+  }, [user, officialLogo]);
 
   const displayName =
     storeName ||
@@ -49,14 +52,7 @@ export function UserMenu({ variant = "compact" }: { variant?: "compact" | "full"
     "Account";
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
 
-  // Only use official brand logo from Shopify.
-  // If not available, use a colorful geometric default random avatar seeded by store name.
-  const officialLogo = isFavicon(storeLogoUrl) ? null : storeLogoUrl;
-  const defaultRandomAvatar = `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(
-    storeName || displayName || user?.id || "omni"
-  )}`;
-
-  const image = officialLogo || defaultRandomAvatar;
+  const image = officialLogo || (user?.hasImage ? user?.imageUrl : null);
 
   const trigger =
     variant === "full" ? (

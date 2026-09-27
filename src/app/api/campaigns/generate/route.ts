@@ -781,6 +781,7 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
       },
       storeProducts.map((product) => ({ id: String(product.id), name: product.name })),
       catalogClaimEvidence,
+      storeSnapshot?.store?.country || shopifyStoreCountry || "",
     );
     let copyValidationErrors = validateCopy(
       parsedResponse,

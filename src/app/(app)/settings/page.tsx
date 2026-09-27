@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { IntegrationCard } from "@/components/settings";
 import { SyncButton } from "@/components/SyncButton";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
+import { normalizeStoreLogoUrl } from "@/lib/store-logo-url";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -35,13 +36,21 @@ export default async function SettingsPage() {
     integration?.shopify_store_url ||
     "your store";
 
-  const isFavicon = (url?: string | null) =>
-    !url ||
-    url.includes("google.com/s2/favicons") ||
-    url.includes("favicon") ||
-    url.includes(".ico");
-
-  const storeLogo = isFavicon(metadata.storeLogoUrl) ? null : metadata.storeLogoUrl;
+  let storeLogo = normalizeStoreLogoUrl(metadata.storeLogoUrl);
+  if (!storeLogo && integration?.shopify_store_url) {
+    const { fetchShopifyStoreLogo } = await import("@/lib/shopify-store-logo");
+    storeLogo = await fetchShopifyStoreLogo(
+      integration.shopify_store_url,
+      integration.shopify_custom_domain
+    );
+    if (storeLogo) {
+      clerk.users
+        .updateUserMetadata(userId, {
+          publicMetadata: { storeLogoUrl: storeLogo },
+        })
+        .catch(() => {});
+    }
+  }
   const storeName = metadata.storeName || null;
 
   return (
