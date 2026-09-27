@@ -195,6 +195,7 @@ Example: {"Lekki": "Lagos", "Wuse": "Abuja"}`;
       max_tokens: 1000,
       messages: [{ role: "user", content: prompt }],
     });
+    await logApiUsage(userId ?? null, "location_consolidation", message.usage, message.model);
 
     const text = message.content[0].type === "text" ? message.content[0].text.trim() : "";
     const cleanText = text
@@ -210,14 +211,6 @@ Example: {"Lekki": "Lagos", "Wuse": "Abuja"}`;
         locationMemoryCache.set(rawCity.trim().toLowerCase(), consolidatedCity);
       }
 
-      if (userId) {
-        logApiUsage(
-          userId,
-          "location_consolidation",
-          message.usage.input_tokens,
-          message.usage.output_tokens
-        );
-      }
       return result;
     }
     return result;

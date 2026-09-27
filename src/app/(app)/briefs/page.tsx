@@ -119,7 +119,7 @@ function BriefCard({ b }: { b: BriefListItem }) {
   );
 }
 
-/** Full-page, searchable, date-filterable grid of every finalized brief. */
+/** Full-page, searchable, date-filterable grid of saved briefs. */
 export default function BriefsPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: BRIEFS_QUERY_KEY,

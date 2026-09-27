@@ -614,6 +614,8 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
       },
     });
 
+    await logApiUsage(userId ?? null, "targeting_profile", response.usage, response.model);
+
     console.log("[Anthropic Prompt Caching - Targeting Profile]", {
       input_tokens: response.usage.input_tokens,
       output_tokens: response.usage.output_tokens,
@@ -635,15 +637,6 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
       });
     } else {
       const profile = toolUseBlock.input as GeneratedBriefResponse;
-
-      if (userId) {
-        logApiUsage(
-          userId,
-          "targeting_profile",
-          response.usage.input_tokens,
-          response.usage.output_tokens
-        );
-      }
 
       // Apply safe local repairs before judging the result. A rejected profile
       // must not trigger another full, expensive targeting generation call.
@@ -764,9 +757,7 @@ export async function generateCreativeHooksOnly(
     tools: [CREATIVE_HOOKS_TOOL],
     tool_choice: { type: "tool", name: "generate_product_hooks" },
   });
-  if (userId) {
-    logApiUsage(userId, "creative_hooks_retry", response.usage.input_tokens, response.usage.output_tokens);
-  }
+  await logApiUsage(userId ?? null, "creative_hooks_retry", response.usage, response.model);
   const block = response.content.find((item) => item.type === "tool_use");
   if (!block || block.type !== "tool_use") throw new CreativeHookGenerationError();
   const verified = finalizeCreativeHooks(block.input as GeneratedBriefResponse, target, catalog);

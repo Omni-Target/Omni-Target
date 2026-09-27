@@ -23,7 +23,7 @@ interface StepItem {
 }
 
 function formatToneLabel(tone?: string): string {
-  if (!tone || tone === "ai" || tone.toLowerCase().includes("let ai decide")) return "Balanced & Authentic";
+  if (!tone || tone === "ai" || tone.toLowerCase().includes("let ai decide") || tone.toLowerCase().includes("auto")) return "AI Auto";
   if (tone.toLowerCase().includes("bold")) return "Bold & Direct";
   if (tone.toLowerCase().includes("warm")) return "Warm & Conversational";
   if (tone.toLowerCase().includes("minimal")) return "Minimal & Editorial";
@@ -148,6 +148,9 @@ export function GeneratingState({
               </h2>
               <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5 truncate">
                 <span>{brandName ? `${brandName} · ` : ""}Meta Advantage+ Engine</span>
+              </p>
+              <p className="mt-1 text-xs font-semibold text-brand-700 dark:text-brand-300">
+                Selected voice: {formatToneLabel(tonePreference)}
               </p>
             </div>
           </div>

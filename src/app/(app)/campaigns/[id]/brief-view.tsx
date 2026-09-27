@@ -94,9 +94,11 @@ function versionToCopy(v: BriefVersionRow): GeneratedCopy {
 export function BriefView({
   campaign,
   versions = [],
+  initialVersionId,
 }: {
   campaign: BriefCampaign;
   versions?: BriefVersionRow[];
+  initialVersionId?: string | null;
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -105,7 +107,7 @@ export function BriefView({
   // always the "Chosen" one, so there's never more than one marked.
   const finalizedId = versions.find((v) => v.is_selected)?.id ?? null;
   const [activeVersionId, setActiveVersionId] = useState<string | null>(
-    finalizedId ?? versions[0]?.id ?? null,
+    versions.find((v) => v.id === initialVersionId)?.id ?? finalizedId ?? versions[0]?.id ?? null,
   );
   const activeVersion = versions.find((v) => v.id === activeVersionId) ?? null;
   const [localRecoveredHooks, setLocalRecoveredHooks] = useState<Record<string, CreativeHook[]>>({});
@@ -281,8 +283,7 @@ export function BriefView({
     }
   };
 
-  // Finalize: persist the chosen variation + mark complete, then head back to
-  // the dashboard. Best-effort persistence never blocks the redirect.
+  // Finalize the chosen variation before leaving this page.
   const handleFinalize = async () => {
     setFinalizing(true);
     setSaveError("");

@@ -318,6 +318,8 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
       return fallback ? respond(fallback, "fallback") : unavailableResponse();
     }
 
+    await logApiUsage(userId, "brief_generation_v4", response.usage, response.model);
+
     console.log("[Anthropic Prompt Caching - Standalone Brief]", {
       input_tokens: response.usage.input_tokens,
       output_tokens: response.usage.output_tokens,
@@ -337,13 +339,6 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
     }
 
     let profile = toolUseBlock.input as GeneratedBriefResponse;
-
-    logApiUsage(
-      userId,
-      "brief_generation_v4",
-      response.usage.input_tokens,
-      response.usage.output_tokens
-    );
 
     // ─── Code-Side Deterministic Validator ───
     let validationErrors = validateBrief(profile, targetProductCtx, catalog);
@@ -410,6 +405,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
             name: "generate_advantage_plus_profile",
           },
         });
+        await logApiUsage(userId, "brief_generation_v4_retry", retryResponse.usage, retryResponse.model);
 
         console.log("[Anthropic Prompt Caching - Standalone Brief Retry]", {
           input_tokens: retryResponse.usage.input_tokens,

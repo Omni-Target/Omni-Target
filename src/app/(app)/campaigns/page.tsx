@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, Suspense, useRef, useCallback } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useUser } from "@clerk/nextjs";
@@ -38,6 +39,13 @@ import {
 import { buildGenerationContext } from "@/lib/campaigns/insights";
 import { buildBriefPdfPayload, buildBriefText } from "@/lib/campaigns/brief";
 import {
+  PENDING_GENERATION_KEY,
+  clearPendingGeneration,
+  parsePendingGeneration,
+  savePendingGeneration,
+  type PendingGeneration,
+} from "@/lib/campaigns/pending-generation";
+import {
   resolveStoreDomain,
   validateCampaignForm,
 } from "@/lib/campaigns/derive";
@@ -61,7 +69,7 @@ const STEP_INDEX: Record<CampaignState, number> = {
 
 function CampaignsContent() {
   const router = useRouter();
-  const { user } = useUser();
+  const { user, isLoaded: userLoaded } = useUser();
   const queryClient = useQueryClient();
   const storeUrl = (user?.publicMetadata?.shopifyStoreUrl as string) || "";
 
@@ -76,6 +84,9 @@ function CampaignsContent() {
   const [loadingDraft, setLoadingDraft] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
   const [showBuyCredits, setShowBuyCredits] = useState(false);
+  const [pendingRecovery, setPendingRecovery] = useState<PendingGeneration | null>(null);
+  const [recoveryStatus, setRecoveryStatus] = useState<"checking" | "unconfirmed" | "unavailable">("checking");
+  const [recoveryAttempt, setRecoveryAttempt] = useState(0);
 
   // Ad-creative upload state + pipeline (presign → PUT → validate → derive isVideo).
   const {
@@ -180,6 +191,12 @@ function CampaignsContent() {
   const [isFinalizingBrief, setIsFinalizingBrief] = useState(false);
   const [hooksLoading, setHooksLoading] = useState(false);
   const [hooksRetryError, setHooksRetryError] = useState<string | null>(null);
+  const [activeGenerationMeta, setActiveGenerationMeta] = useState<{
+    productName?: string;
+    brandName?: string;
+    tone?: string;
+    productPrice?: string;
+  } | null>(null);
 
   const [pendingExpressDraft, setPendingExpressDraft] = useState<{
     product_name: string;
@@ -196,7 +213,23 @@ function CampaignsContent() {
 
   // Read from sessionStorage for auto-fill (client-only init from external store)
   useEffect(() => {
-    const draftStr = sessionStorage.getItem("campaign_draft");
+    let pendingRaw: string | null;
+    let draftStr: string | null;
+    try {
+      pendingRaw = sessionStorage.getItem(PENDING_GENERATION_KEY);
+      draftStr = sessionStorage.getItem("campaign_draft");
+    } catch {
+      setErrorMsg("Browser session storage is unavailable. Please enable it before generating a brief.");
+      setLoadingDraft(false);
+      return;
+    }
+    const pending = parsePendingGeneration(pendingRaw);
+    if (pending) {
+      setPendingRecovery(pending);
+      setLoadingDraft(false);
+      return;
+    }
+    clearPendingGeneration();
     if (draftStr) {
       try {
         const draft = JSON.parse(draftStr);
@@ -205,8 +238,8 @@ function CampaignsContent() {
             productName: draft.product_name,
             autoFilledFromStore: true,
           };
-          if (draft.product_description)
-            formValues.description = draft.product_description;
+          formValues.description =
+            draft.product_description || draft.product_name;
           if (draft.product_price) formValues.productPrice = draft.product_price;
           if (draft.product_variants)
             formValues.productVariants = draft.product_variants;
@@ -218,6 +251,11 @@ function CampaignsContent() {
           if (draft.product_image) applyDraftImage(draft.product_image);
 
           if (draft.express_launch) {
+            setActiveGenerationMeta({
+              productName: draft.product_name,
+              tone: draft.tone_preference || "Let AI decide",
+              productPrice: draft.product_price,
+            });
             setPendingExpressDraft(draft);
             setViewState("generating");
           } else {
@@ -231,6 +269,83 @@ function CampaignsContent() {
     }
     setLoadingDraft(false);
   }, [applyDraft, applyDraftImage]);
+
+  // A lost response must be checked against the committed receipt before the
+  // browser can start another credit-bearing generation.
+  useEffect(() => {
+    if (!pendingRecovery || !userLoaded) return;
+    if (!user?.id || (pendingRecovery.userId && pendingRecovery.userId !== user.id)) {
+      clearPendingGeneration();
+      setPendingRecovery(null);
+      setViewState("selection");
+      return;
+    }
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | null = null;
+    const deadline = recoveryAttempt > 0
+      ? Date.now()
+      : Math.min(pendingRecovery.startedAt + 195_000, Date.now() + 195_000);
+    setRecoveryStatus("checking");
+
+    const checkReceipt = async () => {
+      controller = new AbortController();
+      const timeout = setTimeout(() => controller?.abort(), 15_000);
+      try {
+        const response = await fetch(
+          `/api/campaigns/generate/receipt?requestId=${encodeURIComponent(pendingRecovery.requestId)}`,
+          { cache: "no-store", signal: controller.signal },
+        );
+        if (cancelled) return;
+        if (response.status === 202) {
+          if (Date.now() < deadline) {
+            timer = setTimeout(checkReceipt, 5_000);
+          } else {
+            setRecoveryStatus("unconfirmed");
+          }
+          return;
+        }
+        if (!response.ok) {
+          setRecoveryStatus("unavailable");
+          return;
+        }
+        const { receipt } = await response.json();
+        if (cancelled) return;
+        const campaignId = receipt?.campaignId;
+        const versionId = receipt?.versionId;
+        if (typeof campaignId !== "string" || !/^[0-9a-f-]{36}$/i.test(campaignId)) {
+          setRecoveryStatus("unavailable");
+          return;
+        }
+        clearPendingGeneration();
+        queryClient.invalidateQueries({ queryKey: BRIEFS_QUERY_KEY });
+        queryClient.invalidateQueries({ queryKey: CREDITS_QUERY_KEY });
+        const versionQuery = typeof versionId === "string" && /^[0-9a-f-]{36}$/i.test(versionId)
+          ? `?version=${encodeURIComponent(versionId)}`
+          : "";
+        router.replace(`/campaigns/${campaignId}${versionQuery}`);
+      } catch {
+        if (!cancelled) setRecoveryStatus("unavailable");
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+
+    void checkReceipt();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      controller?.abort();
+    };
+  }, [pendingRecovery, recoveryAttempt, userLoaded, user?.id, queryClient, router]);
+
+  // Clear the recovery marker only after the saved result is visible in Review.
+  useEffect(() => {
+    if (viewState === "review" && campaignId && !pendingRecovery) {
+      clearPendingGeneration();
+    }
+  }, [viewState, campaignId, pendingRecovery]);
 
   // The draft can load before the shared store query on a cold navigation.
   useEffect(() => {
@@ -322,24 +437,36 @@ function CampaignsContent() {
     });
     if (errors.length > 0) {
       setErrorMsg(errors.join(". "));
-      setViewState("input");
+      if (isRegeneration || generatedCopy || variations.length > 0) {
+        setViewState("review");
+      } else {
+        setViewState("input");
+      }
       return;
     }
 
     generatingRef.current = true;
+    setActiveGenerationMeta({
+      productName: activeProductName,
+      brandName: activeBrandName,
+      tone: activeTone,
+      productPrice: activeProductPrice,
+    });
     setViewState("generating");
     setErrorMsg("");
     setShowBuyCredits(false);
     setHooksRetryError(null);
 
-    const {
-      gatewayInsight: derivedGatewayInsight,
-      storeDataForApi,
-      storePrices,
-    } = buildGenerationContext(storeInsights, activeProductName);
-    if (derivedGatewayInsight) setGatewayInsight(derivedGatewayInsight);
-
+    let pendingRequest: PendingGeneration | null = null;
+    let responseConfirmed = false;
     try {
+      const {
+        gatewayInsight: derivedGatewayInsight,
+        storeDataForApi,
+        storePrices,
+      } = buildGenerationContext(storeInsights, activeProductName);
+      if (derivedGatewayInsight) setGatewayInsight(derivedGatewayInsight);
+
       const requestKey = JSON.stringify([
         activeBrandName,
         activeProductName,
@@ -353,6 +480,16 @@ function CampaignsContent() {
       ]);
       if (generationRequestRef.current?.key !== requestKey) {
         generationRequestRef.current = { key: requestKey, id: crypto.randomUUID() };
+      }
+      pendingRequest = {
+        requestId: generationRequestRef.current.id,
+        userId: user?.id ?? null,
+        campaignId,
+        startedAt: Date.now(),
+      };
+      if (!savePendingGeneration(pendingRequest)) {
+        responseConfirmed = true;
+        throw new Error("Browser session storage is unavailable. Please enable it before generating a brief.");
       }
       const res = await fetch("/api/campaigns/generate", {
         method: "POST",
@@ -383,15 +520,25 @@ function CampaignsContent() {
       const data = await res.json();
 
       if (res.status === 402 || data.error === "no_credits") {
+        responseConfirmed = true;
+        clearPendingGeneration();
         setErrorMsg(
           "You have no briefs remaining. Purchase a pack to continue.",
         );
         setShowBuyCredits(true);
-        setViewState("input");
+        if (isRegeneration || generatedCopy || variations.length > 0) {
+          setViewState("review");
+        } else {
+          setViewState("input");
+        }
         return;
       }
 
       if (!res.ok) {
+        if (res.status < 500) {
+          responseConfirmed = true;
+          clearPendingGeneration();
+        }
         const errorDetail =
           typeof data.error === "object"
             ? data.error.message || JSON.stringify(data.error)
@@ -399,6 +546,7 @@ function CampaignsContent() {
         throw new Error(errorDetail || "API returned an error");
       }
 
+      responseConfirmed = true;
       generationRequestRef.current = null;
       setGeneratedAt(data.briefData?.generatedAt);
       setProductAiInsights(data.aiInsights);
@@ -442,6 +590,7 @@ function CampaignsContent() {
         );
       }
       queryClient.invalidateQueries({ queryKey: CREDITS_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: BRIEFS_QUERY_KEY });
 
       if (isRegeneration) setRegenerateCount((prev) => prev + 1);
 
@@ -449,19 +598,31 @@ function CampaignsContent() {
       setHooksLoading(false);
     } catch (err) {
       console.error(err);
+      if (!responseConfirmed && pendingRequest) {
+        setPendingRecovery(pendingRequest);
+        setRecoveryStatus("checking");
+        return;
+      }
       setErrorMsg(
         err instanceof Error
           ? err.message
           : "Something went wrong. Please try again.",
       );
-      setViewState("input");
+      if (isRegeneration || generatedCopy || variations.length > 0) {
+        setViewState("review");
+      } else {
+        setViewState("input");
+      }
     } finally {
       generatingRef.current = false;
+      setActiveGenerationMeta(null);
     }
   };
 
   const handleStartOver = (targetState?: CampaignState | React.MouseEvent) => {
     const finalState = typeof targetState === "string" ? targetState : "media";
+    clearPendingGeneration();
+    setPendingRecovery(null);
     resetForm();
     setGeneratedCopy(null);
     setProductAiInsights(null);
@@ -475,6 +636,8 @@ function CampaignsContent() {
     setIsFinalizingBrief(false);
     setHooksLoading(false);
     setHooksRetryError(null);
+    setActiveGenerationMeta(null);
+    generationRequestRef.current = null;
     resetMedia();
     setViewState(finalState);
   };
@@ -622,6 +785,8 @@ function CampaignsContent() {
   };
 
   const handleCreateNewBrief = () => {
+    clearPendingGeneration();
+    generationRequestRef.current = null;
     resetForm();
     resetMedia();
     setGeneratedCopy(null);
@@ -642,13 +807,17 @@ function CampaignsContent() {
   // never persisted (persistence during generation is best-effort).
   const handleGenerateBrief = async () => {
     if (!campaignId || !generatedCopy) {
-      setViewState("brief");
+      setErrorMsg("Your saved brief could not be confirmed. Please try again.");
+      return;
+    }
+    const targetVersionId =
+      currentVersionId || variations[selectedVariationIndex]?.versionId || null;
+    if (!targetVersionId) {
+      setErrorMsg("The selected variation could not be found. Please try again.");
       return;
     }
     setIsFinalizingBrief(true);
     setErrorMsg("");
-    const targetVersionId =
-      currentVersionId || variations[selectedVariationIndex]?.versionId || null;
     try {
       const briefData = {
         generatedAt,
@@ -679,14 +848,13 @@ function CampaignsContent() {
         }),
       });
       if (!saveResponse.ok) {
-        console.warn("Brief finalize PUT returned non-ok status:", saveResponse.status);
+        throw new Error("Your chosen variation could not be saved. Please retry.");
       }
-      // The brief is now finalized — refresh the history so it appears there.
       queryClient.invalidateQueries({ queryKey: BRIEFS_QUERY_KEY });
     } catch (err) {
       console.warn("Brief finalize PUT failed:", err);
-      // Copy is already persisted from generation; brief_data just enriches the
-      // page. Navigate regardless so the user always reaches their brief.
+      setErrorMsg("Your chosen variation could not be saved. Please retry.");
+      return;
     } finally {
       setIsFinalizingBrief(false);
     }
@@ -698,6 +866,42 @@ function CampaignsContent() {
       <div className="flex min-h-[60vh] items-center justify-center">
         <Spinner size="lg" />
       </div>
+    );
+  }
+
+  if (pendingRecovery) {
+    return (
+      <PageContainer width="wide">
+        <div className="mx-auto mt-16 max-w-lg rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
+          {recoveryStatus === "checking" && <div className="mb-4 flex justify-center"><Spinner size="lg" /></div>}
+          <h1 className="text-xl font-semibold text-foreground">Checking your last brief</h1>
+          <p className="mt-3 text-sm text-muted-foreground">
+            {recoveryStatus === "checking"
+              ? "Your previous request may still be finishing. We are checking its saved result before another brief can start. This check does not use a credit."
+              : recoveryStatus === "unconfirmed"
+                ? "There is no saved result yet. The request may still be finishing. Check again or look for it in your saved briefs."
+                : "We could not check the save status right now. Your request is still protected from an accidental repeat."}
+          </p>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            {recoveryStatus !== "checking" && (
+              <button type="button" onClick={() => setRecoveryAttempt((value) => value + 1)} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+                Check again
+              </button>
+            )}
+            <Link href={pendingRecovery.campaignId ? `/campaigns/${pendingRecovery.campaignId}` : "/briefs"} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-foreground hover:bg-surface-subtle">
+              Open saved briefs
+            </Link>
+          </div>
+          {recoveryStatus !== "checking" && (
+            <div className="mt-6 border-t border-border pt-4">
+              <p className="text-xs text-muted-foreground">Starting another brief later may use another credit if this one finishes.</p>
+              <button type="button" onClick={() => handleStartOver("selection")} className="mt-2 text-sm font-medium text-muted-foreground underline hover:text-foreground">
+                Start a new brief
+              </button>
+            </div>
+          )}
+        </div>
+      </PageContainer>
     );
   }
 
@@ -713,17 +917,22 @@ function CampaignsContent() {
   }
 
   if (viewState === "generating") {
+    const displayProductName = activeGenerationMeta?.productName ?? productName;
+    const displayBrandName = activeGenerationMeta?.brandName ?? brandName;
+    const displayTone = activeGenerationMeta?.tone ?? tone;
+    const displayPrice = activeGenerationMeta?.productPrice ?? productPrice;
+
     return (
       <PageContainer width="wide">
         <GeneratingState
-          productName={productName}
-          brandName={brandName}
-          tonePreference={tone}
-          productPrice={productPrice}
+          productName={displayProductName}
+          brandName={displayBrandName}
+          tonePreference={displayTone}
+          productPrice={displayPrice}
           storeCurrency={storeInsights?.store?.currency}
           budgetCalculation={aiInsights?.budget?.calculation}
           isGateway={(
-            gatewayInsight?.currentProductName?.toLowerCase() === productName.trim().toLowerCase()
+            gatewayInsight?.currentProductName?.toLowerCase() === displayProductName.trim().toLowerCase()
               ? gatewayInsight.currentProductClassification
               : gatewayClassification
           )?.toLowerCase() === "gateway"}
@@ -735,7 +944,11 @@ function CampaignsContent() {
 
   return (
     <PageContainer width="wide" className="pb-24 lg:pb-12">
-      {errorMsg && viewState !== "input" && <p role="alert" className="mb-4 text-red-600">{errorMsg}</p>}
+      {errorMsg && viewState !== "input" && viewState !== "review" && (
+        <p role="alert" className="mb-4 text-red-600">
+          {errorMsg}
+        </p>
+      )}
       {/* items-start lets StepRail's built-in lg:sticky pin while the right column scrolls */}
       <div className="grid gap-8 lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start">
         <StepRail activeIndex={STEP_INDEX[viewState]} />

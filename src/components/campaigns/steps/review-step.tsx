@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, Check, FileText, ImageIcon, Info, Layers, Loader2, RefreshCw, RotateCcw, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowRight, Check, FileText, ImageIcon, Info, Layers, Loader2, RefreshCw, RotateCcw, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -137,7 +137,7 @@ export function ReviewStep({
           </div>
 
           {/* Quick Voice Switcher */}
-          {regenerateCount < 3 && (
+          {regenerateCount < 3 ? (
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-xs text-muted-foreground mr-1">
                 Try another voice:
@@ -172,8 +172,18 @@ export function ReviewStep({
                 </Button>
               )}
             </div>
+          ) : (
+            <div className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">3 free voice variations used</span> (pick your favourite below)
+            </div>
           )}
         </div>
+        {errorMsg && (
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50/80 px-3 py-2 text-xs font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+            <AlertCircle className="size-4 shrink-0 text-red-600 dark:text-red-400" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
       </div>
 
       {variations.length > 1 && (

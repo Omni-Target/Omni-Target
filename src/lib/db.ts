@@ -704,15 +704,15 @@ export async function listUserBriefCampaigns(userId: string, limit = 100) {
       "id, brand_name, product_name, product_description, product_price, media_url, headline, cta, status, created_at",
     )
     .eq("clerk_user_id", userId)
-    // Only finalized briefs (the ones the user proceeded with) — brief_data is
-    // written at finalize, so abandoned drafts never clutter the history.
+    // Generation writes brief_data in the same transaction as the credit debit,
+    // so a saved draft remains discoverable if the browser loses the response.
     .not("brief_data", "is", null)
     .order("created_at", { ascending: false })
     .limit(limit);
 
   if (error) {
     console.error("Error in listUserBriefCampaigns:", error);
-    return [];
+    throw new Error("Could not load saved briefs.");
   }
   const rows = data || [];
   if (rows.length === 0) return rows;
@@ -754,57 +754,64 @@ export async function insertCreditUsage(userId: string, creditsUsed: number, act
   }
 }
 
-/**
- * Log token usage for Anthropic API calls.
- * Runs asynchronously and catches errors so it doesn't block the main thread.
- */
+/** Record every billed token category, including prompt-cache reads and writes. */
 export async function logApiUsage(
   userId: string | null,
   feature: string,
-  inputTokens: number,
-  outputTokens: number
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number | null;
+    cache_read_input_tokens?: number | null;
+  },
+  model: string,
 ) {
   if (!userId) return;
-  const totalTokens = inputTokens + outputTokens;
-  
-  supabaseAdmin
-    .from("api_usage_log")
-    .insert({
+  const cacheCreation = usage.cache_creation_input_tokens ?? 0;
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  try {
+    const { error } = await supabaseAdmin.from("api_usage_log").insert({
       user_id: userId,
       feature,
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      total_tokens: totalTokens,
-    })
-    .then(
-      ({ error }) => {
-        if (error) {
-          console.error("Failed to log API usage to Supabase:", error);
-        }
-      },
-      (err: unknown) => {
-        console.error("Exception logging API usage:", err);
-      }
-    );
+      model,
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      cache_creation_input_tokens: cacheCreation,
+      cache_read_input_tokens: cacheRead,
+      total_tokens: usage.input_tokens + cacheCreation + cacheRead + usage.output_tokens,
+    });
+    if (error) console.error("Failed to log API usage to Supabase:", error);
+  } catch (error) {
+    console.error("Exception logging API usage:", error);
+  }
 }
 
 /** Read an existing generation receipt before repeating expensive model calls. */
 export async function getGenerationReceipt(userId: string, requestId: string, requestHash: string) {
-  try {
-    const { data, error } = await supabaseAdmin.from("brief_generation_receipts")
-      .select("request_hash,response").eq("clerk_user_id", userId).eq("request_id", requestId).maybeSingle();
-    if (error) {
-      // Table doesn't exist yet (migration 0009 pending in Supabase)
-      if (error.code === "PGRST205" || error.code === "42P01") return null;
-      console.warn("getGenerationReceipt error:", error.message);
-      return null;
-    }
-    if (data && data.request_hash !== requestHash) throw new Error("idempotency_conflict");
-    return data?.response ?? null;
-  } catch (err) {
-    if (err instanceof Error && err.message === "idempotency_conflict") throw err;
-    return null;
+  const { data, error } = await supabaseAdmin.from("brief_generation_receipts")
+    .select("request_hash,response").eq("clerk_user_id", userId).eq("request_id", requestId).maybeSingle();
+  if (error) {
+    console.error("Could not verify prior generation request:", error.message, error.code);
+    throw new Error("Could not verify prior generation request.");
   }
+  if (data && data.request_hash !== requestHash) throw new Error("idempotency_conflict");
+  return data?.response ?? null;
+}
+
+/** Read a completed request after the browser lost its generation response. */
+export async function getGenerationReceiptById(userId: string, requestId: string): Promise<Record<string, unknown> | null> {
+  const { data, error } = await supabaseAdmin.from("brief_generation_receipts")
+    .select("response")
+    .eq("clerk_user_id", userId)
+    .eq("request_id", requestId)
+    .maybeSingle();
+  if (error) {
+    console.error("Could not check generation receipt:", error.message, error.code);
+    throw new Error("Could not check whether the brief was saved.");
+  }
+  return data?.response && typeof data.response === "object" && !Array.isArray(data.response)
+    ? data.response as Record<string, unknown>
+    : null;
 }
 
 /** Stop regenerations before model calls when the atomic save fix is not deployed. */

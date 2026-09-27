@@ -13,6 +13,9 @@ import {
   CreativeHookGenerationError,
   generateRecommendations,
 } from "@/lib/insights-engine";
+import type { MetaRecommendations } from "@/lib/insights-engine";
+import { reusableRecommendationsFromVersions } from "@/lib/campaigns/reuse-insights";
+import { canonicalRegenerationProduct } from "@/lib/campaigns/regeneration-product";
 import type { StoreProduct } from "@/lib/store-data";
 
 import { detectColumns } from "@/lib/billing-db";
@@ -270,21 +273,32 @@ export async function POST(request: Request) {
     const receipt = await getGenerationReceipt(userId!, requestId, requestHash);
     if (receipt) return NextResponse.json(receipt);
     const isRegeneration = body.isRegeneration === true;
+    let reusableRecommendations: MetaRecommendations | null = null;
     if (isRegeneration) {
       const campaign = body.campaignId ? await getCampaignById(userId!, body.campaignId) : null;
       const versions = campaign ? await getBriefVersions(userId!, campaign.id) : [];
-      if (!campaign || !versions.length || versions.length >= 4 ||
-          campaign.product_name !== body.productName ||
-          campaign.product_description !== body.productDescription ||
-          campaign.campaign_goal !== (body.campaignGoal || "Drive Website Sales") ||
-          campaign.product_price !== (body.productPrice || null)) {
-        return NextResponse.json({ error: "Free regeneration requires the same saved product and allows up to three alternatives." }, { status: 409 });
+      if (!campaign || !versions.length) {
+        return NextResponse.json({ error: "Original brief session not found. Please create a brief first." }, { status: 404 });
       }
+      if (versions.length >= 4) {
+        return NextResponse.json({ error: "Free variations are limited to three alternatives per brief." }, { status: 409 });
+      }
+
+      const canonicalProduct = canonicalRegenerationProduct(campaign, body);
+      if (!canonicalProduct) {
+        return NextResponse.json({ error: "Voice variations require the same saved product details. Start a new brief if the product changed." }, { status: 409 });
+      }
+      Object.assign(body, canonicalProduct);
       if (!await isBriefRegenerationCommitReady()) {
         return NextResponse.json({
           error: "Voice variations are temporarily unavailable while the brief save is being updated. No AI call was made. Please try again later.",
         }, { status: 503 });
       }
+      reusableRecommendations = reusableRecommendationsFromVersions(
+        versions,
+        body.productName!,
+        body.campaignGoal || "Drive Website Sales",
+      );
     }
 
     // Credit gate: block only if user has no credits AND it's not a free regeneration
@@ -622,6 +636,13 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
       messageContent.push(...resolvedFrames);
     }
 
+    // The media stays identical across voice variations. Cache it separately
+    // from the tone-specific text so later variations can reuse image tokens.
+    const lastVisualBlock = messageContent[messageContent.length - 1];
+    if (lastVisualBlock?.type === "image") {
+      lastVisualBlock.cache_control = { type: "ephemeral" };
+    }
+
     messageContent.push({
       type: "text",
       text: textContent,
@@ -683,12 +704,7 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
     });
 
     if (userId) {
-      logApiUsage(
-        userId,
-        "brief_generation",
-        message.usage.input_tokens,
-        message.usage.output_tokens
-      );
+      await logApiUsage(userId, "brief_generation", message.usage, message.model);
     }
 
     console.log("[Anthropic Prompt Caching - Copy Generation]", {
@@ -799,6 +815,7 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
             },
           ],
         });
+        await logApiUsage(userId, "copy_validation_retry", retryMessage.usage, retryMessage.model);
 
         const retryBlock = retryMessage.content.find((b) => b.type === "text");
         if (retryBlock && retryBlock.type === "text") {
@@ -857,7 +874,9 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
         ? parsedResponse.angleUsed.trim() || null
         : null;
 
-    const recommendations = await generateRecommendations(
+    // A voice change keeps the product and campaign settings. Reuse the saved
+    // audience, budget and hooks instead of regenerating the full profile.
+    const recommendations = reusableRecommendations ?? await generateRecommendations(
       integration.store_snapshot, undefined, userId, targetProductOverride, angleUsed
     );
     const generatedAt = new Date().toISOString();
