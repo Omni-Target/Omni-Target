@@ -175,7 +175,7 @@ export function ProductIntelCard({
 
       {decision && !isNewLaunch && (
         <details className="mt-3 rounded-lg border border-border-subtle px-3 py-2 text-xs text-muted-foreground">
-          <summary className="cursor-pointer font-semibold text-foreground">Product evidence and test readiness</summary>
+          <summary className="cursor-pointer font-semibold text-foreground">Why we chose this product</summary>
           <div className="mt-2 space-y-2 leading-relaxed">
             <p className="text-foreground">
               {decision.role === "Gateway"
