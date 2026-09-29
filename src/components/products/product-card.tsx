@@ -56,7 +56,7 @@ export function ProductCard({
   );
 
   const stockReason = product.product_decision?.readiness_reasons?.find((r) =>
-    r.includes("variants in stock")
+    /^\d+ of \d+ variants in stock/.test(r)
   );
   const partialStockText = stockReason
     ? stockReason.replace("variants in stock.", "in stock").replace("variants in stock", "in stock")
@@ -106,10 +106,13 @@ export function ProductCard({
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {classificationBadge(product.gateway_classification, product.product_decision?.role_confidence)}
           {hasEstablishedRole && product.product_decision?.test_readiness === "planning_candidate" && (
-            <Badge variant="brand" size="sm">Ready to Test</Badge>
+            <Badge variant="brand" size="sm">Planning Candidate</Badge>
           )}
           {hasEstablishedRole && product.product_decision?.test_readiness === "review" && partialStockText && (
             <Badge variant="warning" size="sm">{partialStockText}</Badge>
+          )}
+          {hasEstablishedRole && product.product_decision?.return_evidence?.risk === "review" && (
+            <Badge variant="warning" size="sm">Review returns</Badge>
           )}
           {!label.best && (
             <span className={cn("text-xs font-medium", labelTone[label.tone])}>

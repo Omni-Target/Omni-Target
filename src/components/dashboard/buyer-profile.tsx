@@ -4,10 +4,14 @@ import { formatCurrency } from "@/lib/currency";
 
 export interface BuyerProfileProps {
   locationText: string;
+  internationalLocationText?: string;
+  locationSubText?: string;
   locationLevel?: "city" | "country" | "commercial_hubs" | "missing";
   peakDays: string[];
   aov: number;
   repeatRate: number;
+  medianDaysToSecondOrder?: number | null;
+  repeatBuyersObserved?: number;
   currency: string;
   topChannel?: string;
   topChannelPercentage?: number;
@@ -33,7 +37,7 @@ function Row({
         <p className="text-xs font-medium uppercase tracking-wide text-faint-foreground">
           {label}
         </p>
-        <p className="mt-0.5 text-sm font-medium text-foreground">{value}</p>
+        <div className="mt-0.5 text-sm font-medium text-foreground">{value}</div>
         {sub && <p className="mt-0.5 text-xs text-muted-foreground">{sub}</p>}
       </div>
     </div>
@@ -42,16 +46,20 @@ function Row({
 
 export function BuyerProfile({
   locationText,
+  internationalLocationText,
+  locationSubText,
   locationLevel = "city",
   peakDays,
   aov,
   repeatRate,
+  medianDaysToSecondOrder,
+  repeatBuyersObserved,
   currency,
   topChannel,
   topChannelPercentage,
 }: BuyerProfileProps) {
-  const hasIntl = /United States|United Kingdom|London|New York|Canada|Ghana|Houston/i.test(locationText);
-  const locationSub =
+  const hasIntl = !!internationalLocationText || /United States|United Kingdom|London|New York|Canada|Ghana|Houston/i.test(locationText);
+  const locationSub = locationSubText || (
     locationLevel === "commercial_hubs" || locationLevel === "country"
       ? hasIntl
         ? "Top commercial hubs · Cross-border orders recorded (ideal for diaspora targeting)"
@@ -59,8 +67,9 @@ export function BuyerProfile({
       : locationLevel === "missing"
         ? "Broad market targeting recommended for initial ad tests"
         : hasIntl
-          ? "Cross-border demand recorded in UK & US · Ideal for high-margin diaspora targeting"
-          : "Proven buyer locations recorded directly from your past customer orders";
+          ? "Cross-border demand recorded · Ideal for high-margin diaspora targeting"
+          : "Proven buyer locations recorded directly from your past customer orders"
+  );
 
   const isHighAov = currency === "NGN" ? aov >= 100000 : aov >= 75;
   const isMidAov = currency === "NGN" ? aov >= 30000 : aov >= 35;
@@ -72,8 +81,9 @@ export function BuyerProfile({
         ? "Balanced everyday basket · Showcase versatility and real-world styling"
         : "Accessible impulse price · Highlight bundle value and fast checkout";
 
-  const loyaltySub =
-    repeatRate < 0.15
+  const loyaltySub = medianDaysToSecondOrder != null && (repeatBuyersObserved ?? 0) >= 5
+    ? `Repeat buyers typically order again within ~${Math.round(medianDaysToSecondOrder)} days (based on ${repeatBuyersObserved} repeat buyers) · Prime window for post-purchase flows`
+    : repeatRate < 0.15
       ? "Focus ad creative on converting first-time buyers with an irresistible starter piece"
       : repeatRate <= 0.3
         ? "Solid repeat baseline · Pair new buyer acquisition with retargeting"
@@ -90,7 +100,22 @@ export function BuyerProfile({
         <CardTitle>Your buyers</CardTitle>
       </CardHeader>
       <div className="space-y-5 px-6 pb-6">
-        <Row icon={<MapPin />} label="Where they buy from" value={locationText} sub={locationSub} />
+        <Row
+          icon={<MapPin />}
+          label="Where they buy from"
+          value={
+            <div>
+              <div>{locationText}</div>
+              {internationalLocationText && (
+                <div className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-purple-600">
+                  <span role="img" aria-label="International">🌍</span>
+                  <span>International: {internationalLocationText}</span>
+                </div>
+              )}
+            </div>
+          }
+          sub={locationSub}
+        />
         {topChannel && (
           <Row
             icon={<Compass />}

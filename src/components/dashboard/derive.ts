@@ -3,13 +3,20 @@
 import { getAdvantagePlusGuidance } from "@/lib/advantage-plus";
 import { formatCurrency } from "@/lib/currency";
 import { calculateAdReadinessScore } from "@/lib/ad-readiness-score";
-import { detectDiasporaLocations, isFallbackCountryEntry } from "@/lib/market-geography";
+import {
+  detectDiasporaLocations,
+  isFallbackCountryEntry,
+  getEffectiveStoreCountry,
+  isSameCountry,
+} from "@/lib/market-geography";
 import type { ProductDecisionEvidence, StoreRecentFunnel } from "@/lib/store-data";
 
 export interface OrdersData {
   orders_last_30_days?: number;
   average_order_value?: number;
   repeat_customer_rate?: number;
+  median_days_to_second_order?: number | null;
+  repeat_buyers_observed?: number;
   revenue_last_30_days?: number;
   top_locations?: Array<{ city?: string; country?: string }>;
   top_order_countries?: Array<{ country: string; order_count: number }>;
@@ -125,7 +132,7 @@ export function deriveInsights(orders: OrdersData, currency = "USD", recentFunne
     const conditionalAlt = eventGuidance.event_evidence.conditional_alternative;
 
     const detailText = funnel
-      ? `Shopify recorded ${funnel.completed_checkout_sessions} completed checkouts out of ${funnel.checkout_sessions} checkout sessions. Optimizing for Purchase directly targets paying customers. Confirm Purchase is active in Meta Events Manager before launching${conditionalAlt ? `; consider ${conditionalAlt.event === "InitiateCheckout" ? "Initiate Checkout" : "Add to Cart"} only if Meta Purchase signals prove too sparse.` : "."}`
+      ? `Shopify recorded ${orders30d > 0 ? `${orders30d} orders` : `${funnel.completed_checkout_sessions} completed checkouts`} across ${funnel.checkout_sessions} online checkout sessions in the last 30 days. Optimizing for Purchase directly targets customers ready to pay. Confirm Purchase is active in Meta Events Manager before launching${conditionalAlt ? `; consider ${conditionalAlt.event === "InitiateCheckout" ? "Initiate Checkout" : "Add to Cart"} only if Meta Purchase signals prove too sparse.` : "."}`
       : `Shopify recorded ${orders30d} recent orders. Purchase best matches your goal of acquiring paying buyers. Confirm the Purchase event is active in Meta Events Manager before publishing${orders30d < 15 ? "; if measured purchase signals prove too sparse during testing, consider Initiate Checkout as a backup." : "."}`;
 
     insights.push({
@@ -144,6 +151,23 @@ export function deriveInsights(orders: OrdersData, currency = "USD", recentFunne
       title: `International buyers in ${displayCities}`,
       detail: `You have organic orders coming from ${displayCities}. Test reaching these diaspora communities with clear international shipping terms.`,
     });
+  } else {
+    const effectiveCountry = getEffectiveStoreCountry(undefined, currency, locations);
+    const intlCountries = (orders.top_order_countries || []).filter(
+      (c) => c.order_count > 0 && !isSameCountry(c.country, effectiveCountry)
+    );
+    if (intlCountries.length > 0) {
+      const displayCountries = intlCountries
+        .slice(0, 2)
+        .map((c) => COUNTRY_CODES[c.country] || c.country)
+        .join(" and ");
+      const totalIntlOrders = intlCountries.reduce((sum, c) => sum + (c.order_count || 0), 0);
+      insights.push({
+        kind: "diaspora",
+        title: `International buyers in ${displayCountries}`,
+        detail: `You have ${totalIntlOrders} organic orders recorded from ${displayCountries}. Test reaching these overseas shoppers with dedicated ads and transparent international delivery.`,
+      });
+    }
   }
 
   // 4. Launch Timing & Pacing
@@ -212,11 +236,187 @@ const COMMERCIAL_HUBS: Record<string, string[]> = {
   dubai: ["Dubai", "Abu Dhabi"],
 };
 
+const COUNTRY_TO_ISO: Record<string, string> = {
+  nigeria: "NG",
+  unitedstates: "US",
+  unitedkingdom: "UK",
+  canada: "CA",
+  ghana: "GH",
+  kenya: "KE",
+  southafrica: "ZA",
+  australia: "AU",
+  germany: "DE",
+  france: "FR",
+  ireland: "IE",
+  netherlands: "NL",
+  unitedarabemirates: "UAE",
+  dubai: "UAE",
+  india: "IN",
+  japan: "JP",
+  brazil: "BR",
+  italy: "IT",
+  spain: "ES",
+  switzerland: "CH",
+  sweden: "SE",
+  belgium: "BE",
+  newzealand: "NZ",
+  qatar: "QA",
+  saudiarabia: "SA",
+};
+
 function normalizeCountryKey(c: string): string {
   return c.toLowerCase().replace(/[^a-z]/g, "");
 }
 
-export function deriveLocationText(orders: OrdersData): string {
+export interface BuyerLocationInfo {
+  domesticText: string;
+  internationalText?: string;
+  subtext: string;
+  hasInternational: boolean;
+  totalInternationalOrders: number;
+}
+
+/**
+ * Derives top 3 domestic buyer hubs and top 3 cross-border/international destinations,
+ * with dynamic order count aggregation and tailored strategic subtext.
+ */
+export function deriveBuyerLocations(
+  orders: OrdersData,
+  storeCountry?: string,
+  currency?: string
+): BuyerLocationInfo {
+  const top = orders.top_locations || [];
+  const validLocations = top.filter((loc) => !isFallbackCountryEntry(loc) && loc.city);
+  const effectiveCountry = getEffectiveStoreCountry(storeCountry, currency, top);
+
+  // 1. Split valid recorded locations into Domestic vs International
+  const domesticLocations = validLocations.filter((l) =>
+    isSameCountry(l.country || "", effectiveCountry)
+  );
+  const internationalLocations = validLocations.filter((l) =>
+    !isSameCountry(l.country || "", effectiveCountry)
+  );
+
+  // 2. Format Top 3 Domestic Cities (Clean without redundant home country tags)
+  let domesticText = "";
+  if (domesticLocations.length > 0) {
+    domesticText = domesticLocations
+      .slice(0, 3)
+      .map((l) => l.city!.trim())
+      .join(" · ");
+  } else {
+    // If no domestic cities recorded, check commercial hubs fallback
+    const countryOrders = (orders.top_order_countries || []).filter((entry) => entry.order_count > 0);
+    const candidateCountries: string[] = countryOrders.length > 0
+      ? countryOrders.map((e) => e.country)
+      : [
+          ...new Set(
+            top
+              .map((l) => COUNTRY_CODES[l.country || ""] || l.country || l.city || "")
+              .filter(Boolean),
+          ),
+        ];
+
+    const primaryCountry = candidateCountries[0] || effectiveCountry;
+    const primaryKey = normalizeCountryKey(primaryCountry);
+    const primaryHubs = COMMERCIAL_HUBS[primaryKey] || [];
+    if (primaryHubs.length > 0) {
+      domesticText = primaryHubs.slice(0, 3).join(" · ");
+    } else if (candidateCountries.length > 0) {
+      domesticText = candidateCountries
+        .slice(0, 3)
+        .map((c) => COUNTRY_CODES[c] || c)
+        .join(" · ");
+    } else {
+      domesticText = "No order locations available";
+    }
+  }
+
+  // 3. International Orders & Locations (Top 3)
+  const countryOrders = orders.top_order_countries || [];
+  const intlCountryOrders = countryOrders.filter(
+    (c) => c.order_count > 0 && !isSameCountry(c.country, effectiveCountry)
+  );
+  const totalInternationalOrders = intlCountryOrders.reduce(
+    (sum, c) => sum + (c.order_count || 0),
+    0
+  );
+
+  const intlEntries: string[] = [];
+  const seenCountries = new Set<string>();
+
+  // A. Add up to 3 recorded international cities first (e.g. "Burlington (US)")
+  for (const loc of internationalLocations) {
+    if (intlEntries.length >= 3) break;
+    const rawCountry = loc.country || "";
+    const normKey = normalizeCountryKey(rawCountry);
+    const iso =
+      COUNTRY_TO_ISO[normKey] ||
+      (/^[A-Z]{2}$/.test(rawCountry) ? rawCountry : COUNTRY_CODES[rawCountry] || rawCountry);
+    const label = iso ? `${loc.city!.trim()} (${iso})` : loc.city!.trim();
+    intlEntries.push(label);
+    if (normKey) seenCountries.add(normKey);
+  }
+
+  // B. If fewer than 3, add non-represented international countries from top_order_countries
+  for (const c of intlCountryOrders) {
+    if (intlEntries.length >= 3) break;
+    const normKey = normalizeCountryKey(c.country);
+    if (!seenCountries.has(normKey)) {
+      const countryDisplay = COUNTRY_CODES[c.country] || c.country;
+      intlEntries.push(countryDisplay);
+      seenCountries.add(normKey);
+    }
+  }
+
+  const hasInternational = intlEntries.length > 0 || totalInternationalOrders > 0;
+  const internationalText = intlEntries.length > 0 ? intlEntries.join(" · ") : undefined;
+
+  // 4. Dynamic Subtext
+  let subtext: string;
+  if (domesticText === "No order locations available") {
+    subtext = "Broad market targeting recommended for initial ad tests";
+  } else if (hasInternational) {
+    const intlNames = [
+      ...new Set(
+        intlCountryOrders
+          .map((c) => COUNTRY_CODES[c.country] || c.country)
+          .concat(internationalLocations.map((l) => COUNTRY_CODES[l.country || ""] || l.country || ""))
+          .filter(Boolean),
+      ),
+    ];
+    const countryList =
+      intlNames.slice(0, 2).join(" & ") + (intlNames.length > 2 ? " & more" : "");
+    const countPart =
+      totalInternationalOrders > 0 ? ` (${totalInternationalOrders} orders)` : "";
+    subtext = countryList
+      ? `Cross-border demand recorded in ${countryList}${countPart} · Ideal for high-margin diaspora targeting`
+      : `Cross-border demand recorded${countPart} · Ideal for high-margin diaspora targeting`;
+  } else {
+    subtext = "Proven buyer locations recorded directly from your past customer orders";
+  }
+
+  return {
+    domesticText,
+    internationalText,
+    subtext,
+    hasInternational,
+    totalInternationalOrders,
+  };
+}
+
+export function deriveLocationText(
+  orders: OrdersData,
+  storeCountry?: string,
+  currency?: string
+): string {
+  if (storeCountry || currency) {
+    const info = deriveBuyerLocations(orders, storeCountry, currency);
+    return info.internationalText
+      ? `${info.domesticText} · ${info.internationalText}`
+      : info.domesticText;
+  }
+
   const formatLocation = (l: { city?: string; country?: string }) => {
     const countryDisplay = COUNTRY_CODES[l.country || ""] || l.country || "";
     return countryDisplay && countryDisplay.toLowerCase() !== l.city?.toLowerCase()
@@ -285,8 +485,8 @@ export function deriveProductNarrative(p: StoreProductLike): ProductNarrative {
     const decision = p.product_decision;
     const role = decision.role === "Gateway"
       ? decision.role_confidence === "strong"
-        ? "Proven gateway — your top customer acquisition magnet"
-        : "Gateway product — strong entry product for new buyers"
+        ? "Strong first-order gateway evidence"
+        : "Directional first-order gateway evidence"
       : decision.role === "Consideration"
         ? "Repeat favorite — shines in retargeting and follow-up purchases"
         : decision.role === "Hybrid"
@@ -296,11 +496,11 @@ export function deriveProductNarrative(p: StoreProductLike): ProductNarrative {
       decision.test_readiness === "hold"
         ? "Restock inventory before launching ads."
         : decision.test_readiness === "review"
-          ? "Check variant stock & margins before launching."
-          : "In stock and ready to test with ads.";
+          ? "Review stock, costs, and return evidence before spending."
+          : "Planning candidate; confirm delivery and fees before testing.";
     const primaryMetric =
       decision.role === "Gateway"
-        ? `${decision.first_order_count} new customer orders`
+        ? `${decision.first_order_count} of ${decision.identified_first_orders} identified first orders`
         : decision.role === "Consideration"
           ? `${decision.later_order_count} repeat orders`
           : decision.role === "Hybrid"
@@ -327,7 +527,7 @@ export function deriveProductNarrative(p: StoreProductLike): ProductNarrative {
   if (p.gateway_classification === "Insufficient Data") {
     subtext = "New arrival — create an ad brief to introduce it to shoppers";
   } else if (p.gateway_classification === "Gateway") {
-    subtext = "Top customer acquisition product for winning new shoppers";
+    subtext = "First-order gateway signal from accessible store orders";
   } else if (p.gateway_classification === "Consideration") {
     subtext = "Customer favorite for repeat orders and cross-sells";
   } else if (p.gateway_classification === "Hybrid") {

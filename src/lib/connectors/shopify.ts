@@ -1,11 +1,13 @@
 import { StoreAcquisitionChannel, StoreData, StoreLocation, StoreProduct } from "../store-data";
-import { consolidateLocation, consolidateLocationsWithAI } from "../locations";
+import { consolidateLocation, consolidateLocationsWithAI, formatCityName } from "../locations";
 import { fetchWithRetry } from "../http";
 import { getEffectiveStoreCountry } from "../market-geography";
 import { shopifyAdminRestUrl } from "../shopify-config";
 import { fetchShopifyPrespendIntelligence } from "./shopify-intelligence";
 import { buildProductDecisions } from "../gateway-decision";
 import { summarizeOrderCountries } from "../order-geography";
+import { calculateBuyerOutcomes } from "../buyer-outcomes";
+import { validateGatewaySignal } from "../gateway-validation";
 
 // Shopify API types (subset)
 interface ShopifyShop {
@@ -319,7 +321,7 @@ export async function fetchShopifyStoreData(
 
     if (hasCity) {
       const cityTrimmed = city!.trim();
-      const consolidatedCity = aiMapping[cityTrimmed] || consolidateLocation(cityTrimmed);
+      const consolidatedCity = aiMapping[cityTrimmed] || consolidateLocation(cityTrimmed) || formatCityName(cityTrimmed);
       if (consolidatedCity && consolidatedCity !== "Unknown") {
         const displayCountry = hasCountry ? country!.trim() : "Unknown";
         if (!locationMap[consolidatedCity]) {
@@ -401,6 +403,13 @@ export async function fetchShopifyStoreData(
 
   const repeatRate =
     totalCustomers > 0 ? returningCustomers / totalCustomers : 0;
+  const generatedAt = new Date().toISOString();
+  const buyerOutcomes = ingestionComplete
+    ? calculateBuyerOutcomes(orders, generatedAt)
+    : null;
+  const gatewaySignalValidation = ingestionComplete
+    ? validateGatewaySignal(orders, rawProducts.map((product) => product.id), generatedAt)
+    : null;
 
   // STEP 5 — Process products
   // Build maps of product stats from order history
@@ -572,7 +581,6 @@ export async function fetchShopifyStoreData(
     };
   });
 
-  const generatedAt = new Date().toISOString();
   const costCoverageByProduct = new Map(products.map((product) => [product.id, product.unit_cost_coverage]));
   const decisions = buildProductDecisions(
     orders,
@@ -581,13 +589,22 @@ export async function fetchShopifyStoreData(
       variants: product.variants,
       unit_cost_coverage: costCoverageByProduct.get(String(product.id)),
     })),
-    { asOf: generatedAt, ingestionComplete },
+    {
+      asOf: generatedAt,
+      ingestionComplete,
+      buyerOutcomes: buyerOutcomes || undefined,
+      returnEvidence: intelligence.prespend.capabilities.return_evidence?.status === "available"
+        ? intelligence.returns : undefined,
+      returnEvidenceStatus: intelligence.prespend.capabilities.return_evidence?.status,
+    },
   );
   for (const product of products) {
     const decision = decisions.get(Number(product.id));
     if (!decision) continue;
     product.product_decision = decision;
     product.gateway_classification = decision.role;
+    product.high_value_entry = decision.high_value_entry;
+    product.return_evidence = decision.return_evidence;
   }
 
   // Sort products by revenue descending so the AI and dashboard prioritize top sellers
@@ -644,6 +661,8 @@ export async function fetchShopifyStoreData(
       peak_days: peakDays,
       peak_hours: peakHours,
       repeat_customer_rate: Math.round(repeatRate * 100) / 100,
+      median_days_to_second_order: buyerOutcomes?.median_days_to_second_order ?? null,
+      repeat_buyers_observed: buyerOutcomes?.repeat_buyers_observed ?? 0,
       revenue_last_30_days: revenueLast30Days,
       orders_last_30_days: ordersLast30Days.length,
       revenue_last_60_days: ordersLast60Days.reduce(
@@ -661,13 +680,14 @@ export async function fetchShopifyStoreData(
     },
     prespend: intelligence.prespend,
     data_quality: {
-      schema_version: 6,
+      schema_version: 7,
       ingestion_complete: ingestionComplete,
       history_basis: "accessible_paid_orders",
       oldest_order_at: orders.length ? oldestOrderDate.toISOString() : undefined,
       anonymous_orders: anonymousOrders,
       orders_without_city: ordersWithoutCity,
       warnings: qualityWarnings,
+      gateway_signal_validation: gatewaySignalValidation || undefined,
     },
     generated_at: generatedAt,
   };

@@ -1,4 +1,5 @@
 import { fetchWithRetry } from "../http";
+import { fetchShopifyReturnEvidence } from "./shopify-returns";
 import {
   getMissingShopifyScopes,
   shopifyAdminGraphqlUrl,
@@ -12,6 +13,7 @@ import type {
   StoreMarketReadiness,
   StoreMarketingEvidence,
   StorePolicyEvidence,
+  StoreProductReturnEvidence,
   StorePrespendIntelligence,
   StoreShippingZone,
 } from "../store-data";
@@ -31,6 +33,7 @@ interface ProductEnrichment {
 export interface ShopifyIntelligenceResult {
   prespend: StorePrespendIntelligence;
   products: Record<string, ProductEnrichment>;
+  returns: Record<string, StoreProductReturnEvidence>;
   warnings: string[];
 }
 
@@ -670,6 +673,10 @@ export async function fetchShopifyPrespendIntelligence(
       scopes: ["read_products", "read_inventory", "read_metaobjects"],
       run: () => fetchProductEnrichment(shopDomain, accessToken),
     },
+    return_evidence: {
+      scopes: ["read_orders", "read_all_orders", "read_returns"],
+      run: () => fetchShopifyReturnEvidence(shopDomain, accessToken, new Date().toISOString()),
+    },
   } as const;
 
   const entries = Object.entries(tasks);
@@ -721,6 +728,8 @@ export async function fetchShopifyPrespendIntelligence(
     },
     products:
       (result.product_evidence.value as Record<string, ProductEnrichment> | undefined) || {},
+    returns:
+      (result.return_evidence.value as Record<string, StoreProductReturnEvidence> | undefined) || {},
     warnings,
   };
 }

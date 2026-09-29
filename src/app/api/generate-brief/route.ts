@@ -232,6 +232,8 @@ Product Performance & Customer Entry Signals:
 - Role in Store: ${productRole}
 - Test Readiness: ${productDecision ? `${productDecision.test_readiness.replaceAll("_", " ")}. ${productDecision.readiness_reasons.join(" ")}` : "Not assessed in this snapshot"}
 - 60-Day Follow-Up: ${productDecision ? productDecision.follow_up_60d.repeat_rate === null ? "No fully observed first-order cohort yet" : `${productDecision.follow_up_60d.buyers_with_another_order} of ${productDecision.follow_up_60d.eligible_first_order_buyers} eligible first-order buyers placed another store order` : "Unavailable"}
+- High-Spend Buyer Association: ${productDecision?.high_value_entry ? `${productDecision.high_value_entry.high_value_first_buyers_with_product} of ${productDecision.high_value_entry.high_value_buyers} high-spend buyers started with this product versus ${productDecision.high_value_entry.all_first_buyers_with_product} of ${productDecision.high_value_entry.eligible_first_buyers} eligible first buyers overall; observational only` : "Insufficient mature cohort"}
+- Return Evidence: ${productDecision?.return_evidence?.processed_return_rate != null ? `${productDecision.return_evidence.processed_return_units} processed returns among ${productDecision.return_evidence.eligible_units} eligible units in a mature cohort; ${productDecision.return_evidence.refunded_units} refunded units recorded separately` : "Unavailable or insufficient sample"}
 - Primary Customer Traffic Channel: ${primaryTrafficSource}
 - Top Store Acquisition Channels: ${storeTopChannels || "Direct / Organic Discovery"}
 - Customer Reorder Habit: ${reorderHabit}
@@ -261,6 +263,7 @@ Instructions for this generation:
 5. Dynamic Location Intelligence: Infer commercial hubs as acquisition hypotheses, then check them against the Shopify operational-readiness evidence above. A city may still be recommended for demand testing, but its note must say fulfillment is unverified or blocked when its country lacks an active market or shipping method. Do not imply Shopify sales prove future conversion.
 6. Hook Diversity: Use three different primary propositions: one practical problem/outcome, one concrete product proof, and one identity/occasion or verified risk reversal. Do not repeat the same comfort, movement, fit, quality, or confidence claim under different labels.
 7. Marketing Context Awareness: Note the merchant's Shopify Marketing History. If the merchant has no prior paid ad spend recorded, guide the founder on respecting the initial 7-day learning phase and establishing baseline metrics. If the store has previously run paid campaigns, tailor the recommendations to build upon and scale their past acquisition channels.
+8. Evidence Boundary: First-order, high-spend, repeat, and return metrics are internal planning evidence. Do not turn them into customer-facing ad claims, guarantees, or predictions of Meta performance. Feature only this target product in the brief.
 Generate a high-converting Advantage+ campaign brief for "${targetTitle}" following all rules in the system prompt. Call the generate_advantage_plus_profile tool.`;
 
     const respond = (brief: GeneratedBriefResponse, generationStatus: "generated" | "fallback") => NextResponse.json({

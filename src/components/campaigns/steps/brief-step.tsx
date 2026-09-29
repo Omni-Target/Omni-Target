@@ -93,14 +93,14 @@ export function BriefStep({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-brand-950">
-                Gateway Champion
+                First-order gateway signal
               </span>
               <span className="rounded-full bg-brand-200/80 px-2 py-0.5 text-[11px] font-semibold text-brand-800">
-                Top Acquisition Magnet
+                Historical order evidence
               </span>
             </div>
             <p className="mt-1 text-xs leading-relaxed text-brand-800">
-              This product is your top customer magnet — it appears most frequently in new buyers&apos; first orders. That makes it your highest-potential candidate for winning cold shoppers on Meta.
+              {gatewayInsight?.productDecision?.role_reason || "This product appears in first-time buyers’ orders. Review the evidence and readiness before a cold-acquisition test."}
             </p>
             {gatewayInsight?.firstTimeBuyerRatio ? (() => {
               const ftbPct = Math.round(gatewayInsight.firstTimeBuyerRatio * 100);
@@ -117,11 +117,14 @@ export function BriefStep({
 
               return (
                 <div className="mt-2.5 rounded-lg border border-emerald-200 bg-emerald-50/80 p-2.5 text-xs text-emerald-900 leading-relaxed">
-                  <strong className="font-semibold text-emerald-950">✓ Top first-purchase piece:</strong>{" "}
+                  <strong className="font-semibold text-emerald-950">First-purchase evidence:</strong>{" "}
                   <span>{detailStr}</span>
                 </div>
               );
             })() : null}
+            {gatewayInsight?.productDecision?.test_readiness !== "planning_candidate" && gatewayInsight?.productDecision && (
+              <p className="mt-2 text-xs font-medium text-amber-900">Review before spend: {gatewayInsight.productDecision.readiness_reasons.join(" ")}</p>
+            )}
           </div>
         </div>
       )}

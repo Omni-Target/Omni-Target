@@ -372,7 +372,7 @@ export async function buildBriefHTML(
 
     let insightText = "";
     if (decision && !params.isNewLaunch && !isNew) {
-      insightText = `${decision.role_reason} ${decision.test_readiness === "hold" ? "Hold the ad test until stock returns." : decision.test_readiness === "review" ? "Review inventory and recorded costs before testing." : "This is a planning candidate; check shipping, fees and returns before setting an affordable acquisition cost."}`;
+      insightText = `${decision.role_reason} ${decision.test_readiness === "hold" ? "Hold the ad test until stock returns." : decision.test_readiness === "review" ? `Review before spend: ${decision.readiness_reasons.join(" ")}` : "This is a planning candidate; check shipping and fees before setting an affordable acquisition cost."}`;
     } else if (params.isNewLaunch || isNew) {
       insightText =
         "New product launch — great for testing customer interest with Meta's audience discovery.";
@@ -424,9 +424,9 @@ export async function buildBriefHTML(
               </div>
             </div>
             <div>
-              <div style="font-size:10px; font-weight:600; text-transform:uppercase; color:#15803d; letter-spacing:0.03em;">60-Day Repeat LTV</div>
+              <div style="font-size:10px; font-weight:600; text-transform:uppercase; color:#15803d; letter-spacing:0.03em;">60-Day Buyer Follow-Up</div>
               <div style="font-weight:700; font-size:13px; color:#14532d; margin-top:2px;">
-                ${followUp.repeat_rate === null ? "Building Cohort" : `${Math.round(followUp.repeat_rate * 100)}% reorder rate`}
+                ${followUp.repeat_rate === null ? "Building Cohort" : `${Math.round(followUp.repeat_rate * 100)}% ordered again`}
               </div>
               <div style="font-size:10.5px; color:#166534; margin-top:1px;">
                 ${followUp.repeat_rate === null ? "New product" : `${followUp.buyers_with_another_order} of ${followUp.eligible_first_order_buyers} buyers placed another store order`}
@@ -443,7 +443,7 @@ export async function buildBriefHTML(
             </div>
           </div>
           <div style="font-size:10px; color:#15803d; border-top:1px solid #dcfce7; padding-top:5px; opacity:0.85;">
-            Source: Shopify accessible paid orders and catalog, synced ${esc(decision.as_of.slice(0, 10))}. ${esc(decision.limitations.join(" "))}
+            Source: Shopify accessible paid orders and catalog, synced ${esc(decision.as_of.slice(0, 10))}. ${decision.return_evidence?.processed_return_rate != null ? esc(`${decision.return_evidence.processed_return_units} of ${decision.return_evidence.eligible_units} eligible units had processed returns in a separate mature cohort. `) : ""}${esc(decision.limitations.join(" "))}
           </div>
         </div>`;
     } else if (params.isNewLaunch || isNew) {

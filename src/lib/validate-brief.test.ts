@@ -175,6 +175,48 @@ describe("validateBrief", () => {
     expect(errors.some((e) => e.includes("Product drift"))).toBe(true);
   });
 
+  it("permits harmless title variants like plurals and parenthetical descriptions without drift errors", () => {
+    const baseResponse: GeneratedBriefResponse = {
+      target_product_title: "Ego Pants", // Omits "(Noir)"
+      creative_hooks: [
+        {
+          angle: "Problem / Friction",
+          visual_cue: "Visual 1",
+          on_screen_text: "Text 1.",
+          primary_text_hook: "Hook 1.",
+        },
+        {
+          angle: "Identity / Status",
+          visual_cue: "Visual 2",
+          on_screen_text: "Text 2.",
+          primary_text_hook: "Hook 2.",
+        },
+        {
+          angle: "Material / Craftsmanship",
+          visual_cue: "Visual 3",
+          on_screen_text: "Text 3.",
+          primary_text_hook: "Hook 3.",
+        },
+      ],
+    };
+
+    const errors = validateBrief(baseResponse, targetProduct, catalog);
+    expect(errors.some((e) => e.includes("Product drift"))).toBe(false);
+
+    // Test pluralization e.g. "Jindu Bubble Short" vs "Jindu Bubble Shorts"
+    const shortProduct: TargetProductContext = {
+      id: "prod-short",
+      title: "Jindu Bubble Short",
+      description: "Linen relaxed short with deep pockets.",
+    };
+    const pluralResponse: GeneratedBriefResponse = {
+      target_product_title: "Jindu Bubble Shorts",
+      creative_hooks: baseResponse.creative_hooks,
+    };
+    const pluralErrors = validateBrief(pluralResponse, shortProduct, catalog);
+    expect(pluralErrors.some((e) => e.includes("Product drift"))).toBe(false);
+  });
+
   it("sanitizes leaked tokens with target product title", () => {
     const response: GeneratedBriefResponse = {
       target_product_title: "Other Title",

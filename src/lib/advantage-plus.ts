@@ -42,7 +42,7 @@ export function getAdvantagePlusGuidance(
     ? "shopifyql_sessions"
     : monthlyOrders > 0 ? "shopify_paid_orders_only" : "unavailable";
   const observedText = observed
-    ? `In the last ${observed.window_days} days, Shopify recorded ${observed.cart_sessions!.toLocaleString()} online-store sessions with a cart addition, ${observed.checkout_sessions!.toLocaleString()} that reached checkout, and ${observed.completed_checkout_sessions!.toLocaleString()} that completed checkout. These are store sessions, not Meta events.`
+    ? `In the last ${observed.window_days} days, Shopify recorded ${monthlyOrders > 0 ? `${monthlyOrders.toLocaleString()} paid orders across ` : ""}${observed.cart_sessions!.toLocaleString()} online-store sessions with a cart addition, ${observed.checkout_sessions!.toLocaleString()} that reached checkout, and ${observed.completed_checkout_sessions!.toLocaleString()} that completed checkout. These are store sessions, not Meta events.`
     : monthlyOrders > 0
       ? `Shopify recorded ${monthlyOrders.toLocaleString()} paid orders in the last 30 days, but that total does not establish website or Meta event volume.`
       : "Recent Shopify website funnel data is unavailable; event volume cannot be estimated.";

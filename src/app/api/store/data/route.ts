@@ -39,7 +39,7 @@ export async function GET(request: Request) {
       const cachedSchemaVersion = (cached.data as { data?: { data_quality?: { schema_version?: number } } }).data?.data_quality?.schema_version;
       const cachedNeedsReauth = (cached.data as { needsShopifyReauthorization?: boolean; needsReauthForOrders?: boolean }).needsShopifyReauthorization ||
         (cached.data as { needsReauthForOrders?: boolean }).needsReauthForOrders;
-      if (cachedAge < SNAPSHOT_MAX_AGE_MS && cachedSchemaVersion === 6 && !cachedNeedsReauth) {
+      if (cachedAge < SNAPSHOT_MAX_AGE_MS && cachedSchemaVersion === 7 && !cachedNeedsReauth) {
         return Response.json(cached.data, {
           headers: {
             "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
@@ -69,7 +69,7 @@ export async function GET(request: Request) {
     missingShopifyScopes,
   };
 
-  if (!force && !isStale && creditsRow?.store_snapshot?.data_quality?.schema_version === 6) {
+  if (!force && !isStale && creditsRow?.store_snapshot?.data_quality?.schema_version === 7) {
     const payload = {
       connected: true,
       data: creditsRow.store_snapshot,

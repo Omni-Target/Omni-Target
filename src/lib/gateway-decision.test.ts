@@ -72,4 +72,28 @@ describe("product gateway decisions", () => {
     expect(ranked[0].product_decision?.test_readiness).toBe("planning_candidate");
     expect(ranked[1].product_decision?.role).toBe("Gateway");
   });
+
+  it("keeps gateway role while return evidence changes readiness", () => {
+    const stocked = products.map((product) => ({ ...product, variants: [{ inventory_quantity: 9 }], unit_cost_coverage: "complete" as const }));
+    const decisions = buildProductDecisions(orders, stocked, {
+      asOf,
+      ingestionComplete: true,
+      returnEvidence: {
+        "1": {
+          eligible_units: 40,
+          processed_return_units: 8,
+          refunded_units: 4,
+          processed_return_rate: 0.2,
+          risk: "review",
+          window_days: 365,
+          maturity_days: 60,
+        },
+      },
+    });
+    expect(decisions.get(1)?.role).toBe("Gateway");
+    expect(decisions.get(1)?.test_readiness).toBe("review");
+    expect(decisions.get(1)?.readiness_reasons.join(" ")).toContain("processed returns");
+    expect(decisions.get(2)?.test_readiness).toBe("planning_candidate");
+    expect(decisions.get(2)?.return_evidence_state).toBe("unavailable");
+  });
 });

@@ -23,6 +23,7 @@ import {
   deriveAdReadiness,
   deriveHealthScore,
   deriveInsights,
+  deriveBuyerLocations,
   deriveLocationText,
   buildCampaignDraft,
   type StoreProductLike,
@@ -33,7 +34,7 @@ import { useCredits, CREDITS_QUERY_KEY } from "@/hooks/useCredits";
 import { useQueryClient } from "@tanstack/react-query";
 import { PurchaseDialog } from "@/components/pricing";
 import { getPackById, type CreditPack } from "@/lib/credit-packs";
-import { compareProductsForTest } from "@/lib/gateway-decision";
+import { compareProductsForTest, selectGatewayTestCandidate } from "@/lib/gateway-decision";
 import type { StorePrespendIntelligence } from "@/lib/store-data";
 import { isFallbackCountryEntry } from "@/lib/market-geography";
 
@@ -51,13 +52,16 @@ function relativeTime(iso?: string): string {
 function readinessSubtext(
   readiness: ReturnType<typeof deriveAdReadiness>,
   topProductName?: string,
+  topProductReadiness?: string,
 ): string {
   switch (readiness.readiness) {
     case "ready":
     case "ready_with_warnings":
       return topProductName
-        ? `${topProductName} has your strongest first-order purchase signal. It is a high-priority cold-acquisition test candidate.`
-        : "You have in-stock products with strong first-order purchase signals. Pick one below to create an ad brief.";
+        ? topProductReadiness === "planning_candidate"
+          ? `${topProductName} is a ready gateway candidate based on identified first orders. Review its evidence before a focused cold-acquisition test.`
+          : `${topProductName} has your strongest first-order purchase signal. Review its stock and margins below before testing.`
+        : "There is not yet enough ready gateway evidence for a top cold-acquisition recommendation. Review the product evidence below.";
     case "caution":
       return readiness.hasRecentOrders
         ? "Several of your best-selling styles are currently sold out. Restock your winners to start advertising."
@@ -255,6 +259,7 @@ function DashboardContent() {
     name?: string;
     currency?: string;
     domain?: string;
+    country?: string;
   };
   const activeShop = store.domain || shop;
   const products = (storeData?.products ?? []) as StoreProductLike[];
@@ -267,7 +272,8 @@ function DashboardContent() {
   const healthScore = deriveHealthScore(products, orders);
   const prespend = storeData?.prespend as StorePrespendIntelligence | undefined;
   const insights = deriveInsights(orders, currency, prespend?.analytics?.recent_funnel);
-  const locationText = deriveLocationText(orders);
+  const buyerLocations = deriveBuyerLocations(orders, store.country, currency);
+  const locationText = buyerLocations.domesticText;
   const locationLevel = orders.top_locations?.some((loc) => !isFallbackCountryEntry(loc))
     ? "city" as const
     : (orders.top_order_countries?.length || orders.top_locations?.length)
@@ -290,10 +296,10 @@ function DashboardContent() {
   const intelligenceProducts = [...outOfStockGateways, ...inStockProducts]
     .sort(compareProductsForTest)
     .slice(0, 6);
+  const gatewayTestCandidate = selectGatewayTestCandidate(products);
 
   const topInStockProduct =
-    intelligenceProducts.find((p) => p.in_stock)?.name ||
-    intelligenceProducts[0]?.name;
+    gatewayTestCandidate?.name;
 
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -370,7 +376,11 @@ function DashboardContent() {
               storeData?.generated_at as string | undefined,
             )}
             readiness={readiness.readiness}
-            subtext={readinessSubtext(readiness, topInStockProduct)}
+            subtext={readinessSubtext(
+              readiness,
+              topInStockProduct,
+              gatewayTestCandidate?.product_decision?.test_readiness,
+            )}
             healthScore={healthScore}
             onSync={refreshStoreData}
             syncing={refreshing || shopifyReconnected}
@@ -408,11 +418,15 @@ function DashboardContent() {
           <div className="grid gap-6 lg:grid-cols-3">
             <div className="lg:col-span-1">
               <BuyerProfile
-                locationText={locationText}
+                locationText={buyerLocations.domesticText}
+                internationalLocationText={buyerLocations.internationalText}
+                locationSubText={buyerLocations.subtext}
                 locationLevel={locationLevel}
                 peakDays={peakDays}
                 aov={orders.average_order_value ?? 0}
                 repeatRate={orders.repeat_customer_rate ?? 0}
+                medianDaysToSecondOrder={orders.median_days_to_second_order}
+                repeatBuyersObserved={orders.repeat_buyers_observed}
                 currency={currency}
                 topChannel={orders.acquisition_channels?.[0]?.channel}
                 topChannelPercentage={orders.acquisition_channels?.[0]?.percentage}

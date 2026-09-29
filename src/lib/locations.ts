@@ -6,7 +6,16 @@ export const LAGOS_AREAS = [
   "lagos island", "apapa", "magodo", "ojodu", "ojota", "oshodi", "palmgrove",
   "ikorodu", "epe", "badagry", "alagbado", "alimosho", "bariga", "ebute metta",
   "egbeda", "ejigbo", "idimu", "ikotun", "ilupeju", "ipaja", "isolo", "ketu",
-  "mile 12", "ogba", "okota", "orile", "osapa", "shomolu"
+  "mile 12", "ogba", "okota", "orile", "osapa", "shomolu",
+  // Lekki axis sub-neighborhoods
+  "ikate", "ikate elegushi", "sangotedo", "agungi", "oniru", "jakande",
+  "ologolo", "ilasan", "idado", "igbo efon", "chevron", "marwa",
+  // Island & waterfront
+  "banana island", "obalende",
+  // Mainland extensions
+  "ojo", "mile 2", "ogudu", "alapere", "omole", "berger", "ojodu berger",
+  "aguda", "anthony", "cement", "alausa", "oregun", "opebi", "allen",
+  "igando", "iyana ipaja",
 ];
 
 export const ABUJA_AREAS = [
@@ -20,8 +29,8 @@ export const PH_AREAS = [
   "diobu", "borokiri", "ph", "port harcourt", "port-harcourt"
 ];
 
-export function consolidateLocation(city: string): string {
-  if (!city) return "Unknown";
+export function consolidateLocation(city: string): string | null {
+  if (!city) return null;
   
   const clean = city.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, " ").replace(/\s+/g, " ").trim();
   const cityLower = clean.toLowerCase();
@@ -142,8 +151,22 @@ export function consolidateLocation(city: string): string {
     return "Abeokuta";
   }
 
-  // Standard formatting for other cities to make sure they are beautifully title-cased
-  return clean
+  // Unrecognized — return null so the AI tier can attempt dynamic resolution.
+  // This is the key fix: previously this returned a title-cased version of the raw
+  // input, which made the pre-filter think it was already resolved and skipped AI.
+  return null;
+}
+
+/**
+ * Title-cases a city name for clean display.
+ * Used as the final fallback when neither static nor AI resolution matches.
+ */
+export function formatCityName(city: string): string {
+  if (!city) return "Unknown";
+  return city
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
     .split(" ")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(" ");

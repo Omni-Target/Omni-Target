@@ -1,4 +1,6 @@
 import type { ProductDecisionEvidence } from "./store-data";
+import type { BuyerOutcomes } from "./buyer-outcomes";
+import type { StoreProductReturnEvidence } from "./store-data";
 
 const SIXTY_DAYS_MS = 60 * 24 * 60 * 60 * 1000;
 
@@ -39,13 +41,22 @@ function rate(numerator: number, denominator: number): number | null {
 export function buildProductDecisions(
   orders: DecisionOrder[],
   products: DecisionProduct[],
-  options: { asOf: string; ingestionComplete: boolean },
+  options: {
+    asOf: string;
+    ingestionComplete: boolean;
+    buyerOutcomes?: BuyerOutcomes;
+    returnEvidence?: Record<string, StoreProductReturnEvidence>;
+    returnEvidenceStatus?: "available" | "missing_scope" | "unavailable" | "error";
+  },
 ): Map<number, ProductDecisionEvidence> {
   const now = new Date(options.asOf).getTime();
   const byCustomer = new Map<number, DecisionOrder[]>();
+  const seenOrders = new Set<number>();
   for (const order of orders) {
     const customerId = order.customer?.id;
-    if (!customerId || !Number.isFinite(new Date(order.created_at).getTime())) continue;
+    const orderAt = Date.parse(order.created_at);
+    if (!customerId || seenOrders.has(order.id) || !Number.isFinite(orderAt) || orderAt > now) continue;
+    seenOrders.add(order.id);
     const customerOrders = byCustomer.get(customerId) || [];
     customerOrders.push(order);
     byCustomer.set(customerId, customerOrders);
@@ -126,13 +137,19 @@ export function buildProductDecisions(
     } else if (firstCount >= 3 || laterCount >= 3) {
       role = "Hybrid";
       roleConfidence = "directional";
-      roleReason = `This product appeared in ${firstCount} first orders and ${laterCount} later orders; neither pattern is strong enough to assign a distinct role.`;
+      roleReason = `This product appeared in ${firstCount} first orders and ${laterCount} later orders; balanced demand across new and returning customers.`;
     }
 
     const variants = product.variants || [];
     const inStock = variants.filter((variant) => variant.inventory_quantity > 0).length;
+    const returnEvidence = options.returnEvidence?.[String(product.id)];
+    const returnEvidenceState = options.returnEvidenceStatus === "available"
+      ? returnEvidence?.risk === "insufficient_data" || !returnEvidence ? "insufficient_data" : "available"
+      : options.returnEvidenceStatus || "unavailable";
+    const highValueEntry = options.buyerOutcomes?.high_value_entry.get(product.id);
     const testReadiness: ProductDecisionEvidence["test_readiness"] =
-      inStock === 0 ? "hold" : !options.ingestionComplete || inStock < variants.length || product.unit_cost_coverage !== "complete"
+      inStock === 0 ? "hold" : !options.ingestionComplete || inStock < variants.length ||
+        product.unit_cost_coverage !== "complete" || returnEvidence?.risk === "review"
         ? "review"
         : "planning_candidate";
     const readinessReasons =
@@ -146,11 +163,14 @@ export function buildProductDecisions(
             product.unit_cost_coverage !== "complete"
               ? "Variant costs are unrecorded in Shopify — verify your profit margins before setting ad budget."
               : "Unit costs recorded — verify target margin covers fulfillment before setting ad budget.",
+            ...(returnEvidence?.risk === "review"
+              ? [`${returnEvidence.processed_return_units} of ${returnEvidence.eligible_units} eligible units had processed returns; review product quality before testing.`]
+              : []),
           ];
     const eligible = options.ingestionComplete ? eligibleCounts.get(product.id) || 0 : 0;
     const repeated = options.ingestionComplete ? repeatCounts.get(product.id) || 0 : 0;
     result.set(product.id, {
-      logic_version: 1,
+      logic_version: 2,
       source: "shopify_accessible_paid_orders_and_catalog",
       as_of: options.asOf,
       role,
@@ -167,10 +187,17 @@ export function buildProductDecisions(
         buyers_with_another_order: repeated,
         repeat_rate: rate(repeated, eligible),
       },
+      ...(highValueEntry ? { high_value_entry: highValueEntry } : {}),
+      ...(returnEvidence ? { return_evidence: returnEvidence } : {}),
+      return_evidence_state: returnEvidenceState,
       test_readiness: testReadiness,
       readiness_reasons: readinessReasons,
       limitations: [
         "First-purchase metrics reflect accessible store orders and identified buyer accounts.",
+        ...(returnEvidenceState === "missing_scope" ? ["Shopify return access is not granted for this store."] : []),
+        ...(returnEvidenceState === "error" ? ["Product return data could not be synced; no return risk assessment is shown."] : []),
+        ...(returnEvidenceState === "unavailable" ? ["Product return evidence is unavailable for this snapshot."] : []),
+        ...(returnEvidence?.risk === "insufficient_data" ? ["Too few eligible units to assess product return risk."] : []),
       ],
     });
   }
@@ -188,7 +215,7 @@ export function compareProductsForTest(
   const readinessDifference = readinessRank(a) - readinessRank(b);
   if (readinessDifference) return readinessDifference;
   const gatewayRank = (product: typeof a) =>
-    product.gateway_classification === "Gateway"
+    (product.product_decision?.role || product.gateway_classification) === "Gateway"
       ? product.product_decision?.role_confidence === "strong" ? 0 : 1
       : 2;
   const gatewayDifference = gatewayRank(a) - gatewayRank(b);
@@ -196,5 +223,29 @@ export function compareProductsForTest(
   const firstOrderDifference =
     (b.product_decision?.first_order_count ?? 0) -
     (a.product_decision?.first_order_count ?? 0);
-  return firstOrderDifference || (b.revenue ?? 0) - (a.revenue ?? 0);
+  const followUpDifference =
+    (b.product_decision?.follow_up_60d.repeat_rate ?? -1) -
+    (a.product_decision?.follow_up_60d.repeat_rate ?? -1);
+  return firstOrderDifference || followUpDifference || (b.revenue ?? 0) - (a.revenue ?? 0);
+}
+
+/** 
+ * Selects the top gateway test candidate. Prioritizes planning_candidate first,
+ * with graceful fallback to top in-stock review candidates (with blockers disclosed)
+ * when store costs or variant stocks are partially unrecorded. Products on hold
+ * (out of stock) are never selected as active test candidates.
+ */
+export function selectGatewayTestCandidate<T extends {
+  gateway_classification?: string;
+  product_decision?: ProductDecisionEvidence;
+  in_stock?: boolean;
+  revenue?: number;
+}>(products: T[]): T | null {
+  return products
+    .filter((product) => {
+      const isGateway = (product.product_decision?.role || product.gateway_classification) === "Gateway";
+      const notOnHold = product.in_stock !== false && product.product_decision?.test_readiness !== "hold";
+      return isGateway && notOnHold;
+    })
+    .sort(compareProductsForTest)[0] || null;
 }

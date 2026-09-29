@@ -62,6 +62,8 @@ export function ProductIntelCard({
   const syncIncomplete = decision?.readiness_reasons.some((reason) => reason.includes("sync is incomplete")) ?? false;
   const readinessSummary = !decision ? "" : decision.test_readiness === "hold"
     ? "Out of stock. Restock inventory before testing ads."
+    : decision.return_evidence?.risk === "review"
+      ? "Processed returns are elevated in the observed cohort. Review product quality before testing ads."
     : syncIncomplete
       ? "Shopify order or catalog sync in progress. Data refreshes automatically."
     : decision.test_readiness === "planning_candidate"
@@ -130,9 +132,11 @@ export function ProductIntelCard({
             {!isNewLaunch && classificationBadge(product.gateway_classification, decision?.role_confidence)}
             {decision && !isOutOfStock && hasEstablishedRole && (
               decision.test_readiness === "planning_candidate" ? (
-                <Badge variant="brand" size="sm">Ready to Test</Badge>
+                <Badge variant="brand" size="sm">Planning Candidate</Badge>
               ) : decision.test_readiness === "review" && product.in_stock_variant_count !== undefined && product.total_variant_count && product.in_stock_variant_count < product.total_variant_count ? (
                 <Badge variant="warning" size="sm">{product.in_stock_variant_count} of {product.total_variant_count} in stock</Badge>
+              ) : decision.test_readiness === "review" && decision.return_evidence?.risk === "review" ? (
+                <Badge variant="warning" size="sm">Review returns</Badge>
               ) : null
             )}
           </div>
@@ -147,13 +151,13 @@ export function ProductIntelCard({
         <div className="mt-3 rounded-lg border border-amber-200/80 bg-amber-50/80 p-2.5 text-xs text-amber-900">
           <p className="font-semibold flex items-center gap-1.5 text-amber-950">
             <Sparkles className="size-3.5 text-amber-600" />
-            Restock Priority · Customer Magnet
+            Restock Priority · Gateway signal
           </p>
           <p className="mt-0.5 text-amber-800">
             {decision
-              ? `${decision.first_order_count} new buyers started with this piece.`
-              : "This is one of your top products for winning new customers."}{" "}
-            Restock soon so you can scale it with ads.
+              ? `${decision.first_order_count} of ${decision.identified_first_orders} identified first orders contained this product.`
+              : "This product has a first-order signal."}{" "}
+            Restock before considering an ad test.
           </p>
         </div>
       ) : !isOutOfStock && (narrative.subtext || narrative.primaryMetric) ? (
@@ -171,11 +175,11 @@ export function ProductIntelCard({
 
       {decision && !isNewLaunch && (
         <details className="mt-3 rounded-lg border border-border-subtle px-3 py-2 text-xs text-muted-foreground">
-          <summary className="cursor-pointer font-semibold text-foreground">Why start with this product?</summary>
+          <summary className="cursor-pointer font-semibold text-foreground">Product evidence and test readiness</summary>
           <div className="mt-2 space-y-2 leading-relaxed">
             <p className="text-foreground">
               {decision.role === "Gateway"
-                ? `${decision.first_order_count} new customers picked this as their first purchase. It’s your top customer magnet to acquire fresh shoppers.`
+                ? `${decision.first_order_count} of ${decision.identified_first_orders} identified first orders contained this product, compared with ${decision.later_order_count} of ${decision.identified_later_orders} later orders.`
                 : decision.role === "Consideration"
                   ? `Customers frequently pick this in later orders (${decision.later_order_count} repeat orders). Ideal for retargeting and email campaigns.`
                   : decision.role === "Hybrid"
@@ -184,8 +188,11 @@ export function ProductIntelCard({
             </p>
             {decision.follow_up_60d.repeat_rate !== null && decision.follow_up_60d.eligible_first_order_buyers > 0 && (
               <p className="rounded-md bg-brand-50/70 px-2 py-1 text-brand-700">
-                ✨ <strong>LTV Impact:</strong> {Math.round(decision.follow_up_60d.repeat_rate * 100)}% of buyers who started with this product placed another order within 60 days.
+                <strong>60-day follow-up:</strong> {decision.follow_up_60d.buyers_with_another_order} of {decision.follow_up_60d.eligible_first_order_buyers} eligible buyers placed another store order.
               </p>
+            )}
+            {decision.return_evidence?.processed_return_rate != null && (
+              <p>{decision.return_evidence.processed_return_units} of {decision.return_evidence.eligible_units} eligible units had processed returns ({Math.round(decision.return_evidence.processed_return_rate * 100)}%).</p>
             )}
             <p><strong className="text-foreground">Launch checklist:</strong> {readinessSummary}</p>
             <details className="pt-1">

@@ -148,6 +148,24 @@ function extractSalientTokens(text: string, productTokens?: Set<string>): Set<st
   return salient;
 }
 
+export function areTitlesEquivalent(a?: string | null, b?: string | null): boolean {
+  if (!a || !b) return false;
+  const cleanA = a.trim().toLowerCase();
+  const cleanB = b.trim().toLowerCase();
+  if (cleanA === cleanB) return true;
+
+  const stripNoise = (s: string) =>
+    s
+      .replace(/\s*\([^)]*\)/g, "") // remove parentheticals e.g. "(Noir)"
+      .replace(/^the\s+/i, "")       // remove leading "the"
+      .replace(/(?:es|s)\b/gi, "")   // stem plurals e.g. "shorts" -> "short"
+      .replace(/[^a-z0-9]/g, "");    // strip punctuation/spaces
+
+  const stemA = stripNoise(cleanA);
+  const stemB = stripNoise(cleanB);
+  return stemA.length > 0 && stemA === stemB;
+}
+
 /**
  * Validates a generated Advantage+ single-SKU brief response against
  * angle uniqueness, target product title drift, and sibling SKU leaks.
@@ -284,8 +302,7 @@ export function validateBrief(
   // 5. Target product drift check
   if (
     response.target_product_title &&
-    response.target_product_title.trim().toLowerCase() !==
-      targetProduct.title.trim().toLowerCase()
+    !areTitlesEquivalent(response.target_product_title, targetProduct.title)
   ) {
     errors.push(
       `Product drift: expected "${targetProduct.title}", received "${response.target_product_title}"`
@@ -346,18 +363,25 @@ export function finalizeCreativeHooks(
         [hook.angle, hook.visual_cue, hook.on_screen_text, hook.primary_text_hook]
           .some((field) => typeof field !== "string")
       ) || typeof response.target_product_title !== "string" ||
-      response.target_product_title.trim().toLowerCase() !== targetProduct.title.trim().toLowerCase()) return null;
+      !areTitlesEquivalent(response.target_product_title, targetProduct.title)) return null;
+
+  // Canonicalize to target product's official catalog title
+  const canonicalResponse: GeneratedBriefResponse = {
+    ...response,
+    target_product_title: targetProduct.title,
+  };
+
   // Replacing a sibling inside public copy can turn "Pair with X" into a
   // nonsensical self-reference. Use the verified fallback for that case.
   const forbiddenSiblings = getForbiddenSiblingProducts(targetProduct, catalog);
-  const customerCopyHasSibling = response.creative_hooks.some((hook) =>
+  const customerCopyHasSibling = canonicalResponse.creative_hooks.some((hook) =>
     forbiddenSiblings.some((sibling) => {
       const pattern = siblingTitlePattern(sibling.title);
       return pattern?.test(`${hook.on_screen_text} ${hook.primary_text_hook}`) || false;
     })
   );
   if (customerCopyHasSibling) return null;
-  const sanitized = sanitizeLeakedTokens(response, targetProduct, catalog);
+  const sanitized = sanitizeLeakedTokens(canonicalResponse, targetProduct, catalog);
   return validateBrief(sanitized, targetProduct, catalog).length === 0
     ? sanitized
     : null;

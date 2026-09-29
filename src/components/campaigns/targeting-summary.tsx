@@ -43,6 +43,7 @@ export function TargetingSummary({
     seed?.seed_interests ?? legacyTargeting?.interests ?? [];
   const analytics = storeInsights?.prespend?.analytics;
   const recentFunnel = analytics?.recent_funnel;
+  const orders30d = storeInsights?.orders?.orders_last_30_days || 0;
 
   const topOrderLocs = storeInsights?.orders?.top_locations || [];
   const effectiveStoreCountry = getEffectiveStoreCountry(
@@ -224,7 +225,7 @@ export function TargetingSummary({
             </p>
             {recentFunnel && recentFunnel.cart_sessions !== null && recentFunnel.checkout_sessions !== null && recentFunnel.completed_checkout_sessions !== null && (
               <p className="mt-2 text-[11px] text-brand-700/80">
-                Shopify, last {recentFunnel.window_days} days: {recentFunnel.cart_sessions} cart sessions · {recentFunnel.checkout_sessions} checkout sessions · {recentFunnel.completed_checkout_sessions} completed-checkout sessions. These are not Meta events.
+                Shopify, last {recentFunnel.window_days} days: {orders30d > 0 ? `${orders30d} orders across ` : ""}{recentFunnel.checkout_sessions} checkout sessions ({recentFunnel.cart_sessions} cart additions). These are storefront sessions, not Meta events.
               </p>
             )}
             {optimizationEvent === "AddToCart" && (

@@ -458,7 +458,7 @@ export function buildBriefText({
 
         const roleExplanation =
           productDecision.role === "Gateway"
-            ? `${productDecision.first_order_count} new customers picked this as their first purchase—your top product to attract first-time shoppers.`
+            ? `${productDecision.first_order_count} of ${productDecision.identified_first_orders} identified first orders contained this product, compared with ${productDecision.later_order_count} of ${productDecision.identified_later_orders} later orders.`
             : productDecision.role === "Consideration"
               ? `Customers frequently pick this in later orders (${productDecision.later_order_count} repeat orders)—ideal for retargeting.`
               : productDecision.role === "Hybrid"
@@ -467,9 +467,9 @@ export function buildBriefText({
 
         const readinessLabel =
           productDecision.test_readiness === "planning_candidate"
-            ? "Ready to test (In stock with recorded unit economics)"
+            ? "Planning candidate (review fees and fulfillment before setting budget)"
             : productDecision.test_readiness === "review"
-              ? "Check stock & margins before setting ad budget"
+              ? `Review before spend: ${productDecision.readiness_reasons.join(" ")}`
               : "Out of stock (Restock before launching ads)";
 
         const followUpLabel =
@@ -477,10 +477,19 @@ export function buildBriefText({
             ? "Recent customer cohort maturing (60-day window in progress)"
             : `${productDecision.follow_up_60d.buyers_with_another_order} of ${productDecision.follow_up_60d.eligible_first_order_buyers} buyers (${Math.round(productDecision.follow_up_60d.repeat_rate * 100)}%) returned to order again within 60 days.`;
 
+        const vipRatio = productDecision.high_value_entry
+          ? Math.round((productDecision.high_value_entry.high_value_first_buyers_with_product / productDecision.high_value_entry.high_value_buyers) * 100)
+          : 0;
+        const overallRatio = productDecision.high_value_entry
+          ? Math.round((productDecision.high_value_entry.all_first_buyers_with_product / productDecision.high_value_entry.eligible_first_buyers) * 100)
+          : 0;
+
         return [
           `PRODUCT ROLE: ${roleLabel} — ${roleExplanation}`,
           `TEST READINESS: ${readinessLabel}`,
-          `60-DAY LTV FOLLOW-UP: ${followUpLabel}`,
+          `60-DAY BUYER FOLLOW-UP: ${followUpLabel}`,
+          ...(productDecision.high_value_entry ? [`VIP CUSTOMER MAGNET: ${productDecision.high_value_entry.high_value_first_buyers_with_product} of top ${productDecision.high_value_entry.high_value_buyers} spenders (${vipRatio}%) started with this product (vs ${overallRatio}% of shoppers overall). When customers buy this first, they tend to stick around and spend the most.`] : []),
+          ...(productDecision.return_evidence?.processed_return_rate != null ? [`RETURN EVIDENCE: ${productDecision.return_evidence.processed_return_units} of ${productDecision.return_evidence.eligible_units} orders returned (${Math.round(productDecision.return_evidence.processed_return_rate * 100)}%).${productDecision.return_evidence.refunded_units > 0 ? ` ${productDecision.return_evidence.refunded_units} refunded separately.` : ""}${productDecision.return_evidence.processed_return_units === 0 ? " Safe to test without return risk." : ""}`] : ["RETURN EVIDENCE: Unavailable or insufficient eligible units."]),
           "",
         ];
       })()

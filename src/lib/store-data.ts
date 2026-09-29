@@ -45,11 +45,44 @@ export interface StoreProduct {
   unit_cost_coverage?: "complete" | "partial" | "missing";
   price_less_unit_cost?: number | null;
   catalog_claims?: StoreCatalogClaim[];
+  high_value_entry?: StoreHighValueEntryEvidence;
+  return_evidence?: StoreProductReturnEvidence;
+}
+
+export interface StoreHighValueEntryEvidence {
+  eligible_first_buyers: number;
+  high_value_buyers: number;
+  high_value_first_buyers_with_product: number;
+  all_first_buyers_with_product: number;
+  high_value_share: number;
+  baseline_share: number;
+}
+
+export interface StoreProductReturnEvidence {
+  eligible_units: number;
+  processed_return_units: number;
+  refunded_units: number;
+  processed_return_rate: number | null;
+  primary_reason?: string;
+  risk: "observed" | "review" | "insufficient_data";
+  window_days: 365;
+  maturity_days: 60;
+}
+
+export interface StoreGatewaySignalValidation {
+  candidate_product_id: number;
+  training_first_buyers: number;
+  training_first_buyers_with_product: number;
+  later_first_buyers: number;
+  later_first_buyers_with_product: number;
+  training_share: number;
+  later_share: number;
+  limitation: "historical_first_order_signal_only";
 }
 
 /** A reproducible product-role observation and a separate launch-readiness check. */
 export interface ProductDecisionEvidence {
-  logic_version: 1;
+  logic_version: 1 | 2;
   source: "shopify_accessible_paid_orders_and_catalog";
   as_of: string;
   role: "Gateway" | "Consideration" | "Hybrid" | "Insufficient Data";
@@ -66,6 +99,9 @@ export interface ProductDecisionEvidence {
     buyers_with_another_order: number;
     repeat_rate: number | null;
   };
+  high_value_entry?: StoreHighValueEntryEvidence;
+  return_evidence?: StoreProductReturnEvidence;
+  return_evidence_state?: "available" | "insufficient_data" | "missing_scope" | "error" | "unavailable";
   test_readiness: "planning_candidate" | "review" | "hold";
   readiness_reasons: string[];
   limitations: string[];
@@ -213,6 +249,8 @@ export interface StoreData {
     peak_days: string[];
     peak_hours: number[];
     repeat_customer_rate: number;
+    median_days_to_second_order?: number | null;
+    repeat_buyers_observed?: number;
     revenue_last_30_days: number;
     orders_last_30_days: number;
     revenue_last_60_days?: number;
@@ -227,13 +265,14 @@ export interface StoreData {
   };
   prespend?: StorePrespendIntelligence;
   data_quality?: {
-    schema_version: 2 | 3 | 4 | 5 | 6;
+    schema_version: 2 | 3 | 4 | 5 | 6 | 7;
     ingestion_complete: boolean;
     history_basis: "accessible_paid_orders";
     oldest_order_at?: string;
     anonymous_orders: number;
     orders_without_city: number;
     warnings: string[];
+    gateway_signal_validation?: StoreGatewaySignalValidation;
   };
   generated_at: string;
 }

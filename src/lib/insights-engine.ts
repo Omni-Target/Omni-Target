@@ -532,6 +532,8 @@ Product Performance & Customer Entry Signals:
 - Role in Store: ${productRole}
 - Test Readiness: ${productDecision ? `${productDecision.test_readiness.replaceAll("_", " ")}. ${productDecision.readiness_reasons.join(" ")}` : "Not assessed in this snapshot"}
 - 60-Day Follow-Up: ${productDecision ? productDecision.follow_up_60d.repeat_rate === null ? "No fully observed first-order cohort yet" : `${productDecision.follow_up_60d.buyers_with_another_order} of ${productDecision.follow_up_60d.eligible_first_order_buyers} eligible first-order buyers placed another store order` : "Unavailable"}
+- High-Spend Buyer Association: ${productDecision?.high_value_entry ? `${productDecision.high_value_entry.high_value_first_buyers_with_product} of ${productDecision.high_value_entry.high_value_buyers} high-spend buyers started with this product versus ${productDecision.high_value_entry.all_first_buyers_with_product} of ${productDecision.high_value_entry.eligible_first_buyers} eligible first buyers overall; observational only` : "Insufficient mature cohort"}
+- Return Evidence: ${productDecision?.return_evidence?.processed_return_rate != null ? `${productDecision.return_evidence.processed_return_units} processed returns among ${productDecision.return_evidence.eligible_units} eligible units in a mature cohort; ${productDecision.return_evidence.refunded_units} refunded units recorded separately` : "Unavailable or insufficient sample"}
 - Primary Customer Traffic Channel: ${primaryTrafficSource}
 - Top Store Acquisition Channels: ${storeTopChannels || "Direct / Organic Discovery"}
 - Customer Reorder Habit: ${reorderHabit}
@@ -563,7 +565,8 @@ Instructions for this generation:
 5. Dynamic Location Intelligence: Analyze the merchant's home country (${storeCountry}), category (${targetProductType}), and unit price (${targetProductPrice} ${storeCurrency}). Infer commercial hubs as acquisition hypotheses, then check them against the Shopify operational-readiness evidence above. A city may still be recommended for demand testing, but its note must say fulfillment is unverified or blocked when its country lacks an active market or shipping method. Do not imply Shopify sales prove future conversion.
 6. Factual Grounding in Store Data: Anchor your angles and hooks on the verified materials, craftsmanship details, cut, and features documented in the Product Title and Description above. Never invent unstated fabrics, certifications, or exaggerated claims not found in the merchant's Shopify store data.
 7. Marketing Context Awareness: Note the merchant's Shopify Marketing History. If the merchant has no prior paid ad spend recorded, guide the founder on respecting the initial 7-day learning phase and establishing baseline metrics. If the store has previously run paid campaigns, tailor the recommendations to build upon and scale their past acquisition channels.
-${excludedAngle ? `8. ANGLE EXCLUSION — CRITICAL: The ad copy for this campaign has already been written and leads on this primary angle: "${excludedAngle}". None of your 3 creative hooks may centre on this claim as their primary hook. Your hooks must be genuinely additive — covering psychological territory the copy does not. A founder seeing copy and hooks that all say the same thing loses confidence in both.` : ""}
+8. Evidence Boundary: First-order, high-spend, repeat, and return metrics are internal planning evidence. Do not turn them into customer-facing ad claims, guarantees, or predictions of Meta performance. Feature only this target product in the brief.
+${excludedAngle ? `9. ANGLE EXCLUSION — CRITICAL: The ad copy for this campaign has already been written and leads on this primary angle: "${excludedAngle}". None of your 3 creative hooks may centre on this claim as their primary hook. Your hooks must be genuinely additive — covering psychological territory the copy does not. A founder seeing copy and hooks that all say the same thing loses confidence in both.` : ""}
 Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}" following all rules in the system prompt. Call the generate_advantage_plus_profile tool.`;
 
   // Fallback defaults in case of API failure or tool parsing error
@@ -693,17 +696,47 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
       };
 
       // Apply safe local repairs before judging the result.
-      const sanitized = finalizeCreativeHooks(profile, targetProductCtx, catalog);
-      const verifiedHooks = sanitized?.creative_hooks || [];
+      let sanitized = finalizeCreativeHooks(profile, targetProductCtx, catalog);
+      let verifiedHooks = sanitized?.creative_hooks || [];
 
-      if (!sanitized) {
-        console.warn("[Advantage+ Validator] Hook profile rejected, requiring explicit retry:",
-          validateBrief(profile, targetProductCtx, catalog));
+      // If the unified pass failed hook validation, automatically auto-recover
+      // using the dedicated, focused hook generator before returning to the caller.
+      // This ensures the founder gets both ad copy AND verified hooks in one pass
+      // without ever seeing a "Creative hooks need another try" banner.
+      if (!sanitized || verifiedHooks.length !== 3) {
+        console.warn(
+          "[Advantage+ Validator] First-pass hooks rejected by validator:",
+          validateBrief(profile, targetProductCtx, catalog)
+        );
+        console.log(
+          "[Advantage+ Validator] Auto-recovering verified creative hooks via dedicated hook generator..."
+        );
+        try {
+          const recovered = await generateCreativeHooksOnly(
+            storeData,
+            targetProduct as StoreProduct,
+            excludedAngle,
+            userId
+          );
+          if (recovered && recovered.length === 3) {
+            verifiedHooks = recovered;
+            sanitized = {
+              ...profile,
+              target_product_title: targetProductCtx.title,
+              creative_hooks: recovered,
+            };
+            console.log(
+              "[Advantage+ Validator] Auto-recovery successful: 3 verified hooks attached."
+            );
+          }
+        } catch (recoverErr) {
+          console.warn("[Advantage+ Validator] Auto-recovery failed:", recoverErr);
+        }
       }
 
       return {
         generation_status: hasAiDemographics ? "generated" : "fallback",
-        creative_hooks_status: sanitized?.creative_hooks?.length
+        creative_hooks_status: verifiedHooks.length === 3
           ? "generated"
           : "fallback",
         locations,

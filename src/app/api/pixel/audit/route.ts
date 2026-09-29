@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { getUserIntegration } from "@/lib/db";
 import { calculateAdReadinessScore } from "@/lib/ad-readiness-score";
-import { compareProductsForTest } from "@/lib/gateway-decision";
+import { compareProductsForTest, selectGatewayTestCandidate } from "@/lib/gateway-decision";
 
 export async function GET() {
   const { userId } = await auth();
@@ -83,8 +83,8 @@ export async function GET() {
     (a, b) => (b.units_sold || 0) - (a.units_sold || 0)
   );
 
-  const bestProduct = rankedInStock[0] || null;
-  const isGatewayPick = bestProduct?.gateway_classification === "Gateway";
+  const bestProduct = selectGatewayTestCandidate(inStockProducts);
+  const researchCandidate = rankedInStock[0] || null;
 
   // ── Gateway stock risk check ──────────────────────────────────────────────
   const allGatewayProducts = products.filter((p) => p.gateway_classification === "Gateway");
@@ -95,18 +95,11 @@ export async function GET() {
   const positives: string[] = [];
 
   if (bestProduct) {
-    if (isGatewayPick) {
       const decision = bestProduct.product_decision;
-      let conversionText = "It is your highest-converting entry point for new buyers.";
+      let conversionText = "Its accessible order history shows a first-order gateway signal.";
       if (decision?.first_order_count && decision.identified_first_orders) {
         const pct = Math.round((decision.first_order_count / decision.identified_first_orders) * 100);
-        if (pct >= 20) {
-          const ratio = Math.round(decision.identified_first_orders / decision.first_order_count);
-          const ratioText = ratio >= 2 && ratio <= 5 ? `1 in every ${ratio} new shoppers (${pct}%)` : `${pct}% of new shoppers`;
-          conversionText = `${ratioText} bought this piece on their very first order, making it your highest-converting entry point.`;
-        } else {
-          conversionText = `${decision.first_order_count} first-time customers started with this product, making it your top entry point for new buyers.`;
-        }
+        conversionText = `${decision.first_order_count} of ${decision.identified_first_orders} identified first orders (${pct}%) contained this product.`;
       }
 
       const totalVariants = bestProduct.total_variant_count || 0;
@@ -126,17 +119,10 @@ export async function GET() {
           : "Make sure your unit profit margin leaves healthy room for ad spend before launching.";
 
       positives.push(
-        `Start with "${bestProduct.name}". ${conversionText} ${stockText} ${marginText}`
+        `Test candidate: "${bestProduct.name}". ${conversionText} ${stockText} ${marginText}`
       );
-    } else if ((bestProduct.units_sold || 0) > 0) {
-      positives.push(
-        `Start with "${bestProduct.name}" — your top-selling in-stock product with ${bestProduct.units_sold} units sold. Double down on what customers are already buying before testing anything new.`
-      );
-    } else {
-      positives.push(
-        `Start with "${bestProduct.name}". Since it has no sales history yet, frame your ad as an exclusive first look or early-access drop to spark curiosity.`
-      );
-    }
+  } else if (researchCandidate) {
+    positives.push(`No ready gateway has enough historical evidence for a top cold-acquisition recommendation. "${researchCandidate.name}" can be considered as an initial test hypothesis; review its stock, costs, and buyer evidence before spending.`);
   }
 
   if (orders30d >= 10) {
@@ -189,17 +175,15 @@ export async function GET() {
 
   // Sequencing recommendation
   if (bestProduct && inStockProducts.length > 1) {
-    const secondProduct = isGatewayPick
-      ? topByUnitsSold.find((p) => p.name !== bestProduct.name)
-      : topByUnitsSold[1];
+    const secondProduct = topByUnitsSold.find((p) => p.name !== bestProduct.name);
     if (secondProduct) {
       recommendations.push(
-        `Test "${bestProduct.name}" first before testing "${secondProduct.name}". Focusing your budget on one winner gives Meta cleaner data and protects your ad spend.`
+        `Test "${bestProduct.name}" as the first cold-acquisition candidate before comparing it with "${secondProduct.name}". Keep the first test focused on one product so its results are interpretable.`
       );
     }
   } else if (bestProduct) {
     recommendations.push(
-      `Start with a focused test on "${bestProduct.name}". Set a comfortable daily budget to validate your returns before scaling.`
+      `Start with a focused test on "${bestProduct.name}". Set a controlled daily budget and measure the results before increasing spend.`
     );
   }
 

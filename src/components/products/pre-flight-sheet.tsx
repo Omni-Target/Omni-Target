@@ -98,10 +98,15 @@ export function PreFlightSheet({
 }: PreFlightSheetProps) {
   // Determine intelligent defaults based on product status
   const isGateway =
-    product?.gateway_classification?.toLowerCase() === "gateway";
-  const isNew = (product?.units_sold ?? 0) < 3;
+    product?.gateway_classification?.toLowerCase() === "gateway" ||
+    product?.product_decision?.role === "Gateway";
   const isRepeat =
-    product?.gateway_classification?.toLowerCase() === "consideration";
+    product?.gateway_classification?.toLowerCase() === "consideration" ||
+    product?.product_decision?.role === "Consideration";
+  const isHybrid =
+    product?.gateway_classification?.toLowerCase() === "hybrid" ||
+    product?.product_decision?.role === "Hybrid";
+  const isNew = (product?.units_sold ?? 0) < 3;
 
   const defaultGoal = isGateway
     ? "Drive Website Sales"
@@ -130,6 +135,8 @@ export function PreFlightSheet({
   }, [product, isGateway, isNew, isRepeat]);
 
   if (!product) return null;
+  const decision = product.product_decision;
+  const returns = decision?.return_evidence;
 
   const formattedPrice = product.price
     ? formatCurrency(product.price, currency)
@@ -146,6 +153,10 @@ export function PreFlightSheet({
   ) : isRepeat ? (
     <Badge variant="info" size="sm">
       <Layers className="size-3" /> Repeat Favorite
+    </Badge>
+  ) : isHybrid ? (
+    <Badge variant="outline" size="sm">
+      <Zap className="size-3" /> Proven Seller
     </Badge>
   ) : null;
 
@@ -230,18 +241,64 @@ export function PreFlightSheet({
           <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-3.5 text-xs text-brand-950">
             <div className="flex items-center gap-1.5 font-semibold text-brand-800">
               <Sparkles className="size-3.5 text-brand-600" />
-              Why we recommend this
+              Recommended Campaign Setup
             </div>
             <p className="mt-1 leading-relaxed text-brand-900/90">
               {isGateway
-                ? "This is your Gateway Product — your sales data shows it's your best product for converting new shoppers. We've set your goal to Drive Website Sales to win more first-time buyers."
-                : isNew
-                  ? "A fresh arrival with no ad history yet. We've set your goal to New Arrival Launch to introduce it to interested shoppers and spark your first orders."
-                  : isRepeat
-                    ? "A customer favorite with high repeat appeal. We've set your goal to Retarget Past Visitors to bring back shoppers and drive repeat sales."
-                    : "Matched to your product price point and customer buying patterns to help you get the most out of your test budget."}
+                ? "New shoppers buy this piece more than anything else in your store — making it your highest-signal product to test for cold customer acquisition."
+                : isRepeat
+                  ? "Shoppers love coming back for this piece. Ideal for retargeting past visitors and turning one-time buyers into loyal repeat customers."
+                  : isNew
+                    ? "Fresh drop with no sales history yet. Perfect for building early buzz, testing audience demand, and getting your first orders rolling in."
+                    : isHybrid
+                      ? `Dependable seller${product.units_sold ? ` (${product.units_sold} sold)` : ""} with steady demand across new and returning shoppers. A solid choice to scale consistent order volume.`
+                      : "Matched to your product price point and store demand to help you get the most out of your test budget."}
             </p>
           </div>
+
+          {decision && (
+            <div className="space-y-2 rounded-xl border border-border p-3.5 text-xs text-muted-foreground">
+              <p className="font-semibold text-foreground">Before you spend</p>
+              <p>
+                <span className="font-medium text-foreground">Order history:</span>{" "}
+                {decision.role === "Gateway"
+                  ? `${decision.first_order_count} of ${decision.identified_first_orders} identified first orders contained this product, compared with ${decision.later_order_count} of ${decision.identified_later_orders} later orders.`
+                  : decision.role === "Consideration"
+                    ? `${decision.later_order_count} of ${decision.identified_later_orders} repeat orders contained this product, compared with ${decision.first_order_count} first orders.`
+                    : decision.role === "Hybrid"
+                      ? `This product appeared in ${decision.first_order_count} first orders and ${decision.later_order_count} repeat orders — balanced demand across new and returning customers.`
+                      : decision.role_reason}
+              </p>
+              {decision.follow_up_60d.repeat_rate !== null && (
+                <p>
+                  <span className="font-medium text-foreground">Repeat momentum:</span> {decision.follow_up_60d.buyers_with_another_order} of {decision.follow_up_60d.eligible_first_order_buyers} first-time buyers ({Math.round(decision.follow_up_60d.repeat_rate * 100)}%) placed another store order within 60 days.
+                </p>
+              )}
+              {decision.high_value_entry && (() => {
+                const vipRatio = Math.round((decision.high_value_entry.high_value_first_buyers_with_product / decision.high_value_entry.high_value_buyers) * 100);
+                const overallRatio = Math.round((decision.high_value_entry.all_first_buyers_with_product / decision.high_value_entry.eligible_first_buyers) * 100);
+                return (
+                  <p>
+                    <span className="font-medium text-foreground">VIP customer magnet:</span> {decision.high_value_entry.high_value_first_buyers_with_product} of your top {decision.high_value_entry.high_value_buyers} spenders ({vipRatio}%) started with this piece (vs {overallRatio}% of shoppers overall). When customers buy this first, they tend to stick around and spend the most.
+                  </p>
+                );
+              })()}
+              {returns?.processed_return_rate != null ? (
+                <p className={returns.risk === "review" ? "font-medium text-amber-800" : undefined}>
+                  <span className="font-medium text-foreground">Return rate:</span> {returns.processed_return_units} of {returns.eligible_units} orders returned ({Math.round(returns.processed_return_rate * 100)}%).{returns.refunded_units > 0 ? ` ${returns.refunded_units} refunded separately.` : ""}{returns.primary_reason ? ` Main reason recorded: ${returns.primary_reason}.` : returns.processed_return_units === 0 ? " Safe to test without return risk." : ""}
+                </p>
+              ) : (
+                <p>{decision.return_evidence_state === "missing_scope"
+                  ? "Shopify return access is not granted for this store. Return risk is unassessed."
+                  : decision.return_evidence_state === "error"
+                    ? "Return data could not be synced. Return risk is unassessed."
+                    : "Product return rate is unavailable or has too few eligible units to assess."}</p>
+              )}
+              {decision.test_readiness !== "planning_candidate" && (
+                <p className="font-medium text-amber-800">{decision.readiness_reasons.join(" ")}</p>
+              )}
+            </div>
+          )}
 
           {/* Campaign Objective Selector */}
           <div>
