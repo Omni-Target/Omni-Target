@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* =========================================================================
    OMNI TARGET — Design System (light-first SaaS, deep-indigo brand)
    Single source of truth. Prefer semantic tokens over arbitrary values.
@@ -509,3 +511,11 @@ div:has(> a[href*="clerk.dev"]),
     scroll-behavior: auto !important;
   }
 }
+
+@media print {
+  @page {
+    size: auto;
+    margin: 0;
+  }
+}
+

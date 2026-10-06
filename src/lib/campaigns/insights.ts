@@ -34,7 +34,9 @@ export function buildGenerationContext(
     const topGateway =
       gatewayProducts.length > 0
         ? [...gatewayProducts].sort(
-            (a, b) => (b.revenue ?? 0) - (a.revenue ?? 0),
+            (a, b) =>
+              (b.product_decision?.first_order_count ?? b.first_time_buyer_count ?? 0) -
+              (a.product_decision?.first_order_count ?? a.first_time_buyer_count ?? 0),
           )[0]
         : null;
 
@@ -46,6 +48,7 @@ export function buildGenerationContext(
     );
 
     gatewayInsight = {
+      productDecision: currentProduct?.product_decision,
       currentProductClassification:
         currentProduct?.gateway_classification || "Unknown",
       currentProductName: currentProduct?.name,
@@ -57,8 +60,15 @@ export function buildGenerationContext(
       currentProductRepeatRate: currentProduct?.repeat_purchase_rate,
       storeAov: storeInsights.orders?.average_order_value,
       storeBaseFtb:
-        products.reduce((acc, p) => acc + (p.first_time_buyer_ratio || 0), 0) /
-        products.length,
+        products.length > 0
+          ? products.reduce((acc, p) => acc + (p.first_time_buyer_ratio || 0), 0) / products.length
+          : 0,
+      firstTimeBuyerRatio: currentProduct?.first_time_buyer_ratio,
+      firstTimeBuyerCount: currentProduct?.first_time_buyer_count,
+      uniqueCustomerCount: currentProduct?.unique_customer_count,
+      orderCount: currentProduct?.order_count || currentProduct?.units_sold,
+      unitsSold: currentProduct?.units_sold,
+      revenue: currentProduct?.revenue,
     } as BriefPDFParams["gatewayInsight"];
 
     storeDataForApi = {

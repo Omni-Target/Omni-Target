@@ -1,4 +1,4 @@
-import { Lightbulb, Users, CalendarClock, TrendingUp } from "lucide-react";
+import { Lightbulb, Users, CalendarClock, TrendingUp, Globe } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { Insight, InsightKind } from "./derive";
@@ -11,6 +11,7 @@ const kindMap: Record<
   lookalike: { Icon: Users, badge: "bg-info-50 text-info-600" },
   timing: { Icon: CalendarClock, badge: "bg-accent-50 text-accent-600" },
   scale: { Icon: TrendingUp, badge: "bg-success-50 text-success-600" },
+  diaspora: { Icon: Globe, badge: "bg-purple-50 text-purple-600" },
 };
 
 export function InsightCard({ insight }: { insight: Insight }) {

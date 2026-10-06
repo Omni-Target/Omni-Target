@@ -32,8 +32,8 @@ function AuthBrandPanel() {
           Store Intelligence for Meta Ads
         </div>
         <h2 className="mt-5 max-w-sm text-[1.75rem] font-semibold leading-tight tracking-[-0.02em] text-white">
-          Built for Shopify Fashion Brands. Know exactly what to launch before
-          you deploy capital.
+          Built for modern Shopify brands and growth teams. Know exactly what to
+          launch before you deploy capital.
         </h2>
         <ul className="mt-8 space-y-5">
           {VALUE_PROPS.map(({ Icon, title, body }) => (
@@ -51,7 +51,7 @@ function AuthBrandPanel() {
       </div>
 
       <p className="mt-auto pt-10 text-xs text-white/35">
-        256-bit encryption · SOC 2 compliant
+        Official Shopify Partner App · 100% Read-Only Safety
       </p>
     </div>
   );
@@ -68,11 +68,11 @@ export function AuthShell({
 }) {
   return (
     <SplitLayout aside={<AuthBrandPanel />}>
-      <div className="mb-8 text-center lg:hidden">
-        <h1 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">
+      <div className="mb-5 text-center">
+        <h1 className="text-xl sm:text-2xl font-semibold tracking-[-0.02em] text-foreground">
           {title}
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+        <p className="mt-1 text-xs sm:text-sm text-muted-foreground">{subtitle}</p>
       </div>
       {children}
     </SplitLayout>

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { IntegrationCard } from "@/components/settings";
 import { SyncButton } from "@/components/SyncButton";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
+import { normalizeStoreLogoUrl } from "@/lib/store-logo-url";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,6 +18,14 @@ export const revalidate = 0;
 export default async function SettingsPage() {
   const { userId } = await auth();
   if (!userId) redirect("/login");
+
+  const { clerkClient } = await import("@clerk/nextjs/server");
+  const clerk = await clerkClient();
+  const user = await clerk.users.getUser(userId);
+  const metadata = (user?.publicMetadata || {}) as {
+    storeName?: string;
+    storeLogoUrl?: string;
+  };
 
   const integration = await getUserIntegration(userId);
 
@@ -26,6 +35,23 @@ export default async function SettingsPage() {
     integration?.shopify_custom_domain ||
     integration?.shopify_store_url ||
     "your store";
+
+  let storeLogo = normalizeStoreLogoUrl(metadata.storeLogoUrl);
+  if (!storeLogo && integration?.shopify_store_url) {
+    const { fetchShopifyStoreLogo } = await import("@/lib/shopify-store-logo");
+    storeLogo = await fetchShopifyStoreLogo(
+      integration.shopify_store_url,
+      integration.shopify_custom_domain
+    );
+    if (storeLogo || metadata.storeLogoUrl) {
+      clerk.users
+        .updateUserMetadata(userId, {
+          publicMetadata: { storeLogoUrl: storeLogo ?? null },
+        })
+        .catch(() => {});
+    }
+  }
+  const storeName = metadata.storeName || null;
 
   return (
     <PageContainer width="default" className="space-y-7 pb-16">
@@ -37,8 +63,19 @@ export default async function SettingsPage() {
       <div className="space-y-5">
         {/* Shopify integration */}
         <IntegrationCard
-          icon={<ShoppingBag />}
-          name="Shopify store"
+          icon={
+            shopifyConnected && storeLogo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={storeLogo}
+                alt={storeName || storeDomain}
+                className="size-6 rounded-md object-contain"
+              />
+            ) : (
+              <ShoppingBag />
+            )
+          }
+          name={storeName || "Shopify store"}
           connected={shopifyConnected}
           description={
             shopifyConnected

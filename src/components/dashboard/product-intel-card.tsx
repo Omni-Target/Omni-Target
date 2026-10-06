@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { ImageIcon, ArrowRight, Sparkles } from "lucide-react";
+import { ImageIcon, ArrowRight, Sparkles, ExternalLink, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/currency";
@@ -17,19 +17,23 @@ export interface ProductIntelCardProps {
   currency: string;
   variant?: Variant;
   onCreateBrief?: (product: StoreProductLike, isNewLaunch: boolean) => void;
+  shop?: string | null;
 }
 
-function classificationBadge(c?: string) {
-  if (!c) return null;
-  const label = c === "Insufficient Data" ? "New Launch Brief" : c;
-  const variant =
-    c === "Gateway"
-      ? "brand"
-      : c === "Consideration"
-        ? "warning"
-        : c === "Insufficient Data"
-          ? "info"
-          : "neutral";
+function classificationBadge(c?: string, confidence?: "strong" | "directional" | "insufficient") {
+  if (!c || c.toLowerCase() === "insufficient data") return null;
+  let label = c;
+  let variant: "brand" | "warning" | "info" | "neutral" = "neutral";
+  if (c.toLowerCase() === "gateway") {
+    label = "Gateway Product";
+    variant = "brand";
+  } else if (c.toLowerCase() === "consideration") {
+    label = "Repeat Favorite";
+    variant = "info";
+  } else if (c.toLowerCase() === "hybrid") {
+    label = "Proven Seller";
+    variant = "info";
+  }
   return (
     <Badge variant={variant} size="sm">
       {label}
@@ -42,19 +46,48 @@ export function ProductIntelCard({
   currency,
   variant = "intelligence",
   onCreateBrief,
+  shop,
 }: ProductIntelCardProps) {
-  const isRestock = variant === "restock";
+  const isOutOfStock = !product.in_stock;
   const isNewLaunch = variant === "new-launch";
+  const isGateway =
+    product.gateway_classification?.toLowerCase() === "gateway";
+  const decision = product.product_decision;
+  const hasEstablishedRole = Boolean(
+    product.gateway_classification &&
+    product.gateway_classification !== "Insufficient Data" &&
+    product.gateway_classification.toLowerCase() !== "unknown" &&
+    (product.units_sold ?? 0) >= 3
+  );
+  const syncIncomplete = decision?.readiness_reasons.some((reason) => reason.includes("sync is incomplete")) ?? false;
+  const readinessSummary = !decision ? "" : decision.test_readiness === "hold"
+    ? "Out of stock. Restock inventory before testing ads."
+    : decision.return_evidence?.risk === "review"
+      ? "Processed returns are elevated in the observed cohort. Review product quality before testing ads."
+    : syncIncomplete
+      ? "Shopify order or catalog sync in progress. Data refreshes automatically."
+    : decision.test_readiness === "planning_candidate"
+      ? "Stock and unit costs are recorded. Confirm shipping and transaction fees when setting your test budget."
+      : `${product.in_stock_variant_count !== undefined && product.total_variant_count
+          ? `${product.in_stock_variant_count} of ${product.total_variant_count} variants in stock. `
+          : "Check available stock. "}${product.unit_cost_coverage === "complete"
+          ? "Confirm shipping and packaging costs before launching."
+          : "Confirm product unit costs and target margin before launching."}`;
+
   const narrative = deriveProductNarrative(product);
   const footerAmount = isNewLaunch ? product.price : product.revenue;
+  const shopifyAdminUrl =
+    shop && product.id ? `https://${shop}/admin/products/${product.id}` : null;
 
   return (
     <div
       className={cn(
         "group flex flex-col rounded-2xl border bg-surface p-4 shadow-xs transition-all duration-200",
-        isRestock
-          ? "border-border-subtle opacity-80 grayscale hover:opacity-100 hover:grayscale-0"
-          : "border-border hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md",
+        isOutOfStock && isGateway
+          ? "border-amber-300 bg-amber-50/15 shadow-xs hover:border-amber-400 hover:shadow-md"
+          : isOutOfStock
+            ? "border-border-subtle opacity-80 grayscale hover:opacity-100 hover:grayscale-0"
+            : "border-border hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md",
       )}
     >
       <div className="flex items-start gap-3">
@@ -76,7 +109,7 @@ export function ProductIntelCard({
             {product.name}
           </p>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {isRestock ? (
+            {isOutOfStock ? (
               <Badge variant="danger" size="sm" dot>
                 Out of stock
               </Badge>
@@ -90,16 +123,44 @@ export function ProductIntelCard({
                 In stock
               </Badge>
             )}
-            {!isNewLaunch && classificationBadge(product.gateway_classification)}
+            {isOutOfStock && isGateway ? (
+              <Badge variant="warning" size="sm">
+                <Zap className="size-3" />
+                Restock Priority
+              </Badge>
+            ) : null}
+            {!isNewLaunch && classificationBadge(product.gateway_classification, decision?.role_confidence)}
+            {decision && !isOutOfStock && hasEstablishedRole && (
+              decision.test_readiness === "planning_candidate" ? (
+                <Badge variant="brand" size="sm">Planning Candidate</Badge>
+              ) : decision.test_readiness === "review" && product.in_stock_variant_count !== undefined && product.total_variant_count && product.in_stock_variant_count < product.total_variant_count ? (
+                <Badge variant="warning" size="sm">{product.in_stock_variant_count} of {product.total_variant_count} in stock</Badge>
+              ) : decision.test_readiness === "review" && decision.return_evidence?.risk === "review" ? (
+                <Badge variant="warning" size="sm">Review returns</Badge>
+              ) : null
+            )}
           </div>
         </div>
       </div>
 
       {isNewLaunch ? (
         <p className="mt-3 rounded-lg bg-success-50 px-3 py-2 text-xs italic text-success-700">
-          New product — launch brief available before the first sale
+          New product — create an ad brief to introduce it to shoppers
         </p>
-      ) : !isRestock && (narrative.subtext || narrative.primaryMetric) ? (
+      ) : isOutOfStock && isGateway ? (
+        <div className="mt-3 rounded-lg border border-amber-200/80 bg-amber-50/80 p-2.5 text-xs text-amber-900">
+          <p className="font-semibold flex items-center gap-1.5 text-amber-950">
+            <Sparkles className="size-3.5 text-amber-600" />
+            Restock Priority · Gateway signal
+          </p>
+          <p className="mt-0.5 text-amber-800">
+            {decision
+              ? `${decision.first_order_count} of ${decision.identified_first_orders} identified first orders contained this product.`
+              : "This product has a first-order signal."}{" "}
+            Restock before considering an ad test.
+          </p>
+        </div>
+      ) : !isOutOfStock && (narrative.subtext || narrative.primaryMetric) ? (
         <div className="mt-3 rounded-lg bg-surface-subtle px-3 py-2">
           {narrative.subtext && (
             <p className="text-xs italic text-muted-foreground">{narrative.subtext}</p>
@@ -112,13 +173,59 @@ export function ProductIntelCard({
         </div>
       ) : null}
 
+      {decision && !isNewLaunch && (
+        <details className="mt-3 rounded-lg border border-border-subtle px-3 py-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer font-semibold text-foreground">Why we chose this product</summary>
+          <div className="mt-2 space-y-2 leading-relaxed">
+            <p className="text-foreground">
+              {decision.role === "Gateway"
+                ? `${decision.first_order_count} of ${decision.identified_first_orders} identified first orders contained this product, compared with ${decision.later_order_count} of ${decision.identified_later_orders} later orders.`
+                : decision.role === "Consideration"
+                  ? `Customers frequently pick this in later orders (${decision.later_order_count} repeat orders). Ideal for retargeting and email campaigns.`
+                  : decision.role === "Hybrid"
+                    ? `Consistently popular across first-time buyers (${decision.first_order_count}) and returning customers (${decision.later_order_count}).`
+                    : `Solid catalog performer. Build a targeted ad test to gauge buyer demand.`}
+            </p>
+            {decision.follow_up_60d.repeat_rate !== null && decision.follow_up_60d.eligible_first_order_buyers > 0 && (
+              <p className="rounded-md bg-brand-50/70 px-2 py-1 text-brand-700">
+                <strong>60-day follow-up:</strong> {decision.follow_up_60d.buyers_with_another_order} of {decision.follow_up_60d.eligible_first_order_buyers} eligible buyers placed another store order.
+              </p>
+            )}
+            {decision.return_evidence?.processed_return_rate != null && (
+              <p>{decision.return_evidence.processed_return_units} of {decision.return_evidence.eligible_units} eligible units had processed returns ({Math.round(decision.return_evidence.processed_return_rate * 100)}%).</p>
+            )}
+            <p><strong className="text-foreground">Launch checklist:</strong> {readinessSummary}</p>
+            <details className="pt-1">
+              <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">View order breakdown</summary>
+              <div className="mt-1.5 space-y-1 rounded bg-surface-subtle p-2 text-[11px] text-muted-foreground">
+                <p>• First orders: {decision.first_order_count} of {decision.identified_first_orders} first-time buyers</p>
+                <p>• Repeat orders: {decision.later_order_count} of {decision.identified_later_orders} returning orders</p>
+                <p>• Inventory: {product.in_stock_variant_count !== undefined && product.total_variant_count ? `${product.in_stock_variant_count} of ${product.total_variant_count} variants in stock` : "In stock"}</p>
+              </div>
+            </details>
+          </div>
+        </details>
+      )}
+
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-border-subtle pt-3 text-xs">
         <span className="text-subtle-foreground">
           {product.units_sold ?? 0} sold ·{" "}
           {formatCurrency(Math.round(footerAmount ?? 0), currency)}
         </span>
-        {isRestock ? (
-          <span className="font-medium text-warning-600">Restock</span>
+        {isOutOfStock ? (
+          shopifyAdminUrl ? (
+            <a
+              href={shopifyAdminUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 font-semibold text-amber-700 transition-colors hover:text-amber-800"
+            >
+              Restock on Shopify
+              <ExternalLink className="size-3" />
+            </a>
+          ) : (
+            <span className="font-medium text-warning-600">Restock on Shopify</span>
+          )
         ) : isNewLaunch || product.should_advertise ? (
           <button
             type="button"

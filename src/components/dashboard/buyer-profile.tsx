@@ -1,13 +1,20 @@
-import { MapPin, CalendarClock, Wallet, HeartHandshake } from "lucide-react";
+import { MapPin, CalendarClock, Wallet, HeartHandshake, Compass } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/currency";
 
 export interface BuyerProfileProps {
   locationText: string;
+  internationalLocationText?: string;
+  locationSubText?: string;
+  locationLevel?: "city" | "country" | "commercial_hubs" | "missing";
   peakDays: string[];
   aov: number;
   repeatRate: number;
+  medianDaysToSecondOrder?: number | null;
+  repeatBuyersObserved?: number;
   currency: string;
+  topChannel?: string;
+  topChannelPercentage?: number;
 }
 
 function Row({
@@ -30,7 +37,7 @@ function Row({
         <p className="text-xs font-medium uppercase tracking-wide text-faint-foreground">
           {label}
         </p>
-        <p className="mt-0.5 text-sm font-medium text-foreground">{value}</p>
+        <div className="mt-0.5 text-sm font-medium text-foreground">{value}</div>
         {sub && <p className="mt-0.5 text-xs text-muted-foreground">{sub}</p>}
       </div>
     </div>
@@ -39,32 +46,52 @@ function Row({
 
 export function BuyerProfile({
   locationText,
+  internationalLocationText,
+  locationSubText,
+  locationLevel = "city",
   peakDays,
   aov,
   repeatRate,
+  medianDaysToSecondOrder,
+  repeatBuyersObserved,
   currency,
+  topChannel,
+  topChannelPercentage,
 }: BuyerProfileProps) {
-  const spendSub =
-    aov > 100000
-      ? "Premium buyers — target higher income audiences"
-      : aov >= 30000
-        ? "Mid-market buyers — broad targeting works well"
-        : "Value-conscious buyers — focus on deals and new arrivals";
+  const hasIntl = !!internationalLocationText || /United States|United Kingdom|London|New York|Canada|Ghana|Houston/i.test(locationText);
+  const locationSub = locationSubText || (
+    locationLevel === "commercial_hubs" || locationLevel === "country"
+      ? hasIntl
+        ? "Top commercial hubs · Cross-border orders recorded (ideal for diaspora targeting)"
+        : "Top commercial hubs · Concentrates budget where courier delivery and purchasing power are highest"
+      : locationLevel === "missing"
+        ? "Broad market targeting recommended for initial ad tests"
+        : hasIntl
+          ? "Cross-border demand recorded · Ideal for high-margin diaspora targeting"
+          : "Proven buyer locations recorded directly from your past customer orders"
+  );
 
-  const loyaltySub =
-    repeatRate < 0.15
-      ? "Most buyers are new. Focus ads on acquisition."
+  const isHighAov = currency === "NGN" ? aov >= 100000 : aov >= 75;
+  const isMidAov = currency === "NGN" ? aov >= 30000 : aov >= 35;
+
+  const spendSub =
+    isHighAov
+      ? "High-ticket luxury basket · Spotlight craftsmanship, unboxing & styling to build trust"
+      : isMidAov
+        ? "Balanced everyday basket · Showcase versatility and real-world styling"
+        : "Accessible impulse price · Highlight bundle value and fast checkout";
+
+  const loyaltySub = medianDaysToSecondOrder != null && (repeatBuyersObserved ?? 0) >= 5
+    ? `Repeat buyers typically order again within ~${Math.round(medianDaysToSecondOrder)} days (based on ${repeatBuyersObserved} repeat buyers) · Prime window for post-purchase flows`
+    : repeatRate < 0.15
+      ? "Focus ad creative on converting first-time buyers with an irresistible starter piece"
       : repeatRate <= 0.3
-        ? "Healthy loyalty. Test retargeting campaigns."
-        : "Strong loyalty. Create lookalike audiences from your best customers.";
+        ? "Solid repeat baseline · Pair new buyer acquisition with retargeting"
+        : "Exceptional customer loyalty · High repeat value gives you healthy margin for ads";
 
   const whenSub =
     peakDays.length > 0
-      ? `Launch campaigns on ${
-          peakDays[0] === "Saturday" || peakDays[0] === "Sunday"
-            ? "Friday evening"
-            : "the day before"
-        } to catch your ${peakDays[0]} buyers`
+      ? `Launch fresh creative ahead of ${peakDays.slice(0, 2).join(" & ")} to catch shoppers at their peak`
       : undefined;
 
   return (
@@ -73,7 +100,30 @@ export function BuyerProfile({
         <CardTitle>Your buyers</CardTitle>
       </CardHeader>
       <div className="space-y-5 px-6 pb-6">
-        <Row icon={<MapPin />} label="Where they buy from" value={locationText} />
+        <Row
+          icon={<MapPin />}
+          label="Where they buy from"
+          value={
+            <div>
+              <div>{locationText}</div>
+              {internationalLocationText && (
+                <div className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-purple-600">
+                  <span role="img" aria-label="International">🌍</span>
+                  <span>International: {internationalLocationText}</span>
+                </div>
+              )}
+            </div>
+          }
+          sub={locationSub}
+        />
+        {topChannel && (
+          <Row
+            icon={<Compass />}
+            label="How they find you"
+            value={topChannelPercentage ? `${topChannel} (${topChannelPercentage}% of orders)` : topChannel}
+            sub="Your top organic conversion channel"
+          />
+        )}
         <Row
           icon={<CalendarClock />}
           label="When they buy"

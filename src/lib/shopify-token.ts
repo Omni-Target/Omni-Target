@@ -4,6 +4,7 @@ import {
   detectDbColumns,
   supabaseAdmin,
 } from "./db";
+import { fetchWithRetry } from "./http";
 
 /**
  * Result of resolving a Shopify access token for a user.
@@ -237,19 +238,23 @@ async function doRefreshShopifyToken(
   const refreshUrl = `https://${shopHost}/admin/oauth/access_token`;
 
   try {
-    const refreshRes = await fetch(refreshUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
+    const refreshRes = await fetchWithRetry(
+      refreshUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          client_id: process.env.SHOPIFY_CLIENT_ID,
+          client_secret: process.env.SHOPIFY_CLIENT_SECRET,
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+        }),
       },
-      body: JSON.stringify({
-        client_id: process.env.SHOPIFY_CLIENT_ID,
-        client_secret: process.env.SHOPIFY_CLIENT_SECRET,
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
-      }),
-    });
+      { timeoutMs: 12000, retries: 1 }
+    );
 
     // Guard against non-JSON responses (HTML error/redirect pages). Without
     // this, refreshRes.json() throws "Unexpected token '<'" on an HTML body.

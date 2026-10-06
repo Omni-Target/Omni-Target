@@ -16,7 +16,7 @@ export function briefNudgeEmailHtml(): string {
     </p>
 
     <p style="margin:0 0 16px 0;">
-      We've identified your best products to advertise — Gateway Products that convert cold traffic into first-time buyers. You're one brief away from knowing exactly what to run, who to target, and how much to spend.
+      We&apos;ve identified products that appear frequently in customers&apos; first accessible paid orders. You&apos;re one brief away from turning that Shopify evidence into a clear cold-acquisition test.
     </p>
 
     <p style="margin:0 0 24px 0;">

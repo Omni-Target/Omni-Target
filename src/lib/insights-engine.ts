@@ -1,16 +1,57 @@
-import { StoreData } from "./store-data";
+import { groundTargetingProfile } from "./recommendation-evidence";
+import { StoreData, StoreProduct } from "./store-data";
 import Anthropic from "@anthropic-ai/sdk";
 import { formatCurrency } from "@/lib/currency";
-import { fetchExchangeRates } from "./exchange-rates";
+import { fetchExchangeRateSnapshot } from "./exchange-rates";
+import { estimateDailyTestBudget } from "./budget-evidence";
+import { getAdvantagePlusGuidance } from "./advantage-plus";
+import { summarizeShopifyReadiness } from "./shopify-readiness";
+import { summarizeMarketingHistory } from "./marketing-evidence";
+import { compareProductsForTest } from "./gateway-decision";
+import {
+  isDomesticCity,
+  getEffectiveStoreCountry,
+  getInternationalStrategies,
+  getInternationalBudgetFloor,
+  isTier1Market,
+  isFallbackCountryEntry,
+} from "./market-geography";
+import type {
+  CreativeHook,
+  AdvantagePlusGuidance,
+} from "./brief-pdf-types";
+import {
+  validateBrief,
+  finalizeCreativeHooks,
+  buildVerifiedFallbackHooks,
+  getForbiddenSiblingProducts,
+  type TargetProductContext,
+  type CatalogItem,
+  type GeneratedBriefResponse,
+} from "./validate-brief";
 
 const anthropicClient = new Anthropic();
 import { logApiUsage } from "@/lib/db";
+
+// Claude Sonnet 5 enables adaptive thinking by default, while Anthropic does
+// not allow forced tool_choice with thinking enabled. Hook generation relies
+// on a forced tool call for schema-safe output, so this must stay disabled.
+export const STRUCTURED_HOOK_THINKING = { type: "disabled" } as const;
+
+export class CreativeHookGenerationError extends Error {
+  constructor() {
+    super("Product-specific creative hooks could not be generated.");
+    this.name = "CreativeHookGenerationError";
+  }
+}
 
 export interface LocationResult {
   name: string;
   source: "from_data" | "recommended";
   percentage?: number | null;
   note?: string;
+  country?: string;
+  market_type?: "domestic" | "international";
 }
 
 export interface TimingOutput {
@@ -20,309 +61,782 @@ export interface TimingOutput {
 }
 
 export interface TargetingProfile {
+  generation_status?: "generated" | "fallback";
+  creative_hooks_status?: "generated" | "fallback";
   locations: LocationResult[];
   demographics: {
-    gender: "all" | "female" | "male";
-    gender_reasoning: string;
+    gender: "All" | "Men" | "Women";
+    demographic_justification: string;
     age_min: number;
     age_max: number;
     age_reasoning: string;
   };
-  audiences: {
-    interests: string[];
-    interest_reasoning: string;
-    behaviours: string[];
-  };
+  seed_interests: string[];
+  creative_hooks: CreativeHook[];
+  optimization_reasoning: string;
   timing: TimingOutput;
-  optimization_event: {
-    event: string;
-    reasoning: string;
-    target_weekly: number;
-    upgrade_milestone: string;
-  };
 }
+
+const CREATIVE_HOOKS_TOOL: Anthropic.Tool = {
+  name: "generate_product_hooks",
+  description: "Three distinct, verified creative hooks for one product.",
+  input_schema: {
+    type: "object",
+    properties: {
+      target_product_title: { type: "string" },
+      creative_hooks: {
+        type: "array",
+        minItems: 3,
+        maxItems: 3,
+        items: {
+          type: "object",
+          properties: {
+            angle: { type: "string", enum: ["Problem / Friction", "Identity / Status", "Material / Craftsmanship", "Usability / Transformation", "Contrarian / Curiosity", "Offer / Risk Reversal"] },
+            visual_cue: { type: "string" },
+            on_screen_text: { type: "string" },
+            primary_text_hook: { type: "string" },
+          },
+          required: ["angle", "visual_cue", "on_screen_text", "primary_text_hook"],
+        },
+      },
+    },
+    required: ["target_product_title", "creative_hooks"],
+  },
+};
+
+export const ADVANTAGE_PLUS_SYSTEM_PROMPT = `You are a world-class senior Meta Ads media buyer and direct-response performance strategist briefing a busy e-commerce founder on a single-product Meta Advantage+ campaign.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 1: META ADS ALGORITHMIC REALITY (2026 ARCHITECTURE)
+═══════════════════════════════════════════════════════════════════
+Meta removed the vast majority of detailed-targeting interest categories on January 15, 2026.
+Under Meta's 2026 Advantage+ system:
+1. Seed Suggestions Only: Any interest or demographic input provided to Meta's Ads Manager serves solely as a "seed suggestion" for initial delivery. It is never a hard constraint or exclusionary boundary once conversion signals begin registering.
+2. Hard Boundaries: Location, minimum age, and language are the ONLY remaining hard constraints respected by the delivery system.
+3. Behavior Tags Exclusion: Manual behavioral tags (e.g. "Engaged Shoppers", "Frequent Travelers") are soft suggestions already internalized by Meta's algorithmic graph. Do NOT output manual behavioral tags; stick purely to broad category seed interests in the seed_interests field.
+4. Creative IS Targeting: In 2026, creative assets — the visual cue, the on-screen overlay text, and the opening primary text hook — do 100% of the audience segmentation work that manual interest stacking used to do. The creative itself filters, attracts, and converts the exact right prospective customer.
+5. Seed Interests Brand-Alignment: For luxury, premium contemporary, artisanal, or high-ticket products, NEVER include "Fast Fashion", "Bargain Hunting", discount retail, or coupon tags in seed_interests. For investment and premium pieces, stick to brand-aligned lifestyle, aesthetic, occasion, or category interests matching the product's actual price tier and brand positioning.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 2: STRICT SINGLE-SKU ISOLATION & ANTI-HALLUCINATION MANDATE
+═══════════════════════════════════════════════════════════════════
+Every brief is commissioned for exactly ONE target product (the "Target Product").
+1. Zero Sibling Contamination: You must never mention, reference, or imply any other product, collection item, accessory, or SKU from the store's broader catalog. If forbidden sibling products are listed in the user prompt, none of their names or identifiers may appear in any field of your output, even partially.
+2. Echo Target Title: In target_product_title, you must echo the exact title of the target product provided in the user prompt without alterations.
+3. Specificity Over Fluff: Base all visual cues and copy hooks directly and exclusively on the physical realities of the target product — its actual materials, form, finish, textures, mechanisms, utility, or documented craft details. Do not invent non-existent features or assume unstated accessories.
+4. Zero Customer Review / Social Proof Fabrication: Never fabricate or invent customer reviews, buyer quotes, or specific customer complaints (e.g. 'customers complained that...', 'everyone told us...', 'reviews say...'). Unless verified customer feedback is explicitly provided in the store data, frame hooks around universal category truths, direct physical product attributes (materials, tactile finish, design construction, hardware, ingredients), or clearly labeled creative hypotheses (e.g., 'Designed to solve common friction with conventional alternatives'). Never present an unverified customer quote or complaint as historical store fact.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 3: CREATIVE HOOK TAXONOMY (THE 6 PSYCHOLOGICAL ANGLES)
+═══════════════════════════════════════════════════════════════════
+You must output exactly 3 creative hooks. Each hook must utilize a DIFFERENT psychological angle selected from the following six canonical options. You must perform a self-check to ensure zero conceptual overlap among the 3 chosen angles:
+
+The three hooks must also use three different primary product propositions: (1) a practical problem or outcome, (2) concrete product proof such as a documented material, construction detail, or demonstrated use, and (3) identity, occasion, or verified risk reversal. Do not repeat the same comfort, movement, fit, quality, or confidence claim under different angle labels. If the catalog lacks evidence for one lane, use a clearly labeled creative hypothesis without inventing a product fact.
+
+1. "Problem / Friction"
+   - Core Mechanism: Directly targets a daily annoyance, physical discomfort, poor design, or recurring hassle caused by conventional alternatives.
+   - When to Use: For functional products, everyday essentials, gateway items, or products resolving common buyer friction.
+   - Example Focus: "The morning hassle conventional alternatives create", "Designed to eliminate common everyday friction".
+
+2. "Identity / Status"
+   - Core Mechanism: Signals who the buyer is, their aesthetic taste, social standing, aspirational lifestyle, or personal discernment.
+   - When to Use: For statement items, luxury design, premium lifestyle goods, and items where personal identity drives purchase.
+   - Example Focus: "Command the room without shouting", "The signature of effortless discernment".
+
+3. "Material / Craftsmanship"
+   - Core Mechanism: Focuses on sensory and tactile quality, premium materials, weight, finish, hand-feel, artisan construction, or ethical manufacturing. Justifies price and premium consideration.
+   - When to Use: For solid metals, full-grain leather, organic textiles, botanical extracts, ceramic, or artisanal heritage items.
+   - Example Focus: "Precision-milled aerospace-grade aluminum", "Hand-finished full-grain leather that ages with character".
+
+4. "Usability / Transformation"
+   - Core Mechanism: Demonstrates practical versatility, all-day utility, travel friendliness, or immediate physical transformation upon unboxing or daily use.
+   - When to Use: For versatile everyday favorites, travel essentials, multi-use products, or effortless turn-key designs.
+   - Example Focus: "Effortless morning routine in half the time", "Built for seamless all-day performance".
+
+5. "Contrarian / Curiosity"
+   - Core Mechanism: Counter-intuitive observations, surprising facts, myth-busting, or scroll-stopping questions that shatter standard category assumptions.
+   - When to Use: For unique structural designs, proprietary formulations, unexpected materials, or patent-worthy mechanisms.
+   - Example Focus: "Why the best daily essentials never use synthetic fillers", "The hidden flaw killing conventional products".
+
+6. "Offer / Risk Reversal"
+   - Core Mechanism: Removes purchasing hesitation, provides peace of mind, highlights early access, guarantees satisfaction, or frames an attractive entry proposition.
+   - When to Use: For new launches, first-time buyer acquisition, or high-consideration items needing confidence reinforcement.
+   - Example Focus: "Experience it risk-free with guaranteed hassle-free returns", "Limited inaugural batch with priority dispatch".
+
+Hook Formatting Rules:
+- on_screen_text: Maximum 8 words. Ultra-punchy, high contrast, readable in under 1.5 seconds on mobile.
+- visual_cue: Concrete, descriptive instruction for the video editor or photographer (e.g. macro close-up of stitching, dynamic walking motion in natural light).
+- primary_text_hook: Engaging 1-2 sentence opening hook designed to halt the thumb scroll in Meta feeds.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 4: GEOGRAPHIC INTELLIGENCE & LOCATION STRATEGY
+═══════════════════════════════════════════════════════════════════
+Meta Advantage+ campaigns require precise geographic strategy tailored to the merchant's operational market:
+
+1. Canonical Metro Areas Only:
+   - Output specific metropolitan cities or urban commercial centers.
+   - NEVER output broad countries, regions, provinces, or states as location names.
+2. Country & Market Type Allocation:
+   - For every location object, you MUST specify:
+     * name: The city or metropolitan area name.
+     * country: The canonical country where this specific city is situated.
+     * market_type: Strict mutual exclusivity:
+       - "domestic": MUST be physically located inside the merchant's home store country.
+       - "international": MUST be outside the merchant's home store country (cross-border export or high-intent overseas buyer hubs).
+     * source: "from_data" if the city appears in recorded customer order history, or "recommended" if inferred by you for market expansion.
+     * percentage: Order percentage from data if available, or null if recommended.
+     * note: A 1-sentence plain-English justification explaining why this city's purchasing power and e-commerce buyer profile fits this product.
+3. Market Protocols:
+   - Tier 1 Domestic Markets (e.g., US, UK, CA, AU, Western Europe):
+     Advise broad nationwide targeting for lower ad costs. Provide 3–5 top buyer metro hubs from recorded order data or the highest-density commercial metros in that country matching the product's price point. Keep international locations empty unless explicit overseas order volume exists in the store data.
+   - Dual-Market / Emerging & Developing Markets:
+     Dynamically evaluate the merchant's specific home country, product category, and unit price point. Recommend 3–5 domestic commercial metropolitan hubs with high disposable income, active digital payment adoption, and established delivery infrastructure in that country (combining recorded order data with high-purchasing-power cities capable of buying at this price point). In addition, recommend 2–4 strategic international expansion cities where shoppers have high disposable income, relevant commercial or diaspora affinity for products originating from the merchant's market in this category, and high propensity to purchase cross-border. Do not rely on hardcoded defaults — tailor both domestic and international hubs dynamically to the store's actual country, currency, and product tier.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 5: DEMOGRAPHICS & SEED AUDIENCE GUIDANCE
+═══════════════════════════════════════════════════════════════════
+1. Gender Targeting:
+   - "Women": Mandatory for womenswear, dresses, skirts, slips, female intimate apparel, or female cosmetics.
+   - "Men": Mandatory for menswear, suits, men's shorts, trunks, or male grooming.
+   - "All": Reserved strictly for truly unisex items or universal homeware/accessories.
+   - Provide 1 clear sentence in demographic_justification explaining the purchasing power fit.
+2. Age Brackets:
+   - Set age_min (minimum 18) and age_max realistically based on product price point and disposable income (e.g. 22-45 for contemporary trend items; 28-55 for high-ticket luxury investment items).
+3. Seed Interests:
+   - Select 3 to 5 broad category interests. Always include "Online Shopping". Avoid micro-interests, niche fan pages, or direct competitor names.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 6: CAMPAIGN OPTIMIZATION & TIMING PACING
+═══════════════════════════════════════════════════════════════════
+1. Optimization Event Rationale:
+   - Treat the supplied Purchase event as an unverified launch hypothesis. Shopify activity does not establish Meta event health; do not claim otherwise or recommend switching events based on order-count bands.
+2. Timing & Launch Schedule:
+   - launch_recommendation: 1 actionable sentence recommending launching at 12:00 AM (midnight) as that specific day begins in the store's local timezone (e.g. "Monday at 12:00 AM (midnight Lagos time)"), allowing Meta a full 24-hour cycle to distribute daily budget efficiently. Never mention the prior day (e.g., do NOT say "midnight on Sunday" when recommending Monday 12:00 AM).
+   - reasoning: 1 reassuring sentence advising the founder to maintain 24/7 continuous ad delivery without pausing, letting Meta accumulate shopper signals across the entire week and capture highest conversions during peak days. Note that past peak order days in store data reflect historical customer activity, not an algorithmic guarantee of future ad performance.
+
+═══════════════════════════════════════════════════════════════════
+SECTION 7: TONE, VOICE & FOUNDER-FRIENDLY PLAIN ENGLISH MANDATE
+═══════════════════════════════════════════════════════════════════
+You are communicating with a busy founder who values direct, actionable clarity above all else:
+- Maximum ONE sentence per reasoning, note, or justification field.
+- STRICT BAN on corporate or media-buyer jargon: Never write "algorithmic liquidity", "signal volume", "exit the learning phase", "starving the algorithm", "CPM imbalance", "acquisition signal", "behavioral velocity", "cohort signals", "seed mechanisms", "catalog cannibalization", "pixel conversion signals", "inferred diaspora demand", "bid headroom", "conversion velocity", or "event frequency". Always use plain, encouraging founder-friendly language.
+- Speak like a trusted growth advisor: clear, confident, pragmatic, and immediately understandable.`;
+
+export const ADVANTAGE_PLUS_TOOL: Anthropic.Tool = {
+  name: "generate_advantage_plus_profile",
+  description:
+    "Single-SKU Meta Advantage+ campaign brief: creative hooks, seed audience, timing.",
+  cache_control: { type: "ephemeral" },
+  input_schema: {
+    type: "object",
+    properties: {
+      target_product_title: {
+        type: "string",
+        description:
+          "Echo the exact target product title back — used by the validator to confirm no drift.",
+      },
+      locations: {
+        type: "array",
+        minItems: 2,
+        maxItems: 12,
+        items: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description:
+                "Specific high-converting city or metro area. Never whole countries.",
+            },
+            country: {
+              type: "string",
+              description: "The country where this city is located.",
+            },
+            market_type: {
+              type: "string",
+              enum: ["domestic", "international"],
+              description:
+                "Whether this city is in the store's primary local market ('domestic') or an export/diaspora market abroad ('international').",
+            },
+            source: {
+              type: "string",
+              enum: ["from_data", "recommended"],
+            },
+            percentage: { type: ["number", "null"] },
+            note: { type: "string" },
+          },
+          required: [
+            "name",
+            "country",
+            "market_type",
+            "source",
+            "percentage",
+            "note",
+          ],
+        },
+      },
+      demographics: {
+        type: "object",
+        properties: {
+          gender: {
+            type: "string",
+            enum: ["All", "Men", "Women"],
+          },
+          demographic_justification: { type: "string" },
+          age_min: { type: "number", minimum: 18 },
+          age_max: { type: "number" },
+          age_reasoning: { type: "string" },
+        },
+        required: [
+          "gender",
+          "demographic_justification",
+          "age_min",
+          "age_max",
+          "age_reasoning",
+        ],
+      },
+      seed_interests: {
+        type: "array",
+        minItems: 3,
+        maxItems: 5,
+        items: { type: "string" },
+      },
+      creative_hooks: {
+        type: "array",
+        minItems: 3,
+        maxItems: 3,
+        items: {
+          type: "object",
+          properties: {
+            angle: {
+              type: "string",
+              enum: [
+                "Problem / Friction",
+                "Identity / Status",
+                "Material / Craftsmanship",
+                "Usability / Transformation",
+                "Contrarian / Curiosity",
+                "Offer / Risk Reversal",
+              ],
+            },
+            visual_cue: { type: "string" },
+            on_screen_text: { type: "string" },
+            primary_text_hook: { type: "string" },
+          },
+          required: [
+            "angle",
+            "visual_cue",
+            "on_screen_text",
+            "primary_text_hook",
+          ],
+        },
+      },
+      optimization_reasoning: { type: "string" },
+      timing: {
+        type: "object",
+        properties: {
+          peak_days: {
+            type: "array",
+            items: { type: "string" },
+          },
+          launch_recommendation: { type: "string" },
+          reasoning: { type: "string" },
+        },
+        required: ["peak_days", "launch_recommendation", "reasoning"],
+      },
+    },
+    required: [
+      "target_product_title",
+      "locations",
+      "demographics",
+      "seed_interests",
+      "creative_hooks",
+      "optimization_reasoning",
+      "timing",
+    ],
+  },
+};
 
 /**
  * ─── 1. Consolidate AI Calls (Single-Pass Intelligence) ───
  * Makes a single call to Anthropic's Message API using structured tool use
- * to determine locations, demographics, and audience interests/behaviours.
+ * to determine Meta Advantage+ creative hooks, seed audience, and timing.
  */
-async function generateTargetingProfile(
+async function generateRawTargetingProfile(
   storeData: StoreData,
   adSets: number,
   dailyBudget: number,
-  userId?: string | null
+  userId?: string | null,
+  targetProductOverride?: StoreProduct,
+  excludedAngle?: string | null
 ): Promise<TargetingProfile> {
   const storeCurrency = storeData.store?.currency || "USD";
-  
-  // Format top locations
-  const consolidatedLocations = storeData.orders.top_locations
-    .map((l) => `${l.city} (${l.percentage}%)`)
-    .join(", ");
+  const monthlyOrders =
+    storeData.orders.orders_last_30_days ?? 0;
+  const guidance = getAdvantagePlusGuidance(monthlyOrders, storeData.prespend?.analytics?.recent_funnel);
 
-  // Take top 25 products enriched with category, tags, revenue context, and classification
-  const productSample = storeData.products
-    .slice(0, 25)
-    .map((p) => {
-      const tags = (p.tags || []).slice(0, 5).join(", ");
-      const type = p.product_type || p.collection || "";
-      const isNew = p.order_velocity !== undefined && p.order_velocity < 3; // or matching Shopify order_count threshold
-      const classification = p.gateway_classification || "New Launch";
-      return [
-        `- "${p.name}"`,
-        `price: ${p.price} ${storeCurrency}`,
-        type ? `category: ${type}` : null,
-        tags ? `tags: ${tags}` : null,
-        `classification: ${classification}`,
-        isNew ? `status: New Launch` : null,
-        p.units_sold > 0 ? `units sold: ${p.units_sold}` : null,
-      ].filter(Boolean).join(" | ");
-    })
+  // Format top locations (excluding country-only fallback entries)
+  const validTopLocations = (storeData.orders.top_locations || []).filter((l) => !isFallbackCountryEntry(l));
+  const consolidatedLocations = validTopLocations.length > 0
+    ? validTopLocations.map((l) => `${l.city} (${l.percentage}%)`).join(", ")
+    : storeData.orders.top_order_countries?.length
+      ? `Order cities unavailable; paid-order countries: ${storeData.orders.top_order_countries.map((c) => `${c.country} (${c.order_count} orders)`).join(", ")}`
+      : "Paid-order locations unavailable";
+
+  // Identify target single product
+  const targetProduct =
+    targetProductOverride ||
+    (storeData.products && storeData.products.length > 0
+      ? [...storeData.products].sort(
+          (a, b) => (b.revenue || 0) - (a.revenue || 0)
+        )[0]
+      : {
+          id: "default-product",
+          name: storeData.store.name || "Main Collection Item",
+          price: Math.round(storeData.orders.average_order_value || 50),
+          units_sold: 10,
+          revenue: 500,
+          product_type: "General",
+          collection: "General",
+          description: "",
+          tags: ["bestseller"],
+        });
+
+  const targetProductCtx: TargetProductContext = {
+    id: (targetProduct as { id?: string }).id || targetProduct.name,
+    title: targetProduct.name,
+    description: [
+      targetProduct.description,
+      ...((targetProduct as StoreProduct).catalog_claims || []).map(
+        (claim) => `${claim.key}: ${claim.value}`,
+      ),
+    ].filter(Boolean).join("\n"),
+    tags: targetProduct.tags,
+    product_type:
+      targetProduct.product_type ||
+      (targetProduct as { collection?: string }).collection,
+    price: targetProduct.price,
+    url: (targetProduct as { url?: string }).url,
+  };
+
+  const catalog: CatalogItem[] = (storeData.products || []).map((p) => ({
+    id: (p as { id?: string }).id || p.name,
+    title: p.name,
+  }));
+
+  const targetProductTitle = targetProduct.name;
+  const targetProductDescription =
+    targetProduct.description || "None provided";
+  const targetProductType =
+    targetProduct.product_type ||
+    (targetProduct as { collection?: string }).collection ||
+    "General";
+  const targetProductTags =
+    (targetProduct.tags || []).join(", ") || "None";
+  const targetProductPrice =
+    targetProduct.price ||
+    Math.round(storeData.orders.average_order_value || 0);
+  const targetProductUrl =
+    (targetProduct as { url?: string }).url ||
+    `https://${storeData.store.domain || "store.com"}`;
+  const storeName = storeData.store.name;
+  const storeCountry = getEffectiveStoreCountry(
+    storeData.store.country,
+    storeData.store.currency,
+    storeData.orders.top_locations
+  );
+  const isTier1 = isTier1Market(storeCountry, storeCurrency);
+  const hasOverseasBuyers = storeData.orders.top_locations.some(
+    (l) => !isDomesticCity(l.city || "", l.country, storeCountry, storeCurrency, storeData.orders.top_locations)
+  );
+  const aov = Math.round(storeData.orders.average_order_value);
+  const peakDaysStr =
+    storeData.orders.peak_days.length > 0
+      ? storeData.orders.peak_days.join(", ")
+      : "None recorded yet";
+
+  // Keep the prompt's deny-list aligned with code-side validation.
+  const siblingDenyList = getForbiddenSiblingProducts(targetProductCtx, catalog)
+    .map((c) => `  - "${c.title}"`)
     .join("\n");
 
-  const prompt = `You are a world-class Meta Ads media buyer and marketing consultant advising a busy e-commerce brand founder.
-Analyze this Shopify store's data to generate a complete, high-converting targeting profile.
+  // Matched product & attribution signals
+  const matchedProduct = storeData.products?.find(
+    (p) =>
+      (p.id && targetProductCtx.id && p.id.toString() === targetProductCtx.id.toString()) ||
+      p.name.trim().toLowerCase() === targetProductTitle.trim().toLowerCase()
+  );
 
-Store Details:
-- Name: ${storeData.store.name}
-- Domain: ${storeData.store.domain}
-- Primary Market: ${storeData.store.country}
+  const productDecision = matchedProduct?.product_decision;
+  let productRole: string = productDecision
+    ? `${productDecision.role === "Gateway" ? "Gateway Product" : productDecision.role === "Consideration" ? "Repeat Favorite" : productDecision.role === "Hybrid" ? "Proven Seller" : productDecision.role}: ${productDecision.role_reason}`
+    : matchedProduct?.gateway_classification || "Insufficient Data";
+  if (!productDecision && (
+    matchedProduct?.gateway_classification === "Gateway"
+  )) {
+    const ftbPct = Math.round((matchedProduct?.first_time_buyer_ratio || 0.6) * 100);
+    productRole = `Gateway Product (appeared in ${ftbPct}% of identified purchasers' first accessible paid orders)`;
+  } else if (!productDecision && (
+    matchedProduct?.gateway_classification === "Consideration"
+  )) {
+    productRole = "High-Consideration Product (frequently purchased by customers returning to the brand)";
+  }
+
+  const primaryTrafficSource =
+    matchedProduct?.top_acquisition_channel ||
+    storeData.orders?.acquisition_channels?.[0]?.channel ||
+    "Direct / Social Discovery";
+
+  let reorderHabit = "Early Growth (Focus on driving profitable first-time discovery)";
+  if ((matchedProduct?.repeat_purchase_rate || 0) > 0.15) {
+    const repPct = Math.round((matchedProduct?.repeat_purchase_rate || 0) * 100);
+    reorderHabit = `Strong Reorder Habit (${repPct}% of customers come back to buy again)`;
+  } else if ((storeData.orders?.repeat_customer_rate || 0) > 0.2) {
+    const repStorePct = Math.round((storeData.orders?.repeat_customer_rate || 0) * 100);
+    reorderHabit = `Healthy Store Repeat Rate (${repStorePct}% of all buyers return to order again)`;
+  }
+
+  const storeTopChannels = (storeData.orders?.acquisition_channels || [])
+    .slice(0, 3)
+    .map((c) => `${c.channel} (${c.percentage}%)`)
+    .join(", ");
+  const catalogClaims = (matchedProduct?.catalog_claims || [])
+    .map((claim) => `${claim.key}: ${claim.value}`)
+    .join("; ") || "None recorded";
+  const economicsEvidence = matchedProduct?.unit_cost != null
+    ? `Recorded average variant unit cost: ${matchedProduct.unit_cost} ${matchedProduct.unit_cost_currency || storeCurrency} (${matchedProduct.unit_cost_coverage || "unknown"} coverage). Price less recorded unit cost: ${matchedProduct.price_less_unit_cost ?? "unknown"}; this is not net profit because shipping, fees, returns, and overhead are not included.`
+    : "No unit cost is recorded in Shopify; do not claim a profitable CPA or margin.";
+  const analytics = storeData.prespend?.analytics;
+  const funnelEvidence = analytics
+    ? `${analytics.window_days}-day ShopifyQL funnel: ${analytics.sessions ?? "unknown"} sessions, ${analytics.sessions_with_cart_additions ?? "unknown"} cart sessions, ${analytics.sessions_that_reached_checkout ?? "unknown"} checkout sessions, ${analytics.sessions_that_completed_checkout ?? "unknown"} completed checkout sessions, ${analytics.conversion_rate ?? "unknown"} conversion rate.`
+    : "ShopifyQL funnel analytics unavailable; do not invent store-specific funnel benchmarks.";
+  const operationalReadiness = summarizeShopifyReadiness(storeData.prespend);
+  const activeDiscounts = storeData.prespend?.active_discounts
+    .map((discount) => `${discount.title}${discount.summary ? ` — ${discount.summary}` : ""}`)
+    .join("; ") || "None verified";
+  const policyEvidence = storeData.prespend?.policies
+    .map((policy) => policy.title || policy.type)
+    .join(", ") || "None verified";
+  const marketingEvidence = summarizeMarketingHistory(storeData.prespend?.marketing_history);
+
+  const prompt = `Target Product Context:
+- Product Title: ${targetProductTitle}
+- Product Description: ${targetProductDescription}
+- Category: ${targetProductType}
+- Tags: ${targetProductTags}
+- Price: ${targetProductPrice} ${storeCurrency}
+- Product URL: ${targetProductUrl}
+- Verified Catalog Claims from Shopify Metafields/Metaobjects: ${catalogClaims}
+${siblingDenyList ? `\nForbidden Sibling Products (MUST NEVER appear by name or be referenced in any hook):\n${siblingDenyList}` : ""}
+
+Product Performance & Customer Entry Signals:
+- Role in Store: ${productRole}
+- Test Readiness: ${productDecision ? `${productDecision.test_readiness.replaceAll("_", " ")}. ${productDecision.readiness_reasons.join(" ")}` : "Not assessed in this snapshot"}
+- 60-Day Follow-Up: ${productDecision ? productDecision.follow_up_60d.repeat_rate === null ? "No fully observed first-order cohort yet" : `${productDecision.follow_up_60d.buyers_with_another_order} of ${productDecision.follow_up_60d.eligible_first_order_buyers} eligible first-order buyers placed another store order` : "Unavailable"}
+- High-Spend Buyer Association: ${productDecision?.high_value_entry ? `${productDecision.high_value_entry.high_value_first_buyers_with_product} of ${productDecision.high_value_entry.high_value_buyers} high-spend buyers started with this product versus ${productDecision.high_value_entry.all_first_buyers_with_product} of ${productDecision.high_value_entry.eligible_first_buyers} eligible first buyers overall; observational only` : "Insufficient mature cohort"}
+- Return Evidence: ${productDecision?.return_evidence?.processed_return_rate != null ? `${productDecision.return_evidence.processed_return_units} processed returns among ${productDecision.return_evidence.eligible_units} eligible units in a mature cohort; ${productDecision.return_evidence.refunded_units} refunded units recorded separately` : "Unavailable or insufficient sample"}
+- Primary Customer Traffic Channel: ${primaryTrafficSource}
+- Top Store Acquisition Channels: ${storeTopChannels || "Direct / Organic Discovery"}
+- Customer Reorder Habit: ${reorderHabit}
+- Unit Economics Evidence: ${economicsEvidence}
+- Store Funnel Evidence: ${funnelEvidence}
+- Active Shopify Discounts: ${activeDiscounts}
+- Published Policy Evidence: ${policyEvidence}
+- Shopify Marketing History & Ad Activity: ${marketingEvidence}
+
+Store & Market Context:
+- Store Name: ${storeName}
+- Home Market: ${storeCountry} (${isTier1 ? "Tier 1 Domestic Market" : "Dual-Market / Developing Economy"})
 - Currency: ${storeCurrency}
-- Rolling 60-day Average Order Value (AOV): ${Math.round(storeData.orders.average_order_value)} ${storeCurrency}
+- Rolling 60-day Average Order Value (AOV): ${aov} ${storeCurrency}
+- Monthly Order Volume: ${monthlyOrders} orders/month
+- Assigned Campaign Architecture: ${guidance.campaign_type}
+- Assigned Optimization Event: ${guidance.optimization_event}
+- Top Buyer Locations from Order Data: ${consolidatedLocations || "None recorded yet"}
+- Has Recorded Overseas Buyers: ${hasOverseasBuyers ? "Yes" : "No"}
+- Peak Order Days: ${peakDaysStr}
+- Shopify Operational Readiness:
+${operationalReadiness}
 
-Top Buyer Locations (from order history):
-${consolidatedLocations || "None recorded yet"}
+Instructions for this generation:
+1. Product Role: This is ${targetProductTitle}, acting as ${productRole}. Frame your angles around the core emotional or practical trigger that compels cold prospects to buy for the first time.
+2. Cold Acquisition Safeguard: Hook angles must have broad scroll-stopping appeal. Do NOT use hyper-narrow or hyper-local callouts that choke Meta's broad delivery algorithm.
+3. Founder-Friendly Language: Speak directly to the founder in plain, actionable English without confusing corporate jargon or complex acronyms.
+4. Meta Andromeda Timing: Frame timing guidance around weekly sales rhythm and cash-flow predictability (e.g. expected conversion volume surges). Never advise pausing or day-parting active campaigns, which resets Meta's machine learning.
+5. Dynamic Location Intelligence: Analyze the merchant's home country (${storeCountry}), category (${targetProductType}), and unit price (${targetProductPrice} ${storeCurrency}). Infer commercial hubs as acquisition hypotheses, then check them against the Shopify operational-readiness evidence above. A city may still be recommended for demand testing, but its note must say fulfillment is unverified or blocked when its country lacks an active market or shipping method. Do not imply Shopify sales prove future conversion.
+6. Factual Grounding in Store Data: Anchor your angles and hooks on the verified materials, craftsmanship details, cut, and features documented in the Product Title and Description above. Never invent unstated fabrics, certifications, or exaggerated claims not found in the merchant's Shopify store data.
+7. Marketing Context Awareness: Note the merchant's Shopify Marketing History. If the merchant has no prior paid ad spend recorded, guide the founder on respecting the initial 7-day learning phase and establishing baseline metrics. If the store has previously run paid campaigns, tailor the recommendations to build upon and scale their past acquisition channels.
+8. Evidence Boundary: First-order, high-spend, repeat, and return metrics are internal planning evidence. Do not turn them into customer-facing ad claims, guarantees, or predictions of Meta performance. Feature only this target product in the brief.
+${excludedAngle ? `9. ANGLE EXCLUSION — CRITICAL: The ad copy for this campaign has already been written and leads on this primary angle: "${excludedAngle}". None of your 3 creative hooks may centre on this claim as their primary hook. Your hooks must be genuinely additive — covering psychological territory the copy does not. A founder seeing copy and hooks that all say the same thing loses confidence in both.` : ""}
+Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}" following all rules in the system prompt. Call the generate_advantage_plus_profile tool.`;
 
-Top Products (up to 25, with category, tags, and sales):
-${productSample || "None available"}
-
-Instructions for Reasoning & Messaging:
-- Write like you're texting a busy e-commerce brand founder, not writing a report.
-- Maximum one sentence for each reasoning / note / recommendation field.
-- Never use jargon like "acquisition signal", "behavioral velocity", "cohort signals", or "units/mo velocity".
-- Lead with the actionable implication, not the data behind it.
-- If there's insufficient data, say so in plain English in under 6 words (e.g. "Too few sales to determine yet").
-- Speak with the confidence of a smart marketer friend, not a dashboard tooltip.
-
-Instructions for Locations:
-- Include the store's top buyers' cities from the data, but also recommend 1-2 expansion hubs in their primary market if appropriate.
-- For Nigerian locations: use city-level targeting only (Lagos, Abuja, Port Harcourt, Enugu) — never break down to neighbourhoods or areas, and never use "Nigeria" as a broad country target.
-- For international locations: always use specific cities instead of broad countries — e.g. "New York, NY" or "Houston, TX", not "United States".
-- Consolidate minor sub-cities into their parent metropolitan city.
-- Keep the note field per location explaining whether it's from actual order data or recommended based on purchasing power for the price point.
-- Mark each as source: "from_data" or "recommended".
-
-Instructions for Demographics (Dynamic Age & Gender Selection):
-- Determine the best target gender (all, female, male) and age range (min/max) dynamically based on the price points, styling, and design of the products in this store.
-- Do NOT hardcode or default to generic ranges (like 25-44) unless the store data and product catalog actually dictate it.
-- Higher AOV/price points should target older age ranges (e.g. 30-55) with more purchasing power; youth or streetwear brands should target younger age ranges (e.g. 18-34). Ensure min age is at least 18.
-
-Instructions for Audiences (Critical — Dynamic Media Buyer Reasoning):
-Before generating any interests, you must reason about each product in the catalog as a senior Meta media buyer:
-1. What is the actual purchase decision being made here? (e.g. is it a low-consideration convenience purchase or a high-consideration lifestyle/luxury commitment?)
-2. Pull the store's primary market from the store's country setting (${storeData.store.country}) and top buyer locations (e.g., Lagos, London, New York). Use this as the market context for all targeting decisions.
-3. Does the product price represent a significant financial commitment for a buyer in that specific market? Evaluate this against real-world purchasing power in that market — not against the store's AOV alone. A product priced at ₦160K in Lagos, £140 in London, or $140 in New York carries completely different purchasing weight. Reason accordingly.
-4. If the product represents a high-consideration purchase in its market context, apply luxury/premium buyer targeting (e.g. targeting high-value goods, premium lifestyles, or generic luxury interest categories) regardless of where it sits relative to store AOV and regardless of which collection it belongs to. Do NOT target specific brand names (e.g., Gucci, Chanel, Zara, etc.).
-5. Do not derive interests from collection names or store category labels. Collection names reflect how the brand organises its inventory — they do not reflect how Meta's algorithm categorises buyer behaviour. For example, a high-consideration product in a "Loungewear" collection should be targeted as high-end premium lifestyle/fashion, NOT as generic "Sleepwear" or "Robes".
-6. Apply industry-standard Meta targeting logic throughout. Reason from the product's actual price positioning, market context, and implied buyer psychology — not from the store's taxonomy.
-
-Output requirements:
-- Always include "Online Shopping" as one of the interests — it is a confirmed Meta interest category for e-commerce.
-- Recommend 3-5 additional highly specific Meta Ads interest targets derived from the buyer psychology, price positioning, and market context analyzed above.
-- UNIVERSAL BAN ON BRAND NAMES: Do NOT recommend specific brand names (e.g., competitors, retailers, or luxury labels like Zara, ASOS, Gucci, Chanel, etc.) as interest targets. Use only Meta interest categories (e.g., Luxury Goods, Boutique, Streetwear, Fine jewelry) and behavior signals. Brand targeting creates client-facing friction, whereas available category and behavioral signals are sufficiently granular.
-- CRITICAL — VERIFIED INTERESTS ONLY: Each interest MUST be a real, officially targetable Meta Ads interest that can be searched and found inside Facebook Ads Manager's Detailed Targeting search box. Do NOT suggest interests that cannot be found there (e.g. "Lifestyle (Sociology)" is a parent category label, not a targetable leaf node — never suggest it. "High End Fashion" does not exist as a targetable interest — do not suggest it or any variant of it). Only suggest interests a user would successfully find by typing them into the Ads Manager search field.
-- Always include "Engaged Shoppers" as the first behaviour — it is the only confirmed, consistently available shopping behavior in Meta Ads Manager. Do NOT include "Online Shoppers" — it has been deprecated and removed by Meta.
-- Recommend 1-2 additional behaviors beyond Engaged Shoppers that are genuinely the most relevant match for this specific product's buyer profile, price point, and market context. CRITICAL RULE: Every behavior you suggest MUST be a real, searchable option inside Facebook Ads Manager's Detailed Targeting — one a user could actually find by typing it into the search field. Do NOT invent or hallucinate behavior names. If you cannot confidently confirm a behavior exists in Meta Ads Manager, do not suggest it.
-- For reference, examples of behaviors that ARE confirmed available in Meta Ads Manager include: Engaged Shoppers, Frequent international travelers, Small business owners, Frequent travelers. This is NOT an exhaustive list — use your knowledge of Meta Ads Manager to identify other genuinely available behaviors that are a stronger fit for the product. The goal is the best match, not a rotation of the same defaults.
-- Behaviour signals must always align with the buyer type the product classification indicates:
-  - Gateway or New Launch: Select behaviours that signal first-time buyer potential — someone discovering this brand for the first time. NEVER select behaviours that indicate repeat purchase patterns, return visits, or loyalty/retention signals.
-  - Hybrid: Layer both acquisition and retention behaviours, since this product attracts both new and returning buyers.
-- interest_reasoning MUST explain why these interests fit the buyer psychology and price positioning in the primary market context. Keep it under 2 sentences.
-
-Instructions for Timing & Launches (Dynamic Campaign Launches):
-- Analyze the store's peak days of orders: [${storeData.orders.peak_days.join(", ") || "None recorded yet"}].
-- Analyze the store's peak hours of orders: [${storeData.orders.peak_hours.join(", ") || "None recorded yet"}].
-- Generate dynamic, AI-inferred timing and campaign launch date recommendation. Write a highly actionable 1-sentence launch recommendation (e.g., "Launch Sunday evening to capture the strong Monday peak buying momentum").
-- Write a 1-sentence reasoning explaining this launch schedule based on the peak hour/day trends.
-- Populate "peak_days" with the primary peak day(s) detected or recommended.
-
-Instructions for Optimization Event (Critical):
-- The core question is: "Can Meta get enough optimization events per week to exit the learning phase given this store's budget and order velocity?"
-- Use this logic internally to reason:
-  - weeklyOrderVelocity = (monthly orders / 4)
-  - estimatedWeeklyEventsAtBudget = weeklyOrderVelocity * (dailyBudget / avgOrderValue) * 7
-- The dynamic hierarchy MUST only move between these three events: Purchase, InitiateCheckout, and AddToCart.
-  - Purchase: Use when weekly order velocity divided by ad set count can reasonably generate 10+ purchase events per week at the recommended budget.
-  - InitiateCheckout: Use when store has consistent checkout activity but purchase volume is too low for Purchase optimization.
-  - AddToCart: This is the absolute floor. Any store with order history below the InitiateCheckout threshold gets AddToCart. NEVER go lower.
-- NEVER recommend ViewContent, PageView, or any awareness-level event to an e-commerce store regardless of data volume.
-- Provide a plain English explanation of why this event makes sense to the merchant specifically stating what signal you expect and what to watch for.
-- CRITICAL: Use gender-neutral language (e.g. "buyers", "customers", "people") unless the catalog explicitly caters exclusively to one gender.
-- CRITICAL: DO NOT include any specific budget numbers, amounts, or currency symbols in this reasoning text, as the user's budget is dynamic and will change on the frontend.
-
-Campaign Context:
-- Monthly Orders: ${storeData.orders.orders_last_30_days || 0}
-- Recommended Ad Sets: ${adSets}
-- Daily Budget per Ad Set: ${dailyBudget} ${storeCurrency}
-`;
+  // Fallback defaults in case of API failure or tool parsing error
+  const defaultLocations: LocationResult[] =
+    storeData.orders.top_locations.length > 0
+      ? storeData.orders.top_locations.map((l) => ({
+          name: l.city,
+          country: l.country,
+          market_type: isDomesticCity(
+            l.city || "",
+            l.country,
+            storeCountry,
+            storeCurrency,
+            storeData.orders.top_locations
+          )
+            ? ("domestic" as const)
+            : ("international" as const),
+          source: ((storeData.data_quality?.schema_version || 0) >= 2 ? "from_data" : "recommended") as "from_data" | "recommended",
+          percentage: l.percentage,
+          note: `Top buyer hub representing ${l.percentage}% of your customer orders.`,
+        }))
+      : [
+          {
+            name: storeCountry || "Domestic Market",
+            country: storeCountry,
+            market_type: "domestic" as const,
+            source: ((storeData.data_quality?.schema_version || 0) >= 2 ? "from_data" : "recommended") as "from_data" | "recommended",
+            percentage: 100,
+            note: "Defaulting targeting to your store's home market.",
+          },
+        ];
 
   try {
     const response = await anthropicClient.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1500,
-      messages: [{ role: "user", content: prompt }],
-      tools: [
+      model: "claude-sonnet-5",
+      max_tokens: 4096,
+      thinking: STRUCTURED_HOOK_THINKING,
+      system: [
         {
-          name: "generate_targeting_profile",
-          description: "Generates the targeting profile for a Shopify store's Meta ad campaigns.",
-          input_schema: {
-            type: "object",
-            properties: {
-              locations: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    name: { type: "string", description: "City or region name" },
-                    source: { type: "string", enum: ["from_data", "recommended"] },
-                    percentage: { type: "number", description: "Percentage of orders from this location, or null if recommended" },
-                    note: { type: "string", description: "Actionable 1-sentence note for the founder." }
-                  },
-                  required: ["name", "source", "percentage", "note"]
-                }
-              },
-              demographics: {
-                type: "object",
-                properties: {
-                  gender: { type: "string", enum: ["all", "female", "male"] },
-                  gender_reasoning: { type: "string", description: "Actionable 1-sentence explanation of the gender selection." },
-                  age_min: { type: "number", description: "Minimum age target (at least 18)" },
-                  age_max: { type: "number", description: "Maximum age target (typically 44, 54, or 65)" },
-                  age_reasoning: { type: "string", description: "Actionable 1-sentence explanation of the age selection." }
-                },
-                required: ["gender", "gender_reasoning", "age_min", "age_max", "age_reasoning"]
-              },
-              audiences: {
-                type: "object",
-                properties: {
-                  interests: { type: "array", items: { type: "string" }, description: "Specific Meta Ads interest targets" },
-                  interest_reasoning: { type: "string", description: "Actionable 1-sentence explanation of why these interests convert best." },
-                  behaviours: { type: "array", items: { type: "string" }, description: "List of 2-3 target behaviors. MUST include Engaged Shoppers as the first item. Do NOT include Online Shoppers (deprecated). Only add 1-2 additional behaviors that are verifiably searchable in Meta Ads Manager today." }
-                },
-                required: ["interests", "interest_reasoning", "behaviours"]
-              },
-              timing: {
-                type: "object",
-                properties: {
-                  peak_days: { type: "array", items: { type: "string" }, description: "Specific peak days detected or recommended" },
-                  launch_recommendation: { type: "string", description: "Dynamic, AI-inferred launch recommendation." },
-                  reasoning: { type: "string", description: "1-sentence explanation of why this launch timing works best." }
-                },
-                required: ["peak_days", "launch_recommendation", "reasoning"]
-              },
-              optimization_event: {
-                type: "object",
-                properties: {
-                  event: { type: "string", description: "The recommended Meta Ads optimization event (e.g. Purchase, AddToCart, ViewContent)." },
-                  reasoning: { type: "string", description: "Plain english explanation of why this event was chosen given budget and velocity." },
-                  target_weekly: { type: "number", description: "The target number of events per week expected or required." },
-                  upgrade_milestone: { type: "string", description: "A milestone suggestion for when to upgrade to a deeper funnel event." }
-                },
-                required: ["event", "reasoning", "target_weekly", "upgrade_milestone"]
-              }
-            },
-            required: ["locations", "demographics", "audiences", "timing", "optimization_event"]
-          }
-        }
+          type: "text",
+          text: ADVANTAGE_PLUS_SYSTEM_PROMPT,
+          cache_control: { type: "ephemeral" },
+        },
       ],
+      messages: [{ role: "user", content: prompt }],
+      tools: [ADVANTAGE_PLUS_TOOL],
       tool_choice: {
         type: "tool",
-        name: "generate_targeting_profile"
-      }
+        name: "generate_advantage_plus_profile",
+      },
+    });
+
+    await logApiUsage(userId ?? null, "targeting_profile", response.usage, response.model);
+
+    console.log("[Anthropic Prompt Caching - Targeting Profile]", {
+      input_tokens: response.usage.input_tokens,
+      output_tokens: response.usage.output_tokens,
+      stop_reason: response.stop_reason,
+      cache_creation_input_tokens:
+        (response.usage as unknown as { cache_creation_input_tokens?: number })
+          .cache_creation_input_tokens ?? 0,
+      cache_read_input_tokens:
+        (response.usage as unknown as { cache_read_input_tokens?: number })
+          .cache_read_input_tokens ?? 0,
     });
 
     const toolUseBlock = response.content.find((c) => c.type === "tool_use");
-    if (toolUseBlock && toolUseBlock.type === "tool_use") {
-      // The tool-use input is the model's dynamic JSON output. It is constrained
-      // by the tool's input_schema above and transformed/validated field-by-field
-      // below, so a precise static type would add maintenance cost without real
-      // safety. This is the one justified `any` in the data path.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const profile = toolUseBlock.input as any;
-      // Log raw AI output for debugging targeting quality
-      console.log("[AI targeting profile raw output]", JSON.stringify(profile, null, 2));
-      
-      if (userId) {
-        logApiUsage(
-          userId,
-          "targeting_profile",
-          response.usage.input_tokens,
-          response.usage.output_tokens
+    if (!toolUseBlock || toolUseBlock.type !== "tool_use") {
+      console.error("[Targeting Profile Error] No tool_use block returned from Claude:", {
+        stop_reason: response.stop_reason,
+        content_types: response.content.map((c) => c.type),
+        output_tokens: response.usage.output_tokens,
+      });
+    } else {
+      const profile = toolUseBlock.input as GeneratedBriefResponse;
+
+      // Extract valid demographics from AI response
+      const hasAiDemographics =
+        profile.demographics &&
+        ["All", "Men", "Women"].includes(profile.demographics.gender) &&
+        typeof profile.demographics.age_min === "number" &&
+        typeof profile.demographics.age_max === "number" &&
+        profile.demographics.age_min >= 18 &&
+        profile.demographics.age_max >= profile.demographics.age_min;
+
+      const demographics = hasAiDemographics
+        ? {
+            gender: profile.demographics!.gender,
+            demographic_justification:
+              profile.demographics!.demographic_justification ||
+              "Demographic profile aligned with product price point and buyer history.",
+            age_min: profile.demographics!.age_min,
+            age_max: profile.demographics!.age_max,
+            age_reasoning:
+              profile.demographics!.age_reasoning ||
+              "Age range structured for core buyer purchasing power.",
+          }
+        : {
+            gender: "All" as const,
+            demographic_justification:
+              "Starting with broad gender targeting gives Meta the freedom to find the shoppers most interested in this product across your market.",
+            age_min: 25,
+            age_max: 44,
+            age_reasoning:
+              "Standard e-commerce age targeting (25-44) is recommended for early validation campaigns.",
+          };
+
+      const seed_interests =
+        Array.isArray(profile.seed_interests) && profile.seed_interests.length > 0
+          ? profile.seed_interests.filter((i): i is string => typeof i === "string" && i.trim().length > 0)
+          : ["Online Shopping", "Fashion"];
+
+      const locations =
+        Array.isArray(profile.locations) && profile.locations.length > 0
+          ? profile.locations
+          : defaultLocations;
+
+      const timing = profile.timing || {
+        peak_days:
+          storeData.orders?.peak_days && storeData.orders.peak_days.length > 0
+            ? storeData.orders.peak_days
+            : ["Monday", "Friday", "Sunday"],
+        launch_recommendation:
+          `Launch on ${storeData.orders?.peak_days?.[0] || "Monday"} at 12:00 AM (midnight) in your store's timezone leading into your peak sales days.`,
+        reasoning:
+          "Maintaining continuous 24/7 ad delivery allows Meta to optimize across your entire weekly sales rhythm. Past order timing reflects historical customer activity, not an algorithmic guarantee of future ad performance.",
+      };
+
+      // Apply safe local repairs before judging the result.
+      let sanitized = finalizeCreativeHooks(profile, targetProductCtx, catalog);
+      let verifiedHooks = sanitized?.creative_hooks || [];
+
+      // If the unified pass failed hook validation, automatically auto-recover
+      // using the dedicated, focused hook generator before returning to the caller.
+      // This ensures the founder gets both ad copy AND verified hooks in one pass
+      // without ever seeing a "Creative hooks need another try" banner.
+      if (!sanitized || verifiedHooks.length !== 3) {
+        console.warn(
+          "[Advantage+ Validator] First-pass hooks rejected by validator:",
+          validateBrief(profile, targetProductCtx, catalog)
         );
+        console.log(
+          "[Advantage+ Validator] Auto-recovering verified creative hooks via dedicated hook generator..."
+        );
+        try {
+          const recovered = await generateCreativeHooksOnly(
+            storeData,
+            targetProduct as StoreProduct,
+            excludedAngle,
+            userId
+          );
+          if (recovered && recovered.length === 3) {
+            verifiedHooks = recovered;
+            sanitized = {
+              ...profile,
+              target_product_title: targetProductCtx.title,
+              creative_hooks: recovered,
+            };
+            console.log(
+              "[Advantage+ Validator] Auto-recovery successful: 3 verified hooks attached."
+            );
+          }
+        } catch (recoverErr) {
+          console.warn("[Advantage+ Validator] Auto-recovery failed:", recoverErr);
+        }
       }
 
-      if (profile && profile.locations && profile.demographics && profile.audiences && profile.timing) {
-        return profile as TargetingProfile;
-      } else {
-        console.warn("[AI targeting profile] Tool returned incomplete data:", JSON.stringify(profile));
-      }
-    } else {
-      console.warn("[AI targeting profile] No tool_use block found in response. Full response:", JSON.stringify(response.content));
+      return {
+        generation_status: hasAiDemographics ? "generated" : "fallback",
+        creative_hooks_status: verifiedHooks.length === 3
+          ? "generated"
+          : "fallback",
+        locations,
+        demographics,
+        seed_interests,
+        creative_hooks: verifiedHooks,
+        optimization_reasoning: guidance.default_reasoning,
+        timing,
+      };
     }
   } catch (err) {
-    console.error("AI targeting profile generation error:", err);
+    console.error("AI Advantage+ profile generation error:", err);
   }
 
-  // Fallback defaults in case of API failure or tool parsing error
-  const defaultLocations = storeData.orders.top_locations.length > 0
-    ? storeData.orders.top_locations.map(l => ({
-        name: l.city,
-        source: "from_data" as const,
-        percentage: l.percentage,
-        note: `Top buyer hub representing ${l.percentage}% of your customer orders.`
-      }))
-    : [
-        {
-          name: storeData.store.country || "Lagos",
-          source: "from_data" as const,
-          percentage: 100,
-          note: "Defaulting targeting to your store's home market."
-        }
-      ];
-
   return {
+    generation_status: "fallback",
+    creative_hooks_status: "fallback",
     locations: defaultLocations,
     demographics: {
-      gender: "all",
-      gender_reasoning: "We recommend starting with broad gender targeting to let Meta's pixel learn your buyer profile.",
+      gender: "All",
+      demographic_justification:
+        "Starting with broad gender targeting gives Meta the freedom to find the shoppers most interested in this product across your market.",
       age_min: 25,
       age_max: 44,
-      age_reasoning: "Standard e-commerce age targeting (25-44) is highly recommended for early validation campaigns."
+      age_reasoning:
+        "Standard e-commerce age targeting (25-44) is recommended for early validation campaigns.",
     },
-    audiences: {
-      interests: ["Online Shopping", "Fashion"],
-      interest_reasoning: "Broad fashion interest targeting is the most reliable way to feed early-stage customer data to the Meta pixel.",
-      behaviours: ["Engaged Shoppers"]
-    },
+    seed_interests: ["Online Shopping", "Fashion"],
+    creative_hooks: [],
+    optimization_reasoning: guidance.default_reasoning,
     timing: {
-      peak_days: storeData.orders.peak_days.length > 0 ? storeData.orders.peak_days : ["Thursday"],
-      launch_recommendation: storeData.orders.peak_days.length > 0
-        ? `Launch on ${storeData.orders.peak_days[0]} morning to ride the buying momentum.`
-        : "Launch on Thursday evening to capture weekend traffic.",
-      reasoning: storeData.orders.peak_days.length > 0
-        ? `Order data shows a clear conversion lift on ${storeData.orders.peak_days.join(", ")}.`
-        : "Thursday launches build optimal momentum for weekend e-commerce traffic."
+      peak_days:
+        storeData.orders.peak_days.length > 0
+          ? storeData.orders.peak_days
+          : ["Thursday"],
+      launch_recommendation:
+        storeData.orders.peak_days.length > 0
+          ? `Launch on ${storeData.orders.peak_days[0]} at 12:00 AM (midnight) to give Meta a full day to pace budget into your peak sales window.`
+          : "Launch at 12:00 AM (midnight) on Thursday to build momentum for weekend traffic.",
+      reasoning:
+        storeData.orders.peak_days.length > 0
+          ? `Shoppers placed the most past orders on ${storeData.orders.peak_days.join(", ")}. Past order timing reflects historical customer activity, not an algorithmic guarantee of future ad performance.`
+          : "Thursday launches build momentum for weekend e-commerce traffic. Past order timing reflects historical customer activity, not an algorithmic guarantee.",
     },
-    optimization_event: {
-      event: "AddToCart",
-      reasoning: "We're starting with AddToCart to give Meta enough signal to find your buyers. Switch to Purchase once you're seeing consistent weekly orders.",
-      target_weekly: 10,
-      upgrade_milestone: "Switch to Purchase optimization once you get 10+ orders."
-    }
   };
 }
 
-// ─── Health Scoring Functions (Unchanged) ───
+export async function generateTargetingProfile(
+  ...args: Parameters<typeof generateRawTargetingProfile>
+): Promise<TargetingProfile> {
+  return groundTargetingProfile(await generateRawTargetingProfile(...args), args[0]);
+}
+
+/** A small, credit-free recovery call when a saved brief is missing hooks. */
+export async function generateCreativeHooksOnly(
+  storeData: StoreData,
+  product: StoreProduct,
+  excludedAngle?: string | null,
+  userId?: string | null,
+): Promise<CreativeHook[]> {
+  const target: TargetProductContext = {
+    id: product.id || product.name,
+    title: product.name,
+    description: [
+      product.description,
+      ...(product.catalog_claims || []).map((claim) => `${claim.key}: ${claim.value}`),
+    ].filter(Boolean).join("\n"),
+    tags: product.tags,
+    product_type: product.product_type,
+    price: product.price,
+  };
+  const catalog: CatalogItem[] = (storeData.products || []).map((item) => ({
+    id: item.id || item.name,
+    title: item.name,
+  }));
+  const response = await anthropicClient.messages.create({
+    model: "claude-sonnet-5",
+    max_tokens: 1200,
+    thinking: STRUCTURED_HOOK_THINKING,
+    system: `Write three distinct Meta feed creative hooks for one product. Use only the verified product facts supplied by the merchant. Each hook must have a specific opening visual, on-screen text of at most eight words, and an opening primary-text line. Use one practical benefit, one concrete construction or material proof, and one styling or identity angle. Give each hook a different angle from the tool enum. Avoid generic lines such as "Style it your way" or "A closer look at the details". Never invent guarantees, certifications, reviews, or features. Echo the exact product title.`,
+    messages: [{
+      role: "user",
+      content: `Product: ${target.title}\nCategory: ${target.product_type || "unspecified"}\nVerified description and catalog claims: ${target.description || "No details supplied"}\nTags: ${(target.tags || []).join(", ") || "none"}${excludedAngle ? `\nAd copy already leads with: ${excludedAngle}. Make the three hooks additive.` : ""}`,
+    }],
+    tools: [CREATIVE_HOOKS_TOOL],
+    tool_choice: { type: "tool", name: "generate_product_hooks" },
+  });
+  await logApiUsage(userId ?? null, "creative_hooks_retry", response.usage, response.model);
+  const block = response.content.find((item) => item.type === "tool_use");
+  if (!block || block.type !== "tool_use") throw new CreativeHookGenerationError();
+  const verified = finalizeCreativeHooks(block.input as GeneratedBriefResponse, target, catalog);
+  if (!verified) {
+    console.warn("[Creative Hooks Retry] Hook validation failed:",
+      validateBrief(block.input as GeneratedBriefResponse, target, catalog));
+    throw new CreativeHookGenerationError();
+  }
+  return verified.creative_hooks;
+}
+
+// ─── Health Scoring Functions ───
 
 function scoreProducts(products: StoreData["products"]): {
   score: number;
@@ -334,7 +848,8 @@ function scoreProducts(products: StoreData["products"]): {
   return {
     score,
     max: 20,
-    status: products.length >= 10 ? "good" : products.length >= 5 ? "warning" : "bad",
+    status:
+      products.length >= 10 ? "good" : products.length >= 5 ? "warning" : "bad",
   };
 }
 
@@ -371,8 +886,7 @@ function scoreAvailability(products: StoreData["products"]): {
   status: "good" | "warning" | "bad";
 } {
   if (products.length === 0) return { score: 0, max: 25, status: "bad" };
-  const ratio =
-    products.filter((p) => p.in_stock).length / products.length;
+  const ratio = products.filter((p) => p.in_stock).length / products.length;
   const score = Math.round(ratio * 25);
   return {
     score,
@@ -381,11 +895,11 @@ function scoreAvailability(products: StoreData["products"]): {
   };
 }
 
-
-
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
 export interface MetaRecommendations {
+  generation_status?: "generated" | "fallback";
+  creative_hooks_status?: "generated" | "fallback";
   lowDataWarning?: boolean;
   lowDataMessage?: string;
   newStoreCaution?: boolean;
@@ -394,18 +908,26 @@ export interface MetaRecommendations {
   highBudgetWarningMessage?: string;
   budgetWarning?: boolean;
   budgetWarningMessage?: string;
+  creative_hooks: CreativeHook[];
+  advantage_plus_guidance: AdvantagePlusGuidance;
   targeting: {
     locations: LocationResult[];
+    domestic_locations?: LocationResult[];
+    international_locations?: LocationResult[];
+    domestic_budget_formatted?: string;
+    international_budget_formatted?: string;
+    overseas_demand?: string[];
     age_min: number;
     age_max: number;
     age_reasoning: string;
-    gender: "all" | "female" | "male";
+    gender: "All" | "Men" | "Women" | "all" | "female" | "male";
     gender_reasoning?: string;
     interests: string[];
-    behaviours: string[];
-    interest_reasoning: string;
+    interest_reasoning?: string;
+    behaviours?: string[];
   };
   budget: {
+    calculation?: import("./budget-evidence").BudgetCalculation;
     recommended_daily: number;
     recommended_duration_days: number;
     reasoning: string;
@@ -416,14 +938,13 @@ export interface MetaRecommendations {
       revenue_based: number;
       aov_based: number;
       goal_multipliers: Record<string, number>;
-      meta_optimal_daily: number; 
+      meta_optimal_daily: number;
     };
     ad_sets: number;
     ad_set_reasoning?: string;
     optimization_event: {
       event: string;
       reasoning: string;
-      target_weekly: number;
       upgrade_milestone?: string;
     };
     strategies: {
@@ -432,6 +953,13 @@ export interface MetaRecommendations {
       total_daily: number;
       description: string;
     }[];
+    international_strategies?: {
+      label: string;
+      daily: number;
+      total_daily: number;
+      description: string;
+    }[];
+    international_recommended_daily?: number;
   };
   timing: TimingOutput;
   placements: {
@@ -456,51 +984,95 @@ export interface MetaRecommendations {
 export async function generateRecommendations(
   storeData: StoreData,
   dynamicExchangeRates?: Record<string, number>,
-  userId?: string | null
+  userId?: string | null,
+  targetProductOverride?: StoreProduct,
+  excludedAngle?: string | null
 ): Promise<MetaRecommendations> {
   const storeCurrency = storeData.store.currency || "USD";
-  const rates = dynamicExchangeRates || (await fetchExchangeRates());
-  const exchangeRate = rates[storeCurrency] || 1;
+  const fx = dynamicExchangeRates
+    ? { rates: dynamicExchangeRates, source: "provided" as const, fetched_at: null }
+    : await fetchExchangeRateSnapshot();
+  const rates = fx.rates;
+  const exchangeRate = rates[storeCurrency];
+  if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new Error(`No reliable exchange rate for ${storeCurrency}`);
+  const monthlyOrders =
+    storeData.orders.orders_last_30_days ?? 0;
+  const guidance = getAdvantagePlusGuidance(monthlyOrders, storeData.prespend?.analytics?.recent_funnel);
 
   // ─── Before running calculations: data sufficiency check ───
-  if (storeData.orders.order_count < 20) {
+  if (storeData.orders.order_count < 20 && !targetProductOverride) {
+    const lowDataCatalogPrices = (storeData.products || [])
+      .map((p) => p.price)
+      .filter((p): p is number => typeof p === "number" && p > 0)
+      .sort((a, b) => a - b);
+    const lowDataMedianCatalogPrice =
+      lowDataCatalogPrices.length > 0
+        ? lowDataCatalogPrices[Math.floor(lowDataCatalogPrices.length / 2)]
+        : 0;
+    const effectiveLowDataAov =
+      storeData.orders.average_order_value > 0
+        ? storeData.orders.average_order_value
+        : lowDataMedianCatalogPrice > 0
+        ? lowDataMedianCatalogPrice
+        : 25 * exchangeRate;
+
     return {
+      generation_status: "fallback",
+      creative_hooks_status: "fallback",
       lowDataWarning: true,
-      lowDataMessage: "We need at least 20 orders to generate reliable recommendations. Keep selling and check back soon.",
+      lowDataMessage:
+        "We need at least 20 orders to generate reliable recommendations. Keep selling and check back soon.",
+      creative_hooks: [],
+      advantage_plus_guidance: {
+        campaign_type: guidance.campaign_type,
+        optimization_event: guidance.optimization_event,
+        optimization_reasoning: guidance.default_reasoning,
+        event_evidence: guidance.event_evidence,
+        seed_audience_suggestions: {
+          age_min: 25,
+          age_max: 44,
+          gender: "All",
+          demographic_justification:
+            "Starting with broad demographics gives Meta the freedom to discover your best buyers naturally.",
+          seed_interests: ["Online Shopping", "Fashion"],
+        },
+      },
       targeting: {
-        locations: storeData.orders.top_locations.length > 0
-          ? storeData.orders.top_locations.map(l => ({
-              name: l.city,
-              source: "from_data" as const,
-              percentage: l.percentage,
-              note: `Top buyer city representing ${l.percentage}% of your customer orders.`
-            }))
-          : [{ name: storeData.store.country || "Lagos", source: "from_data" as const, percentage: 100, note: "Defaulting targeting to your store's home market." }],
+        locations:
+          storeData.orders.top_locations.length > 0
+            ? storeData.orders.top_locations.map((l) => ({
+                name: l.city,
+                source: ((storeData.data_quality?.schema_version || 0) >= 2 ? "from_data" : "recommended") as "from_data" | "recommended",
+                percentage: l.percentage,
+                note: `Top buyer city representing ${l.percentage}% of your customer orders.`,
+              }))
+            : [],
         age_min: 25,
         age_max: 44,
-        age_reasoning: "We need at least 20 orders to infer target age range.",
-        gender: "all",
-        gender_reasoning: "We recommend starting with broad gender targeting to let Meta's pixel learn your buyer profile.",
+        age_reasoning: "Age is a suggested test range, not observed customer age.",
+        gender: "All",
+        gender_reasoning:
+          "We recommend starting with broad gender targeting to let Meta's pixel learn your buyer profile.",
         interests: ["Online Shopping", "Fashion"],
-        behaviours: ["Engaged Shoppers"],
-        interest_reasoning: "Starting with broad interest targeting is recommended for stores with low order volume.",
+        interest_reasoning:
+          "Starting with broad interest seed hints is recommended for stores with low order volume.",
       },
       budget: {
         recommended_daily: Math.round(15 * exchangeRate),
         recommended_duration_days: 14,
-        reasoning: "We need at least 20 orders to calculate personalized budgets. Using default minimal testing budget.",
+        reasoning:
+          "Starter testing budget: 1 consolidated ad set focused on your primary domestic market to jumpstart conversions and build initial pixel data.",
         currency: storeCurrency,
         currency_symbol: storeData.store.currency_symbol || "$",
         tier: "Starter",
-        ad_sets: 2,
+        ad_sets: 1,
         optimization_event: {
-          event: "AddToCart",
-          reasoning: "We're starting with AddToCart to give Meta enough signal to find your buyers. Switch to Purchase once you're seeing consistent weekly orders.",
-          target_weekly: 10
+          event: guidance.optimization_event,
+          reasoning: guidance.default_reasoning,
         },
         breakdown: {
           revenue_based: 0,
-          aov_based: storeData.orders.average_order_value || 0,
+          aov_based: Math.round(effectiveLowDataAov),
           goal_multipliers: {
             "Drive Website Sales": 1.0,
             "Grow Brand Awareness": 0.6,
@@ -513,42 +1085,84 @@ export async function generateRecommendations(
           {
             label: "Dip Your Toe",
             daily: Math.round(15 * exchangeRate * 0.7),
-            total_daily: Math.round(15 * exchangeRate * 0.7) * 2,
-            description: "Low risk, slow learning. Good if you're testing for the first time."
+            total_daily: Math.round(15 * exchangeRate * 0.7),
+            description:
+              "Lowers upfront financial risk. Best if cash is tight, but may take longer to collect customer signals.",
           },
           {
             label: "Sweet Spot",
             daily: Math.round(15 * exchangeRate * 1.0),
-            total_daily: Math.round(15 * exchangeRate * 1.0) * 2,
-            description: "Our recommendation. Enough budget for Meta to learn without burning cash."
+            total_daily: Math.round(15 * exchangeRate * 1.0),
+            description:
+              "Our recommended starter baseline. Balances clear shopper feedback without overspending upfront.",
           },
           {
             label: "Full Send",
             daily: Math.round(15 * exchangeRate * 1.4),
-            total_daily: Math.round(15 * exchangeRate * 1.4) * 2,
-            description: "Faster results but higher daily spend. Best when you already know your creative works."
-          }
-        ]
+            total_daily: Math.round(15 * exchangeRate * 1.4),
+            description:
+              "Faster data collection at higher daily spend. Best when you already know your creative works.",
+          },
+        ],
+        international_strategies: getInternationalStrategies(storeCurrency, exchangeRate),
+        international_recommended_daily: Math.round(18 * exchangeRate),
       },
       timing: {
         peak_days: [],
-        launch_recommendation: "Launch anytime — gather data from your first campaign to optimise timing",
+        launch_recommendation:
+          "Launch anytime — gather data from your first campaign to optimise timing",
         reasoning: "No peak day data yet",
       },
       placements: {
-        recommended: ["Facebook Feed", "Instagram Feed", "Instagram Stories", "Instagram Reels"]
+        recommended: [
+          "Facebook Feed",
+          "Instagram Feed",
+          "Instagram Stories",
+          "Instagram Reels",
+        ],
       },
-      top_products_to_advertise: storeData.products.filter(p => p.should_advertise).slice(0, 5).map(p => p.name),
-      products_to_avoid: storeData.products.filter(p => !p.should_advertise).map(p => p.name),
+      top_products_to_advertise: storeData.products
+        .filter((p) => p.should_advertise)
+        .slice(0, 5)
+        .map((p) => p.name),
+      products_to_avoid: storeData.products
+        .filter((p) => !p.should_advertise)
+        .map((p) => p.name),
       store_health_score: 20,
       health_breakdown: [
-        { label: "Active Products", score: 5, max: 20, status: "warning", percentage: 25 },
-        { label: "Recent Orders", score: 5, max: 30, status: "bad", percentage: 16 },
-        { label: "Customer Retention", score: 5, max: 25, status: "bad", percentage: 20 },
-        { label: "Product Availability", score: 5, max: 25, status: "bad", percentage: 20 }
+        {
+          label: "Active Products",
+          score: 5,
+          max: 20,
+          status: "warning",
+          percentage: 25,
+        },
+        {
+          label: "Recent Orders",
+          score: 5,
+          max: 30,
+          status: "bad",
+          percentage: 16,
+        },
+        {
+          label: "Customer Retention",
+          score: 5,
+          max: 25,
+          status: "bad",
+          percentage: 20,
+        },
+        {
+          label: "Product Availability",
+          score: 5,
+          max: 25,
+          status: "bad",
+          percentage: 20,
+        },
       ],
-      warnings: ["We need at least 20 orders to generate reliable recommendations. Keep selling and check back soon."],
-      opportunities: []
+      warnings: [
+        "We need at least 20 orders to generate reliable recommendations. Keep selling and check back soon.",
+      ],
+      opportunities: [],
     };
   }
 
@@ -562,28 +1176,47 @@ export async function generateRecommendations(
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     if (oldestDate > thirtyDaysAgo) {
       newStoreCaution = true;
-      newStoreCautionMessage = "Your store is new — these recommendations will improve as more order data comes in.";
+      newStoreCautionMessage =
+        "Your store is new — these recommendations will improve as more order data comes in.";
     }
   }
 
-  // ── Dynamic Ad Sets: based on data maturity, not hardcoded ──
-  const monthlyOrders = storeData.orders.orders_last_30_days || 0;
-  let adSets: number;
-  let adSetReasoning: string;
+  const effectiveStoreCountry = getEffectiveStoreCountry(
+    storeData.store?.country,
+    storeData.store?.currency,
+    storeData.orders.top_locations
+  );
 
-  if (monthlyOrders < 20) {
-    adSets = 1;
-    adSetReasoning = `Your ${monthlyOrders} monthly orders aren't enough to split test — start with 1 ad set to concentrate your data.`;
-  } else if (monthlyOrders <= 50) {
-    adSets = 2;
-    adSetReasoning = `Your ${monthlyOrders} monthly orders give you enough signal to test 2 audience variations — run 1-2 ad sets.`;
-  } else {
-    adSets = 3;
-    adSetReasoning = `With ${monthlyOrders} monthly orders, you have enough purchase volume to run meaningful split tests across 3 ad sets.`;
-  }
+  // ── Multi-Market & Ad Sets Intelligence ──
+  const isDomestic = (city: string, country: string | undefined) =>
+    isDomesticCity(
+      city,
+      country,
+      effectiveStoreCountry,
+      storeData.store?.currency,
+      storeData.orders.top_locations
+    );
+
+  // Categorize order locations into domestic vs international (excluding country-only fallback entries)
+  const validOrderLocations = (storeData.orders.top_locations || []).filter(
+    (l) => !isFallbackCountryEntry(l)
+  );
+  const domesticLocations = validOrderLocations.filter((l) =>
+    isDomestic(l.city, l.country)
+  );
+
+  const internationalLocations = validOrderLocations.filter(
+    (l) => !isDomestic(l.city, l.country)
+  );
+
+  const hasInternationalDemand = internationalLocations.length > 0;
 
   // ── BUDGET CALCULATION (USD tiered revenue ratio with AOV liquidity guardrail) ──
-  const avgMonthlyRevenue = (storeData.orders as { revenue_avg_3_months?: number }).revenue_avg_3_months || storeData.orders.revenue_last_30_days || 0;
+  const avgMonthlyRevenue =
+    (storeData.orders as { revenue_avg_3_months?: number })
+      .revenue_avg_3_months ||
+    storeData.orders.revenue_last_30_days ||
+    0;
   const avgMonthlyRevenueUSD = avgMonthlyRevenue / exchangeRate;
 
   const TEST_DURATION_DAYS = 14;
@@ -603,51 +1236,110 @@ export async function generateRecommendations(
   }
 
   const totalDailySpendUSD = totalTestBudgetUSD / TEST_DURATION_DAYS;
-  const tierDailyPerAdSetUSD = totalDailySpendUSD / adSets; // raw tier budget per ad set
 
-  // ── AOV Guardrail: only apply if within 2x of tier budget; warn if it would exceed 3x ──
-  const aovUSD = storeData.orders.average_order_value / exchangeRate;
-  const aovGuardrailUSD = aovUSD * 0.5; // minimum spend Meta needs to see a purchase signal
+  // ── AOV & PRODUCT PRICE GUARDRAIL WATERFALL ──
+  // Fallback hierarchy if store had a dry spell / low-to-no recent orders:
+  // 1. Historical store AOV (from rolling 60d or lifetime orders)
+  // 2. Target product price being advertised (if generating for a specific product)
+  // 3. Median product price from store catalog
+  // 4. Default testing baseline ($25)
+  const catalogPrices = (storeData.products || [])
+    .map((p) => p.price)
+    .filter((p): p is number => typeof p === "number" && p > 0)
+    .sort((a, b) => a - b);
+  const medianCatalogPrice =
+    catalogPrices.length > 0
+      ? catalogPrices[Math.floor(catalogPrices.length / 2)]
+      : 0;
 
-  let finalDailyPerAdSetUSD: number;
+  const effectiveAOV =
+    (targetProductOverride?.price && targetProductOverride.price > 0)
+      ? targetProductOverride.price
+      : storeData.orders.average_order_value > 0
+      ? storeData.orders.average_order_value
+      : medianCatalogPrice > 0
+      ? medianCatalogPrice
+      : 25 * exchangeRate;
+
+  const aovUSD = effectiveAOV / exchangeRate;
+  const aovGuardrailUSD = aovUSD * 0.5;
+
   let budgetWarning = false;
   let budgetWarningMessage: string | undefined;
 
-  if (aovGuardrailUSD > tierDailyPerAdSetUSD * 3) {
-    // Guardrail is unaffordable — use tier budget as-is and warn the merchant
-    finalDailyPerAdSetUSD = tierDailyPerAdSetUSD;
+  if (aovGuardrailUSD > totalDailySpendUSD * 3) {
     budgetWarning = true;
     const guardrailLocal = Math.round(aovGuardrailUSD * exchangeRate);
-    const tierLocal = Math.round(tierDailyPerAdSetUSD * exchangeRate);
-    budgetWarningMessage = `Your product price point ideally requires ${storeData.store.currency_symbol || ""}${guardrailLocal.toLocaleString()}/day per ad set for Meta's algorithm to work efficiently. Starting at ${storeData.store.currency_symbol || ""}${tierLocal.toLocaleString()} is possible but expect a longer learning phase. Consider starting with Add to Cart optimization instead of Purchase.`;
-  } else if (aovGuardrailUSD > tierDailyPerAdSetUSD) {
-    // Guardrail is within reason (1x–3x) — apply it
-    finalDailyPerAdSetUSD = aovGuardrailUSD;
-  } else {
-    // Tier budget already covers the guardrail
-    finalDailyPerAdSetUSD = tierDailyPerAdSetUSD;
+    const tierLocal = Math.round(totalDailySpendUSD * exchangeRate);
+    budgetWarningMessage = `For a premium product at this price point, a daily budget of ${storeData.store.currency_symbol || ""}${guardrailLocal.toLocaleString()}/day may give the test more room to gather evidence. Starting at ${storeData.store.currency_symbol || ""}${tierLocal.toLocaleString()}/day limits the amount you risk, but results may be inconclusive. Verify the Purchase event in Meta Events Manager before launch and reassess any event change using measured campaign results.`;
   }
 
-  const recommendedDailyLocal = finalDailyPerAdSetUSD * exchangeRate;
+  const finalDailyUSD = estimateDailyTestBudget(totalDailySpendUSD, aovUSD);
+
+  const recommendedDailyLocal = finalDailyUSD * exchangeRate;
   const recommendedDaily = Math.round(recommendedDailyLocal);
 
+  // Multi-market allocation decision
+  const intlFloorStrategies = getInternationalStrategies(storeCurrency, exchangeRate);
+  const MIN_INTL_DAILY_LOCAL = intlFloorStrategies[0]?.daily || Math.round(18 * exchangeRate);
+  const intlFloorFormatted = getInternationalBudgetFloor(storeCurrency, exchangeRate);
+
+  let adSets: number;
+  let adSetReasoning: string;
+
+  if (hasInternationalDemand) {
+    const intlCityNames = internationalLocations.map((l) => l.city).join(" · ");
+    adSets = 1;
+    adSetReasoning =
+      `Recommended Plan: 1 consolidated ad set at ${formatCurrency(recommendedDaily, storeCurrency, storeData.store.currency_symbol)}/day focused on your primary domestic market.\n\n` +
+      `💡 Optional Overseas Expansion: Should you ever wish to test overseas sales in ${intlCityNames}, launch a separate overseas ad set at ${intlFloorFormatted}. You do not need to run both at once — win your home market first to protect your cash flow.`;
+  } else {
+    // Pure domestic store
+    adSets = 1;
+    adSetReasoning = `Recommended Plan: 1 consolidated ad set at ${formatCurrency(recommendedDaily, storeCurrency, storeData.store.currency_symbol)}/day to focus your entire budget on finding your best customers without splitting your spend.`;
+  }
 
   // Run unified AI single-pass call
-  const profile = await generateTargetingProfile(storeData, adSets, recommendedDaily, userId);
+  const profile = await generateTargetingProfile(
+    storeData,
+    adSets,
+    recommendedDaily,
+    userId,
+    targetProductOverride,
+    excludedAngle
+  );
 
-  // --- TARGETING ---
+  // --- Advantage+ Guidance & Creative Hooks ---
+  const advantage_plus_guidance: AdvantagePlusGuidance = {
+    campaign_type: guidance.campaign_type,
+    optimization_event: guidance.optimization_event,
+    optimization_reasoning: guidance.default_reasoning,
+    event_evidence: guidance.event_evidence,
+    seed_audience_suggestions: {
+      age_min: profile.demographics.age_min,
+      age_max: profile.demographics.age_max,
+      gender: profile.demographics.gender,
+      demographic_justification: profile.demographics.demographic_justification,
+      seed_interests: profile.seed_interests,
+    },
+  };
+
+  // The validated copy and deterministic recommendations remain useful when
+  // hooks fail. Return an explicit empty hook set so the client can retry only
+  // this step without paying for another copywriter call.
+  const creative_hooks = profile.creative_hooks;
+
+  // --- TARGETING (Backward compatibility) ---
   const gender = profile.demographics.gender;
-  const gender_reasoning = profile.demographics.gender_reasoning;
   const finalAgeMin = profile.demographics.age_min || 25;
   const finalAgeMax = profile.demographics.age_max || 44;
-  const finalAgeReasoning = profile.demographics.age_reasoning || "Standard e-commerce age targeting (25-44) is highly recommended for early validation campaigns.";
-  
+  const finalAgeReasoning =
+    profile.demographics.age_reasoning ||
+    "Standard e-commerce age targeting (25-44) is highly recommended for early validation campaigns.";
   const locations = profile.locations;
-  const interests = profile.audiences.interests;
-  const behaviours = (profile.audiences.behaviours || (profile.audiences as { behaviors?: string[] }).behaviors || ["Engaged Shoppers"]).filter((b: string) => b !== "Online Shoppers" && b !== "Online shoppers");
-  const interest_reasoning = profile.audiences.interest_reasoning;
+  const interests = profile.seed_interests;
 
-  // Goal multipliers (applied client-side, stored for reference)
+  // Goal multipliers
   const goalMultipliers: Record<string, number> = {
     "Drive Website Sales": 1.0,
     "Grow Brand Awareness": 0.6,
@@ -659,36 +1351,78 @@ export async function generateRecommendations(
   const strategies = [
     {
       label: "Dip Your Toe",
-      daily: Math.round(finalDailyPerAdSetUSD * 0.7 * exchangeRate),
-      total_daily: Math.round(finalDailyPerAdSetUSD * 0.7 * exchangeRate) * adSets,
-      description: "Low risk, slow learning. Good if you're testing for the first time."
+      daily: Math.round(finalDailyUSD * 0.7 * exchangeRate),
+      total_daily:
+        Math.round(finalDailyUSD * 0.7 * exchangeRate) * adSets,
+      description:
+        "Lowers upfront financial risk. Best if cash is tight, but may take longer to collect customer signals.",
     },
     {
       label: "Sweet Spot",
       daily: recommendedDaily,
       total_daily: recommendedDaily * adSets,
-      description: "Our recommendation. Enough budget for Meta to learn without burning cash."
+      description:
+        "Our recommended starter baseline. Balances clear shopper feedback without overspending upfront.",
     },
     {
       label: "Full Send",
-      daily: Math.round(finalDailyPerAdSetUSD * 1.4 * exchangeRate),
-      total_daily: Math.round(finalDailyPerAdSetUSD * 1.4 * exchangeRate) * adSets,
-      description: "Faster results but higher daily spend. Best when you already know your creative works."
-    }
+      daily: Math.round(finalDailyUSD * 1.4 * exchangeRate),
+      total_daily:
+        Math.round(finalDailyUSD * 1.4 * exchangeRate) * adSets,
+      description:
+        "Faster data collection at higher daily spend. Best when you already know your creative works.",
+    },
   ];
 
-  const budgetReasoning = `Based on your monthly store revenue of ${formatCurrency(Math.round(avgMonthlyRevenue), storeCurrency, storeData.store.currency_symbol)}, ` +
-    `we recommend ${adSets} ad set${adSets > 1 ? "s" : ""} at ${formatCurrency(recommendedDaily, storeCurrency, storeData.store.currency_symbol)} per ad set/day. ` +
-    adSetReasoning;
+  const internationalStrategies = getInternationalStrategies(storeCurrency, exchangeRate);
 
-  // Check high budget warning (for budgets that are genuinely high in absolute terms, post-guardrail)
+  const isAovPaced = finalDailyUSD === aovGuardrailUSD && aovGuardrailUSD > totalDailySpendUSD;
+  const formattedAov = formatCurrency(
+    Math.round(effectiveAOV),
+    storeCurrency,
+    storeData.store.currency_symbol
+  );
+  const formattedMonthlyRev = formatCurrency(
+    Math.round(avgMonthlyRevenue),
+    storeCurrency,
+    storeData.store.currency_symbol
+  );
+  const formattedDipDaily = formatCurrency(
+    Math.round(finalDailyUSD * 0.7 * exchangeRate),
+    storeCurrency,
+    storeData.store.currency_symbol
+  );
+
+  let budgetReasoning = "";
+  if (isAovPaced) {
+    budgetReasoning =
+      `Calibrated for your product's ${formattedAov} price point: Higher-ticket items naturally have longer consideration cycles, so the price-based test rule raises the daily estimate; it does not establish an affordable acquisition cost. If you prefer lower upfront risk, the Dip Your Toe option is a valid starting point that simply takes longer to accumulate conclusive signals. ` +
+      adSetReasoning;
+    if (avgMonthlyRevenue > 0 && (recommendedDaily * TEST_DURATION_DAYS) > (avgMonthlyRevenue * 0.3)) {
+      budgetReasoning += `\n\n💡 Cash Flow Tip: Your recent 30-day store sales were ${formattedMonthlyRev}. If cash flow is tight right now, choose the Dip Your Toe option (${formattedDipDaily}/day) to test with less risk, or wait until your busy season picks up.`;
+    }
+  } else if (avgMonthlyRevenue > 0) {
+    budgetReasoning =
+      `Based on the ${budgetTier} testing rule and recent store revenue of ${formattedMonthlyRev}. This is a test-spend estimate, not a profitability forecast. ` +
+      adSetReasoning;
+  } else {
+    budgetReasoning =
+      `Based on your product price point of ${formattedAov} and our Starter Testing model. ` +
+      adSetReasoning;
+  }
+
+  // Check high budget warning
   let highBudgetWarning = false;
   let highBudgetWarningMessage: string | undefined;
 
-  if (!budgetWarning && finalDailyPerAdSetUSD > 50) {
+  if (!budgetWarning && finalDailyUSD > 50) {
     highBudgetWarning = true;
-    const formattedAmount = formatCurrency(recommendedDaily, storeCurrency, storeData.store.currency_symbol);
-    highBudgetWarningMessage = `Your product price point requires a minimum daily budget of ${formattedAmount} for Meta's algorithm to optimize. Ensure this budget is available before launching.`;
+    const formattedAmount = formatCurrency(
+      recommendedDaily,
+      storeCurrency,
+      storeData.store.currency_symbol
+    );
+    highBudgetWarningMessage = `For a higher-priced product, we recommend a daily budget of at least ${formattedAmount} to give Meta room to find qualified buyers.`;
   }
 
   // --- TIMING ---
@@ -703,9 +1437,7 @@ export async function generateRecommendations(
   ];
 
   // --- PRODUCTS ---
-  const sortedProducts = [...storeData.products].sort(
-    (a, b) => b.revenue - a.revenue
-  );
+  const sortedProducts = [...storeData.products].sort(compareProductsForTest);
   const topProducts = sortedProducts
     .filter((p) => p.should_advertise)
     .slice(0, 5)
@@ -714,7 +1446,7 @@ export async function generateRecommendations(
     .filter((p) => !p.should_advertise)
     .map((p) => `${p.name}${p.reason ? ` (${p.reason})` : ""}`);
 
-  // --- STORE HEALTH (percentage-based) ---
+  // --- STORE HEALTH ---
   const productScore = scoreProducts(storeData.products);
   const orderScore = scoreOrders(storeData.orders.orders_last_30_days);
   const retentionScore = scoreRetention(storeData.orders.repeat_customer_rate);
@@ -747,7 +1479,9 @@ export async function generateRecommendations(
       score: availabilityScore.score,
       max: availabilityScore.max,
       status: availabilityScore.status,
-      percentage: Math.round((availabilityScore.score / availabilityScore.max) * 100),
+      percentage: Math.round(
+        (availabilityScore.score / availabilityScore.max) * 100
+      ),
     },
   ] as MetaRecommendations["health_breakdown"];
 
@@ -758,7 +1492,7 @@ export async function generateRecommendations(
     availabilityScore.score;
 
   // --- WARNINGS ---
-  const warnings: string[] = [];
+  const warnings: string[] = [...(storeData.data_quality?.warnings ?? ["History coverage is unverified. Sync the store before relying on historical claims."])];
   const outOfStockCount = storeData.products.filter((p) => !p.in_stock).length;
   if (outOfStockCount > 0) {
     warnings.push(
@@ -770,7 +1504,7 @@ export async function generateRecommendations(
       "No orders in last 30 days — targeting recommendations are limited without purchase data"
     );
   }
-  
+
   const currencyAovUSD = storeData.orders.average_order_value / exchangeRate;
   if (currencyAovUSD > 0 && currencyAovUSD < 15) {
     warnings.push(
@@ -803,27 +1537,165 @@ export async function generateRecommendations(
     );
   }
 
-  return {
-    ...(lowDataWarningCheck(storeData) ? {} : {
-      newStoreCaution,
-      newStoreCautionMessage,
-      highBudgetWarning,
-      highBudgetWarningMessage,
-      budgetWarning,
-      budgetWarningMessage,
-    }),
+  const effectiveCountry = getEffectiveStoreCountry(
+    storeData.store.country,
+    storeCurrency,
+    storeData.orders.top_locations
+  );
+  const isTier1 = isTier1Market(effectiveCountry, storeCurrency);
+
+    // Always include ALL domestic cities from store order data first, then supplement with AI-suggested ones
+    const storeDataDomesticLocs: LocationResult[] = domesticLocations.map((l) => ({
+      name: l.city,
+      country: l.country,
+      market_type: "domestic" as const,
+      source: ((storeData.data_quality?.schema_version || 0) >= 2 ? "from_data" : "recommended") as "from_data" | "recommended",
+      percentage: l.percentage,
+      note: "Top shopping city from your customer orders",
+    }));
+    const storeDataDomesticNames = new Set(storeDataDomesticLocs.map((l) => l.name.toLowerCase()));
+    const aiDomesticExtra = locations
+      .filter((l) => {
+        const isDom =
+          l.market_type === "domestic"
+            ? true
+            : l.market_type === "international"
+            ? false
+            : isDomestic(l.name || "", (l as { country?: string }).country);
+        return isDom && !storeDataDomesticNames.has((l.name || "").toLowerCase());
+      })
+      .map((l) => ({ ...l, source: "recommended" as const, market_type: "domestic" as const }));
+
+    const finalDomesticLocations: LocationResult[] =
+      storeDataDomesticLocs.length > 0
+        ? [...storeDataDomesticLocs, ...aiDomesticExtra]
+        : locations
+            .filter((l) => {
+              if (l.market_type === "domestic") return true;
+              if (l.market_type === "international") return false;
+              return isDomestic(l.name || "", (l as { country?: string }).country);
+            })
+            .map((l) => ({ ...l, source: "recommended" as const, market_type: "domestic" as const }));
+
+    // International locations: combine real store order data with strategic international hubs
+    const storeDataIntlLocs: LocationResult[] = internationalLocations.map((l) => ({
+      name: l.city,
+      country: l.country,
+      market_type: "international" as const,
+      source: ((storeData.data_quality?.schema_version || 0) >= 2 ? "from_data" : "recommended") as "from_data" | "recommended",
+      percentage: l.percentage,
+      note: "Overseas city from your customer orders",
+    }));
+    const storeDataIntlNames = new Set(storeDataIntlLocs.map((l) => l.name.toLowerCase()));
+    const aiIntlExtra = locations
+      .filter((l) => {
+        const isIntl =
+          l.market_type === "international"
+            ? true
+            : l.market_type === "domestic"
+            ? false
+            : !isDomestic(l.name || "", (l as { country?: string }).country);
+        return isIntl && !storeDataIntlNames.has((l.name || "").toLowerCase());
+      })
+      .map((l) => ({ ...l, source: "recommended" as const, market_type: "international" as const }));
+
+    const finalInternationalLocations: LocationResult[] =
+      storeDataIntlLocs.length > 0
+        ? [...storeDataIntlLocs, ...aiIntlExtra]
+        : isTier1
+        ? []
+        : locations
+            .filter((l) => {
+              if (l.market_type === "international") return true;
+              if (l.market_type === "domestic") return false;
+              return !isDomestic(l.name || "", (l as { country?: string }).country);
+            })
+            .map((l) => ({ ...l, source: "recommended" as const, market_type: "international" as const }));
+
+    if (finalInternationalLocations.length > 0) {
+      const displayedIntlCityNames = finalInternationalLocations
+        .map((l) => (l.name || (l as { city?: string }).city || "").split(",")[0].trim())
+        .filter(Boolean)
+        .slice(0, 4)
+        .join(" · ");
+      if (displayedIntlCityNames) {
+        budgetReasoning = budgetReasoning.replace(
+          /Should you ever wish to (?:explore international demand|test overseas sales) in [^,]+,/i,
+          `Should you ever wish to test overseas sales in ${displayedIntlCityNames},`
+        );
+      }
+    }
+
+    const domesticBudgetFormatted =
+      formatCurrency(
+        recommendedDaily,
+        storeCurrency,
+        storeData.store.currency_symbol
+      ) + "/day";
+
+    const intlBudgetFormatted =
+      formatCurrency(
+        MIN_INTL_DAILY_LOCAL,
+        storeCurrency,
+        storeData.store.currency_symbol
+      ) + "/day ($18/day min)";
+
+    return {
+    generation_status: profile.generation_status,
+    creative_hooks_status: profile.creative_hooks_status ?? (creative_hooks.length === 3 ? "generated" : "fallback"),
+    ...(lowDataWarningCheck(storeData)
+      ? {}
+      : {
+          newStoreCaution,
+          newStoreCautionMessage,
+          highBudgetWarning,
+          highBudgetWarningMessage,
+          budgetWarning,
+          budgetWarningMessage,
+        }),
+    creative_hooks,
+    advantage_plus_guidance,
     targeting: {
-      locations,
+      locations: finalDomesticLocations,
+      domestic_locations: finalDomesticLocations,
+      international_locations:
+        finalInternationalLocations.length > 0
+          ? finalInternationalLocations
+          : undefined,
+      domestic_budget_formatted: domesticBudgetFormatted,
+      international_budget_formatted:
+        finalInternationalLocations.length > 0
+          ? intlBudgetFormatted
+          : undefined,
+      overseas_demand:
+        finalInternationalLocations.length > 0
+          ? finalInternationalLocations.map((l) => l.name)
+          : undefined,
       age_min: finalAgeMin,
       age_max: finalAgeMax,
       age_reasoning: finalAgeReasoning,
       gender,
-      gender_reasoning,
+      gender_reasoning: profile.demographics.demographic_justification,
       interests,
-      behaviours,
-      interest_reasoning,
+      interest_reasoning:
+        "Starting interest suggestions to help Meta find your first wave of shoppers.",
     },
     budget: {
+      calculation: {
+        rule_version: "prespend-v1",
+        product_price: targetProductOverride?.price ?? null,
+        price_basis: targetProductOverride?.price ? "selected_product" : "store_aov_or_catalog",
+        effective_price: effectiveAOV,
+        revenue_30d: avgMonthlyRevenue,
+        product_revenue_30d: targetProductOverride?.revenue ? Math.round(targetProductOverride.revenue) : null,
+        baseline_test_usd: totalTestBudgetUSD,
+        baseline_duration_days: TEST_DURATION_DAYS,
+        baseline_daily: totalDailySpendUSD * exchangeRate,
+        price_guardrail_daily: effectiveAOV * 0.5,
+        selected_rule: isAovPaced ? "price_guardrail" : "revenue_tier_baseline",
+        daily_before_strategy: recommendedDaily,
+        fx: { currency: storeCurrency, rate: exchangeRate, source: fx.source, fetched_at: fx.fetched_at },
+      },
       recommended_daily: recommendedDaily,
       recommended_duration_days: TEST_DURATION_DAYS,
       reasoning: budgetReasoning,
@@ -832,19 +1704,21 @@ export async function generateRecommendations(
       tier: budgetTier,
       ad_sets: adSets,
       optimization_event: {
-        event: profile.optimization_event.event,
-        reasoning: profile.optimization_event.reasoning,
-        target_weekly: profile.optimization_event.target_weekly,
-        upgrade_milestone: profile.optimization_event.upgrade_milestone,
+        event: guidance.optimization_event,
+        reasoning: guidance.default_reasoning,
+        upgrade_milestone: guidance.event_evidence.conditional_alternative?.condition ||
+          "Confirm the Purchase event in Meta Events Manager before publishing and reassess after measured results.",
       },
       ad_set_reasoning: adSetReasoning,
       breakdown: {
         revenue_based: avgMonthlyRevenue,
-        aov_based: storeData.orders.average_order_value,
+        aov_based: Math.round(effectiveAOV),
         goal_multipliers: goalMultipliers,
         meta_optimal_daily: strategies[0].daily,
       },
       strategies,
+      international_strategies: internationalStrategies,
+      international_recommended_daily: internationalStrategies[1]?.daily,
     },
     timing,
     placements: {

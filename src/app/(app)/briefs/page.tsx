@@ -9,7 +9,6 @@ import {
   FileText,
   Layers,
   Search,
-  X,
 } from "lucide-react";
 import { PageContainer } from "@/components/layout/page-container";
 import { Card } from "@/components/ui/card";
@@ -120,10 +119,7 @@ function BriefCard({ b }: { b: BriefListItem }) {
   );
 }
 
-const dateInputClass =
-  "rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground shadow-xs outline-none transition-colors focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
-
-/** Full-page, searchable, date-filterable grid of every finalized brief. */
+/** Full-page, searchable, date-filterable grid of saved briefs. */
 export default function BriefsPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: BRIEFS_QUERY_KEY,

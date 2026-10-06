@@ -44,11 +44,12 @@ function formatDate(iso: string | null): string {
   }
 }
 
-/** Recent finalized briefs, each linking to its durable /campaigns/[id] page. */
+/** Recent saved briefs, including drafts recovered after a lost response. */
 export function BriefHistory({ limit = 5 }: { limit?: number }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: BRIEFS_QUERY_KEY,
     queryFn: fetchBriefHistory,
+    staleTime: 0,
   });
 
   const items = (data ?? []).slice(0, limit);

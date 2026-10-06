@@ -6,7 +6,16 @@ export const LAGOS_AREAS = [
   "lagos island", "apapa", "magodo", "ojodu", "ojota", "oshodi", "palmgrove",
   "ikorodu", "epe", "badagry", "alagbado", "alimosho", "bariga", "ebute metta",
   "egbeda", "ejigbo", "idimu", "ikotun", "ilupeju", "ipaja", "isolo", "ketu",
-  "mile 12", "ogba", "okota", "orile", "osapa", "shomolu"
+  "mile 12", "ogba", "okota", "orile", "osapa", "shomolu",
+  // Lekki axis sub-neighborhoods
+  "ikate", "ikate elegushi", "sangotedo", "agungi", "oniru", "jakande",
+  "ologolo", "ilasan", "idado", "igbo efon", "chevron", "marwa",
+  // Island & waterfront
+  "banana island", "obalende",
+  // Mainland extensions
+  "ojo", "mile 2", "ogudu", "alapere", "omole", "berger", "ojodu berger",
+  "aguda", "anthony", "cement", "alausa", "oregun", "opebi", "allen",
+  "igando", "iyana ipaja",
 ];
 
 export const ABUJA_AREAS = [
@@ -20,8 +29,8 @@ export const PH_AREAS = [
   "diobu", "borokiri", "ph", "port harcourt", "port-harcourt"
 ];
 
-export function consolidateLocation(city: string): string {
-  if (!city) return "Unknown";
+export function consolidateLocation(city: string): string | null {
+  if (!city) return null;
   
   const clean = city.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, " ").replace(/\s+/g, " ").trim();
   const cityLower = clean.toLowerCase();
@@ -46,8 +55,13 @@ export function consolidateLocation(city: string): string {
     }
   }
 
-  // 3. Port Harcourt check: If contains "port harcourt" or matches PH areas
-  if (cityLower.includes("port harcourt") || cityLower.includes("port-harcourt") || cityLower === "ph") {
+  // 3. Port Harcourt check: If contains "port harcourt" or matches PH areas or Rivers state
+  if (
+    cityLower.includes("port harcourt") ||
+    cityLower.includes("port-harcourt") ||
+    cityLower === "ph" ||
+    cityLower.includes("rivers")
+  ) {
     return "Port Harcourt";
   }
   for (const area of PH_AREAS) {
@@ -62,11 +76,22 @@ export function consolidateLocation(city: string): string {
   }
 
   // 5. Ibadan check
-  if (cityLower.includes("ibadan") || cityLower.includes("bodija") || cityLower.includes("oluyole")) {
+  if (
+    cityLower.includes("ibadan") ||
+    cityLower.includes("bodija") ||
+    cityLower.includes("oluyole") ||
+    cityLower === "oyo" ||
+    cityLower.includes("oyo state")
+  ) {
     return "Ibadan";
   }
 
-  // 6. Warri check
+  // 6. London / UK metro check
+  if (cityLower === "england" || cityLower.includes("london") || cityLower.includes("greater london")) {
+    return "London";
+  }
+
+  // 7. Warri check
   if (cityLower.includes("warri") || cityLower.includes("effurun")) {
     return "Warri";
   }
@@ -126,8 +151,22 @@ export function consolidateLocation(city: string): string {
     return "Abeokuta";
   }
 
-  // Standard formatting for other cities to make sure they are beautifully title-cased
-  return clean
+  // Unrecognized — return null so the AI tier can attempt dynamic resolution.
+  // This is the key fix: previously this returned a title-cased version of the raw
+  // input, which made the pre-filter think it was already resolved and skipped AI.
+  return null;
+}
+
+/**
+ * Title-cases a city name for clean display.
+ * Used as the final fallback when neither static nor AI resolution matches.
+ */
+export function formatCityName(city: string): string {
+  if (!city) return "Unknown";
+  return city
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
     .split(" ")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(" ");
@@ -137,38 +176,49 @@ const anthropicClient = new Anthropic();
 
 import { logApiUsage } from "@/lib/db";
 
+// In-memory cache to prevent duplicate AI calls for identical location strings within the process
+const locationMemoryCache = new Map<string, string>();
+
 export async function consolidateLocationsWithAI(
   rawLocations: { city: string; country: string }[],
   userId?: string | null
 ): Promise<Record<string, string>> {
   if (rawLocations.length === 0) return {};
 
-  const prompt = `
-You are an address consolidation API for a Shopify store.
-Your task is to take a list of raw city/country names from customer orders, and for the primary market (especially Nigeria), group/consolidate all sub-city neighborhoods, local government areas (LGAs), or districts into their standard parent metropolitan city or state (e.g. Lekki, Ikoyi, Ikeja, Victoria Island, Yaba -> Lagos; Maitama, Wuse, Gwarinpa, Kubwa -> Abuja; GRA, Trans Amadi -> Port Harcourt; Benin City -> Benin City).
+  const result: Record<string, string> = {};
+  const uncachedLocations: { city: string; country: string }[] = [];
 
-For other markets, consolidate them into their standard city or state name (e.g. "Detroit, MI" -> "Detroit", "London, Greater London" -> "London").
+  for (const loc of rawLocations) {
+    const key = loc.city.trim().toLowerCase();
+    if (locationMemoryCache.has(key)) {
+      result[loc.city.trim()] = locationMemoryCache.get(key)!;
+    } else {
+      uncachedLocations.push(loc);
+    }
+  }
 
-Clean any extra whitespaces, commas, or province abbreviations from the final name, and ensure proper Title Case.
+  // If all requested locations were already resolved in cache, return immediately
+  if (uncachedLocations.length === 0) {
+    return result;
+  }
 
-Input locations:
-${JSON.stringify(rawLocations, null, 2)}
+  const prompt = `You are an address consolidation API for an e-commerce store.
+Group sub-city neighborhoods, LGAs, or districts into standard parent metro cities (e.g. Lekki, Ikoyi, Ikeja, Yaba -> Lagos; Maitama, Wuse -> Abuja; Trans Amadi -> Port Harcourt; Detroit, MI -> Detroit; London, Greater London -> London).
+Clean extra spaces and province abbreviations. Return proper Title Case.
 
-Return ONLY a valid JSON object mapping the exact raw city input to its consolidated parent city or state name. No explanations, no markdown block.
-Example format:
-{
-  "Lekki": "Lagos",
-  "Wuse": "Abuja",
-  "Benin City": "Benin City"
-}
-`;
+Input:
+${JSON.stringify(uncachedLocations, null, 2)}
+
+Return ONLY a JSON object mapping raw city to consolidated city. No markdown blocks.
+Example: {"Lekki": "Lagos", "Wuse": "Abuja"}`;
 
   try {
     const message = await anthropicClient.messages.create({
-      model: "claude-sonnet-4-6",
+      model: "claude-haiku-4-5",
       max_tokens: 1000,
       messages: [{ role: "user", content: prompt }],
     });
+    await logApiUsage(userId ?? null, "location_consolidation", message.usage, message.model);
 
     const text = message.content[0].type === "text" ? message.content[0].text.trim() : "";
     const cleanText = text
@@ -179,19 +229,16 @@ Example format:
     
     const parsed = JSON.parse(cleanText) as Record<string, string>;
     if (typeof parsed === "object" && parsed !== null) {
-      if (userId) {
-        logApiUsage(
-          userId,
-          "location_consolidation",
-          message.usage.input_tokens,
-          message.usage.output_tokens
-        );
+      for (const [rawCity, consolidatedCity] of Object.entries(parsed)) {
+        result[rawCity] = consolidatedCity;
+        locationMemoryCache.set(rawCity.trim().toLowerCase(), consolidatedCity);
       }
-      return parsed;
+
+      return result;
     }
-    return {};
+    return result;
   } catch (error) {
     console.error("AI location consolidation error:", error);
-    return {};
+    return result;
   }
 }

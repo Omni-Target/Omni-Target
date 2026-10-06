@@ -1,3 +1,5 @@
+"use client";
+
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
@@ -31,18 +33,27 @@ export function Avatar({
   className,
   ...props
 }: AvatarProps) {
+  const [failedSrc, setFailedSrc] = React.useState<string | null>(null);
+  const image = src && src !== failedSrc ? src : null;
+
   return (
     <div
       className={cn(
-        "relative grid shrink-0 place-items-center overflow-hidden rounded-full border border-border-subtle bg-gradient-brand-vivid font-semibold text-white",
+        "relative grid shrink-0 place-items-center overflow-hidden rounded-full border border-border-subtle font-semibold",
+        image ? "bg-white" : "bg-gradient-brand-vivid text-white",
         sizeMap[size],
         className,
       )}
       {...props}
     >
-      {src ? (
+      {image ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt={name ?? "avatar"} className="size-full object-cover" />
+        <img
+          src={image}
+          alt={name ?? "Store logo"}
+          className="size-full object-contain p-0.5"
+          onError={() => setFailedSrc(image)}
+        />
       ) : (
         <span aria-hidden>{initials(name) || "·"}</span>
       )}

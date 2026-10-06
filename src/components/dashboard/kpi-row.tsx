@@ -47,8 +47,9 @@ export function KpiRow({
       </Card>
       <Card className="p-5">
         <Stat
-          label="Avg order value"
+          label={orders30d > 0 ? "Avg order value · 30d" : "Avg order value"}
           value={formatCurrency(Math.round(aov), currency)}
+          hint={orders30d === 0 && aov > 0 ? "Store historical average" : "Shopify net AOV (excl. shipping & tax)"}
           icon={<Receipt />}
         />
       </Card>

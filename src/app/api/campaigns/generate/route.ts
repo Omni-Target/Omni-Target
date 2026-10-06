@@ -1,13 +1,32 @@
+import { fetchSafeImage } from "@/lib/safe-image-fetch";
+import { createHash, randomUUID } from "node:crypto";
+import { buildGenerationContext } from "@/lib/campaigns/insights";
+import { normalizeCopyPunctuation, validateCopy } from "@/lib/campaigns/validate-copy";
+import { buildCopyValidationEvidence } from "@/lib/campaigns/copy-evidence";
 import { NextResponse } from "next/server";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { queryUserIntegrationSelect, updateUserIntegration, insertCreditUsage, logApiUsage, insertCampaign, insertBriefVersion, getBriefVersions } from "@/lib/db";
+import { queryUserIntegrationSelect, logApiUsage, getBriefVersions, getCampaignById, getGenerationReceipt, isBriefRegenerationCommitReady, commitBriefGeneration } from "@/lib/db";
 import sharp from "sharp";
+import {
+  CreativeHookGenerationError,
+  generateRecommendations,
+} from "@/lib/insights-engine";
+import type { MetaRecommendations } from "@/lib/insights-engine";
+import { reusableRecommendationsFromVersions } from "@/lib/campaigns/reuse-insights";
+import { canonicalRegenerationProduct } from "@/lib/campaigns/regeneration-product";
+import type { StoreProduct } from "@/lib/store-data";
 
 import { detectColumns } from "@/lib/billing-db";
+import { availableCredits } from "@/lib/credit-balance";
+import { getChannelBehavioralGuidance, getGeographicBuyingDynamics } from "@/lib/campaigns/qualitative-guidance";
+import { summarizeMarketingHistory } from "@/lib/marketing-evidence";
 
 // Credit-gating: check balance before generation
+
+export const runtime = "nodejs";
+export const maxDuration = 180;
 
 // Global client removed in favor of explicit initialization per request
 
@@ -37,9 +56,11 @@ interface GenerateRequest {
   isRegeneration?: boolean;
   shopifyStoreCountry?: string | null;
   topCustomerLocations?: CustomerLocation[] | null;
+  skipTargeting?: boolean;
   // Present on regenerations: attaches the new attempt to the existing brief
   // session instead of creating a fresh campaign.
   campaignId?: string | null;
+  requestId?: string;
 }
 
 interface GatewayInsight {
@@ -55,6 +76,151 @@ interface CustomerLocation {
   province?: string;
   country?: string;
 }
+
+export const COPYWRITER_SYSTEM_PROMPT = `You are a world-class senior direct-response performance copywriter who writes exceptionally high-converting Meta ad copy for high-growth e-commerce brands.
+
+You understand that great ads are punchy, direct, visually grounded, and focused relentlessly on the product's unique value — whether that is an emotional transformation, status elevation, or practical utility.
+
+Before generating copy, you silently analyze market dynamics, buyer psychology, and consideration tiers. You never expose this internal reasoning in your output; you output exclusively clean, parseable JSON conforming to the requested schema.
+
+═══════════════════════════════════════════════════════════════════
+PILLAR 1: DYNAMIC MARKET AND CONSIDERATION TIER REASONING
+═══════════════════════════════════════════════════════════════════
+You will receive key store context in the user prompt:
+- Store Primary Country: shopify_store_country
+- Top Customer Locations: top_customer_locations
+- Product Price: product_price
+- Store AOV: store_aov
+- Store Currency: store_currency
+
+Silently evaluate:
+1. Primary Market Identification:
+   Infer the store's primary geographic focus from the country and customer locations.
+2. Consideration & Purchasing Power Calibration:
+   Evaluate the product price against the store AOV AND against real-world consumer purchasing power in that specific market.
+   Remember: A product priced below store AOV can still represent a high-consideration, discerning purchase depending on regional economic context (e.g. comparing Lagos vs. London vs. New York purchasing dynamics). Never rely solely on mathematical price ratios; ground your reasoning in how a real customer in that market perceives the expenditure.
+3. Classification into 3 Distinct Tiers:
+   - Luxury: High consideration, investment mindset, elite craftsmanship, exclusive aesthetic.
+   - Premium Contemporary: Aspirational yet accessible, design-led, high-quality daily rotation, style-conscious.
+   - Mid-Market: Practical value, immediate lifestyle utility, low-friction adoption, broad accessibility.
+4. The Four Cultural Pillars:
+   - Communication Style: How top-tier indigenous and global luxury brands in this market speak (e.g. quiet confidence vs. expressive energy).
+   - Buyer Psychology: What triggers purchase: directness vs. restraint, aspiration vs. belonging, tactile craftsmanship vs. visible status.
+   - Regional Luxury Definition: How luxury is experienced locally: quiet vs. bold, occasion-driven vs. everyday elevation.
+   - Brand Taboos: What immediately cheapens the brand in this market: pushy discount language, exaggerated hype, desperation, or off-brand claims.
+
+═══════════════════════════════════════════════════════════════════
+PILLAR 2: REGIONAL NUANCE & MARKET FALLBACKS
+═══════════════════════════════════════════════════════════════════
+When regional signals are clear, tailor nuance accordingly:
+- Nigeria (NG): Quiet confidence, appreciation for bespoke tailoring, craft, prestige, and fabric quality. Investment-justified rather than bargain-seeking.
+- United Kingdom (GB): Understated elegance, dry wit or quiet restraint, minimal clutter, heritage, and timeless durability.
+- United Arab Emirates (AE): Polished opulence, occasion-driven, status-aware — honoring both regional Emirati sophistication and cosmopolitan international tastes.
+- United States (US): Identity-first, direct, aesthetic-led ("this is who you are"), immediate value proposition and seamless lifestyle integration.
+- Canada (CA): Thoughtful, understated, quality-obsessed, weather/utility conscious, understated refinement.
+- Australia (AU): Effortless confidence, relaxed luxury, sun/lifestyle-oriented, completely allergic to pretension or stiff formality.
+- South Africa (ZA): Aspirational yet grounded, vibrant community awareness, occasion-led celebrations.
+- France (FR): Effortless nonchalance, intellectual chic, artistic curation, never appearing to try too hard.
+- Germany (DE): Functional perfection, architectural clarity, material integrity, rigorous truth in advertising.
+- Singapore (SG): Sleek, hyper-polished, cosmopolitan efficiency, modern status signals.
+- Kenya / Ghana (KE/GH): Bold, identity-proud, contemporary African luxury, rich cultural resonance.
+
+═══════════════════════════════════════════════════════════════════
+PILLAR 3: CAMPAIGN OBJECTIVE ADAPTATION
+═══════════════════════════════════════════════════════════════════
+Adapt copy structure strictly according to the campaign goal:
+1. "Drive Website Sales" (Default Direct-Response):
+   The copy must drive immediate consideration. The opening hooks attention, the body validates desire and overcomes friction, and the final line commands an effortless, confident action to visit and purchase.
+2. "Grow Brand Awareness":
+   Focus intensely on distinctive brand codes, unique design signatures, founder ethos, or material excellence. Build brand equity without desperate sales pitches.
+3. "Promote a New Collection":
+   Frame the ad around inaugural release, new seasonal drops, or first-look access. Ignite curiosity and desire without sounding frantic.
+4. "Retarget Past Visitors":
+   Speak directly to an audience that already knows the brand. Address hesitation, reaffirm the standout detail they noticed before, or highlight versatile styling to close the decision.
+
+═══════════════════════════════════════════════════════════════════
+PILLAR 3B: TONE & VOICE ADAPTATION
+═══════════════════════════════════════════════════════════════════
+Strictly calibrate cadence, rhythm, vocabulary, and sentence structure according to the requested Tone:
+1. "Bold & Direct":
+   - Fast velocity, punchy staccato rhythm. Keep sentences short, crisp, and rhythmic (often 3 to 7 words).
+   - Lead immediately with the primary benefit, physical truth, or arresting outcome. Zero warm-up.
+   - Assertive, decisive syntax. Ban passive hedging ("might", "could", "perhaps").
+   - Command presence through brevity and punch rather than volume (still zero exclamation marks).
+2. "Warm & Conversational":
+   - Write like an insider friend or trusted advisor recommending their personal favorite.
+   - Intimate, empathetic second-person perspective. Ground the product in relatable, lived moments (the morning rush, weekend rituals, unwinding at home).
+   - Natural cadence that sounds spoken aloud, yet polished. Approachable and welcoming without sounding cheap or colloquial.
+3. "Minimal & Editorial":
+   - Curated architectural and editorial posture (clean, understated, intentional design aesthetic).
+   - Sparse, deliberate wording. Maximum verbal whitespace. Let the product imagery carry the weight.
+   - Focus intensely on design truth, form, materials, tactile structure, and precision finish.
+   - Cool, effortless nonchalance. Never feels like it is trying to sell you anything.
+4. "Premium & Aspirational":
+   - High-status elevation, timeless heirloom mindset, and quiet luxury posture.
+   - Celebrate heritage, meticulous craft, premium materials, and uncompromised quality integrity.
+   - Speaks to discerning buyers who value longevity, performance, and distinction over loud hype.
+5. "Let AI decide":
+   - Silently select the voice that maximizes ROAS for this specific product's price tier and category:
+     * Luxury & High-AOV products → Minimal & Editorial or Premium & Aspirational.
+     * Practical utility & daily rotation products → Bold & Direct or Warm & Conversational.
+
+═══════════════════════════════════════════════════════════════════
+PILLAR 4: UNIVERSAL COPYWRITING MANDATES & CONSTRAINTS
+═══════════════════════════════════════════════════════════════════
+1. The Luxury Restraint Rule:
+   If the product is Luxury or Premium Contemporary, restraint ALWAYS wins over hype.
+   - ABSOLUTE BAN on exclamation marks (!). Never use exclamation marks.
+   - ABSOLUTE BAN on false urgency or unverified demand claims: No countdowns, no "Hurry!", no "Don't miss out!", no "Selling out fast!", no "Keep selling out", no "Always sold out", no "Back by popular demand" unless verified store history explicitly documents repeated stockouts.
+   - Build desire through precision, posture, and descriptive sensory power.
+2. Creative Visual Grounding:
+   - When an image is provided: Root the copy in visual truth — form, texture, color tones, materials, and real-world setting.
+   - When a video storyboard is provided: Write copy that complements motion, pacing, and dynamic on-screen transitions. Never refer to "this picture" or static imagery when a video storyboard is provided.
+3. Sell the Outcome, Not the Specs:
+   - Do not merely summarize the raw product description.
+   - Pull 1 or 2 striking physical or material details to anchor credibility, then sell how using, owning, or experiencing the product transforms daily life.
+4. Ban on Abstract Clichés:
+   - Never use: "There is a version of you...", "Imagine a world...", "Step into...", "Elevate your...", "Look no further...", "Game changer".
+   - Never use passive announcement headlines: "Introducing...", "Meet the...", "The [Product] is here", "The [Product] arrives in [Color]". Every headline must be an active, arresting hook or sensory product truth.
+   - Avoid melodrama and poetic fluff. Specificity always beats generalities.
+5. Compliance & Cleanliness:
+   - NEVER include the product price or currency in the copy (Meta policy & pricing fluidity).
+   - NEVER reference stock counts (e.g. "only 3 left") — stock goes stale and violates advertising policies.
+   - NEVER assume the reader's geographic location or local currency.
+6. Grounded Material, Demand & Feature Truthfulness (Strict Zero-Hallucination Mandate):
+   - ONLY reference physical materials (e.g. linen, silk, leather, titanium, ceramic, organic botanicals), closures/hardware (e.g. drawstring, zipper, magnetic, snap), or physical attributes that are EXPLICITLY documented in the product title, description, verified catalog tags/claims, or clearly visible in the product image.
+   - NEVER invent or assume closures, components, mechanisms, or unstated ingredients.
+   - NEVER invent unstated fabrics, materials, ingredients, or formulations.
+   - For apparel products: NEVER claim an item is "unisex" unless documented. If womenswear, write with female styling nuance; if menswear, write with male nuance.
+   - NEVER claim a product "fits every body" or "works for everyone" unless explicit universal specifications are documented in the product description.
+   - NEVER make unverified demand claims like "why these keep selling out" or "our fastest-selling piece" — write from observed product craftsmanship, form, finish, and functional utility instead.
+
+═══════════════════════════════════════════════════════════════════
+PILLAR 5: CALL TO ACTION (CTA) & CONVERSION INTENT
+═══════════════════════════════════════════════════════════════════
+Meta Ads Manager strictly restricts the ad button to an official, fixed list. In Advantage+ Sales and direct-to-consumer e-commerce, the button must align with real purchase intent:
+1. "Shop Now" (The Undisputed E-Commerce Gold Standard):
+   - DEFAULT for direct-response e-commerce, catalog products, and Advantage+ Sales campaigns across all price tiers.
+   - Pre-qualifies clicks: sets the clear expectation that clicking leads to a store to purchase physical goods. It filters out low-intent curiosity clickers, lowers landing page bounce rates, and delivers the highest ROAS on conversion-optimized pixel campaigns.
+2. "Order Now" (Made-to-Order & Exclusive Drops):
+   - Use when the product context explicitly features bespoke tailoring, pre-orders, or a limited-batch seasonal drop.
+3. "Learn More" (Editorial & Informational Angles):
+   - Use only when the campaign goal is pure Brand Awareness or the creative explicitly drives to an educational landing page, styling quiz, or brand story rather than a direct Shopify product page.
+4. "Get Offer" (Promotional):
+   - Use only if an explicit bundle discount, introductory offer, or gift with purchase is featured in the creative.
+
+═══════════════════════════════════════════════════════════════════
+OUTPUT FORMAT SPECIFICATION
+═══════════════════════════════════════════════════════════════════
+Respond ONLY with a valid JSON object matching this exact structure:
+{
+  "headline": "Maximum 8 words. A bold statement or specific product detail. Never a question. Never abstract or clever for its own sake.",
+  "primaryText": "2 to 3 punchy sentences. Sentence 1 hooks the moment or feeling. Sentence 2 grounds it in specific product details. Sentence 3 is an action or memorable truth.",
+  "description": "1 sentence under 20 words. A specific physical detail that adds fresh information not repeated in the primary text.",
+  "cta": "One of: Shop Now, Learn More, Order Now, Get Offer, Sign Up, Book Now, Contact Us",
+  "copywriterNote": "A single concise sentence explaining the strategic copywriting rationale for this specific product and audience (written like you're advising a busy e-commerce founder: no fluff or jargon, lead with why this angle, sensory grounding, or psychological tension converts in this market).",
+  "angleUsed": "One sentence naming the primary psychological angle and lead claim this copy centres on (e.g. 'First-time buyer confidence: pull-on fit with no sizing anxiety' or 'Material truth: hand-beaded cowrie shell hem as the hero sensory detail'). The hooks engine reads this to ensure its 3 hooks cover genuinely different territory."
+}`;
 
 /**
  * POST handler for generating ad copy via Claude
@@ -90,17 +256,50 @@ export async function POST(request: Request) {
     integration?.credits_unlimited_until &&
     new Date(integration.credits_unlimited_until) > new Date();
 
-  const currentCredits = integration
-    ? (cols.hasCredits ? integration.credits : integration.credits_balance) ?? integration.credits_balance ?? 0
-    : 0;
+  const currentCredits = availableCredits(integration, cols.hasCredits);
 
   const hasCredits = currentCredits > 0;
 
   try {
     const body: Partial<GenerateRequest> = await request.json();
 
-    // Extract isRegeneration early — regenerations bypass the credit gate entirely.
-    const isRegeneration = body.isRegeneration ?? false;
+    const requestId = body.requestId || randomUUID();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+      return NextResponse.json({ error: "Invalid request ID" }, { status: 400 });
+    }
+    const requestInput = { ...body };
+    delete requestInput.requestId;
+    const requestHash = createHash("sha256").update(JSON.stringify(requestInput)).digest("hex");
+    const receipt = await getGenerationReceipt(userId!, requestId, requestHash);
+    if (receipt) return NextResponse.json(receipt);
+    const isRegeneration = body.isRegeneration === true;
+    let reusableRecommendations: MetaRecommendations | null = null;
+    if (isRegeneration) {
+      const campaign = body.campaignId ? await getCampaignById(userId!, body.campaignId) : null;
+      const versions = campaign ? await getBriefVersions(userId!, campaign.id) : [];
+      if (!campaign || !versions.length) {
+        return NextResponse.json({ error: "Original brief session not found. Please create a brief first." }, { status: 404 });
+      }
+      if (versions.length >= 4) {
+        return NextResponse.json({ error: "Free variations are limited to three alternatives per brief." }, { status: 409 });
+      }
+
+      const canonicalProduct = canonicalRegenerationProduct(campaign, body);
+      if (!canonicalProduct) {
+        return NextResponse.json({ error: "Voice variations require the same saved product details. Start a new brief if the product changed." }, { status: 409 });
+      }
+      Object.assign(body, canonicalProduct);
+      if (!await isBriefRegenerationCommitReady()) {
+        return NextResponse.json({
+          error: "Voice variations are temporarily unavailable while the brief save is being updated. No AI call was made. Please try again later.",
+        }, { status: 503 });
+      }
+      reusableRecommendations = reusableRecommendationsFromVersions(
+        versions,
+        body.productName!,
+        body.campaignGoal || "Drive Website Sales",
+      );
+    }
 
     // Credit gate: block only if user has no credits AND it's not a free regeneration
     if (!hasUnlimited && !hasCredits && !isRegeneration) {
@@ -141,83 +340,19 @@ export async function POST(request: Request) {
     const client = new Anthropic({ apiKey });
 
     // Validate required fields
-    if (!brandName || !productName || !productDescription) {
+    if (![brandName, productName, productDescription].every((v) => typeof v === "string" && v.trim().length > 0 && v.length <= 20000)) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
+    if (typeof brandName !== "string" || typeof productName !== "string" || typeof productDescription !== "string") {
+      return NextResponse.json({ error: "Invalid product fields" }, { status: 400 });
+    }
+    if (!integration?.store_snapshot) {
+      return NextResponse.json({ error: "Sync your Shopify store before generating a brief." }, { status: 409 });
+    }
     console.log("Selected platform:", platform);
 
-    const systemPrompt = `You are a senior performance copywriter 
-who writes high-converting Meta ad copy for ecommerce brands.
 
-You understand that great ads are punchy, direct, and focused 
-on the product's unique value — whether that's an emotional 
-benefit or a practical one.
-
-Before writing any copy, you MUST silently reason through the following steps. Do NOT output this analysis/reasoning in your response; reason silently and output only the final JSON.
-
-STEP 1 — DYNAMIC MARKET AND TIER REASONING
-Evaluate the following variables passed in the user prompt:
-- Store Primary Country: shopify_store_country
-- Top Customer Locations: top_customer_locations
-- Product Price: product_price
-- Store AOV: store_aov
-- Store Currency: store_currency
-
-Silently reason through:
-1. Identify the store's primary market from the store primary country and top customer locations.
-2. Determine whether this product represents a high-consideration purchase by evaluating the product price against the store AOV AND against real-world purchasing power in the store primary country. Note that a product priced below store AOV can still be a luxury purchase depending on the market context (e.g. comparing Lagos, London, or New York purchasing dynamics). Do not rely on relative store positioning alone — reason about what this price means to a real buyer in this specific market.
-3. From these two conclusions, determine the product's tier: Luxury, Premium Contemporary, or Mid-Market.
-4. Reason through these four pillars:
-   - Communication Style: How do established fashion/ecommerce brands in this market communicate at this tier?
-   - Buyer Psychology: What does this buyer respond to: directness or restraint, aspiration or identity, craft or status?
-   - Luxury Definition: What does luxury look like in this market: loud or quiet, occasion-driven or lifestyle-driven, community-signalled or privately held?
-   - Brand Taboos: What should this copy never do: what reads as tacky, aggressive, or off-brand to this buyer?
-
-STEP 2 — REGIONAL FALLBACKS
-If Store Primary Country or Top Customer Locations are missing or ambiguous, fall back to these regional defaults:
-- NG: Quiet confidence, craft and quality signals, investment-justified — not budget-conscious.
-- GB: Understated, minimal text, trust and heritage-focused.
-- AE: Elegant, occasion-driven, status-aware — balance Emirati, Arab expat, and Western expat nuances.
-- US: Aesthetic and identity-led — "this is who you are".
-- CA: Understated and quality-focused, closer to GB than US.
-- AU: Relaxed confidence, lifestyle-led, anti-pretension.
-- ZA: Aspirational but grounded, community-aware, occasion-driven.
-- FR: Effortless, intellectual, never trying too hard.
-- DE: Functional clarity, quality-led, sceptical of overselling.
-- SG: Polished, status-aware, international sophistication.
-- IN: Occasion and celebration-driven at luxury tier, family and community-signalled.
-- KE/GH: Aspirational, bold, identity-proud, emerging luxury sensibility.
-
-STEP 3 — UNIVERSAL MANDATES
-1. Luxury Restraint Rule: If the tier is determined to be Luxury in Step 1, copy must always prioritize restraint over excitement. There is an absolute ban on exclamation marks, urgency tactics, countdowns, and "limited time" language. Earn desire through confidence and positioning, not pressure.
-2. Meta Best Practices: Maximize hook rate in the first 3 lines. Keep visual copy recommendations clean and low-text.
-3. Campaign Objective Adaptation:
-   - "Drive Website Sales": The copy's last line must always be a direct, clear call to action encouraging purchase.
-   - "Grow Brand Awareness": Focus heavily on the brand's unique aesthetic, craft, mission, or identity.
-   - "Promote a New Collection": Lead with the newness or first-look framing, creating excitement without appearing desperate.
-   - "Retarget Past Visitors": Assume the reader is already familiar with the brand. Remind them of the core benefit or address returning buyer consideration directly.
-
-CRITICAL RULES FOR TONE & APPROACH:
-- DO NOT just creatively rewrite the product description! The description is merely background context so you understand what the product is.
-- Your job is to write an ad that sells the OUTCOME, the FEELING, or the UNIQUE VALUE.
-- Pull only 1 or 2 striking details from the description if they help the hook. Ignore the rest of it.
-- NO POETRY. NO MELODRAMA.
-- Do NOT use abstract phrases like "There is a version of you...", "Imagine a world...", "Step into...", or "Elevate your...".
-- Be specific. Specific always beats general.
-- Use short, punchy sentences.
-- NEVER include the product price or any currency amount in the copy — not even as a hook.
-- NEVER reference inventory, stock levels, or how many units remain — this information goes stale and violates Meta policy.
-- NEVER assume the reader's country, currency, or local pricing — copy must work equally well in any market.
-
-OUTPUT — Provide the final ad copy in clean formatting. Omit all internal reasoning entirely from the output. Respond only with valid JSON, no markdown, no preamble:
-{
-  "headline": "max 8 words. A statement or specific detail. Never a question. Never abstract. Never clever for its own sake.",
-  "primaryText": "2-3 sentences. First creates the moment or feeling. Middle grounds it in the product specifically. Last is an action or a truth that lands.",
-  "description": "1 sentence under 20 words. A specific product detail that adds something the primary text didn't say.",
-  "cta": "one of: Shop Now, Learn More, Order Now, Get Offer, Sign Up, Book Now, Contact Us",
-  "copywriterNote": "A single sentence explaining why this copy works for this audience, written like you're texting a busy e-commerce founder (maximum 1 sentence, no jargon, lead with the actionable implication, sound like a smart marketer friend)."
-}`;
 
     // Detect if the media is a video:
     // 1. Check Cloudinary URL path for /video/upload/
@@ -236,36 +371,70 @@ OUTPUT — Provide the final ad copy in clean formatting. Omit all internal reas
       ? topCustomerLocations.map((l) => `${l.city || l.province || ""}${l.country ? ` (${l.country})` : ""}`).filter(Boolean).join(", ")
       : "Unknown";
 
+    const storeSnapshot = integration?.store_snapshot;
+    const catalogEvidenceProduct = (storeSnapshot?.products || []).find(
+      (product: StoreProduct) =>
+        product.name.trim().toLowerCase() === productName.trim().toLowerCase() ||
+        (product.id && String(product.id) === String(productName)),
+    ) as StoreProduct | undefined;
+    const catalogClaimEvidence = (catalogEvidenceProduct?.catalog_claims || [])
+      .map((claim) => `${claim.key}: ${claim.value}`)
+      .join("; ");
+    const topChannel = storeSnapshot?.orders?.acquisition_channels?.[0];
+    const channelGuidance = getChannelBehavioralGuidance(
+      topChannel?.channel,
+      topChannel?.percentage
+    );
+    const geographicGuidance = getGeographicBuyingDynamics(
+      shopifyStoreCountry,
+      currency,
+      topCustomerLocations
+    );
+    const marketingEvidence = summarizeMarketingHistory(
+      storeSnapshot?.prespend?.marketing_history
+    );
+
     const textContent = 
 `Generate Meta ad copy for:
 
 Brand: ${brandName}
 Product: ${productName}
 Description: ${productDescription}
+Verified Shopify catalog tags: ${catalogEvidenceProduct?.tags?.join(", ") || "None recorded"}
+Verified Shopify catalog claims: ${catalogClaimEvidence || "None recorded"}
 
 Store Primary Country: ${shopifyStoreCountry || "Unknown"}
 Top Customer Locations: ${formattedLocations}
 Product Price: ${productPrice || "Unknown"}
 Store AOV: ${storeAov || "Unknown"}
 Store Currency: ${currency}
+Shopify Marketing History: ${marketingEvidence}
 
 Audience: ${targetAudience || "Not specified"}
 Goal: ${campaignGoal}
 Tone: ${tonePreference}
 ${productVariants ? `Available Variants/Sizes: ${productVariants}` : ""}
 
-${isVideo ? 
+${channelGuidance ? `${channelGuidance}\n` : ""}${geographicGuidance ? `${geographicGuidance}\n` : ""}`.trim() + "\n\n" +
+`${isVideo ? 
   `CRITICAL: The ad creative is a VIDEO. 
   A 10-frame sequential storyboard of the video has been provided.
   Ensure the copy works perfectly alongside motion-heavy content. 
   Do not refer to "this picture" or static imagery.` 
-  : imageUrl ? 
-  `A product image has been provided. 
-  Use what you observe — colour, style, 
-  texture, mood, occasion-fit, aesthetic — 
-  to inform the copy. Let the visual 
-  truth of the product shape the writing 
-  as much as the description does.` 
+  : imageUrl ?
+  `A product image has been provided.
+
+  Before writing a single word of copy, silently assess two things:
+  1. What is this image primarily communicating? (e.g. product in use or on a person, craft detail or texture close-up, lifestyle or setting context, scale and form, flat lay or product-only shot)
+  2. What does this image NOT show — and therefore what must the copy carry?
+
+  Your copy and the image must never be doing the same job:
+  - If the image shows the product in use or on a model/person → copy sells the experience of using/owning it, the occasion or friction it unlocks, or the one physical detail that earns it a place in someone's daily life or routine. Never describe the shape the eye can already see.
+  - If the image shows craft detail, texture, or a close-up → copy sells the identity and transformation — who the customer becomes, what moment this product is made for.
+  - If the image shows a lifestyle, dynamic, or editorial context → copy anchors to product truth — what it is made of, what specific physical detail makes this product worth buying, what distinguishes it from anything else.
+  - If the image is a flat lay, product-only, or white-background shot → copy sells the transformation — what changes for the person who owns this, what problem it solves, what feeling, utility, or elevation it creates in real-world use.
+
+  In every case: never describe what the eye already sees. Never claim any material, closure, or feature not explicitly stated in the product title, description, verified catalog tags, or catalog claims.`
   : ""}
   
 ${productVariants ? 
@@ -275,23 +444,31 @@ ${productVariants ?
   : ""}
 
 ${gatewayInsight?.currentProductClassification === "Gateway" ?
-  `CRITICAL: This product is classified as a GATEWAY PRODUCT. It converts cold traffic extremely well.
-  Your hook MUST be derived from its high velocity or repeat rate. 
-  ${(gatewayInsight.currentProductVelocity ?? 0) > (gatewayInsight.storeMedianVelocity || 0) ? `Consider a hook like "Sells out every ${Math.max(1, Math.round(90 / (gatewayInsight.currentProductVelocity || 1)))} days".` : ""}
-  ${(gatewayInsight.currentProductRepeatRate ?? 0) > 0.1 ? `Or a hook like "The ${productName} our customers come back for".` : ""}`
+  `CRITICAL: This product is verified as a GATEWAY PRODUCT.
+  It is proven by store cohort data to convert cold strangers into first-time customers.
+  Your hook and primary text MUST lower first-time buyer hesitation:
+  - Address quality confidence, tactile material finish, fit/utility, and ease of first-time purchase.
+  - Give a hesitant customer who has never ordered from this brand a clear reason to make their first purchase.
+  ${(gatewayInsight.currentProductVelocity ?? 0) > (gatewayInsight.storeMedianVelocity || 0) ? `Velocity signal: High customer demand, fast-moving restocks.` : ""}
+  ${(gatewayInsight.currentProductRepeatRate ?? 0) > 0.1 ? `Repeat buying power: Buyers who started with this product came back to order again.` : ""}`
   : gatewayInsight?.currentProductClassification === "Consideration" ?
   `CRITICAL: This product is classified as a CONSIDERATION PRODUCT. It converts warm or returning traffic.
   Your hook MUST be derived from its premium attributes and the fact that it is a high-consideration purchase. Address the quality and investment value.`
   : ""}
 
-${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — there is no purchase history to reference.
+${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — sell the sensory design and utility, not the track record.
   CRITICAL for New Launches:
-  - Frame this as a first look or early access moment — not a proven bestseller.
-  - NEVER use social proof phrases like "loved by thousands", "our best-seller", or "customers say".
-  - NEVER use scarcity tactics like "selling fast" or "only X left" — there is no history to back this up.
-  - Recommended angles: UGC-style discovery, founder introduction, early adopter framing ("Be the first", "Before everyone else").
-  - Write copy that builds desire and curiosity rather than urgency or proof.
-  - Use the product's design, materials, and category to sell the vision, not the track record.` : ""}`;
+  - Lead with the sensory truth of the form, materials, tactile finish, and daily utility.
+  - Ban generic announcement clichés like "Introducing...", "The [Product] is here", or "First look — see it before it's part of everyone's rotation".
+  - NEVER use social proof phrases like "loved by thousands", "our best-seller", or "customers say" — there is no purchase history to back this up.
+  - NEVER use scarcity tactics like "selling fast" or "only X left".
+  - Sell why this product solves a real customer friction or elevates a daily routine (e.g. effortless daily use, superior durability, refined finish, versatile application from morning to night).` : ""}
+
+${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
+  `SPARSE DESCRIPTION ALERT: The product description provided is minimal (under 30 words).
+  CRITICAL — do NOT extrapolate, invent, or assume any material, closure, fabric blend, fit detail, or feature not explicitly stated.
+  Stay anchored exclusively to what is confirmed in the product title, description, verified catalog tags and claims, or what is directly visible in the image.
+  Narrow and specific copy grounded in confirmed truth always outperforms broad plausible-sounding copy. Write less and mean more.` : ""}`;
 
     const messageContent: Anthropic.ContentBlockParam[] = [];
 
@@ -303,16 +480,16 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
       try {
         let fetchUrl = url;
 
-        // --- Shopify CDN: resize to 1200px wide + force JPEG ---
+        // --- Shopify CDN: resize to 1200px wide + force JPEG via query params without breaking file hashes ---
         if (fetchUrl.includes("cdn.shopify.com")) {
-          // Shopify image URLs support _WIDTHx suffix before the extension
-          // e.g. product.jpg → product_1200x.jpg
-          fetchUrl = fetchUrl.replace(
-            /(\.(jpg|jpeg|png|webp|avif))(\?|$)/i,
-            "_1200x.jpg$3"
-          );
-          // Append format=jpg to force JPEG output regardless of original
-          fetchUrl += fetchUrl.includes("?") ? "&format=jpg" : "?format=jpg";
+          try {
+            const parsed = new URL(fetchUrl);
+            parsed.searchParams.set("width", "1200");
+            parsed.searchParams.set("format", "jpg");
+            fetchUrl = parsed.toString();
+          } catch {
+            fetchUrl = url;
+          }
         }
 
         // --- Cloudinary: add quality + resize transforms ---
@@ -324,10 +501,15 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
           fetchUrl = `${base}w_1200,c_limit,q_auto:good,f_jpg/${rest}`;
         }
 
-        console.log("Fetching image for AI (resized URL):", fetchUrl.slice(0, 120));
+        console.log("Fetching image for AI (URL):", fetchUrl.slice(0, 120));
 
-        const res = await fetch(fetchUrl);
-        if (!res.ok) throw new Error(`Failed to fetch image: ${res.statusText}`);
+        let res = await fetchSafeImage(fetchUrl);
+        // If resized CDN URL failed (e.g. 404 or CDN rejection), fallback to the original raw URL
+        if (!res.ok && fetchUrl !== url) {
+          console.warn(`Resized image URL returned ${res.status} ${res.statusText}, retrying with original URL: ${url}`);
+          res = await fetchSafeImage(url);
+        }
+        if (!res.ok) throw new Error(`Failed to fetch image: ${res.status} ${res.statusText}`);
 
         const buffer = await res.arrayBuffer();
         let contentType = (res.headers.get("content-type") || "image/jpeg")
@@ -340,14 +522,22 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
 
         const supported = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
-        // If the CDN still returned an unsupported type (like avif),
-        // skip the image block to prevent Anthropic from crashing with a 400.
-        if (!supported.includes(contentType)) {
-          console.warn(`Unsupported image type: ${contentType} from ${fetchUrl}. Skipping visual analysis.`);
-          return null;
-        }
-
         let imgBuffer: Uint8Array = Buffer.from(buffer);
+
+        // If the CDN returned an unsupported type (like avif, tiff, heic), convert to jpeg with sharp
+        if (!supported.includes(contentType)) {
+          try {
+            console.info(`Converting image from ${contentType} to image/jpeg using sharp...`);
+            imgBuffer = await sharp(imgBuffer)
+              .resize({ width: 1200, withoutEnlargement: true })
+              .jpeg({ quality: 80, mozjpeg: true })
+              .toBuffer();
+            contentType = "image/jpeg";
+          } catch (convErr) {
+            console.warn(`Failed to convert image type ${contentType} with sharp:`, convErr);
+            return null;
+          }
+        }
 
         // Progressive compression: if still over limit, use sharp to shrink until it fits.
         // This guarantees visual analysis always works — we never skip the image.
@@ -446,38 +636,94 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
       messageContent.push(...resolvedFrames);
     }
 
+    // The media stays identical across voice variations. Cache it separately
+    // from the tone-specific text so later variations can reuse image tokens.
+    const lastVisualBlock = messageContent[messageContent.length - 1];
+    if (lastVisualBlock?.type === "image") {
+      lastVisualBlock.cache_control = { type: "ephemeral" };
+    }
+
     messageContent.push({
       type: "text",
       text: textContent,
-      cache_control: { type: "ephemeral" }
+      // Write the image/storyboard and prompt prefix on the first request so a
+      // validator retry can read it from cache rather than paying to reprocess it.
+      cache_control: { type: "ephemeral" },
     });
 
-    // Call the Anthropic API
+    // Resolve matching StoreProduct or construct targetProductOverride for strict single-SKU isolation
+    const storeProducts = (integration?.store_snapshot?.products || []) as StoreProduct[];
+    const matchedProduct = catalogEvidenceProduct || storeProducts.find(
+      (p) =>
+        p.name.trim().toLowerCase() === productName.trim().toLowerCase() ||
+        (p.id && String(p.id) === String(productName))
+    );
+
+    const parsedPrice =
+      typeof productPrice === "number"
+        ? productPrice
+        : parseFloat(String(productPrice || "0").replace(/[^0-9.]/g, "")) ||
+          matchedProduct?.price ||
+          Math.round(storeAov || 50);
+
+    const targetProductOverride: StoreProduct = {
+      ...(matchedProduct || {}),
+      id: matchedProduct?.id || "selected-product",
+      name: productName,
+      description: productDescription || matchedProduct?.description || "",
+      price: parsedPrice,
+      units_sold: matchedProduct?.units_sold || 0,
+      revenue: matchedProduct?.revenue || 0,
+      in_stock: matchedProduct?.in_stock ?? true,
+      collection: matchedProduct?.collection || matchedProduct?.product_type || "",
+      image_url: imageUrl || matchedProduct?.image_url || "",
+      should_advertise: true,
+      tags: matchedProduct?.tags && matchedProduct.tags.length > 0 ? matchedProduct.tags : [],
+      product_type: matchedProduct?.product_type || matchedProduct?.collection || "",
+      has_partial_stock: matchedProduct?.has_partial_stock ?? false,
+      in_stock_variant_count: matchedProduct?.in_stock_variant_count || 1,
+      total_variant_count: matchedProduct?.total_variant_count || 1,
+    };
+
+    // ── Step 1: Generate ad copy first ──────────────────────────────────────
+    // The copywriter runs alone. Its output includes `angleUsed` — a one-sentence
+    // summary of the primary psychological claim the copy leads on. That field
+    // is then passed to the hooks engine so the brief's 3 hooks cover genuinely
+    // different territory rather than converging on the same gateway angle.
     const message = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
+      model: "claude-sonnet-5",
+      max_tokens: 4096,
       system: [
         {
           type: "text",
-          text: systemPrompt,
-          cache_control: { type: "ephemeral" }
-        }
+          text: COPYWRITER_SYSTEM_PROMPT,
+          cache_control: { type: "ephemeral" },
+        },
       ],
       messages: [{ role: "user", content: messageContent }],
     });
 
     if (userId) {
-      logApiUsage(
-        userId,
-        "brief_generation",
-        message.usage.input_tokens,
-        message.usage.output_tokens
-      );
+      await logApiUsage(userId, "brief_generation", message.usage, message.model);
     }
+
+    console.log("[Anthropic Prompt Caching - Copy Generation]", {
+      input_tokens: message.usage.input_tokens,
+      output_tokens: message.usage.output_tokens,
+      stop_reason: message.stop_reason,
+      content_blocks: message.content.map((b) => b.type),
+      cache_creation_input_tokens:
+        (message.usage as unknown as { cache_creation_input_tokens?: number })
+          .cache_creation_input_tokens ?? 0,
+      cache_read_input_tokens:
+        (message.usage as unknown as { cache_read_input_tokens?: number })
+          .cache_read_input_tokens ?? 0,
+    });
 
     // Check if we received text content
     const responseBlock = message.content.find((block) => block.type === "text");
     if (!responseBlock || responseBlock.type !== "text") {
+      console.error("Claude returned non-text blocks:", message.content);
       throw new Error("No text content returned from Claude");
     }
 
@@ -503,130 +749,196 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — ther
       );
     }
 
-    // Deduct credit after successful generation, ONLY if it's not a free regeneration
-    if (!hasUnlimited && !isRegeneration) {
-      const newCredits = Math.max(0, currentCredits - 1);
-      const updateData: Record<string, unknown> = {};
-      if (cols.hasCredits) {
-        updateData.credits = newCredits;
-      }
-      updateData.credits_balance = newCredits;
-
-      await updateUserIntegration(userId!, updateData);
-      await insertCreditUsage(userId!, 1, "brief_generated");
-
-      if (newCredits === 1 || newCredits === 0) {
-        try {
-          const { clerkClient } = await import("@clerk/nextjs/server");
-          const user = await (await clerkClient()).users.getUser(userId!);
-          const email = user.emailAddresses[0]?.emailAddress;
-          
-          if (email) {
-            const { sendEmail } = await import("@/lib/email");
-            
-            if (newCredits === 1) {
-              const { creditLowEmailHtml } = await import("@/emails/credit-low");
-              await sendEmail({
-                to: email,
-                subject: "1 brief credit left",
-                html: creditLowEmailHtml(),
-                userId: userId!,
-                templateName: "credit-low"
-              });
-            } else if (newCredits === 0) {
-              const { creditExhaustedEmailHtml } = await import("@/emails/credit-exhausted");
-              await sendEmail({
-                to: email,
-                subject: "You've used all your credits",
-                html: creditExhaustedEmailHtml(),
-                userId: userId!,
-                templateName: "credit-exhausted"
-              });
-            }
-          }
-        } catch (emailErr) {
-          console.error("Failed to send credit alert email:", emailErr);
-        }
-      }
+    // Normalize snake_case or variant keys and guarantee a high-converting copywriterNote
+    if (parsedResponse.primary_text && !parsedResponse.primaryText) {
+      parsedResponse.primaryText = parsedResponse.primary_text;
     }
+    const rawNote =
+      parsedResponse.copywriterNote ??
+      parsedResponse.copywriter_note ??
+      parsedResponse.copywriterNotes ??
+      parsedResponse.copywriter_notes ??
+      "";
+    const cleanNote = typeof rawNote === "string" ? rawNote.trim() : "";
+    const copywriterNote =
+      cleanNote ||
+      `Written to catch feed attention, highlight the genuine craftsmanship of ${productName}, and encourage shoppers to visit your store and buy.`;
 
-    // Persist the brief so it survives refresh, lives at a stable URL, and keeps
-    // every regeneration attempt for later comparison/history. Best-effort: a
-    // persistence failure must never break generation, so errors are swallowed
-    // and we simply return without ids (the client falls back to the in-app view).
-    const copyFields = {
-      headline: parsedResponse.headline ?? null,
-      primary_text: parsedResponse.primaryText ?? null,
-      description: parsedResponse.description ?? null,
-      cta: parsedResponse.cta ?? null,
-      copywriter_note: parsedResponse.copywriterNote ?? null,
-    };
-    let campaignId: string | null = body.campaignId ?? null;
-    let versionId: string | null = null;
-    let attemptNumber = 1;
-    try {
-      if (campaignId) {
-        // Regeneration attaching to an existing session: append the next attempt.
-        // getBriefVersions is owner-scoped, so a spoofed id resolves to [] and we
-        // safely fall through to creating a fresh campaign.
-        const versions = await getBriefVersions(userId!, campaignId);
-        if (versions.length === 0) {
-          campaignId = null;
-        } else {
-          attemptNumber = versions.length + 1;
-        }
-      }
-      if (!campaignId) {
-        campaignId = await insertCampaign(userId!, {
-          brand_name: brandName ?? null,
-          product_name: productName ?? null,
-          product_description: productDescription ?? null,
-          target_audience: targetAudience ?? null,
-          campaign_goal: campaignGoal ?? null,
-          tone_preference: tonePreference ?? null,
-          platform: platform ?? null,
-          media_url: body.mediaUrl ?? imageUrl ?? null,
-          product_price: productPrice ?? null,
-          ...copyFields,
-        });
-        attemptNumber = 1;
-      }
-      if (campaignId) {
-        versionId = await insertBriefVersion(userId!, campaignId, {
-          attempt_number: attemptNumber,
-          is_selected: attemptNumber === 1,
-          ...copyFields,
-        });
-      }
-    } catch (persistErr) {
-      console.error("Brief persistence failed (continuing):", persistErr);
-      campaignId = null;
-      versionId = null;
-    }
+    parsedResponse.copywriterNote = copywriterNote;
+    parsedResponse = normalizeCopyPunctuation(parsedResponse);
 
-    // Balance after this request. Deduction above runs only for the first,
-    // non-unlimited generation; regenerations and unlimited users are unchanged.
-    // Returned so the client can update the shared credits cache instantly
-    // instead of waiting for a refetch.
-    const creditsBalanceAfter =
-      !hasUnlimited && !isRegeneration
-        ? Math.max(0, currentCredits - 1)
-        : currentCredits;
-
-    // Return the parsed copy, the authoritative balance, and the persisted ids.
-    return NextResponse.json(
+    // ─── Code-Side Copy Validator ────────────────────────────────────────────
+    // Runs banned-string scan + hallucination check. On failure, fires one
+    // targeted retry at temp 0.2 with a specific error message before the
+    // credit is deducted — so a failed generation never costs the founder a credit.
+    const { groundedProductEvidence, forbiddenProductNames, factualEvidence } = buildCopyValidationEvidence(
       {
-        ...parsedResponse,
-        credits_balance: creditsBalanceAfter,
-        is_unlimited: !!hasUnlimited,
-        campaignId,
-        versionId,
-        attemptNumber,
+        id: String(targetProductOverride.id),
+        name: productName,
+        description: productDescription || matchedProduct?.description || "",
+        tags: matchedProduct?.tags || [],
+        product_type: matchedProduct?.product_type || "",
       },
-      { status: 200 },
+      storeProducts.map((product) => ({ id: String(product.id), name: product.name })),
+      catalogClaimEvidence,
+      storeSnapshot?.store?.country || shopifyStoreCountry || "",
     );
+    let copyValidationErrors = validateCopy(
+      parsedResponse,
+      groundedProductEvidence,
+      forbiddenProductNames,
+      factualEvidence,
+    );
+
+    if (copyValidationErrors.length > 0) {
+      console.warn("[Copy Validator] Initial copy failed validation:", copyValidationErrors);
+
+      try {
+        const retryMessage = await client.messages.create({
+          model: "claude-sonnet-5",
+          max_tokens: 4096,
+          system: [
+            {
+              type: "text",
+              text: COPYWRITER_SYSTEM_PROMPT,
+              cache_control: { type: "ephemeral" },
+            },
+          ],
+          messages: [
+            { role: "user", content: messageContent },
+            {
+              role: "assistant",
+              content: responseBlock.text,
+            },
+            {
+              role: "user",
+              content: `The generated copy failed quality validation with the following issues:\n${copyValidationErrors.map((e) => `- ${e}`).join("\n")}\n\nPlease regenerate the copy strictly fixing each issue. Maintain the same product, same strategic angle — only correct the specific violations listed above.`,
+            },
+          ],
+        });
+        await logApiUsage(userId, "copy_validation_retry", retryMessage.usage, retryMessage.model);
+
+        const retryBlock = retryMessage.content.find((b) => b.type === "text");
+        if (retryBlock && retryBlock.type === "text") {
+          try {
+            let retryCleaned = retryBlock.text.trim();
+            const retryJsonMatch = retryCleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+            if (retryJsonMatch) {
+              retryCleaned = retryJsonMatch[1].trim();
+            } else {
+              const s = retryCleaned.indexOf("{");
+              const e = retryCleaned.lastIndexOf("}");
+              if (s !== -1 && e !== -1 && e > s) retryCleaned = retryCleaned.substring(s, e + 1);
+            }
+            let retryParsed = JSON.parse(retryCleaned);
+            if (retryParsed.primary_text && !retryParsed.primaryText) {
+              retryParsed.primaryText = retryParsed.primary_text;
+            }
+            retryParsed.copywriterNote = retryParsed.copywriterNote || copywriterNote;
+            retryParsed = normalizeCopyPunctuation(retryParsed);
+
+            copyValidationErrors = validateCopy(
+              retryParsed,
+              groundedProductEvidence,
+              forbiddenProductNames,
+              factualEvidence,
+            );
+            if (copyValidationErrors.length === 0) {
+              parsedResponse = retryParsed;
+              console.log("[Copy Validator] Retry passed validation.");
+            } else {
+              console.error("[Copy Validator Alert] Copy still failed after retry:", copyValidationErrors);
+              // Reject below; never deliver known-invalid facts.
+            }
+          } catch (retryParseErr) {
+            console.error("[Copy Validator] Retry JSON parse failed:", retryParseErr);
+          }
+        }
+      } catch (retryErr) {
+        console.error("[Copy Validator] Retry API call failed:", retryErr);
+      }
+    }
+
+    if (copyValidationErrors.length > 0) {
+      return NextResponse.json({ error: "We could not validate the product claims in this copy. Please retry. No credit was charged." }, { status: 422 });
+    }
+
+    // ── Step 2: Generate targeting profile with copy angle as exclusion ──────
+    // angleUsed is extracted from the now-validated copy. The hooks engine
+    // receives it as an explicit exclusion so its 3 hooks are forced to cover
+    // psychological territory the copy has not already claimed.
+    // If skipTargeting is true (used for progressive rendering), we skip this step
+    // and return the validated copy immediately, allowing the client to fetch
+    // targeting asynchronously.
+    const angleUsed: string | null =
+      typeof parsedResponse?.angleUsed === "string"
+        ? parsedResponse.angleUsed.trim() || null
+        : null;
+
+    // A voice change keeps the product and campaign settings. Reuse the saved
+    // audience, budget and hooks instead of regenerating the full profile.
+    const recommendations = reusableRecommendations ?? await generateRecommendations(
+      integration.store_snapshot, undefined, userId, targetProductOverride, angleUsed
+    );
+    const generatedAt = new Date().toISOString();
+    const context = {
+      schemaVersion: 2,
+      generatedAt,
+      ruleVersion: "prespend-v1",
+      model: "claude-sonnet-5",
+      brandName, productName, productPrice: parsedPrice, goal: campaignGoal,
+      generatedCopy: parsedResponse, selectedCta: parsedResponse.cta,
+      aiInsights: recommendations,
+      storeInsights: integration.store_snapshot,
+      gatewayInsight: buildGenerationContext(integration.store_snapshot, productName).gatewayInsight,
+      isNewLaunch: !!isNewLaunch,
+      selectedDuration: 14, selectedIntlDuration: 14, selectedStrategyIndex: 1, selectedIntlStrategyIndex: 1,
+    };
+    const result = await commitBriefGeneration({
+      p_user_id: userId!, p_request_id: requestId, p_request_hash: requestHash,
+      p_campaign_id: isRegeneration ? body.campaignId! : null,
+      p_campaign: {
+        brand_name: brandName, product_name: productName, product_description: productDescription,
+        target_audience: targetAudience, campaign_goal: campaignGoal, tone_preference: tonePreference,
+        platform: platform ?? null, media_url: body.mediaUrl ?? imageUrl ?? null,
+        product_price: productPrice || null,
+      },
+      p_copy: {
+        headline: parsedResponse.headline, primary_text: parsedResponse.primaryText,
+        description: parsedResponse.description, cta: parsedResponse.cta, copywriter_note: parsedResponse.copywriterNote,
+      },
+      p_context: context,
+      p_response: {
+        ...parsedResponse, angleUsed, aiInsights: recommendations, briefData: context,
+        creative_hooks: recommendations.creative_hooks,
+        advantage_plus_guidance: recommendations.advantage_plus_guidance,
+      },
+    });
+    return NextResponse.json(result);
   } catch (error) {
     console.error("Campaign API Generation Error:", error);
+
+    if (error instanceof Error && error.message === "no_credits") {
+      return NextResponse.json({
+        error: "no_credits",
+        message: "You have no briefs remaining. Purchase a pack to continue.",
+        redirect: "/pricing",
+      }, { status: 402 });
+    }
+
+    if (error instanceof Error && error.message === "Could not confirm the brief was saved. Please retry.") {
+      return NextResponse.json({ error: error.message }, { status: 503 });
+    }
+
+    if (error instanceof CreativeHookGenerationError) {
+      return NextResponse.json(
+        {
+          error:
+            "Creative hooks could not be generated. Please retry. No credit was charged.",
+        },
+        { status: 502 }
+      );
+    }
 
     // Map known Anthropic error types to user-friendly messages
     const err = error as { status?: number; message?: string };

@@ -6,7 +6,10 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { PageContainer } from "@/components/layout/page-container";
 import { Section } from "@/components/layout/section";
 import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { Sparkles, ExternalLink } from "lucide-react";
 import { BriefHistory } from "@/components/campaigns/brief-history";
 import {
   CommandCenterHero,
@@ -20,11 +23,20 @@ import {
   deriveAdReadiness,
   deriveHealthScore,
   deriveInsights,
+  deriveBuyerLocations,
   deriveLocationText,
   buildCampaignDraft,
   type StoreProductLike,
 } from "@/components/dashboard";
+import { PreFlightSheet, type ProductRow } from "@/components/products";
 import { useStoreData, useForceSyncStoreData } from "@/hooks/useStoreData";
+import { useCredits, CREDITS_QUERY_KEY } from "@/hooks/useCredits";
+import { useQueryClient } from "@tanstack/react-query";
+import { PurchaseDialog } from "@/components/pricing";
+import { getPackById, type CreditPack } from "@/lib/credit-packs";
+import { compareProductsForTest, selectGatewayTestCandidate } from "@/lib/gateway-decision";
+import type { StorePrespendIntelligence } from "@/lib/store-data";
+import { isFallbackCountryEntry } from "@/lib/market-geography";
 
 function relativeTime(iso?: string): string {
   if (!iso) return "just now";
@@ -39,16 +51,21 @@ function relativeTime(iso?: string): string {
 
 function readinessSubtext(
   readiness: ReturnType<typeof deriveAdReadiness>,
+  topProductName?: string,
+  topProductReadiness?: string,
 ): string {
   switch (readiness.readiness) {
     case "ready":
-      return "Active products, recent sales — everything Meta needs to start learning. Let's run something.";
     case "ready_with_warnings":
-      return "Check Product Intelligence below — we've flagged the best products to run right now.";
+      return topProductName
+        ? topProductReadiness === "planning_candidate"
+          ? `${topProductName} is a ready gateway candidate based on identified first orders. Review its evidence before a focused cold-acquisition test.`
+          : `${topProductName} has your strongest first-order purchase signal. Review its stock and margins below before testing.`
+        : "There is not yet enough ready gateway evidence for a top cold-acquisition recommendation. Review the product evidence below.";
     case "caution":
       return readiness.hasRecentOrders
-        ? "Most of your stock is out. Restock your winners and you'll be ready to go."
-        : "No recent orders yet. Build some organic momentum first, then come back.";
+        ? "Several of your best-selling styles are currently sold out. Restock your winners to start advertising."
+        : "No recent orders detected yet. Share your store link or build initial sales before running paid ads.";
     default:
       return "We couldn't load your products. Sync or reconnect to refresh your store data.";
   }
@@ -58,31 +75,43 @@ function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { shop: creditsShop } = useCredits();
 
   // Store snapshot from the shared cache — deduped with the products & campaigns
   // pages, so navigating between them doesn't re-hit Shopify.
   const { data: storeResponse, isLoading: loading } = useStoreData();
   const forceSync = useForceSyncStoreData();
   const [refreshing, setRefreshing] = useState(false);
-  const [needsReauth, setNeedsReauth] = useState(false);
-  const [shop, setShop] = useState<string | null>(null);
+  const shop = creditsShop ?? null;
+  const reconnectSyncStarted = React.useRef(false);
+  const shopifyReconnected = searchParams.get("shopify") === "reconnected";
 
   const connected = storeResponse?.connected ?? false;
   const sessionExpired = !!storeResponse?.reauthRequired;
   const storeData =
     storeResponse?.connected && storeResponse.data ? storeResponse.data : null;
 
-  if (storeResponse?.needsReauthForOrders && !needsReauth) {
-    setNeedsReauth(true);
-  }
+  const needsReauth = !shopifyReconnected && !refreshing && Boolean(
+    storeResponse?.needsShopifyReauthorization ||
+      storeResponse?.needsReauthForOrders,
+  );
 
-  // Resolve connected shop domain (used by the not-connected state).
   useEffect(() => {
-    fetch("/api/user/credits")
-      .then((r) => r.json())
-      .then((data) => setShop(data.shop))
-      .catch(() => {});
-  }, []);
+    if (!shopifyReconnected || reconnectSyncStarted.current) return;
+    reconnectSyncStarted.current = true;
+    forceSync()
+      .catch(() => toast({
+        variant: "danger",
+        title: "Store refresh failed",
+        description: "Your store is connected. Use Refresh data to try the sync again.",
+      }))
+      .finally(() => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("shopify");
+        window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+      });
+  }, [shopifyReconnected, forceSync, toast]);
 
   // Success toasts from redirect params.
   const paymentSuccess = searchParams.get("payment");
@@ -92,6 +121,7 @@ function DashboardContent() {
 
   useEffect(() => {
     if (paymentSuccess === "success") {
+      queryClient.invalidateQueries({ queryKey: CREDITS_QUERY_KEY });
       toast({
         variant: "success",
         title: "Payment successful",
@@ -100,12 +130,34 @@ function DashboardContent() {
       });
       window.history.replaceState({}, "", "/dashboard");
     }
-  }, [paymentSuccess, toast]);
+  }, [paymentSuccess, toast, queryClient]);
 
   const billingMessage = searchParams.get("message");
 
+  const planParam = searchParams.get("plan")?.toLowerCase();
+  const initialPlanPack = React.useMemo(() => {
+    if (billingSuccess) return null;
+    if (planParam && ["starter", "growth", "scale"].includes(planParam)) {
+      return getPackById(planParam) ?? null;
+    }
+    return null;
+  }, [planParam, billingSuccess]);
+
+  const [pendingPlanPack, setPendingPlanPack] = useState<CreditPack | null>(initialPlanPack);
+  const [purchaseDialogOpen, setPurchaseDialogOpen] = useState(Boolean(initialPlanPack));
+
+  useEffect(() => {
+    if (initialPlanPack) {
+      if (typeof document !== "undefined") {
+        document.cookie = "selected_plan=; Path=/; Max-Age=0";
+      }
+      window.history.replaceState({}, "", "/dashboard");
+    }
+  }, [initialPlanPack]);
+
   useEffect(() => {
     if (billingSuccess === "success") {
+      queryClient.invalidateQueries({ queryKey: CREDITS_QUERY_KEY });
       toast({
         variant: "success",
         title: "Billing successful",
@@ -126,17 +178,78 @@ function DashboardContent() {
       });
       window.history.replaceState({}, "", "/dashboard");
     }
-  }, [billingSuccess, billingCredits, billingPlan, billingMessage, toast]);
+  }, [billingSuccess, billingCredits, billingPlan, billingMessage, toast, queryClient]);
 
   const refreshStoreData = () => {
     setRefreshing(true);
     forceSync().finally(() => setRefreshing(false));
   };
 
+  const [selectedProductForPreFlight, setSelectedProductForPreFlight] =
+    useState<ProductRow | null>(null);
+  const [preFlightOpen, setPreFlightOpen] = useState(false);
+
   const onCreateBrief = (product: StoreProductLike, isNewLaunch: boolean) => {
+    setSelectedProductForPreFlight(product as ProductRow);
+    setPreFlightOpen(true);
+  };
+
+  const handleLaunchExpress = ({
+    product,
+    goal,
+    tone,
+  }: {
+    product: ProductRow;
+    goal: string;
+    tone: string;
+  }) => {
     sessionStorage.setItem(
       "campaign_draft",
-      JSON.stringify(buildCampaignDraft(product, isNewLaunch)),
+      JSON.stringify({
+        product_name: product.name,
+        product_description: product.description || product.name,
+        product_image: product.image_url || "",
+        product_variants:
+          product.has_partial_stock && product.in_stock_variant_names
+            ? product.in_stock_variant_names.join(", ")
+            : "",
+        product_price: product.price ? String(product.price) : "",
+        is_new_launch: (product.units_sold ?? 0) < 3,
+        gateway_classification: product.gateway_classification || "",
+        campaign_goal: goal,
+        tone_preference: tone,
+        express_launch: true,
+      }),
+    );
+    router.push("/campaigns?express=true");
+  };
+
+  const handleCustomizeManual = ({
+    product,
+    goal,
+    tone,
+  }: {
+    product: ProductRow;
+    goal: string;
+    tone: string;
+  }) => {
+    sessionStorage.setItem(
+      "campaign_draft",
+      JSON.stringify({
+        product_name: product.name,
+        product_description: product.description || product.name,
+        product_image: product.image_url || "",
+        product_variants:
+          product.has_partial_stock && product.in_stock_variant_names
+            ? product.in_stock_variant_names.join(", ")
+            : "",
+        product_price: product.price ? String(product.price) : "",
+        is_new_launch: (product.units_sold ?? 0) < 3,
+        gateway_classification: product.gateway_classification || "",
+        campaign_goal: goal,
+        tone_preference: tone,
+        express_launch: false,
+      }),
     );
     router.push("/campaigns");
   };
@@ -145,7 +258,10 @@ function DashboardContent() {
   const store = (storeData?.store ?? {}) as {
     name?: string;
     currency?: string;
+    domain?: string;
+    country?: string;
   };
+  const activeShop = store.domain || shop;
   const products = (storeData?.products ?? []) as StoreProductLike[];
   const orders = (storeData?.orders ?? {}) as Parameters<
     typeof deriveInsights
@@ -154,14 +270,36 @@ function DashboardContent() {
 
   const readiness = deriveAdReadiness(products, orders);
   const healthScore = deriveHealthScore(products, orders);
-  const insights = deriveInsights(orders);
-  const locationText = deriveLocationText(orders);
+  const prespend = storeData?.prespend as StorePrespendIntelligence | undefined;
+  const insights = deriveInsights(orders, currency, prespend?.analytics?.recent_funnel);
+  const buyerLocations = deriveBuyerLocations(orders, store.country, currency);
+  const locationText = buyerLocations.domesticText;
+  const locationLevel = orders.top_locations?.some((loc) => !isFallbackCountryEntry(loc))
+    ? "city" as const
+    : (orders.top_order_countries?.length || orders.top_locations?.length)
+      ? "commercial_hubs" as const
+      : "missing" as const;
   const peakDays = orders.peak_days || [];
 
-  const intelligenceProducts = products
-    .filter((p) => p.in_stock)
-    .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
+  const isGatewayProduct = (p: StoreProductLike) =>
+    p.gateway_classification?.toLowerCase() === "gateway";
+
+  const outOfStockGateways = products.filter(
+    (p) => !p.in_stock && isGatewayProduct(p),
+  );
+
+  const inStockProducts = products
+    .filter((p) => p.in_stock && (p.units_sold ?? 0) > 0)
+    .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0));
+
+  // Historical product role and current test readiness are independent.
+  const intelligenceProducts = [...outOfStockGateways, ...inStockProducts]
+    .sort(compareProductsForTest)
     .slice(0, 6);
+  const gatewayTestCandidate = selectGatewayTestCandidate(products);
+
+  const topInStockProduct =
+    gatewayTestCandidate?.name;
 
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -177,7 +315,12 @@ function DashboardContent() {
     .slice(0, 6);
 
   const restocking = products
-    .filter((p) => !p.in_stock && (p.units_sold ?? 0) > 0)
+    .filter(
+      (p) =>
+        !p.in_stock &&
+        (p.units_sold ?? 0) > 0 &&
+        !isGatewayProduct(p),
+    )
     .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0));
 
   return (
@@ -188,24 +331,69 @@ function DashboardContent() {
         <ConnectStoreState shop={shop} expired={sessionExpired} />
       ) : (
         <>
+          {pendingPlanPack && (
+            <div className="flex flex-col gap-3 rounded-2xl border border-brand-200 bg-brand-50/80 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5 shadow-xs animate-fade-in">
+              <div className="flex items-center gap-3">
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-100 text-brand-700">
+                  <Sparkles className="size-5" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-foreground">
+                      You selected the {pendingPlanPack.name}
+                    </p>
+                    <Badge variant="brand" size="sm">
+                      Selected Plan
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Authorize via Shopify to activate {pendingPlanPack.credits} Creative Briefs and start generating high-converting ads.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  size="sm"
+                  onClick={() => setPurchaseDialogOpen(true)}
+                  className="font-semibold"
+                >
+                  Activate via Shopify
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setPendingPlanPack(null)}
+                  className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 cursor-pointer transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
           <CommandCenterHero
             storeName={store.name || "Your store"}
             lastSynced={relativeTime(
               storeData?.generated_at as string | undefined,
             )}
             readiness={readiness.readiness}
-            subtext={readinessSubtext(readiness)}
+            subtext={readinessSubtext(
+              readiness,
+              topInStockProduct,
+              gatewayTestCandidate?.product_decision?.test_readiness,
+            )}
             healthScore={healthScore}
             onSync={refreshStoreData}
-            syncing={refreshing}
+            syncing={refreshing || shopifyReconnected}
+            topProduct={topInStockProduct}
           />
 
           {needsReauth && (
-            <Alert variant="brand" title="Unlock full order history">
+            <Alert variant="brand" title="Unlock upgraded store intelligence">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <span>
-                  Full order history gives you more accurate recommendations. We
-                  recently updated our permissions.
+                  Reconnect once so Omni Target can read the new analytics,
+                  cost, inventory, market, shipping, return, discount, and
+                  policy signals used by the upgraded recommendations.
                 </span>
                 <Link
                   href="/api/auth/shopify/connect?from=dashboard"
@@ -230,15 +418,25 @@ function DashboardContent() {
           <div className="grid gap-6 lg:grid-cols-3">
             <div className="lg:col-span-1">
               <BuyerProfile
-                locationText={locationText}
+                locationText={buyerLocations.domesticText}
+                internationalLocationText={buyerLocations.internationalText}
+                locationSubText={buyerLocations.subtext}
+                locationLevel={locationLevel}
                 peakDays={peakDays}
                 aov={orders.average_order_value ?? 0}
                 repeatRate={orders.repeat_customer_rate ?? 0}
+                medianDaysToSecondOrder={orders.median_days_to_second_order}
+                repeatBuyersObserved={orders.repeat_buyers_observed}
                 currency={currency}
+                topChannel={orders.acquisition_channels?.[0]?.channel}
+                topChannelPercentage={orders.acquisition_channels?.[0]?.percentage}
               />
             </div>
             <div className="lg:col-span-2">
-              <Section title="What this means for your ads">
+              <Section
+                title="Tips for your next ad"
+                description="Recommendations based on your store's recent sales and customer habits"
+              >
                 {insights.length > 0 ? (
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     {insights.map((insight, i) => (
@@ -247,19 +445,64 @@ function DashboardContent() {
                   </div>
                 ) : (
                   <div className="grid h-full place-items-center rounded-2xl border border-dashed border-border bg-surface-subtle p-8 text-center text-sm text-muted-foreground">
-                    More insights unlock as your store gathers order data.
+                    More tips unlock as your store gathers order data.
                   </div>
                 )}
               </Section>
             </div>
           </div>
 
-          <BriefHistory />
-
           <Section
-            title="Product intelligence"
-            description="Top Meta Ad candidates, optimized by revenue performance and inventory depth"
+            title="Products to advertise"
+            description="First-order product signals and current test readiness, shown separately"
           >
+            {outOfStockGateways.length > 0 && (
+              <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-amber-300/80 bg-linear-to-r from-amber-500/10 via-amber-500/5 to-transparent p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                <div className="flex items-center gap-3">
+                  <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-amber-100 text-amber-800">
+                    <Sparkles className="size-5" />
+                  </span>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-foreground">
+                        Restock Suggestion: {outOfStockGateways.map((g) => g.name).join(", ")}
+                      </p>
+                      <Badge variant="brand" size="sm">
+                        Gateway signal
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {outOfStockGateways.length === 1
+                        ? `${outOfStockGateways[0].product_decision?.first_order_count ?? "Some"} identified first orders contained this product. Its first-order role remains visible, but the stock check puts an ad test on hold.`
+                        : "These products have first-order signals, but their current stock puts an ad test on hold."}
+                    </p>
+                  </div>
+                </div>
+                {activeShop && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    asChild
+                    className="shrink-0 border-amber-300 text-amber-900 hover:bg-amber-100"
+                  >
+                    <a
+                      href={
+                        outOfStockGateways.length === 1
+                          ? `https://${activeShop}/admin/products/${outOfStockGateways[0].id}`
+                          : `https://${activeShop}/admin/products`
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 font-semibold"
+                    >
+                      Restock on Shopify
+                      <ExternalLink className="size-3.5" />
+                    </a>
+                  </Button>
+                )}
+              </div>
+            )}
+
             {intelligenceProducts.length > 0 ? (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {intelligenceProducts.map((p) => (
@@ -269,6 +512,7 @@ function DashboardContent() {
                     currency={currency}
                     variant="intelligence"
                     onCreateBrief={onCreateBrief}
+                    shop={activeShop}
                   />
                 ))}
               </div>
@@ -282,8 +526,8 @@ function DashboardContent() {
 
           {newLaunches.length > 0 && (
             <Section
-              title="New launches"
-              description="Just added — build a launch brief before the first sale."
+              title="New arrivals"
+              description="Recently added to your store — create an ad brief to introduce them to shoppers"
             >
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {newLaunches.map((p) => (
@@ -293,15 +537,35 @@ function DashboardContent() {
                     currency={currency}
                     variant="new-launch"
                     onCreateBrief={onCreateBrief}
+                    shop={activeShop}
                   />
                 ))}
               </div>
             </Section>
           )}
 
-          <RestockingPanel products={restocking} currency={currency} />
+          <BriefHistory />
+
+          <RestockingPanel products={restocking} currency={currency} shop={activeShop} />
         </>
       )}
+
+      <PurchaseDialog
+        pack={pendingPlanPack}
+        open={purchaseDialogOpen}
+        onOpenChange={setPurchaseDialogOpen}
+        shop={activeShop}
+        currency="USD"
+      />
+
+      <PreFlightSheet
+        product={selectedProductForPreFlight}
+        open={preFlightOpen}
+        onOpenChange={setPreFlightOpen}
+        currency={currency}
+        onLaunchExpress={handleLaunchExpress}
+        onCustomizeManual={handleCustomizeManual}
+      />
     </PageContainer>
   );
 }

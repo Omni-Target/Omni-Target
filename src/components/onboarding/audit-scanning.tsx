@@ -12,14 +12,24 @@ export const AUDIT_STEPS = [
 // impression of a real analysis happening under the hood.
 const SIGNALS = [
   "Product catalog",
-  "Order velocity",
-  "Retention curve",
+  "Recent sales pace",
+  "Customer repeat rate",
   "Stock health",
   "Gateway products",
 ];
 
 export function AuditScanning({ currentStep }: { currentStep: number }) {
   const allDone = currentStep >= AUDIT_STEPS.length;
+  const progressPercent = allDone ? 100 : currentStep === 0 ? 35 : currentStep === 1 ? 70 : 92;
+
+  const stepMessages = [
+    "Syncing product catalog and order history from Shopify…",
+    "Analyzing purchase velocity, customer repeat rate & stock health…",
+    "Identifying top gateway products & compiling readiness scorecard…",
+  ];
+  const activeMessage = allDone
+    ? "Compiling your readiness report…"
+    : stepMessages[currentStep] || "Analyzing your store data…";
 
   return (
     <div className="text-center">
@@ -124,11 +134,14 @@ export function AuditScanning({ currentStep }: { currentStep: number }) {
       </div>
 
       <div className="mx-auto mt-8 h-1.5 max-w-md overflow-hidden rounded-full bg-surface-muted">
-        <div className="h-full rounded-full bg-gradient-to-r from-brand-600 to-accent-500 animate-progress-fill" />
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-brand-600 to-accent-500 transition-all duration-700 ease-out"
+          style={{ width: `${progressPercent}%` }}
+        />
       </div>
 
-      <p className="mt-3 text-xs text-faint-foreground">
-        {allDone ? "Compiling your readiness report…" : "This usually takes a few seconds."}
+      <p className="mt-3 text-xs text-faint-foreground transition-all duration-300">
+        {activeMessage}
       </p>
     </div>
   );

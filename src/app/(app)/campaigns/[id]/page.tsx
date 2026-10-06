@@ -11,10 +11,13 @@ import { BriefView } from "./brief-view";
  */
 export default async function CampaignBriefPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ version?: string | string[] }>;
 }) {
   const { id } = await params;
+  const { version } = await searchParams;
   const { userId } = await auth();
   if (!userId) notFound();
 
@@ -27,7 +30,7 @@ export default async function CampaignBriefPage({
 
   return (
     <PageContainer width="wide" className="pb-24 lg:pb-12">
-      <BriefView campaign={campaign} versions={versions} />
+      <BriefView campaign={campaign} versions={versions} initialVersionId={typeof version === "string" ? version : null} />
     </PageContainer>
   );
 }

@@ -13,7 +13,11 @@ import type {
   AiInsights,
   StoreInsights,
 } from "@/components/campaigns/types";
-import type { BriefPDFParams } from "@/lib/brief-pdf-types";
+import type {
+  BriefPDFParams,
+  CreativeHook,
+  AdvantagePlusGuidance,
+} from "@/lib/brief-pdf-types";
 import { buildBriefPdfPayload, buildBriefText } from "@/lib/campaigns/brief";
 
 // The full-screen PDF modal is only reached on click — load its chunk on demand.
@@ -28,17 +32,24 @@ const PdfBriefModal = dynamic(
 // Full brief context persisted at finalize time (campaigns.brief_data). Optional
 // throughout: if finalize didn't run, we fall back to the campaign's columns.
 interface BriefData {
+  generatedAt?: string;
   brandName?: string;
   productName?: string;
   goal?: string;
   generatedCopy?: GeneratedCopy;
   selectedCta?: string;
   aiInsights?: AiInsights | null;
+  creative_hooks?: CreativeHook[];
+  recovered_creative_hooks?: CreativeHook[];
+  advantage_plus_guidance?: AdvantagePlusGuidance;
   storeInsights?: StoreInsights | null;
   selectedStrategyIndex?: number;
+  selectedIntlStrategyIndex?: number;
   selectedDuration?: 7 | 14 | 30;
+  selectedIntlDuration?: 7 | 14 | 30;
   gatewayInsight?: BriefPDFParams["gatewayInsight"] | null;
   isNewLaunch?: boolean;
+  productPrice?: number;
 }
 
 export interface BriefCampaign {
@@ -52,9 +63,12 @@ export interface BriefCampaign {
   cta: string | null;
   copywriter_note: string | null;
   brief_data: BriefData | null;
+  product_price?: string | null;
+  product_description?: string | null;
 }
 
 export interface BriefVersionRow {
+  brief_data?: BriefData | null;
   id: string;
   attempt_number: number;
   headline: string | null;
@@ -71,20 +85,36 @@ function versionToCopy(v: BriefVersionRow): GeneratedCopy {
     primaryText: v.primary_text ?? "",
     description: v.description ?? "",
     cta: v.cta ?? "",
-    copywriterNote: v.copywriter_note ?? "",
+    copywriterNote:
+      v.copywriter_note ||
+      "Written to catch shoppers' attention in their feed, highlight the real product details, and encourage them to visit your store and buy.",
   };
 }
 
 export function BriefView({
   campaign,
   versions = [],
+  initialVersionId,
 }: {
   campaign: BriefCampaign;
   versions?: BriefVersionRow[];
+  initialVersionId?: string | null;
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const bd: BriefData = campaign.brief_data ?? {};
+  // Open on the finalized variation (or the first attempt); clicking any
+  // variation in the rail switches the whole brief to it — and the active one is
+  // always the "Chosen" one, so there's never more than one marked.
+  const finalizedId = versions.find((v) => v.is_selected)?.id ?? null;
+  const [activeVersionId, setActiveVersionId] = useState<string | null>(
+    versions.find((v) => v.id === initialVersionId)?.id ?? finalizedId ?? versions[0]?.id ?? null,
+  );
+  const activeVersion = versions.find((v) => v.id === activeVersionId) ?? null;
+  const [localRecoveredHooks, setLocalRecoveredHooks] = useState<Record<string, CreativeHook[]>>({});
+  const [hooksLoading, setHooksLoading] = useState(false);
+  const [hooksRetryError, setHooksRetryError] = useState<string | null>(null);
+
+  const bd: BriefData = activeVersion?.brief_data ?? campaign.brief_data ?? {};
 
   // The campaign's persisted (finalized) copy — prefer the rich brief_data, fall
   // back to columns so the page still renders if only the generate-time write
@@ -96,7 +126,9 @@ export function BriefView({
         primaryText: campaign.primary_text ?? "",
         description: campaign.description ?? "",
         cta: campaign.cta ?? "",
-        copywriterNote: campaign.copywriter_note ?? "",
+        copywriterNote:
+          campaign.copywriter_note ||
+          "Written to catch shoppers' attention in their feed, highlight the real product details, and encourage them to visit your store and buy.",
       },
     [bd.generatedCopy, campaign],
   );
@@ -104,19 +136,32 @@ export function BriefView({
   const brandName = bd.brandName ?? campaign.brand_name ?? "";
   const productName = bd.productName ?? campaign.product_name ?? "";
   const goal = bd.goal ?? campaign.campaign_goal ?? "";
-  const aiInsights = bd.aiInsights ?? null;
+  const recoveredHooks = (activeVersionId ? localRecoveredHooks[activeVersionId] : undefined) ?? bd.recovered_creative_hooks;
+  const aiInsights: AiInsights | null = useMemo(() => {
+    if (bd.aiInsights) {
+      return {
+        ...bd.aiInsights,
+        creative_hooks: recoveredHooks ?? bd.creative_hooks ?? bd.aiInsights.creative_hooks,
+        creative_hooks_status: recoveredHooks?.length === 3
+          ? "generated"
+          : bd.aiInsights.creative_hooks_status,
+        advantage_plus_guidance:
+          bd.advantage_plus_guidance ?? bd.aiInsights.advantage_plus_guidance,
+      };
+    }
+    if (recoveredHooks || bd.creative_hooks || bd.advantage_plus_guidance) {
+      return {
+        creative_hooks: recoveredHooks ?? bd.creative_hooks,
+        creative_hooks_status: recoveredHooks?.length === 3 ? "generated" : undefined,
+        advantage_plus_guidance: bd.advantage_plus_guidance,
+      } as AiInsights;
+    }
+    return null;
+  }, [bd.aiInsights, bd.creative_hooks, bd.advantage_plus_guidance, recoveredHooks]);
   const storeInsights = bd.storeInsights ?? null;
   const gatewayInsight = bd.gatewayInsight ?? null;
   const isNewLaunch = bd.isNewLaunch ?? false;
-
-  // Open on the finalized variation (or the first attempt); clicking any
-  // variation in the rail switches the whole brief to it — and the active one is
-  // always the "Chosen" one, so there's never more than one marked.
-  const finalizedId = versions.find((v) => v.is_selected)?.id ?? null;
-  const [activeVersionId, setActiveVersionId] = useState<string | null>(
-    finalizedId ?? versions[0]?.id ?? null,
-  );
-  const activeVersion = versions.find((v) => v.id === activeVersionId) ?? null;
+  const productPrice = bd.productPrice ?? (campaign.product_price ? Number(campaign.product_price) : undefined);
 
   // The copy shown + exported is whichever variation is being viewed.
   const displayedCopy: GeneratedCopy = activeVersion
@@ -131,39 +176,54 @@ export function BriefView({
   const [selectedStrategyIndex, setSelectedStrategyIndex] = useState(
     bd.selectedStrategyIndex ?? 1,
   );
+  const [selectedIntlStrategyIndex, setSelectedIntlStrategyIndex] = useState(
+    bd.selectedIntlStrategyIndex ?? 1,
+  );
   const [selectedDuration, setSelectedDuration] = useState<7 | 14 | 30>(
     bd.selectedDuration ?? 14,
   );
+  const [selectedIntlDuration, setSelectedIntlDuration] = useState<7 | 14 | 30>(
+    bd.selectedIntlDuration ?? 14,
+  );
   const [modalOpen, setModalOpen] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   // PDF params for the currently viewed variation — the modal builds the PDF
   // from this (preview + download are the same document).
   const pdfParams = useMemo(
     () =>
       buildBriefPdfPayload({
+        generatedAt: bd.generatedAt,
         brandName,
         productName,
+        productPrice,
         goal,
         generatedCopy: displayedCopy,
         selectedCta: displayedCta,
         aiInsights,
         storeInsights,
         selectedDuration,
+        selectedIntlDuration,
         selectedStrategyIndex,
+        selectedIntlStrategyIndex,
         gatewayInsight,
         isNewLaunch,
       }),
     [
+      bd.generatedAt,
       brandName,
       productName,
+      productPrice,
       goal,
       displayedCopy,
       displayedCta,
       aiInsights,
       storeInsights,
       selectedDuration,
+      selectedIntlDuration,
       selectedStrategyIndex,
+      selectedIntlStrategyIndex,
       gatewayInsight,
       isNewLaunch,
     ],
@@ -183,30 +243,68 @@ export function BriefView({
       storeInsights,
       goal,
       selectedStrategyIndex,
+      selectedIntlStrategyIndex,
       selectedDuration,
+      selectedIntlDuration,
+      gatewayInsight,
     });
     navigator.clipboard.writeText(briefText);
     setCopiedField("full-brief");
     setTimeout(() => setCopiedField(null), 2000);
   };
 
-  // Finalize: persist the chosen variation + mark complete, then head back to
-  // the dashboard. Best-effort persistence never blocks the redirect.
+  const handleRetryHooks = async () => {
+    if (hooksLoading || !activeVersionId) return;
+    setHooksLoading(true);
+    setHooksRetryError(null);
+    try {
+      const response = await fetch("/api/campaigns/generate/targeting", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productName,
+          productDescription: campaign.product_description ?? undefined,
+          productPrice,
+          campaignId: campaign.id,
+          versionId: activeVersionId,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok || !Array.isArray(result.creative_hooks) || result.creative_hooks.length !== 3) {
+        throw new Error(result.error || "Could not generate verified hooks. Please try again.");
+      }
+      setLocalRecoveredHooks((current) => ({ ...current, [activeVersionId]: result.creative_hooks }));
+      queryClient.invalidateQueries({ queryKey: BRIEFS_QUERY_KEY });
+      router.refresh();
+    } catch (error) {
+      setHooksRetryError(error instanceof Error ? error.message : "Could not generate hooks. Please try again.");
+    } finally {
+      setHooksLoading(false);
+    }
+  };
+
+  // Finalize the chosen variation before leaving this page.
   const handleFinalize = async () => {
     setFinalizing(true);
+    setSaveError("");
     try {
-      await fetch(`/api/campaigns/${campaign.id}`, {
+      const response = await fetch(`/api/campaigns/${campaign.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           versionId: activeVersionId,
           copy: displayedCopy,
           status: "complete",
+          briefData: { ...bd, selectedStrategyIndex, selectedIntlStrategyIndex, selectedDuration, selectedIntlDuration, selectedCta: displayedCta },
         }),
       });
+      if (!response.ok) throw new Error("Save failed");
       queryClient.invalidateQueries({ queryKey: BRIEFS_QUERY_KEY });
     } catch (err) {
-      console.error("Failed to finalize campaign:", err);
+      setSaveError("Your brief could not be saved. Please retry.");
+      return;
+    } finally {
+      setFinalizing(false);
     }
     router.push("/dashboard");
   };
@@ -215,6 +313,7 @@ export function BriefView({
 
   return (
     <>
+      {saveError && <p role="alert" className="mb-4 text-red-600">{saveError}</p>}
       <div
         className={cn(
           hasRail &&
@@ -233,7 +332,14 @@ export function BriefView({
                   <button
                     key={v.id}
                     type="button"
-                    onClick={() => setActiveVersionId(v.id)}
+                    onClick={() => {
+                      setActiveVersionId(v.id);
+                      const context = v.brief_data ?? campaign.brief_data;
+                      setSelectedStrategyIndex(context?.selectedStrategyIndex ?? 1);
+                      setSelectedIntlStrategyIndex(context?.selectedIntlStrategyIndex ?? 1);
+                      setSelectedDuration(context?.selectedDuration ?? 14);
+                      setSelectedIntlDuration(context?.selectedIntlDuration ?? 14);
+                    }}
                     aria-current={isActive ? "true" : undefined}
                     className={cn(
                       "flex items-center justify-between rounded-xl border px-3 py-2.5 text-left text-sm font-medium transition-colors",
@@ -269,15 +375,24 @@ export function BriefView({
             storeInsights={storeInsights}
             aiInsights={aiInsights}
             loadingAiInsights={false}
+            hooksLoading={hooksLoading}
+            onRetryHooks={activeVersionId ? handleRetryHooks : undefined}
+            hooksRetryError={hooksRetryError}
             goal={goal}
             selectedStrategyIndex={selectedStrategyIndex}
             setSelectedStrategyIndex={setSelectedStrategyIndex}
+            selectedIntlStrategyIndex={selectedIntlStrategyIndex}
+            setSelectedIntlStrategyIndex={setSelectedIntlStrategyIndex}
             selectedDuration={selectedDuration}
             setSelectedDuration={setSelectedDuration}
+            selectedIntlDuration={selectedIntlDuration}
+            setSelectedIntlDuration={setSelectedIntlDuration}
             isDownloadingPdf={false}
             onDownloadPdf={() => setModalOpen(true)}
             onCopyBrief={handleCopyBrief}
             onCreateNew={() => router.push("/campaigns")}
+            gatewayInsight={gatewayInsight}
+            productPrice={productPrice}
           />
         </div>
       </div>

@@ -2,19 +2,20 @@ import { z } from "zod";
 import { getIntegrationByUser } from "@/lib/billing-db";
 import { requireUser } from "@/lib/api/require-user";
 import { apiError, apiServerError } from "@/lib/api/response";
+import { shopifyAdminGraphqlUrl } from "@/lib/shopify-config";
 
 const PLANS = {
   starter: {
-    name: "Starter Pack – 5 Credits",
-    price: "39.00",
+    name: "Starter Pack – 3 Credits",
+    price: "9.00",
   },
   growth: {
-    name: "Growth Pack – 15 Credits",
-    price: "99.00",
+    name: "Growth Pack – 10 Credits",
+    price: "25.00",
   },
   scale: {
     name: "Scale Pack – 30 Credits",
-    price: "179.00",
+    price: "59.00",
   },
 } as const;
 
@@ -96,7 +97,7 @@ export async function POST(request: Request) {
       test: testMode,
     };
 
-    const shopifyUrl = `https://${shop}/admin/api/2026-01/graphql.json`;
+    const shopifyUrl = shopifyAdminGraphqlUrl(shop);
     console.log(`Initiating Shopify one-time billing for ${shop}. Plan: ${plan}, Price: $${planInfo.price}, Test Mode: ${testMode}`);
 
     const response = await fetch(shopifyUrl, {

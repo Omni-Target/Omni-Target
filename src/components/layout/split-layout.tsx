@@ -1,4 +1,5 @@
 import * as React from "react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Wordmark } from "@/components/shared/logo";
 
@@ -10,6 +11,8 @@ export interface SplitLayoutProps {
   asideClassName?: string;
   /** Max-width wrapper for the right-panel content. Defaults to `max-w-md`. */
   contentClassName?: string;
+  /** Optional actions rendered in the top-right header area on mobile and desktop. */
+  headerActions?: React.ReactNode;
 }
 
 /**
@@ -25,11 +28,12 @@ export function SplitLayout({
   className,
   asideClassName,
   contentClassName = "max-w-md",
+  headerActions,
 }: SplitLayoutProps) {
   return (
     <div
       className={cn(
-        "flex h-screen w-full overflow-hidden bg-background",
+        "flex h-dvh min-h-dvh lg:h-screen w-full overflow-hidden bg-background",
         className,
       )}
     >
@@ -43,20 +47,41 @@ export function SplitLayout({
         <div className="absolute inset-0 opacity-15 bg-[radial-gradient(circle_at_20%_20%,var(--color-ink-foreground)_1px,transparent_1px)] bg-size-[26px_26px]" />
         <div
           aria-hidden
-          className="absolute -left-24 top-1/3 h-80 w-80 rounded-full bg-[radial-gradient(circle,color-mix(in_srgb,var(--color-brand-500)_28%,transparent),transparent_70%)] blur-3xl"
+          className="absolute -left-24 top-1/3 h-80 w-80 rounded-full bg-[radial-gradient(circle,color-mix(in_srgb,var(--color-brand-500)_28%,transparent),transparent70%)] blur-3xl"
         />
         <div className="relative z-10 flex h-full flex-col p-10">{aside}</div>
       </aside>
 
-      {/* Right — independently scrollable workspace */}
-      <main className="relative h-screen flex-1 overflow-y-auto">
+      {/* Right — independently scrollable workspace dynamically centered on any device */}
+      <main className="relative flex h-full flex-1 flex-col overflow-y-auto overscroll-contain">
         {/* Mobile brand bar — sticky so it stays put while the panel scrolls */}
-        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-border-subtle bg-background/85 px-5 py-4 backdrop-blur lg:hidden">
-          <Wordmark size={26} />
+        <div className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b border-border-subtle bg-background/95 px-4 sm:px-5 backdrop-blur lg:hidden">
+          <Link
+            href="https://omnitarget.co"
+            className="transition-opacity hover:opacity-80 flex items-center"
+            title="Omni Target Home"
+          >
+            <Wordmark size={24} />
+          </Link>
+          {headerActions && (
+            <div className="flex items-center gap-2.5">{headerActions}</div>
+          )}
         </div>
-        <div className="flex min-h-full flex-col items-center justify-center px-5 py-10 sm:px-10">
-          <div className={cn("w-full", contentClassName)}>{children}</div>
+
+        {/* Desktop top header actions */}
+        {headerActions && (
+          <div className="hidden lg:flex absolute top-6 right-8 z-20 items-center gap-3">
+            {headerActions}
+          </div>
+        )}
+
+        {/* Dynamic center workspace: vertically balanced on any mobile phone */}
+        <div className="flex flex-1 flex-col items-center justify-center px-4 py-4 sm:px-10 sm:py-8">
+          <div className={cn("w-full my-auto", contentClassName)}>{children}</div>
         </div>
+
+        {/* Matching bottom spacer on mobile so vertical centering is geometrically balanced against the header */}
+        <div aria-hidden className="h-14 shrink-0 pointer-events-none lg:hidden" />
       </main>
     </div>
   );

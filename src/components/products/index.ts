@@ -1,5 +1,6 @@
 export { ProductCard } from "./product-card";
 export { OutOfStockCard } from "./out-of-stock-card";
+export { PreFlightSheet } from "./pre-flight-sheet";
 export {
   ProductsToolbar,
   type SortKey,

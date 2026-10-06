@@ -290,16 +290,34 @@ export async function queryUserIntegrationSelect(
  * Retrieve user integration record matched by store URL (using or operator).
  */
 export async function getExistingIntegrationByStore(shopUrl: string, excludeUserId?: string) {
+  const cleanShop = shopUrl
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/$/, "")
+    .toLowerCase();
+  const slug = cleanShop.replace(/\.myshopify\.com$/i, "");
+  const fullShop = cleanShop.endsWith(".myshopify.com")
+    ? cleanShop
+    : `${cleanShop}.myshopify.com`;
+
+  const variants = Array.from(
+    new Set([cleanShop, slug, fullShop, `https://${fullShop}`, `https://${cleanShop}`])
+  );
+
+  const orFilter = variants
+    .flatMap((v) => [`shopify_store_url.eq.${v}`, `shop_domain.eq.${v}`])
+    .join(",");
+
   let query = supabaseAdmin
     .from("user_integrations")
-    .select("clerk_user_id")
-    .eq("shopify_store_url", shopUrl);
+    .select("clerk_user_id, shopify_store_url, shop_domain")
+    .or(orFilter);
 
   if (excludeUserId) {
     query = query.neq("clerk_user_id", excludeUserId);
   }
 
-  const { data, error } = await query.maybeSingle();
+  const { data, error } = await query.limit(1).maybeSingle();
 
   if (error) {
     console.error("Error in getExistingIntegrationByStore:", error);
@@ -530,6 +548,7 @@ export interface CampaignInsert extends BriefCopyFields {
   platform?: string | null;
   media_url?: string | null;
   product_price?: string | null;
+  brief_data?: Record<string, unknown> | null;
 }
 
 /**
@@ -685,15 +704,15 @@ export async function listUserBriefCampaigns(userId: string, limit = 100) {
       "id, brand_name, product_name, product_description, product_price, media_url, headline, cta, status, created_at",
     )
     .eq("clerk_user_id", userId)
-    // Only finalized briefs (the ones the user proceeded with) — brief_data is
-    // written at finalize, so abandoned drafts never clutter the history.
+    // Generation writes brief_data in the same transaction as the credit debit,
+    // so a saved draft remains discoverable if the browser loses the response.
     .not("brief_data", "is", null)
     .order("created_at", { ascending: false })
     .limit(limit);
 
   if (error) {
     console.error("Error in listUserBriefCampaigns:", error);
-    return [];
+    throw new Error("Could not load saved briefs.");
   }
   const rows = data || [];
   if (rows.length === 0) return rows;
@@ -735,36 +754,174 @@ export async function insertCreditUsage(userId: string, creditsUsed: number, act
   }
 }
 
-/**
- * Log token usage for Anthropic API calls.
- * Runs asynchronously and catches errors so it doesn't block the main thread.
- */
+/** Record every billed token category, including prompt-cache reads and writes. */
 export async function logApiUsage(
   userId: string | null,
   feature: string,
-  inputTokens: number,
-  outputTokens: number
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number | null;
+    cache_read_input_tokens?: number | null;
+  },
+  model: string,
 ) {
   if (!userId) return;
-  const totalTokens = inputTokens + outputTokens;
-  
-  supabaseAdmin
-    .from("api_usage_log")
-    .insert({
+  const cacheCreation = usage.cache_creation_input_tokens ?? 0;
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  try {
+    const { error } = await supabaseAdmin.from("api_usage_log").insert({
       user_id: userId,
       feature,
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      total_tokens: totalTokens,
-    })
-    .then(
-      ({ error }) => {
-        if (error) {
-          console.error("Failed to log API usage to Supabase:", error);
-        }
-      },
-      (err: unknown) => {
-        console.error("Exception logging API usage:", err);
-      }
-    );
+      model,
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      cache_creation_input_tokens: cacheCreation,
+      cache_read_input_tokens: cacheRead,
+      total_tokens: usage.input_tokens + cacheCreation + cacheRead + usage.output_tokens,
+    });
+    if (error) console.error("Failed to log API usage to Supabase:", error);
+  } catch (error) {
+    console.error("Exception logging API usage:", error);
+  }
+}
+
+/** Read an existing generation receipt before repeating expensive model calls. */
+export async function getGenerationReceipt(userId: string, requestId: string, requestHash: string) {
+  const { data, error } = await supabaseAdmin.from("brief_generation_receipts")
+    .select("request_hash,response").eq("clerk_user_id", userId).eq("request_id", requestId).maybeSingle();
+  if (error) {
+    console.error("Could not verify prior generation request:", error.message, error.code);
+    throw new Error("Could not verify prior generation request.");
+  }
+  if (data && data.request_hash !== requestHash) throw new Error("idempotency_conflict");
+  return data?.response ?? null;
+}
+
+/** Read a completed request after the browser lost its generation response. */
+export async function getGenerationReceiptById(userId: string, requestId: string): Promise<Record<string, unknown> | null> {
+  const { data, error } = await supabaseAdmin.from("brief_generation_receipts")
+    .select("response")
+    .eq("clerk_user_id", userId)
+    .eq("request_id", requestId)
+    .maybeSingle();
+  if (error) {
+    console.error("Could not check generation receipt:", error.message, error.code);
+    throw new Error("Could not check whether the brief was saved.");
+  }
+  return data?.response && typeof data.response === "object" && !Array.isArray(data.response)
+    ? data.response as Record<string, unknown>
+    : null;
+}
+
+/** Stop regenerations before model calls when the atomic save fix is not deployed. */
+export async function isBriefRegenerationCommitReady(): Promise<boolean> {
+  const { data, error } = await supabaseAdmin.from("schema_migrations")
+    .select("id")
+    .eq("id", "0010_fix_commit_brief_ambiguity")
+    .maybeSingle();
+  if (error) {
+    console.error("Could not verify brief regeneration migration:", error.message, error.code);
+    return false;
+  }
+  return data?.id === "0010_fix_commit_brief_ambiguity";
+}
+
+export async function commitBriefGeneration(params: {
+  p_user_id: string; p_request_id: string; p_request_hash: string; p_campaign_id: string | null;
+  p_campaign: Record<string, unknown>; p_copy: Record<string, unknown>;
+  p_context: Record<string, unknown>; p_response: Record<string, unknown>;
+}) {
+  const { data, error } = await supabaseAdmin.rpc("commit_brief_generation", params);
+  if (!error && data && typeof data === "object" && "campaignId" in data && "versionId" in data) {
+    return data;
+  }
+  if (!error) {
+    console.error("commit_brief_generation returned an incomplete receipt");
+    throw new Error("Could not confirm the brief was saved. Please retry.");
+  }
+
+  // Known intentional business validation exceptions from the RPC
+  const knownBusinessErrors = [
+    "no_credits",
+    "regeneration_limit",
+    "regeneration_product_changed",
+    "invalid_regeneration",
+    "idempotency_conflict",
+    "integration_not_found",
+  ];
+  if (knownBusinessErrors.includes(error.message)) {
+    throw new Error(error.message);
+  }
+
+  // The RPC owns credit deduction, campaign/version writes, and the receipt in
+  // one database transaction. A multi-request fallback cannot preserve those
+  // guarantees, so surface the failure without reporting a successful charge.
+  console.error("commit_brief_generation failed:", error.message, error.code);
+  throw new Error("Could not confirm the brief was saved. Please retry.");
+}
+
+export async function finalizeBriefVersion(userId: string, campaignId: string, versionId: string,
+  context: unknown, copy: unknown, status?: string) {
+  const { error } = await supabaseAdmin.rpc("finalize_brief_version", {
+    p_user_id: userId, p_campaign_id: campaignId, p_version_id: versionId,
+    p_context: context ?? {}, p_copy: copy ?? {}, p_status: status ?? null,
+  });
+  if (!error) return;
+
+  if (error.code === "PGRST202" || error.code === "42883") {
+    console.warn("RPC finalize_brief_version not found. Using direct Supabase update fallback.");
+    try {
+      await supabaseAdmin.from("campaign_brief_versions")
+        .update({ is_selected: false })
+        .eq("campaign_id", campaignId)
+        .eq("clerk_user_id", userId);
+      await supabaseAdmin.from("campaign_brief_versions")
+        .update({ is_selected: true })
+        .eq("id", versionId)
+        .eq("clerk_user_id", userId);
+    } catch {}
+    await supabaseAdmin.from("campaigns")
+      .update({
+        brief_data: context as Record<string, unknown>,
+        status: status === "complete" ? "complete" : undefined,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", campaignId)
+      .eq("clerk_user_id", userId);
+    return;
+  }
+
+  throw new Error(error.message);
+}
+
+/** Attach a later, verified hook result without rewriting immutable generation evidence. */
+export async function saveRecoveredCreativeHooks(
+  userId: string,
+  campaignId: string,
+  versionId: string,
+  hooks: import("./brief-pdf-types").CreativeHook[],
+) {
+  const { data: version, error: readError } = await supabaseAdmin
+    .from("campaign_brief_versions")
+    .select("brief_data")
+    .eq("id", versionId)
+    .eq("campaign_id", campaignId)
+    .eq("clerk_user_id", userId)
+    .single();
+  if (readError || !version) throw new Error("Brief version not found.");
+
+  const existing = version.brief_data && typeof version.brief_data === "object" &&
+    !Array.isArray(version.brief_data)
+    ? version.brief_data as Record<string, unknown>
+    : {};
+  const { data: updated, error: writeError } = await supabaseAdmin
+    .from("campaign_brief_versions")
+    .update({ brief_data: { ...existing, recovered_creative_hooks: hooks } })
+    .eq("id", versionId)
+    .eq("campaign_id", campaignId)
+    .eq("clerk_user_id", userId)
+    .select("id")
+    .single();
+  if (writeError || !updated) throw new Error("Recovered hooks could not be saved.");
 }

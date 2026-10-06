@@ -15,10 +15,11 @@ export const authAppearance = {
   },
   elements: {
     rootBox: "w-full",
-    cardBox: "shadow-none border-0 w-full",
-    card: "bg-transparent shadow-none m-0 p-0",
-    headerTitle: "text-foreground font-semibold text-xl",
-    headerSubtitle: "text-muted-foreground",
+    cardBox: "!shadow-none !border-0 w-full !p-0 !m-0",
+    card: "!bg-transparent !shadow-none !border-0 !m-0 !p-0 w-full",
+    header: "hidden",
+    headerTitle: "hidden",
+    headerSubtitle: "hidden",
     formButtonPrimary:
       "bg-brand-600 hover:bg-brand-700 text-white rounded-lg font-medium shadow-sm normal-case text-sm py-2.5 transition-colors",
     socialButtonsBlockButton:

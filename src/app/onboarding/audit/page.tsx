@@ -12,8 +12,10 @@ import {
   type AuditResult,
 } from "@/components/onboarding";
 import { Button } from "@/components/ui/button";
+import { useUser } from "@clerk/nextjs";
 
 function AuditContent() {
+  const { user } = useUser();
   const searchParams = useSearchParams();
   const fromDashboard = searchParams.get("from") === "dashboard";
 
@@ -24,47 +26,55 @@ function AuditContent() {
   const [completing, setCompleting] = useState(false);
 
   useEffect(() => {
+    let isCancelled = false;
+
+    // 1. Kick off store data sync in background and audit computation IMMEDIATELY on mount
+    const fetchPromise = (async () => {
+      // Refresh latest store data in background without blocking the audit response
+      fetch("/api/store/data").catch((e) =>
+        console.warn("Background store/data fetch non-critical notice:", e)
+      );
+
+      const res = await fetch("/api/pixel/audit");
+      if (!res.ok) throw new Error("Audit API failed");
+      const data: AuditResult = await res.json();
+      if (data.status === "not_connected") {
+        window.location.href = "/onboarding/connect-shopify";
+        return data;
+      }
+      return data;
+    })();
+
+    // 2. Step through scanning animation smoothly (1600ms per step)
     const stepInterval = setInterval(() => {
       setCurrentStep((prev) => (prev < AUDIT_STEPS.length - 1 ? prev + 1 : prev));
-    }, 1000);
+    }, 1600);
 
-    // After 3s of animation, trigger store data fetch then audit.
-    const apiTimer = setTimeout(async () => {
-      clearInterval(stepInterval);
-      setCurrentStep(AUDIT_STEPS.length);
-      try {
-        // Populate store_snapshot so the audit endpoint has data to read.
-        await fetch("/api/store/data");
+    // 3. Ensure a minimum 2.0s visual animation so the merchant experiences the AI analysis
+    const minTimePromise = new Promise((resolve) => setTimeout(resolve, 2000));
 
-        // Run the audit, retrying while it reports "syncing".
-        let auditData: AuditResult | null = null;
-        for (let attempt = 0; attempt < 3; attempt++) {
-          const res = await fetch("/api/pixel/audit");
-          if (!res.ok) throw new Error("Audit API failed");
-          const data: AuditResult = await res.json();
-
-          if (data.status !== "syncing") {
-            auditData = data;
-            break;
-          }
-          if (attempt < 2) {
-            await new Promise((r) => setTimeout(r, 2000));
-          } else {
-            auditData = data;
-          }
-        }
-        setAuditResult(auditData);
-      } catch (err) {
+    Promise.all([fetchPromise, minTimePromise])
+      .then(([data]) => {
+        if (isCancelled) return;
+        clearInterval(stepInterval);
+        setCurrentStep(AUDIT_STEPS.length);
+        setAuditResult(data);
+      })
+      .catch((err) => {
+        if (isCancelled) return;
         console.error("Audit error:", err);
         setAuditError("Failed to complete audit. Please try again.");
-      } finally {
-        setScanning(false);
-      }
-    }, 3000);
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          clearInterval(stepInterval);
+          setScanning(false);
+        }
+      });
 
     return () => {
+      isCancelled = true;
       clearInterval(stepInterval);
-      clearTimeout(apiTimer);
     };
   }, []);
 
@@ -77,6 +87,8 @@ function AuditContent() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ onboardingStep: "complete" }),
         });
+        // Sync user state and refresh session JWT on client
+        await user?.reload().catch(() => {});
       } catch (err) {
         console.error("Failed to update onboarding step:", err);
       }

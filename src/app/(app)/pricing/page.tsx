@@ -18,22 +18,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { CreditPackCard, PurchaseDialog } from "@/components/pricing";
 import { CREDIT_PACKS, type CreditPack } from "@/lib/credit-packs";
+import { useCredits } from "@/hooks/useCredits";
 
-// Shopify Billing supports the starter/growth/scale plans only, so the
-// single-brief pack is omitted from the storefront for now. The pack data
-// remains in CREDIT_PACKS so it can be restored if another method returns.
-const PURCHASABLE_PACKS = CREDIT_PACKS.filter((p) => p.id !== "single");
-
-interface CreditsState {
-  credits_balance: number;
-  shop: string | null;
-  is_unlimited: boolean;
-}
+// All 4 plans matching Shopify App Store listing (single-brief is kept for fallback)
+const STOREFRONT_PLANS = CREDIT_PACKS.filter((p) => p.id !== "single");
 
 const ASSURANCES = [
   { icon: ShieldCheck, title: "Secure checkout", body: "Billed safely through Shopify." },
   { icon: Zap, title: "Instant credits", body: "Briefs are added the moment you pay." },
-  { icon: HelpCircle, title: "No subscription", body: "Buy credits once — they don't expire soon." },
+  { icon: HelpCircle, title: "No subscription", body: "Buy credits once — valid for 12 months." },
 ];
 
 function PricingContent() {
@@ -41,24 +34,9 @@ function PricingContent() {
   const searchParams = useSearchParams();
   // Shopify Billing is USD-only, so the currency toggle is disabled for now.
   const currency = "USD" as const;
-  const [state, setState] = React.useState<CreditsState | null>(null);
-  const [loading, setLoading] = React.useState(true);
+  const { credits, isUnlimited, shop, isLoading: loading } = useCredits();
   const [selected, setSelected] = React.useState<CreditPack | null>(null);
   const [dialogOpen, setDialogOpen] = React.useState(false);
-
-  React.useEffect(() => {
-    fetch("/api/user/credits")
-      .then((r) => r.json())
-      .then((d) => {
-        setState({
-          credits_balance: d.credits_balance ?? 0,
-          shop: d.shop ?? null,
-          is_unlimited: !!d.is_unlimited,
-        });
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
 
   React.useEffect(() => {
     if (searchParams.get("status") === "cancelled") {
@@ -72,6 +50,7 @@ function PricingContent() {
   }, [searchParams, toast]);
 
   const onBuy = (pack: CreditPack) => {
+    if (pack.id === "free") return;
     setSelected(pack);
     setDialogOpen(true);
   };
@@ -84,15 +63,15 @@ function PricingContent() {
             <Sparkles className="size-3.5" /> Credits & billing
           </>
         }
-        title="Buy campaign brief credits"
-        description="Each credit generates one full AI campaign brief — copy, targeting, budget and a downloadable PDF. No subscription required."
+        title="Pricing"
+        description="Choose the plan that best fits your business. Each credit generates one full AI campaign brief — copy, targeting, budget and a downloadable PDF."
       />
 
       {/* Current balance */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-surface px-5 py-4 shadow-xs">
         <div className="flex items-center gap-3">
           <span className="grid size-10 place-items-center rounded-xl bg-brand-50 text-brand-600">
-            {state?.is_unlimited ? (
+            {isUnlimited ? (
               <InfinityIcon className="size-5" />
             ) : (
               <Sparkles className="size-5" />
@@ -106,31 +85,37 @@ function PricingContent() {
               <Skeleton className="mt-1 h-6 w-24" />
             ) : (
               <p className="text-lg font-semibold text-foreground">
-                {state?.is_unlimited
+                {isUnlimited
                   ? "Unlimited access"
-                  : `${state?.credits_balance ?? 0} credit${state?.credits_balance === 1 ? "" : "s"}`}
+                  : `${credits ?? 0} credit${credits === 1 ? "" : "s"}`}
               </p>
             )}
           </div>
         </div>
-        {state?.shop && (
+        {shop && (
           <p className="text-sm text-muted-foreground">
             Connected store ·{" "}
-            <span className="font-medium text-foreground">{state.shop}</span>
+            <span className="font-medium text-foreground">{shop}</span>
           </p>
         )}
       </div>
 
-      {/* Packs (single-brief omitted — see PURCHASABLE_PACKS note above) */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {PURCHASABLE_PACKS.map((pack) => (
-          <CreditPackCard
-            key={pack.id}
-            pack={pack}
-            currency={currency}
-            onBuy={onBuy}
-          />
-        ))}
+      {/* 4 Plan Cards */}
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+          {STOREFRONT_PLANS.map((pack) => (
+            <CreditPackCard
+              key={pack.id}
+              pack={pack}
+              currency={currency}
+              onBuy={onBuy}
+              hasStore={Boolean(shop)}
+            />
+          ))}
+        </div>
+        <p className="text-center text-xs text-muted-foreground pt-1">
+          All charges are billed in USD.
+        </p>
       </div>
 
       {/* Assurances */}
@@ -155,7 +140,7 @@ function PricingContent() {
         pack={selected}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        shop={state?.shop ?? null}
+        shop={shop}
         currency={currency}
       />
     </PageContainer>
@@ -175,8 +160,8 @@ function PricingFallback() {
     <PageContainer width="wide" className="space-y-8">
       <Skeleton className="h-10 w-72" />
       <Skeleton className="h-20 w-full" />
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {[0, 1, 2].map((i) => (
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
           <Skeleton key={i} className="h-96 w-full" />
         ))}
       </div>
