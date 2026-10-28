@@ -144,7 +144,7 @@ export function PreFlightSheet({
 
   const roleBadge = isGateway ? (
     <Badge variant="brand" size="sm">
-      <Sparkles className="size-3" /> Gateway Product
+      <Sparkles className="size-3" /> New Buyer Magnet
     </Badge>
   ) : isNew ? (
     <Badge variant="warning" size="sm">
@@ -258,44 +258,80 @@ export function PreFlightSheet({
 
           {decision && (
             <div className="space-y-2 rounded-xl border border-border p-3.5 text-xs text-muted-foreground">
-              <p className="font-semibold text-foreground">Before you spend</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold text-foreground">Why this piece works</p>
+                {decision.election_score && decision.election_score.total > 0 && (
+                  <Badge variant="brand" size="sm">
+                    Score {decision.election_score.total}/100
+                  </Badge>
+                )}
+              </div>
               <p>
-                <span className="font-medium text-foreground">Order history:</span>{" "}
+                <span className="font-medium text-foreground">New-buyer appeal:</span>{" "}
                 {decision.role === "Gateway"
-                  ? `${decision.first_order_count} of ${decision.identified_first_orders} identified first orders contained this product, compared with ${decision.later_order_count} of ${decision.identified_later_orders} later orders.`
+                  ? `Chosen by ${Math.round((decision.first_order_reach ?? 0) * 100)}% of your new customers (${decision.first_order_count} of ${decision.identified_first_orders} first-time orders).`
                   : decision.role === "Consideration"
-                    ? `${decision.later_order_count} of ${decision.identified_later_orders} repeat orders contained this product, compared with ${decision.first_order_count} first orders.`
+                    ? `Bought in ${Math.round((decision.later_order_reach ?? 0) * 100)}% of repeat orders (${decision.later_order_count} of ${decision.identified_later_orders} returning orders).`
                     : decision.role === "Hybrid"
-                      ? `This product appeared in ${decision.first_order_count} first orders and ${decision.later_order_count} repeat orders — balanced demand across new and returning customers.`
+                      ? `Steady demand across ${decision.first_order_count} first-time orders and ${decision.later_order_count} repeat orders.`
                       : decision.role_reason}
               </p>
-              {decision.follow_up_60d.repeat_rate !== null && (
+              {decision.first_order_economics?.basket_multiplier != null &&
+                decision.first_order_economics.basket_multiplier >= 1.15 && (
+                  <p>
+                    <span className="font-medium text-foreground">Bigger first carts:</span> New buyers who start here check out with an average cart of{" "}
+                    <span className="font-medium text-foreground">
+                      {decision.first_order_economics.avg_first_order_value != null
+                        ? formatCurrency(Math.round(decision.first_order_economics.avg_first_order_value), currency)
+                        : `${decision.first_order_economics.basket_multiplier}x item price`}
+                    </span>{" "}
+                    ({decision.first_order_economics.basket_multiplier}x item price
+                    {decision.first_order_economics.multi_item_first_order_rate
+                      ? ` — ${Math.round(decision.first_order_economics.multi_item_first_order_rate * 100)}% add extra items`
+                      : ""}).
+                  </p>
+                )}
+              {(decision.follow_up_60d.repeat_rate !== null || decision.post_entry_bridge?.top_next_product_name) && (
                 <p>
-                  <span className="font-medium text-foreground">Repeat momentum:</span> {decision.follow_up_60d.buyers_with_another_order} of {decision.follow_up_60d.eligible_first_order_buyers} first-time buyers ({Math.round(decision.follow_up_60d.repeat_rate * 100)}%) placed another store order within 60 days.
+                  <span className="font-medium text-foreground">What they buy next:</span>{" "}
+                  {decision.follow_up_60d.buyers_with_another_order > 0 ? (
+                    <>
+                      {decision.follow_up_60d.buyers_with_another_order} of {decision.follow_up_60d.eligible_first_order_buyers} new buyers ({Math.round((decision.follow_up_60d.repeat_rate ?? 0) * 100)}%) came back for another order within 60 days
+                      {decision.post_entry_bridge?.top_next_product_name ? (
+                        <> — most often for <span className="font-medium text-foreground">{decision.post_entry_bridge.top_next_product_name}</span></>
+                      ) : null}
+                      .
+                    </>
+                  ) : (
+                    <>No 60-day repeat orders recorded from first-time buyers yet.</>
+                  )}
                 </p>
               )}
               {decision.high_value_entry && (() => {
                 const vipRatio = Math.round((decision.high_value_entry.high_value_first_buyers_with_product / decision.high_value_entry.high_value_buyers) * 100);
-                const overallRatio = Math.round((decision.high_value_entry.all_first_buyers_with_product / decision.high_value_entry.eligible_first_buyers) * 100);
                 return (
                   <p>
-                    <span className="font-medium text-foreground">VIP customer magnet:</span> {decision.high_value_entry.high_value_first_buyers_with_product} of your top {decision.high_value_entry.high_value_buyers} spenders ({vipRatio}%) started with this piece (vs {overallRatio}% of shoppers overall). When customers buy this first, they tend to stick around and spend the most.
+                    <span className="font-medium text-foreground">VIP customer magnet:</span> {decision.high_value_entry.high_value_first_buyers_with_product} of your top {decision.high_value_entry.high_value_buyers} spenders ({vipRatio}%) bought this on their very first order.
                   </p>
                 );
               })()}
-              {returns?.processed_return_rate != null ? (
-                <p className={returns.risk === "review" ? "font-medium text-amber-800" : undefined}>
-                  <span className="font-medium text-foreground">Return rate:</span> {returns.processed_return_units} of {returns.eligible_units} orders returned ({Math.round(returns.processed_return_rate * 100)}%).{returns.refunded_units > 0 ? ` ${returns.refunded_units} refunded separately.` : ""}{returns.primary_reason ? ` Main reason recorded: ${returns.primary_reason}.` : returns.processed_return_units === 0 ? " Safe to test without return risk." : ""}
+              {decision.variant_stock_coverage?.core_variant_stockout &&
+              decision.variant_stock_coverage.stocked_out_core_variants.length > 0 ? (
+                <p className="font-medium text-amber-800">
+                  <span className="font-semibold">Heads up before spending:</span> Best-selling option ({decision.variant_stock_coverage.stocked_out_core_variants.join(", ")}) is currently sold out — only {Math.round((decision.variant_stock_coverage.demand_weighted_stock_share ?? 0) * 100)}% of historical demand is in stock.
                 </p>
               ) : (
-                <p>{decision.return_evidence_state === "missing_scope"
-                  ? "Shopify return access is not granted for this store. Return risk is unassessed."
-                  : decision.return_evidence_state === "error"
-                    ? "Return data could not be synced. Return risk is unassessed."
-                    : "Product return rate is unavailable or has too few eligible units to assess."}</p>
-              )}
-              {decision.test_readiness !== "planning_candidate" && (
-                <p className="font-medium text-amber-800">{decision.readiness_reasons.join(" ")}</p>
+                <p className={returns?.risk === "review" ? "font-medium text-amber-800" : undefined}>
+                  <span className="font-medium text-foreground">Stock & returns:</span>{" "}
+                  {decision.variant_stock_coverage && decision.variant_stock_coverage.unweighted_stock_share < 1
+                    ? `${Math.round((decision.variant_stock_coverage.demand_weighted_stock_share ?? 0) * 100)}% of popular options in stock`
+                    : "All options in stock"}
+                  {returns?.processed_return_rate != null
+                    ? returns.processed_return_units === 0
+                      ? ` · 0 returns across ${returns.eligible_units} orders.`
+                      : ` · ${returns.processed_return_units} of ${returns.eligible_units} orders returned (${Math.round(returns.processed_return_rate * 100)}%).`
+                    : "."}
+                </p>
               )}
             </div>
           )}

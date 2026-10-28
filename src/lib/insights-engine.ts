@@ -7,7 +7,7 @@ import { estimateDailyTestBudget } from "./budget-evidence";
 import { getAdvantagePlusGuidance } from "./advantage-plus";
 import { summarizeShopifyReadiness } from "./shopify-readiness";
 import { summarizeMarketingHistory } from "./marketing-evidence";
-import { compareProductsForTest } from "./gateway-decision";
+import { compareProductsForTest, selectGatewayTestCandidate } from "./gateway-decision";
 import {
   isDomesticCity,
   getEffectiveStoreCountry,
@@ -32,6 +32,7 @@ import {
 
 const anthropicClient = new Anthropic();
 import { logApiUsage } from "@/lib/db";
+import { resolveVerifiedMetaInterests } from "./meta-interest-resolver";
 
 // Claude Sonnet 5 enables adaptive thinking by default, while Anthropic does
 // not allow forced tool_choice with thinking enabled. Hook generation relies
@@ -203,7 +204,8 @@ SECTION 5: DEMOGRAPHICS & SEED AUDIENCE GUIDANCE
 2. Age Brackets:
    - Set age_min (minimum 18) and age_max realistically based on product price point and disposable income (e.g. 22-45 for contemporary trend items; 28-55 for high-ticket luxury investment items).
 3. Seed Interests:
-   - Select 3 to 5 broad category interests. Always include "Online Shopping". Avoid micro-interests, niche fan pages, or direct competitor names.
+   - Select 4 to 5 real, concise 1-to-2-word Meta Ads Manager Detailed Targeting interest names aligned with the buyer's price tier and category (e.g., "Online shopping", "Women's clothing", "Men's clothing", "Dresses", "Trousers", "Skirt", "Shorts", "Blouse", "Luxury goods", "Designer clothing", "Boutiques", "Fashion design", "Skin care", "Cosmetics", "Jewellery", "Footwear", "Handbags").
+   - Always include "Online shopping". Never invent 3-to-4-word editorial phrases (such as "Contemporary Fashion Design", "Going Out Outfits", "African Fashion Brands", or "Boutique Fashion Brands") that do not exist in Meta Ads Manager's Detailed Targeting search box.
 
 ═══════════════════════════════════════════════════════════════════
 SECTION 6: CAMPAIGN OPTIMIZATION & TIMING PACING
@@ -382,13 +384,12 @@ async function generateRawTargetingProfile(
       ? `Order cities unavailable; paid-order countries: ${storeData.orders.top_order_countries.map((c) => `${c.country} (${c.order_count} orders)`).join(", ")}`
       : "Paid-order locations unavailable";
 
-  // Identify target single product
+  // Identify target single product using the proprietary Gateway Election engine
   const targetProduct =
     targetProductOverride ||
     (storeData.products && storeData.products.length > 0
-      ? [...storeData.products].sort(
-          (a, b) => (b.revenue || 0) - (a.revenue || 0)
-        )[0]
+      ? selectGatewayTestCandidate(storeData.products) ||
+        [...storeData.products].sort(compareProductsForTest)[0]
       : {
           id: "default-product",
           name: storeData.store.name || "Main Collection Item",
@@ -532,6 +533,8 @@ Product Performance & Customer Entry Signals:
 - Role in Store: ${productRole}
 - Test Readiness: ${productDecision ? `${productDecision.test_readiness.replaceAll("_", " ")}. ${productDecision.readiness_reasons.join(" ")}` : "Not assessed in this snapshot"}
 - 60-Day Follow-Up: ${productDecision ? productDecision.follow_up_60d.repeat_rate === null ? "No fully observed first-order cohort yet" : `${productDecision.follow_up_60d.buyers_with_another_order} of ${productDecision.follow_up_60d.eligible_first_order_buyers} eligible first-order buyers placed another store order` : "Unavailable"}
+- Post-Entry Cross-Sell Bridge: ${productDecision?.post_entry_bridge?.top_next_product_name ? `${productDecision.post_entry_bridge.top_next_product_buyers} of ${productDecision.post_entry_bridge.repeat_buyers_from_entry} repeat first-time buyers returned for "${productDecision.post_entry_bridge.top_next_product_name}"${productDecision.post_entry_bridge.value_expansion_60d_multiple ? ` (${productDecision.post_entry_bridge.value_expansion_60d_multiple}x 60-day spend expansion)` : ""}` : "No dominant second-order bridge observed yet"}
+- Day-1 First-Order Basket Economics: ${productDecision?.first_order_economics?.basket_multiplier != null ? `First-time buyers check out with an average cart of ${productDecision.first_order_economics.avg_first_order_value} ${storeCurrency} (${productDecision.first_order_economics.basket_multiplier}x unit price)` : "Standard single-item entry"}
 - High-Spend Buyer Association: ${productDecision?.high_value_entry ? `${productDecision.high_value_entry.high_value_first_buyers_with_product} of ${productDecision.high_value_entry.high_value_buyers} high-spend buyers started with this product versus ${productDecision.high_value_entry.all_first_buyers_with_product} of ${productDecision.high_value_entry.eligible_first_buyers} eligible first buyers overall; observational only` : "Insufficient mature cohort"}
 - Return Evidence: ${productDecision?.return_evidence?.processed_return_rate != null ? `${productDecision.return_evidence.processed_return_units} processed returns among ${productDecision.return_evidence.eligible_units} eligible units in a mature cohort; ${productDecision.return_evidence.refunded_units} refunded units recorded separately` : "Unavailable or insufficient sample"}
 - Primary Customer Traffic Channel: ${primaryTrafficSource}
@@ -674,10 +677,20 @@ Generate a high-converting Advantage+ campaign brief for "${targetProductTitle}"
               "Standard e-commerce age targeting (25-44) is recommended for early validation campaigns.",
           };
 
-      const seed_interests =
+      const raw_seed_interests =
         Array.isArray(profile.seed_interests) && profile.seed_interests.length > 0
           ? profile.seed_interests.filter((i): i is string => typeof i === "string" && i.trim().length > 0)
-          : ["Online Shopping", "Fashion"];
+          : ["Online shopping", "Clothing"];
+
+      const seed_interests = await resolveVerifiedMetaInterests({
+        candidateInterests: raw_seed_interests,
+        productTitle: targetProductTitle,
+        productType: targetProductType,
+        tags: targetProduct.tags,
+        gender: demographics.gender,
+        productPrice: Number(targetProductPrice) || undefined,
+        storeAov: aov || undefined,
+      });
 
       const locations =
         Array.isArray(profile.locations) && profile.locations.length > 0

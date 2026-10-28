@@ -14,6 +14,7 @@ import {
   generateRecommendations,
 } from "@/lib/insights-engine";
 import type { MetaRecommendations } from "@/lib/insights-engine";
+import { resolveVerifiedMetaInterests } from "@/lib/meta-interest-resolver";
 import { reusableRecommendationsFromVersions } from "@/lib/campaigns/reuse-insights";
 import { canonicalRegenerationProduct } from "@/lib/campaigns/regeneration-product";
 import type { StoreProduct } from "@/lib/store-data";
@@ -880,6 +881,30 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
     const recommendations = reusableRecommendations ?? await generateRecommendations(
       integration.store_snapshot, undefined, userId, targetProductOverride, angleUsed
     );
+    if (reusableRecommendations) {
+      const verifiedInterests = await resolveVerifiedMetaInterests({
+        candidateInterests:
+          recommendations.advantage_plus_guidance?.seed_audience_suggestions?.seed_interests ||
+          recommendations.targeting?.interests ||
+          ["Online shopping"],
+        productTitle: targetProductOverride.name,
+        productType: targetProductOverride.product_type,
+        tags: targetProductOverride.tags,
+        gender:
+          (recommendations.advantage_plus_guidance?.seed_audience_suggestions?.gender as "All" | "Men" | "Women" | undefined) ||
+          (recommendations.targeting?.gender as "All" | "Men" | "Women" | undefined) ||
+          "All",
+        productPrice: parsedPrice,
+        storeAov: storeAov || undefined,
+        accessToken: integration?.meta_access_token,
+      });
+      if (recommendations.targeting) {
+        recommendations.targeting.interests = verifiedInterests;
+      }
+      if (recommendations.advantage_plus_guidance?.seed_audience_suggestions) {
+        recommendations.advantage_plus_guidance.seed_audience_suggestions.seed_interests = verifiedInterests;
+      }
+    }
     const generatedAt = new Date().toISOString();
     const context = {
       schemaVersion: 2,

@@ -31,7 +31,7 @@ function getInitialStoreSnapshot(): StoreDataResponse | undefined {
       parsed &&
       typeof parsed === "object" &&
       parsed.connected &&
-      parsed.data?.data_quality?.schema_version === 7
+      parsed.data?.data_quality?.schema_version === 9
     ) {
       return parsed;
     }

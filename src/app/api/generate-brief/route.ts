@@ -26,6 +26,7 @@ import {
   ADVANTAGE_PLUS_TOOL,
   STRUCTURED_HOOK_THINKING,
 } from "@/lib/insights-engine";
+import { resolveVerifiedMetaInterests } from "@/lib/meta-interest-resolver";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
@@ -444,6 +445,17 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
       profile = { ...profile, ...fallback };
       generationStatus = "fallback";
     }
+
+    profile.seed_interests = await resolveVerifiedMetaInterests({
+      candidateInterests: profile.seed_interests || ["Online shopping"],
+      productTitle: targetProductCtx.title,
+      productType: targetProductCtx.product_type,
+      tags: targetProductCtx.tags,
+      gender: profile.demographics?.gender || "All",
+      productPrice: Number(targetProductCtx.price) || undefined,
+      storeAov: Math.round(storeSnapshot.orders?.average_order_value || 0) || undefined,
+      accessToken: integration?.meta_access_token,
+    });
 
     return respond(profile, generationStatus);
   } catch (error) {

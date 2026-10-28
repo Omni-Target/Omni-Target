@@ -483,32 +483,78 @@ export interface ProductNarrative {
 export function deriveProductNarrative(p: StoreProductLike): ProductNarrative {
   if (p.product_decision) {
     const decision = p.product_decision;
-    const role = decision.role === "Gateway"
-      ? decision.role_confidence === "strong"
-        ? "Strong first-order gateway evidence"
-        : "Directional first-order gateway evidence"
-      : decision.role === "Consideration"
-        ? "Repeat favorite — shines in retargeting and follow-up purchases"
-        : decision.role === "Hybrid"
-          ? "Bestseller — popular with both first-time and returning buyers"
-          : "Catalog contender — test creative to gauge buyer response";
-    const readiness =
-      decision.test_readiness === "hold"
-        ? "Restock inventory before launching ads."
-        : decision.test_readiness === "review"
-          ? "Review stock, costs, and return evidence before spending."
-          : "Planning candidate; confirm delivery and fees before testing.";
-    const primaryMetric =
-      decision.role === "Gateway"
-        ? `${decision.first_order_count} of ${decision.identified_first_orders} identified first orders`
-        : decision.role === "Consideration"
-          ? `${decision.later_order_count} repeat orders`
-          : decision.role === "Hybrid"
-            ? `${decision.first_order_count} first / ${decision.later_order_count} repeat orders`
-            : `${decision.first_order_count} first orders recorded`;
+    const firstPct =
+      decision.identified_first_orders > 0
+        ? Math.round((decision.first_order_count / decision.identified_first_orders) * 100)
+        : 0;
+    const coreOut = decision.variant_stock_coverage?.core_variant_stockout === true;
+    const outVariants = decision.variant_stock_coverage?.stocked_out_core_variants ?? [];
+    const demandShare = decision.variant_stock_coverage?.demand_weighted_stock_share;
+    const multiItemRate = decision.first_order_economics?.multi_item_first_order_rate;
+    const nextBridge = decision.post_entry_bridge?.top_next_product_name;
+    const repeat60d = decision.follow_up_60d.repeat_rate;
+
+    if (decision.test_readiness === "hold" || p.in_stock === false) {
+      return {
+        primaryMetric:
+          decision.first_order_count > 0
+            ? `${firstPct}% of new buyers chose this first (${decision.first_order_count} orders)`
+            : "Currently out of stock",
+        subtext: "Sold out right now — restock inventory before spending ad budget.",
+      };
+    }
+
+    if (coreOut) {
+      const lostPct =
+        demandShare != null ? Math.round((1 - demandShare) * 100) : null;
+      const variantLabel = outVariants.length > 0 ? outVariants.join(", ") : "Best-selling size";
+      return {
+        primaryMetric: `Hold off on ads — ${outVariants.length > 0 ? `option ${variantLabel} is sold out` : "popular options sold out"}`,
+        subtext:
+          lostPct != null
+            ? `Sold-out option (${variantLabel}) drives ${lostPct}% of sales for this piece. Restock it before running ads.`
+            : "Your highest-selling size or option is out of stock. Restock before running ads.",
+      };
+    }
+
+    if (decision.return_evidence?.risk === "review") {
+      const retPct = Math.round((decision.return_evidence.processed_return_rate ?? 0) * 100);
+      return {
+        primaryMetric: `${retPct}% return rate (${decision.return_evidence.processed_return_units} of ${decision.return_evidence.eligible_units} returned)`,
+        subtext: "Attracts buyers, but returns are elevated — check sizing or fit details before scaling ads.",
+      };
+    }
+
+    if (decision.role === "Gateway") {
+      const primaryMetric = `${firstPct}% of new customers start here (${decision.first_order_count} of ${decision.identified_first_orders} first orders)`;
+      let subtext = "One of your strongest entry pieces for turning cold shoppers into first-time buyers.";
+      if (multiItemRate != null && multiItemRate >= 0.5) {
+        subtext = `Brings new shoppers in — and ${Math.round(multiItemRate * 100)}% of them add extra items to their cart at checkout.`;
+      } else if (nextBridge) {
+        subtext = `Strong entry piece — first-time buyers frequently come back next for ${nextBridge}.`;
+      } else if (repeat60d != null && repeat60d >= 0.12) {
+        subtext = `Proven entry piece — ${Math.round(repeat60d * 100)}% of first-time buyers come back for another order within 60 days.`;
+      }
+      return { primaryMetric, subtext };
+    }
+
+    if (decision.role === "Consideration") {
+      return {
+        primaryMetric: `Chosen in ${decision.later_order_count} repeat orders`,
+        subtext: "Shoppers come back for this after they know your brand — ideal for retargeting past visitors.",
+      };
+    }
+
+    if (decision.role === "Hybrid") {
+      return {
+        primaryMetric: `${decision.first_order_count} first-time orders · ${decision.later_order_count} repeat orders`,
+        subtext: "Popular with both first-time shoppers and returning customers.",
+      };
+    }
+
     return {
-      subtext: `${role}. ${readiness}`,
-      primaryMetric,
+      primaryMetric: `${decision.first_order_count} first-time order${decision.first_order_count === 1 ? "" : "s"} recorded`,
+      subtext: "Low order volume so far — test with a small budget if you want to gauge cold buyer interest.",
     };
   }
   let subtext = "";

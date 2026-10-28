@@ -19,6 +19,7 @@ import {
   type ProductRow,
   type ProductLabel,
 } from "@/components/products";
+import { compareProductsForTest, selectGatewayTestCandidate } from "@/lib/gateway-decision";
 
 interface StoreData {
   store?: { currency?: string };
@@ -75,6 +76,10 @@ export default function ProductsPage() {
     const list = inStockProducts.filter(matchesSearch);
     return list.sort((a, b) => {
       switch (sort) {
+        case "units_sold":
+          if ((b.units_sold ?? 0) !== (a.units_sold ?? 0))
+            return (b.units_sold ?? 0) - (a.units_sold ?? 0);
+          return (b.revenue ?? 0) - (a.revenue ?? 0);
         case "revenue":
           return (b.revenue ?? 0) - (a.revenue ?? 0);
         case "price_high":
@@ -84,14 +89,22 @@ export default function ProductsPage() {
         case "name":
           return (a.name ?? "").localeCompare(b.name ?? "");
         case "best":
-        default:
+        default: {
+          const decisionComparison = compareProductsForTest(a, b);
+          if (decisionComparison !== 0) return decisionComparison;
           if ((b.units_sold ?? 0) !== (a.units_sold ?? 0))
             return (b.units_sold ?? 0) - (a.units_sold ?? 0);
           return (b.revenue ?? 0) - (a.revenue ?? 0);
+        }
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inStockProducts, sort, search]);
+
+  const topGatewayCandidate = useMemo(
+    () => selectGatewayTestCandidate(inStockProducts),
+    [inStockProducts],
+  );
 
   const filteredOut = outOfStockProducts.filter(matchesSearch);
 
@@ -204,12 +217,19 @@ export default function ProductsPage() {
       ) : (
         <div className="space-y-10">
           {showIn && sortedInStock.length > 0 && (
-            <Section title="Ready to advertise" description="In-stock products ranked for your campaigns.">
+            <Section
+              title="Ready to advertise"
+              description="In-stock products ranked by cold-acquisition gateway evidence, retention, and readiness."
+            >
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {sortedInStock.map((product) => (
                   <ProductCard
                     key={String(product.id)}
                     product={product}
+                    isTopGateway={
+                      topGatewayCandidate != null &&
+                      String(topGatewayCandidate.id) === String(product.id)
+                    }
                     label={getProductLabel(product, maxSold)}
                     priceLabel={formatPrice(product.price ?? 0)}
                     revenueLabel={formatPrice(Math.round(product.revenue ?? 0))}
