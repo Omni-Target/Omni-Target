@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 
-export type SortKey = "best" | "revenue" | "price_high" | "price_low" | "name";
+export type SortKey = "best" | "units_sold" | "revenue" | "price_high" | "price_low" | "name";
 export type StockFilter = "all" | "in" | "out";
 
 export function ProductsToolbar({
@@ -52,7 +52,8 @@ export function ProductsToolbar({
           onChange={(e) => onSort(e.target.value as SortKey)}
           className="h-9 w-auto min-w-[10rem] text-[0.8125rem]"
         >
-          <option value="best">Best selling</option>
+          <option value="best">Recommended for acquisition</option>
+          <option value="units_sold">Most units sold</option>
           <option value="revenue">Highest revenue</option>
           <option value="price_high">Price: high to low</option>
           <option value="price_low">Price: low to high</option>

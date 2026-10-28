@@ -34,4 +34,46 @@ describe("buyer outcomes", () => {
       baseline_share: 0.2,
     });
   });
+
+  it("maps post-entry cross-catalog product bridges, second-order timing, and 60-day value expansion", () => {
+    const productNames = new Map<number, string>([
+      [101, "Kasa Silk Slip"],
+      [202, "Kasa Tailored Blazer"],
+      [303, "Kasa Linen Trouser"],
+    ]);
+
+    // 4 customers start with Product 101 ($100):
+    // - 3 of them come back within 20–30 days to buy Product 202 ($150)
+    // - 1 of them comes back 25 days later to re-buy Product 101 ($100) and Product 303 ($100)
+    const orders: BuyerOutcomeOrder[] = [
+      { id: 1, customer: { id: 1 }, created_at: "2026-05-01T00:00:00Z", total_price: "100", line_items: [{ product_id: 101 }] },
+      { id: 2, customer: { id: 1 }, created_at: "2026-05-21T00:00:00Z", total_price: "150", line_items: [{ product_id: 202 }] },
+
+      { id: 3, customer: { id: 2 }, created_at: "2026-05-02T00:00:00Z", total_price: "100", line_items: [{ product_id: 101 }] },
+      { id: 4, customer: { id: 2 }, created_at: "2026-05-26T00:00:00Z", total_price: "150", line_items: [{ product_id: 202 }] },
+
+      { id: 5, customer: { id: 3 }, created_at: "2026-05-03T00:00:00Z", total_price: "100", line_items: [{ product_id: 101 }] },
+      { id: 6, customer: { id: 3 }, created_at: "2026-06-02T00:00:00Z", total_price: "150", line_items: [{ product_id: 202 }] },
+
+      { id: 7, customer: { id: 4 }, created_at: "2026-05-04T00:00:00Z", total_price: "100", line_items: [{ product_id: 101 }] },
+      { id: 8, customer: { id: 4 }, created_at: "2026-05-29T00:00:00Z", total_price: "200", line_items: [{ product_id: 101 }, { product_id: 303 }] },
+    ];
+
+    const result = calculateBuyerOutcomes(orders, "2026-09-29T00:00:00Z", productNames);
+    const bridge = result.post_entry_bridge.get(101);
+    expect(bridge).toBeDefined();
+    expect(bridge).toMatchObject({
+      repeat_buyers_from_entry: 4,
+      cross_catalog_repeat_buyers: 4,
+      same_sku_repeat_buyers: 1,
+      median_days_to_second_order: 24.5,
+      top_next_product_id: 202,
+      top_next_product_name: "Kasa Tailored Blazer",
+      top_next_product_buyers: 3,
+      top_next_product_share: 0.75,
+      avg_first_order_spend: 100,
+      avg_60d_cumulative_spend: 262.5,
+      value_expansion_60d_multiple: 2.63,
+    });
+  });
 });

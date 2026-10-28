@@ -32,7 +32,7 @@ interface ShopifyOrder {
   source_name: string;
   referring_site?: string | null;
   landing_site?: string | null;
-  line_items?: { product_id: number; quantity: number; price: string }[];
+  line_items?: { product_id: number; variant_id?: number; quantity: number; price: string }[];
 }
 
 import { parseTrafficSource } from "./traffic-source";
@@ -404,8 +404,11 @@ export async function fetchShopifyStoreData(
   const repeatRate =
     totalCustomers > 0 ? returningCustomers / totalCustomers : 0;
   const generatedAt = new Date().toISOString();
+  const productNamesMap = new Map<number, string>(
+    rawProducts.map((product) => [product.id, product.title]),
+  );
   const buyerOutcomes = ingestionComplete
-    ? calculateBuyerOutcomes(orders, generatedAt)
+    ? calculateBuyerOutcomes(orders, generatedAt, productNamesMap)
     : null;
   const gatewaySignalValidation = ingestionComplete
     ? validateGatewaySignal(orders, rawProducts.map((product) => product.id), generatedAt)
@@ -582,10 +585,13 @@ export async function fetchShopifyStoreData(
   });
 
   const costCoverageByProduct = new Map(products.map((product) => [product.id, product.unit_cost_coverage]));
+  const priceByProduct = new Map(products.map((product) => [product.id, product.price]));
   const decisions = buildProductDecisions(
     orders,
     rawProducts.map((product) => ({
       id: product.id,
+      price: priceByProduct.get(String(product.id)),
+      created_at: product.created_at,
       variants: product.variants,
       unit_cost_coverage: costCoverageByProduct.get(String(product.id)),
     })),
@@ -604,6 +610,7 @@ export async function fetchShopifyStoreData(
     product.product_decision = decision;
     product.gateway_classification = decision.role;
     product.high_value_entry = decision.high_value_entry;
+    product.post_entry_bridge = decision.post_entry_bridge;
     product.return_evidence = decision.return_evidence;
   }
 
@@ -680,7 +687,7 @@ export async function fetchShopifyStoreData(
     },
     prespend: intelligence.prespend,
     data_quality: {
-      schema_version: 7,
+      schema_version: 9,
       ingestion_complete: ingestionComplete,
       history_basis: "accessible_paid_orders",
       oldest_order_at: orders.length ? oldestOrderDate.toISOString() : undefined,

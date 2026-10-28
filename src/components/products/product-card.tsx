@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Flame, ArrowRight, ImageIcon, TrendingUp } from "lucide-react";
+import { Flame, ArrowRight, ImageIcon, TrendingUp, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { ProductRow, ProductLabel } from "./types";
@@ -13,15 +13,17 @@ const labelTone: Record<ProductLabel["tone"], string> = {
   faint: "text-faint-foreground",
 };
 
-function classificationBadge(c?: string, confidence?: "strong" | "directional" | "insufficient") {
+function classificationBadge(c?: string, isTopGateway?: boolean) {
   if (!c || c.toLowerCase() === "insufficient data") return null;
   const isGateway = c.toLowerCase() === "gateway";
   const isConsideration = c.toLowerCase() === "consideration";
   const isHybrid = c.toLowerCase() === "hybrid";
 
+  if (isGateway && isTopGateway) return null; // Shown as #1 Pick for New Buyers on the image overlay
+
   const variant = isGateway ? "brand" : isConsideration || isHybrid ? "info" : "neutral";
   const label = isGateway
-    ? "Gateway Product"
+    ? "New Buyer Magnet"
     : isConsideration
       ? "Repeat Favorite"
       : isHybrid
@@ -37,30 +39,42 @@ function classificationBadge(c?: string, confidence?: "strong" | "directional" |
 
 export function ProductCard({
   product,
+  isTopGateway = false,
   label,
   priceLabel,
   revenueLabel,
   onCreateCampaign,
 }: {
   product: ProductRow;
+  isTopGateway?: boolean;
   label: ProductLabel;
   priceLabel: string;
   revenueLabel: string;
   onCreateCampaign: (product: ProductRow) => void;
 }) {
+  const decision = product.product_decision;
   const hasEstablishedRole = Boolean(
     product.gateway_classification &&
     product.gateway_classification !== "Insufficient Data" &&
     product.gateway_classification.toLowerCase() !== "unknown" &&
     (product.units_sold ?? 0) >= 3
   );
+  const isEmergingGateway = Boolean(
+    !hasEstablishedRole && decision?.acquisition_momentum?.is_emerging_gateway
+  );
+  const coreStockout = decision?.variant_stock_coverage?.core_variant_stockout === true;
 
-  const stockReason = product.product_decision?.readiness_reasons?.find((r) =>
+  const stockReason = decision?.readiness_reasons?.find((r) =>
     /^\d+ of \d+ variants in stock/.test(r)
   );
   const partialStockText = stockReason
-    ? stockReason.replace("variants in stock.", "in stock").replace("variants in stock", "in stock")
+    ? stockReason
+        .replace(/\s*\(\d+% of historical demand covered\)\.?/, "")
+        .replace("variants in stock.", "in stock")
+        .replace("variants in stock", "in stock")
     : null;
+  const bridge = decision?.post_entry_bridge;
+  const basketMultiplier = decision?.first_order_economics?.basket_multiplier;
 
   return (
     <div className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md">
@@ -79,15 +93,35 @@ export function ProductCard({
           </div>
         )}
         <div className="absolute left-3 top-3 flex flex-wrap gap-1.5">
-          <Badge variant="success" size="sm" dot>
-            In stock
-          </Badge>
-          {label.best && (
+          {coreStockout ? (
+            <Badge variant="warning" size="sm">
+              Key size out
+            </Badge>
+          ) : partialStockText ? (
+            <Badge variant="warning" size="sm">
+              {partialStockText}
+            </Badge>
+          ) : (
+            <Badge variant="success" size="sm" dot>
+              In stock
+            </Badge>
+          )}
+          {isTopGateway && (
+            <Badge variant="brand" size="sm">
+              <Sparkles className="size-3" /> #1 Pick for New Buyers
+            </Badge>
+          )}
+          {label.best && !isTopGateway && (
             <Badge variant="warning" size="sm">
               <Flame className="size-3" /> Best seller
             </Badge>
           )}
         </div>
+        {decision?.election_score && decision.election_score.total > 0 && hasEstablishedRole && (
+          <div className="absolute right-3 top-3 rounded-lg bg-surface/90 px-2 py-0.5 text-[11px] font-semibold text-foreground shadow-xs backdrop-blur-xs">
+            {decision.election_score.total}/100
+          </div>
+        )}
       </div>
 
       <div className="flex flex-1 flex-col p-4">
@@ -104,15 +138,12 @@ export function ProductCard({
         </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {classificationBadge(product.gateway_classification, product.product_decision?.role_confidence)}
-          {hasEstablishedRole && product.product_decision?.test_readiness === "planning_candidate" && (
-            <Badge variant="brand" size="sm">Planning Candidate</Badge>
+          {classificationBadge(product.gateway_classification, isTopGateway)}
+          {isEmergingGateway && (
+            <Badge variant="brand" size="sm">Rising New-Buyer Pick</Badge>
           )}
-          {hasEstablishedRole && product.product_decision?.test_readiness === "review" && partialStockText && (
-            <Badge variant="warning" size="sm">{partialStockText}</Badge>
-          )}
-          {hasEstablishedRole && product.product_decision?.return_evidence?.risk === "review" && (
-            <Badge variant="warning" size="sm">Review returns</Badge>
+          {hasEstablishedRole && decision?.return_evidence?.risk === "review" && (
+            <Badge variant="warning" size="sm">High returns</Badge>
           )}
           {!label.best && (
             <span className={cn("text-xs font-medium", labelTone[label.tone])}>
@@ -120,6 +151,20 @@ export function ProductCard({
             </span>
           )}
         </div>
+
+        {(bridge?.top_next_product_name || (basketMultiplier != null && basketMultiplier >= 1.2)) && (
+          <div className="mt-2 rounded-lg bg-brand-50/50 px-2.5 py-1.5 text-[11px] leading-snug text-brand-900">
+            {bridge?.top_next_product_name ? (
+              <span>
+                <strong>What they buy next:</strong> Shoppers often come back for {bridge.top_next_product_name}
+              </span>
+            ) : basketMultiplier != null && basketMultiplier >= 1.2 ? (
+              <span>
+                <strong>Bigger first carts:</strong> New buyers spend {basketMultiplier}x the item price at checkout
+              </span>
+            ) : null}
+          </div>
+        )}
 
         {product.description && (
           <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">

@@ -511,6 +511,10 @@ function DashboardContent() {
                     product={p}
                     currency={currency}
                     variant="intelligence"
+                    isTopGateway={
+                      gatewayTestCandidate != null &&
+                      String(gatewayTestCandidate.id) === String(p.id)
+                    }
                     onCreateBrief={onCreateBrief}
                     shop={activeShop}
                   />

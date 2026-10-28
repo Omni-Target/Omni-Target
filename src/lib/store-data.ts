@@ -46,6 +46,7 @@ export interface StoreProduct {
   price_less_unit_cost?: number | null;
   catalog_claims?: StoreCatalogClaim[];
   high_value_entry?: StoreHighValueEntryEvidence;
+  post_entry_bridge?: StorePostEntryBridgeEvidence;
   return_evidence?: StoreProductReturnEvidence;
 }
 
@@ -56,6 +57,20 @@ export interface StoreHighValueEntryEvidence {
   all_first_buyers_with_product: number;
   high_value_share: number;
   baseline_share: number;
+}
+
+export interface StorePostEntryBridgeEvidence {
+  repeat_buyers_from_entry: number;
+  cross_catalog_repeat_buyers: number;
+  same_sku_repeat_buyers: number;
+  median_days_to_second_order: number | null;
+  top_next_product_id?: number;
+  top_next_product_name?: string;
+  top_next_product_buyers?: number;
+  top_next_product_share?: number | null;
+  avg_first_order_spend: number | null;
+  avg_60d_cumulative_spend: number | null;
+  value_expansion_60d_multiple: number | null;
 }
 
 export interface StoreProductReturnEvidence {
@@ -80,9 +95,45 @@ export interface StoreGatewaySignalValidation {
   limitation: "historical_first_order_signal_only";
 }
 
+export interface StoreAcquisitionMomentum {
+  recent_60d_first_orders: number;
+  recent_60d_total_first_orders: number;
+  recent_first_order_reach: number | null;
+  decayed_first_order_score: number;
+  velocity_trend: "accelerating" | "steady" | "cooling" | "new_signal" | "insufficient_data";
+  is_emerging_gateway: boolean;
+}
+
+export interface StoreFirstOrderEconomics {
+  avg_first_order_value: number | null;
+  basket_multiplier: number | null;
+  multi_item_first_order_rate: number | null;
+  price_vs_median_first_order: number | null;
+}
+
+export interface StoreVariantStockCoverage {
+  in_stock_variants: number;
+  total_variants: number;
+  unweighted_stock_share: number;
+  demand_weighted_stock_share: number | null;
+  core_variant_stockout: boolean;
+  stocked_out_core_variants: string[];
+}
+
+export interface StoreProductElectionScore {
+  total: number;
+  breakdown: {
+    entry_lift: number;
+    retention_ltv: number;
+    momentum: number;
+    basket_economics: number;
+    operational_readiness: number;
+  };
+}
+
 /** A reproducible product-role observation and a separate launch-readiness check. */
 export interface ProductDecisionEvidence {
-  logic_version: 1 | 2;
+  logic_version: 1 | 2 | 3;
   source: "shopify_accessible_paid_orders_and_catalog";
   as_of: string;
   role: "Gateway" | "Consideration" | "Hybrid" | "Insufficient Data";
@@ -100,8 +151,13 @@ export interface ProductDecisionEvidence {
     repeat_rate: number | null;
   };
   high_value_entry?: StoreHighValueEntryEvidence;
+  post_entry_bridge?: StorePostEntryBridgeEvidence;
   return_evidence?: StoreProductReturnEvidence;
   return_evidence_state?: "available" | "insufficient_data" | "missing_scope" | "error" | "unavailable";
+  acquisition_momentum?: StoreAcquisitionMomentum;
+  first_order_economics?: StoreFirstOrderEconomics;
+  variant_stock_coverage?: StoreVariantStockCoverage;
+  election_score?: StoreProductElectionScore;
   test_readiness: "planning_candidate" | "review" | "hold";
   readiness_reasons: string[];
   limitations: string[];
@@ -265,7 +321,7 @@ export interface StoreData {
   };
   prespend?: StorePrespendIntelligence;
   data_quality?: {
-    schema_version: 2 | 3 | 4 | 5 | 6 | 7;
+    schema_version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
     ingestion_complete: boolean;
     history_basis: "accessible_paid_orders";
     oldest_order_at?: string;
