@@ -416,13 +416,14 @@ export async function selectIntegrationFieldsByShop(shop: string, selectFields: 
     .from("user_integrations")
     .select(`clerk_user_id, ${selectFields}`)
     .eq(queryField, shop)
-    .maybeSingle();
+    .order("updated_at", { ascending: false })
+    .limit(1);
 
   if (error) {
     console.error("Error in selectIntegrationFieldsByShop:", error);
     return null;
   }
-  return data as UserIntegration | null;
+  return (Array.isArray(data) ? data[0] : data) as UserIntegration | null;
 }
 
 /**

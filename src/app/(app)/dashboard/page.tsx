@@ -118,6 +118,19 @@ function DashboardContent() {
   const billingSuccess = searchParams.get("billing");
   const billingCredits = searchParams.get("credits");
   const billingPlan = searchParams.get("plan");
+  const appStoreChargeId = searchParams.get("charge_id");
+  const appStoreShop = searchParams.get("shop");
+
+  // If Shopify App Store Managed Pricing redirects directly to /dashboard?charge_id=...
+  // forward to our billing callback route so the charge is verified and credited.
+  useEffect(() => {
+    if (appStoreChargeId && !billingSuccess) {
+      const shopParam = appStoreShop || shop || "";
+      if (shopParam) {
+        window.location.href = `/api/shopify/billing/callback?charge_id=${encodeURIComponent(appStoreChargeId)}&shop=${encodeURIComponent(shopParam)}`;
+      }
+    }
+  }, [appStoreChargeId, appStoreShop, billingSuccess, shop]);
 
   useEffect(() => {
     if (paymentSuccess === "success") {
