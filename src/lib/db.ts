@@ -423,7 +423,7 @@ export async function selectIntegrationFieldsByShop(shop: string, selectFields: 
     console.error("Error in selectIntegrationFieldsByShop:", error);
     return null;
   }
-  return (Array.isArray(data) ? data[0] : data) as UserIntegration | null;
+  return (Array.isArray(data) ? data[0] ?? null : data) as unknown as UserIntegration | null;
 }
 
 /**
