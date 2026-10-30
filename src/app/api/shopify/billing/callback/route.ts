@@ -1,3 +1,4 @@
+import { auth } from "@clerk/nextjs/server";
 import {
   getIntegrationByShop,
   getIntegrationByUser,
@@ -11,9 +12,10 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const chargeId = searchParams.get("charge_id");
   const shop = searchParams.get("shop");
-  // Present on charges initiated after the user-scoped billing fix; lets us
-  // attribute credits to the exact payer even when a shop is shared.
-  const uid = searchParams.get("uid");
+  // Present on charges initiated after the user-scoped billing fix; if Shopify
+  // App Store Managed Pricing redirected without `uid`, fall back to active Clerk session.
+  const clerkAuth = await auth().catch(() => ({ userId: null }));
+  const uid = searchParams.get("uid") || clerkAuth.userId || null;
 
   console.log(
     `Shopify billing callback received. Shop: ${shop}, Charge ID: ${chargeId}, User: ${uid ?? "(legacy)"}`
@@ -40,14 +42,17 @@ export async function GET(request: Request) {
       );
     }
 
-    // 2. Query the charge from Shopify GraphQL API
-    const globalId = chargeId.startsWith("gid://")
+    // 2. Query the charge from Shopify GraphQL API (check both AppPurchaseOneTime
+    //    and AppSubscription so App Store Managed Pricing plans work seamlessly)
+    const numericId = chargeId.replace(/^gid:\/\/shopify\/[^/]+\//, "");
+    const oneTimeGid = chargeId.startsWith("gid://")
       ? chargeId
-      : `gid://shopify/AppPurchaseOneTime/${chargeId}`;
+      : `gid://shopify/AppPurchaseOneTime/${numericId}`;
+    const subscriptionGid = `gid://shopify/AppSubscription/${numericId}`;
 
     const query = `
-      query GetAppPurchaseOneTime($id: ID!) {
-        node(id: $id) {
+      query GetAppBillingCharge($oneTimeId: ID!, $subId: ID!) {
+        oneTime: node(id: $oneTimeId) {
           ... on AppPurchaseOneTime {
             id
             name
@@ -58,10 +63,17 @@ export async function GET(request: Request) {
             }
           }
         }
+        subscription: node(id: $subId) {
+          ... on AppSubscription {
+            id
+            name
+            status
+          }
+        }
       }
     `;
 
-    const shopifyUrl = shopifyAdminGraphqlUrl(shop);
+    const shopifyUrl = shopifyAdminGraphqlUrl(integration.shop_domain || shop);
     const response = await fetch(shopifyUrl, {
       method: "POST",
       headers: {
@@ -70,7 +82,7 @@ export async function GET(request: Request) {
       },
       body: JSON.stringify({
         query,
-        variables: { id: globalId },
+        variables: { oneTimeId: oneTimeGid, subId: subscriptionGid },
       }),
     });
 
@@ -83,16 +95,19 @@ export async function GET(request: Request) {
     }
 
     const result = await response.json();
-    if (result.errors) {
+    if (result.errors && !result.data?.oneTime && !result.data?.subscription) {
       console.error("Shopify GraphQL errors while fetching charge:", result.errors);
       return Response.redirect(
         `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?billing=error&message=Shopify+GraphQL+error`
       );
     }
 
-    const chargeNode = result.data?.node;
+    const chargeNode =
+      (result.data?.oneTime?.id ? result.data.oneTime : null) ||
+      (result.data?.subscription?.id ? result.data.subscription : null);
+    const globalId = chargeNode?.id || oneTimeGid;
     if (!chargeNode) {
-      console.error(`No charge node found for ID: ${globalId}`);
+      console.error(`No charge node found for ID: ${oneTimeGid} or ${subscriptionGid}`);
       return Response.redirect(
         `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?billing=error&message=Charge+not+found`
       );

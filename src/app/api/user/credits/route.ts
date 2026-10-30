@@ -23,7 +23,8 @@ export async function GET() {
     );
   }
 
-  const { detectColumns } = await import("@/lib/billing-db");
+  const { detectColumns, reconcileShopifyBillingForUser } = await import("@/lib/billing-db");
+  await reconcileShopifyBillingForUser(userId);
   const cols = await detectColumns();
 
   const selectQuery = [
