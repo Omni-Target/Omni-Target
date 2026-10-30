@@ -50,7 +50,15 @@ export async function getIntegrationByShop(shop: string) {
     if (!data) return null;
   }
 
-  return mapIntegrationData(data, cols);
+  const mapped = mapIntegrationData(data, cols);
+  if (data.clerk_user_id) {
+    const tokenRes = await getValidShopifyToken(data.clerk_user_id);
+    if (tokenRes.status === "ok") {
+      mapped.access_token = tokenRes.accessToken;
+      mapped.shop_domain = tokenRes.shopUrl;
+    }
+  }
+  return mapped;
 }
 
 /**
@@ -188,6 +196,11 @@ export async function addCreditsToIntegration(shop: string, creditsToAdd: number
     if (data) {
       finalQueryField = altField;
     }
+  }
+
+  if (data?.clerk_user_id) {
+    await addCreditsToUser(data.clerk_user_id, creditsToAdd);
+    return;
   }
 
   let currentCredits = 0;
