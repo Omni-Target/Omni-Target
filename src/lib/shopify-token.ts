@@ -114,10 +114,28 @@ export async function getValidShopifyToken(
   const rawExpiresAt =
     integration.token_expires_at || integration.shopify_token_expires_at;
   const expiresAt = rawExpiresAt ? new Date(rawExpiresAt).getTime() : null;
+  const refreshToken =
+    integration.refresh_token || integration.shopify_refresh_token;
 
-  // If no expiry info, assume the token is valid (legacy non-expiring token
-  // that hasn't been migrated yet — the API call itself will fail with 403
-  // if it's truly expired, which is handled by the caller)
+  // If no expiry info and no refresh token, automatically migrate the legacy
+  // non-expiring offline token to an expiring offline token + refresh token
+  // via Shopify's Token Exchange API (required before Jan 1, 2027).
+  if (!expiresAt && !refreshToken) {
+    const existingMigration = inflightRefreshes.get(userId);
+    if (existingMigration) {
+      return existingMigration;
+    }
+    const migrationPromise = migrateLegacyShopifyToken(
+      userId,
+      shopUrl,
+      accessToken,
+    ).finally(() => {
+      inflightRefreshes.delete(userId);
+    });
+    inflightRefreshes.set(userId, migrationPromise);
+    return migrationPromise;
+  }
+
   if (!expiresAt) {
     return { status: "ok", accessToken, shopUrl };
   }
@@ -130,8 +148,6 @@ export async function getValidShopifyToken(
   }
 
   // Token is within 24 hours of expiry — attempt refresh
-  const refreshToken =
-    integration.refresh_token || integration.shopify_refresh_token;
   if (!refreshToken) {
     console.error(
       "Token within 24 hours of expiry but no refresh token available for user:",
@@ -342,4 +358,106 @@ function isDeadRefreshToken(status: number, body: string): boolean {
     return false;
   }
   return /invalid_request|invalid_grant|active refresh_token/i.test(body);
+}
+
+/**
+ * One-time migration of a legacy permanent offline token to a 60-minute
+ * expiring offline token + 90-day rolling refresh token via Shopify's
+ * OAuth 2.0 Token Exchange grant (`urn:ietf:params:oauth:grant-type:token-exchange`).
+ */
+async function migrateLegacyShopifyToken(
+  userId: string,
+  shopUrl: string,
+  legacyAccessToken: string,
+): Promise<ShopifyTokenResult> {
+  if (!process.env.SHOPIFY_CLIENT_ID || !process.env.SHOPIFY_CLIENT_SECRET) {
+    return { status: "ok", accessToken: legacyAccessToken, shopUrl };
+  }
+
+  const locked = await acquireRefreshLock(userId);
+  if (!locked) {
+    return { status: "ok", accessToken: legacyAccessToken, shopUrl };
+  }
+
+  try {
+    const latest = await getUserIntegration(userId);
+    const latestRefresh =
+      latest?.refresh_token || latest?.shopify_refresh_token;
+    const latestToken = latest?.shopify_access_token || latest?.access_token;
+    if (latestRefresh && latestToken) {
+      return { status: "ok", accessToken: latestToken, shopUrl };
+    }
+
+    const shopHost = shopUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    const exchangeUrl = `https://${shopHost}/admin/oauth/access_token`;
+
+    const res = await fetchWithRetry(
+      exchangeUrl,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          client_id: process.env.SHOPIFY_CLIENT_ID,
+          client_secret: process.env.SHOPIFY_CLIENT_SECRET,
+          grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+          subject_token: legacyAccessToken,
+          subject_token_type:
+            "urn:shopify:params:oauth:token-type:offline-access-token",
+          requested_token_type:
+            "urn:shopify:params:oauth:token-type:offline-access-token",
+          expiring: 1,
+        }),
+      },
+      { timeoutMs: 12000, retries: 1 },
+    );
+
+    const contentType = res.headers.get("content-type") || "";
+    const rawBody = await res.text();
+    if (!res.ok || !contentType.includes("application/json")) {
+      console.warn(
+        `[shopify-token] Legacy token migration skipped/failed for ${userId} (${shopHost}): HTTP ${res.status}`,
+      );
+      return { status: "ok", accessToken: legacyAccessToken, shopUrl };
+    }
+
+    const data = JSON.parse(rawBody);
+    if (!data.access_token || !data.refresh_token) {
+      return { status: "ok", accessToken: legacyAccessToken, shopUrl };
+    }
+
+    const newExpiresAt = data.expires_in
+      ? new Date(Date.now() + data.expires_in * 1000).toISOString()
+      : null;
+
+    const cols = await detectDbColumns();
+    const updateData: Record<string, string> = {
+      shopify_access_token: data.access_token,
+      shopify_refresh_token: data.refresh_token,
+    };
+    if (cols.hasAccessToken) updateData.access_token = data.access_token;
+    if (cols.hasRefreshToken) updateData.refresh_token = data.refresh_token;
+    if (newExpiresAt) {
+      updateData.shopify_token_expires_at = newExpiresAt;
+      if (cols.hasTokenExpiresAt) updateData.token_expires_at = newExpiresAt;
+    }
+
+    await updateUserIntegration(userId, updateData);
+    console.log(
+      `[shopify-token] Successfully migrated legacy offline token to expiring token for ${userId} (${shopHost})`,
+    );
+
+    return {
+      status: "ok",
+      accessToken: data.access_token,
+      shopUrl,
+    };
+  } catch (err) {
+    console.warn("[shopify-token] Legacy token migration error:", err);
+    return { status: "ok", accessToken: legacyAccessToken, shopUrl };
+  } finally {
+    await releaseRefreshLock(userId);
+  }
 }
