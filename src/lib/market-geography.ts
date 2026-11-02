@@ -347,9 +347,13 @@ export function isDomesticCity(
 ): boolean {
   const effectiveCountry = getEffectiveStoreCountry(storeCountry, storeCurrency, topLocations);
 
-  // 1. If explicit country is provided, compare countries dynamically
-  if (country) {
-    return isSameCountry(country, effectiveCountry);
+  // 1. Metropolitan dictionary check FIRST: resolve unambiguous global cities to their
+  // canonical country so browser-autofill or corrupted order country metadata (e.g.
+  // { city: "London", country: "Nigeria" }) can never leak an overseas hub into local targeting.
+  const cityPart = (cityName || "").split(",")[0].trim();
+  const resolvedCountry = lookupCityCountry(cityPart) || lookupCityCountry(cityName);
+  if (resolvedCountry) {
+    return isSameCountry(resolvedCountry, effectiveCountry);
   }
 
   // 2. If the city string contains country info (e.g. "Lagos, Nigeria", "London, UK", "New York, USA")
@@ -361,7 +365,12 @@ export function isDomesticCity(
     }
   }
 
-  // 3. Match against the store's customer order history to retrieve the city's real shipping country
+  // 3. If explicit country is provided, compare countries dynamically
+  if (country) {
+    return isSameCountry(country, effectiveCountry);
+  }
+
+  // 4. Match against the store's customer order history to retrieve the city's real shipping country
   if (cityName && topLocations && topLocations.length > 0) {
     const cleanCity = cityName.toLowerCase().trim();
     const match = topLocations.find(
@@ -373,12 +382,6 @@ export function isDomesticCity(
     if (match?.country) {
       return isSameCountry(match.country, effectiveCountry);
     }
-  }
-
-  // 4. Metropolitan dictionary check: resolve city to canonical country
-  const resolvedCountry = lookupCityCountry(cityName);
-  if (resolvedCountry) {
-    return isSameCountry(resolvedCountry, effectiveCountry);
   }
 
   // 5. Default: Return true only if no known conflict

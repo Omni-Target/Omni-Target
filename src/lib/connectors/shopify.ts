@@ -1,7 +1,7 @@
 import { StoreAcquisitionChannel, StoreData, StoreLocation, StoreProduct } from "../store-data";
 import { consolidateLocation, consolidateLocationsWithAI, formatCityName } from "../locations";
 import { fetchWithRetry } from "../http";
-import { getEffectiveStoreCountry } from "../market-geography";
+import { getEffectiveStoreCountry, isSameCountry, lookupCityCountry } from "../market-geography";
 import { shopifyAdminRestUrl } from "../shopify-config";
 import { fetchShopifyPrespendIntelligence } from "./shopify-intelligence";
 import { buildProductDecisions } from "../gateway-decision";
@@ -275,17 +275,60 @@ export async function fetchShopifyStoreData(
     return l !== "" && l !== "unknown" && l !== "null" && l !== "undefined" && l !== "none" && l !== "-" && l !== "false" && l !== "true";
   };
 
+  // Resolves the best shipping city + country for an order, guarding against
+  // browser-autofill mismatches (e.g. a customer in Lagos, Nigeria whose UK browser
+  // autofilled city: "London" alongside province: "Lagos", country: "Nigeria", or
+  // typed the country name "Nigeria" into the city field).
+  const extractOrderLocation = (order: ShopifyOrder): { city: string | undefined; country: string | undefined } => {
+    const rawCity = order.shipping_address?.city || order.billing_address?.city;
+    const rawProvince = order.shipping_address?.province || order.billing_address?.province;
+    const rawCountry =
+      order.shipping_address?.country ||
+      order.shipping_address?.country_code ||
+      order.billing_address?.country ||
+      order.billing_address?.country_code;
+
+    const hasCountry = isValidLocation(rawCountry);
+    const hasProvince = isValidLocation(rawProvince);
+
+    if (isValidLocation(rawCity)) {
+      const trimmedCity = rawCity!.trim();
+
+      // 1. If the buyer typed the country name itself into the city box (e.g. city: "Nigeria", province: "Lagos")
+      if (hasCountry && isSameCountry(trimmedCity, rawCountry) && hasProvince) {
+        return { city: rawProvince!.trim(), country: rawCountry!.trim() };
+      }
+
+      // 2. If the city is a known global metro whose country contradicts the order's shipping country
+      // AND the order's province resolves to a valid city inside the shipping country (e.g.
+      // city: "London", province: "Lagos", country: "Nigeria"), prefer the validated province.
+      if (hasCountry && hasProvince) {
+        const candidateCity = consolidateLocation(trimmedCity) || trimmedCity;
+        const cityCanonicalCountry = lookupCityCountry(candidateCity);
+        if (cityCanonicalCountry && !isSameCountry(cityCanonicalCountry, rawCountry)) {
+          const provinceCity = consolidateLocation(rawProvince!.trim()) || rawProvince!.trim();
+          const provinceCanonicalCountry = lookupCityCountry(provinceCity);
+          if (provinceCanonicalCountry && isSameCountry(provinceCanonicalCountry, rawCountry)) {
+            return { city: rawProvince!.trim(), country: rawCountry!.trim() };
+          }
+        }
+      }
+
+      return { city: trimmedCity, country: hasCountry ? rawCountry!.trim() : undefined };
+    }
+
+    return {
+      city: hasProvince ? rawProvince!.trim() : undefined,
+      country: hasCountry ? rawCountry!.trim() : undefined,
+    };
+  };
+
   // Dynamic AI Location consolidation
   const uniqueRawLocationsMap = new Map<string, string>();
   orders.forEach((order) => {
-    const city =
-      order.shipping_address?.city ||
-      order.billing_address?.city ||
-      order.shipping_address?.province ||
-      order.billing_address?.province;
-    const country = order.shipping_address?.country || order.shipping_address?.country_code || order.billing_address?.country_code || "Unknown";
+    const { city, country } = extractOrderLocation(order);
     if (isValidLocation(city)) {
-      uniqueRawLocationsMap.set(city!.trim(), country);
+      uniqueRawLocationsMap.set(city!.trim(), country || "Unknown");
     }
   });
 
@@ -309,12 +352,7 @@ export async function fetchShopifyStoreData(
   // Location analysis
   const locationMap: Record<string, { count: number; country: string }> = {};
   orders.forEach((order) => {
-    const city =
-      order.shipping_address?.city ||
-      order.billing_address?.city ||
-      order.shipping_address?.province ||
-      order.billing_address?.province;
-    const country = order.shipping_address?.country || order.shipping_address?.country_code || order.billing_address?.country_code;
+    const { city, country } = extractOrderLocation(order);
 
     const hasCity = isValidLocation(city);
     const hasCountry = isValidLocation(country);
@@ -322,10 +360,18 @@ export async function fetchShopifyStoreData(
     if (hasCity) {
       const cityTrimmed = city!.trim();
       const consolidatedCity = aiMapping[cityTrimmed] || consolidateLocation(cityTrimmed) || formatCityName(cityTrimmed);
-      if (consolidatedCity && consolidatedCity !== "Unknown") {
+      if (consolidatedCity && consolidatedCity !== "Unknown" && (!hasCountry || !isSameCountry(consolidatedCity, country))) {
         const displayCountry = hasCountry ? country!.trim() : "Unknown";
+        const canonicalCountry = lookupCityCountry(consolidatedCity);
         if (!locationMap[consolidatedCity]) {
           locationMap[consolidatedCity] = { count: 0, country: displayCountry };
+        } else if (
+          canonicalCountry &&
+          !isSameCountry(canonicalCountry, locationMap[consolidatedCity].country) &&
+          isSameCountry(canonicalCountry, displayCountry)
+        ) {
+          // If an earlier order had a mismatched country, overwrite with the matching canonical country
+          locationMap[consolidatedCity].country = displayCountry;
         }
         locationMap[consolidatedCity].count += 1;
       }

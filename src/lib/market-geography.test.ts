@@ -85,6 +85,19 @@ describe("market-geography dynamic utility", () => {
     expect(isDomesticCity("Lagos", undefined, "US", "USD", [])).toBe(false); // Lagos is Nigeria
   });
 
+  it("blocks overseas cities even when noisy customer order metadata tags them with the domestic country", () => {
+    const poisonedLocations = [
+      { city: "Lagos", country: "Nigeria", percentage: 70 },
+      { city: "Abuja", country: "Nigeria", percentage: 13 },
+      { city: "Ibadan", country: "Nigeria", percentage: 2 },
+      { city: "London", country: "Nigeria", percentage: 1 },
+    ];
+    expect(isDomesticCity("London", "Nigeria", "Nigeria", "NGN", poisonedLocations)).toBe(false);
+    expect(isDomesticCity("Houston", "Nigeria", "Nigeria", "NGN", poisonedLocations)).toBe(false);
+    expect(isDomesticCity("Toronto", "Nigeria", "Nigeria", "NGN", poisonedLocations)).toBe(false);
+    expect(isDomesticCity("Lagos", "Nigeria", "Nigeria", "NGN", poisonedLocations)).toBe(true);
+  });
+
   it("formats international budget floor dynamically", () => {
     expect(getInternationalBudgetFloor("NGN", 1600)).toBe("₦28,800/day ($18/day min)");
     expect(getInternationalBudgetFloor("USD")).toBe("$18/day minimum");
