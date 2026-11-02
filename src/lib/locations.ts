@@ -9,19 +9,20 @@ export const LAGOS_AREAS = [
   "mile 12", "ogba", "okota", "orile", "osapa", "shomolu",
   // Lekki axis sub-neighborhoods
   "ikate", "ikate elegushi", "sangotedo", "agungi", "oniru", "jakande",
-  "ologolo", "ilasan", "idado", "igbo efon", "chevron", "marwa",
+  "ologolo", "ilasan", "idado", "igbo efon", "chevron", "marwa", "ikota",
+  "awoyaya", "ibeju lekki", "kekki", "eti osa",
   // Island & waterfront
   "banana island", "obalende",
   // Mainland extensions
   "ojo", "mile 2", "ogudu", "alapere", "omole", "berger", "ojodu berger",
   "aguda", "anthony", "cement", "alausa", "oregun", "opebi", "allen",
-  "igando", "iyana ipaja",
+  "igando", "iyana ipaja", "abule egba", "ajao", "amuwo odofin",
 ];
 
 export const ABUJA_AREAS = [
-  "maitama", "wuse", "garki", "asokoro", "gwarinpa", "kubwa", "lugbe", "jabi",
+  "maitama", "wuse", "garki", "asokoro", "gwarinpa", "gwarimpa", "kubwa", "lugbe", "jabi",
   "utako", "gudu", "life camp", "apo", "karu", "nyanya", "lokogoma", "galadimawa",
-  "guzape", "durumi", "fct", "abuja"
+  "guzape", "durumi", "katampe", "fct", "abuja"
 ];
 
 export const PH_AREAS = [
