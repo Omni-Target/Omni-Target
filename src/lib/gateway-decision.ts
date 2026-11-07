@@ -18,7 +18,7 @@ export interface DecisionOrder {
   total_price?: string | number;
   subtotal_price?: string | number;
   current_subtotal_price?: string | number;
-  customer?: { id: number };
+  customer?: { id: number; orders_count?: number; created_at?: string };
   line_items?: Array<{
     product_id: number;
     variant_id?: number;
@@ -106,6 +106,7 @@ export function buildProductDecisions(
   options: {
     asOf: string;
     ingestionComplete: boolean;
+    ordersTruncated?: boolean;
     buyerOutcomes?: BuyerOutcomes;
     returnEvidence?: Record<string, StoreProductReturnEvidence>;
     returnEvidenceStatus?: "available" | "missing_scope" | "unavailable" | "error";
@@ -167,6 +168,29 @@ export function buildProductDecisions(
       (a, b) =>
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime() || a.id - b.id,
     );
+
+    // On high-volume stores where order pagination was bounded to the newest cohort,
+    // Shopify's customer.orders_count reveals whether the buyer placed earlier orders
+    // before the fetched window. If so, their orders inside this window are repeat
+    // ("later") orders — never mistake them for a first-time order.
+    if (options.ordersTruncated) {
+      const lifetimeOrdersCount = Math.max(
+        0,
+        ...customerOrders.map((o) => Number(o.customer?.orders_count) || 0),
+      );
+      if (lifetimeOrdersCount > customerOrders.length) {
+        for (const later of customerOrders) {
+          laterTotal++;
+          for (const productId of new Set(
+            (later.line_items || []).map((item) => item.product_id).filter((id) => id > 0),
+          )) {
+            laterCounts.set(productId, (laterCounts.get(productId) || 0) + 1);
+          }
+        }
+        continue;
+      }
+    }
+
     const first = customerOrders[0];
     firstTotal++;
     const firstAt = new Date(first.created_at).getTime();

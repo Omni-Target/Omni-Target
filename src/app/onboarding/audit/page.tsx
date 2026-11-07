@@ -24,24 +24,34 @@ function AuditContent() {
   const [auditError, setAuditError] = useState("");
   const [scanning, setScanning] = useState(true);
   const [completing, setCompleting] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     let isCancelled = false;
+    setScanning(true);
+    setAuditError("");
+    setCurrentStep(0);
 
-    // 1. Kick off store data sync in background and audit computation IMMEDIATELY on mount
+    // 1. Run audit computation (which populates store_snapshot if missing),
+    // then warm /api/store/data cache afterwards so we don't fire two competing
+    // full Shopify syncs at the exact same moment on large catalogs.
     const fetchPromise = (async () => {
-      // Refresh latest store data in background without blocking the audit response
-      fetch("/api/store/data").catch((e) =>
-        console.warn("Background store/data fetch non-critical notice:", e)
-      );
-
-      const res = await fetch("/api/pixel/audit");
+      let res = await fetch("/api/pixel/audit");
+      if (!res.ok) {
+        // Retry once automatically in case a large-catalog sync hit a transient timeout
+        res = await fetch("/api/pixel/audit");
+      }
       if (!res.ok) throw new Error("Audit API failed");
       const data: AuditResult = await res.json();
       if (data.status === "not_connected") {
         window.location.href = "/onboarding/connect-shopify";
         return data;
       }
+
+      // Warm dashboard cache in background after audit snapshot is ready
+      fetch("/api/store/data").catch((e) =>
+        console.warn("Background store/data fetch non-critical notice:", e)
+      );
       return data;
     })();
 
@@ -76,7 +86,7 @@ function AuditContent() {
       isCancelled = true;
       clearInterval(stepInterval);
     };
-  }, []);
+  }, [retryCount]);
 
   const handleContinue = async () => {
     setCompleting(true);
@@ -128,9 +138,18 @@ function AuditContent() {
           </div>
           <h2 className="text-lg font-semibold text-foreground">Audit failed</h2>
           <p className="mt-1.5 text-sm text-danger-600">{auditError}</p>
-          <Button className="mt-6" onClick={handleContinue} isLoading={completing}>
-            {fromDashboard ? "Return to dashboard" : "Continue to dashboard"}
-          </Button>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <Button
+              variant="outline"
+              onClick={() => setRetryCount((c) => c + 1)}
+              disabled={completing}
+            >
+              Try again
+            </Button>
+            <Button onClick={handleContinue} isLoading={completing}>
+              {fromDashboard ? "Return to dashboard" : "Continue to dashboard"}
+            </Button>
+          </div>
         </div>
       ) : null}
     </OnboardingShell>

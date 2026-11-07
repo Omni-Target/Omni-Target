@@ -575,40 +575,51 @@ async function fetchProductEnrichment(
   const products: ProductNode[] = [];
   let cursor: string | null = null;
   let page = 0;
+  const maxPages = 8;
+  const deadline = Date.now() + 10_000;
   do {
-    const data: {
-      products: {
-        nodes: ProductNode[];
-        pageInfo: { hasNextPage: boolean; endCursor?: string | null };
-      };
-    } = await graphql(
-      shopDomain,
-      accessToken,
-      `query PrespendProductEvidence($after: String) {
-        products(first: 50, after: $after, query: "status:active") {
-          nodes {
-            legacyResourceId
-            metafields(first: 50) {
-              nodes {
-                namespace key type value
-                reference {
-                  ... on Metaobject { type fields { key value } }
+    if (page > 0 && Date.now() >= deadline) break;
+    try {
+      const data: {
+        products: {
+          nodes: ProductNode[];
+          pageInfo: { hasNextPage: boolean; endCursor?: string | null };
+        };
+      } = await graphql(
+        shopDomain,
+        accessToken,
+        `query PrespendProductEvidence($after: String) {
+          products(first: 50, after: $after, query: "status:active") {
+            nodes {
+              legacyResourceId
+              metafields(first: 50) {
+                nodes {
+                  namespace key type value
+                  reference {
+                    ... on Metaobject { type fields { key value } }
+                  }
                 }
               }
+              variants(first: 100) {
+                nodes { inventoryItem { unitCost { amount currencyCode } } }
+              }
             }
-            variants(first: 100) {
-              nodes { inventoryItem { unitCost { amount currencyCode } } }
-            }
+            pageInfo { hasNextPage endCursor }
           }
-          pageInfo { hasNextPage endCursor }
-        }
-      }`,
-      { after: cursor }
-    );
-    products.push(...data.products.nodes);
-    cursor = data.products.pageInfo.hasNextPage ? data.products.pageInfo.endCursor || null : null;
-    page += 1;
-  } while (cursor && page < 20);
+        }`,
+        { after: cursor }
+      );
+      products.push(...data.products.nodes);
+      cursor = data.products.pageInfo.hasNextPage ? data.products.pageInfo.endCursor || null : null;
+      page += 1;
+    } catch (error) {
+      if (page > 0) {
+        console.warn(`Product enrichment stopped after ${page} pages (${products.length} products):`, compactError(error));
+        break;
+      }
+      throw error;
+    }
+  } while (cursor && page < maxPages);
 
   return Object.fromEntries(products.map((product) => {
     const costs = product.variants.nodes
