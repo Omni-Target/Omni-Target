@@ -6,7 +6,7 @@ export interface BuyerOutcomeOrder {
   total_price: string;
   subtotal_price?: string;
   current_subtotal_price?: string;
-  customer?: { id: number };
+  customer?: { id: number; orders_count?: number };
   line_items?: Array<{ product_id: number }>;
 }
 
@@ -54,6 +54,7 @@ export function calculateBuyerOutcomes(
   orders: BuyerOutcomeOrder[],
   asOf: string,
   productNames?: Map<number, string>,
+  ordersTruncated = false,
 ): BuyerOutcomes {
   const now = Date.parse(asOf);
   const byCustomer = new Map<number, BuyerOutcomeOrder[]>();
@@ -106,6 +107,15 @@ export function calculateBuyerOutcomes(
 
   for (const customerOrders of byCustomer.values()) {
     customerOrders.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id);
+    if (ordersTruncated) {
+      const lifetimeOrdersCount = Math.max(
+        0,
+        ...customerOrders.map((o) => Number(o.customer?.orders_count) || 0),
+      );
+      if (lifetimeOrdersCount > customerOrders.length) {
+        continue;
+      }
+    }
     const firstOrder = customerOrders[0];
     const firstAt = Date.parse(firstOrder.created_at);
     const firstProducts = new Set(

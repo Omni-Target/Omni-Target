@@ -3,6 +3,9 @@ import { getUserIntegration } from "@/lib/db";
 import { calculateAdReadinessScore } from "@/lib/ad-readiness-score";
 import { compareProductsForTest, selectGatewayTestCandidate } from "@/lib/gateway-decision";
 
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 export async function GET() {
   const { userId } = await auth();
 

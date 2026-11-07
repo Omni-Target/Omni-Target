@@ -25,7 +25,7 @@ interface ShopifyOrder {
   subtotal_price?: string;
   current_subtotal_price?: string;
   created_at: string;
-  customer?: { id: number };
+  customer?: { id: number; orders_count?: number; created_at?: string };
   billing_address?: { city?: string; province?: string; province_code?: string; country_code?: string; country?: string };
   shipping_address?: { city?: string; province?: string; province_code?: string; country_code?: string; country?: string };
   financial_status: string;
@@ -107,18 +107,57 @@ function parseNextPageUrl(linkHeader: string | null): string | null {
   return null;
 }
 
-async function shopifyGetPaginated<T>(
+const ORDER_SYNC_MAX_PAGES = 100; // Up to 25,000 most recent paid orders
+const ORDER_SYNC_BUDGET_MS = 20_000;
+const PRODUCT_SYNC_INITIAL_MAX_PAGES = 8; // Up to 2,000 active catalog products upfront
+const PRODUCT_SYNC_BUDGET_MS = 12_000;
+const MISSING_ORDER_PRODUCTS_MAX_BATCHES = 2; // Up to 500 additional order-referenced products
+const MISSING_ORDER_PRODUCTS_BUDGET_MS = 6_000;
+export const MAX_SNAPSHOT_PRODUCTS = 1_000;
+const MAX_VARIANT_NAMES_PER_PRODUCT = 25;
+const MAX_PRODUCT_DESCRIPTION_CHARS = 600;
+
+interface PaginatedFetchOptions {
+  maxPages?: number;
+  maxDurationMs?: number;
+  allowPartial?: boolean;
+}
+
+interface PaginatedFetchResult<T> {
+  items: T[];
+  truncated: boolean;
+  pagesFetched: number;
+}
+
+export async function shopifyGetPaginatedWithMeta<T>(
   shopDomain: string,
   accessToken: string,
   initialEndpoint: string,
   dataKey: string,
-  maxPages = 200 // Increased to 200 pages (50,000 records) for full lifetime ingestion
-): Promise<T[]> {
+  options: PaginatedFetchOptions = {}
+): Promise<PaginatedFetchResult<T>> {
+  const {
+    maxPages = 200,
+    maxDurationMs,
+    allowPartial = false,
+  } = options;
+  const deadline = maxDurationMs ? Date.now() + maxDurationMs : Infinity;
+
   let results: T[] = [];
   let url = shopifyAdminRestUrl(shopDomain, initialEndpoint);
   let pagesFetched = 0;
 
   while (url && pagesFetched < maxPages) {
+    if (pagesFetched > 0 && Date.now() >= deadline) {
+      if (allowPartial) {
+        console.warn(
+          `Shopify ${dataKey} sync reached time budget (${maxDurationMs}ms) after ${pagesFetched} pages (${results.length} records); continuing with partial set.`
+        );
+        return { items: results, truncated: true, pagesFetched };
+      }
+      throw new Error(`Incomplete Shopify ${dataKey} import: time budget exceeded`);
+    }
+
     try {
       const res = await fetchWithTimeout(url, {
         headers: {
@@ -143,15 +182,102 @@ async function shopifyGetPaginated<T>(
       url = parseNextPageUrl(linkHeader) || "";
     } catch (error) {
       console.error(`Shopify fetch error for URL ${url}:`, error);
+      if (allowPartial && pagesFetched > 0) {
+        console.warn(
+          `Shopify ${dataKey} pagination interrupted after ${pagesFetched} pages (${results.length} records); continuing with fetched records.`
+        );
+        return { items: results, truncated: true, pagesFetched };
+      }
       throw error;
     }
   }
 
-  if (url) throw new Error(`Incomplete Shopify ${dataKey} import: pagination limit reached`);
-  return results;
+  if (url) {
+    if (allowPartial) {
+      console.warn(
+        `Shopify ${dataKey} pagination capped at ${maxPages} pages (${results.length} records) for high-volume store.`
+      );
+      return { items: results, truncated: true, pagesFetched };
+    }
+    throw new Error(`Incomplete Shopify ${dataKey} import: pagination limit reached`);
+  }
+
+  return { items: results, truncated: false, pagesFetched };
 }
 
+/**
+ * For large-catalog stores (e.g., 10k–70k+ SKUs), ensures every product that
+ * actually appears in order history is fetched even if it wasn't in the first
+ * N pages of `products.json`. Prioritizes products by units sold descending.
+ */
+export async function fetchMissingOrderProducts(
+  shopDomain: string,
+  accessToken: string,
+  orders: ShopifyOrder[],
+  existingProducts: ShopifyProduct[]
+): Promise<ShopifyProduct[]> {
+  const existingIds = new Set<number>(existingProducts.map((p) => p.id));
+  const missingUnitsByProduct = new Map<number, number>();
+
+  for (const order of orders) {
+    for (const item of order.line_items || []) {
+      const pid = item.product_id;
+      if (!pid || pid <= 0 || existingIds.has(pid)) continue;
+      const qty = Math.max(1, Number(item.quantity) || 1);
+      missingUnitsByProduct.set(pid, (missingUnitsByProduct.get(pid) || 0) + qty);
+    }
+  }
+
+  if (missingUnitsByProduct.size === 0) return [];
+
+  const prioritizedMissingIds = [...missingUnitsByProduct.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+    .slice(0, MISSING_ORDER_PRODUCTS_MAX_BATCHES * 250)
+    .map(([pid]) => pid);
+
+  const fetched: ShopifyProduct[] = [];
+  const deadline = Date.now() + MISSING_ORDER_PRODUCTS_BUDGET_MS;
+
+  for (let i = 0; i < prioritizedMissingIds.length; i += 250) {
+    if (i > 0 && Date.now() >= deadline) break;
+    const chunk = prioritizedMissingIds.slice(i, i + 250);
+    const endpoint = `products.json?ids=${chunk.join(",")}&limit=250&status=active&fields=id,title,handle,body_html,variants,images,product_type,vendor,tags,created_at`;
+    const batch = await shopifyGet<{ products: ShopifyProduct[] }>(
+      shopDomain,
+      accessToken,
+      endpoint
+    );
+    if (batch?.products?.length) {
+      fetched.push(...batch.products);
+    }
+  }
+
+  return fetched;
+}
+
+// Deduplicate concurrent full-store syncs for the same shop domain so parallel
+// requests (e.g. audit + dashboard warmup) share one in-flight Shopify sync.
+const inFlightStoreSyncs = new Map<string, Promise<StoreData>>();
+
 export async function fetchShopifyStoreData(
+  shopDomain: string,
+  accessToken: string,
+  userId?: string | null
+): Promise<StoreData> {
+  const syncKey = shopDomain.trim().toLowerCase();
+  const existingSync = inFlightStoreSyncs.get(syncKey);
+  if (existingSync) {
+    return existingSync;
+  }
+
+  const syncPromise = executeShopifyStoreSync(shopDomain, accessToken, userId).finally(() => {
+    inFlightStoreSyncs.delete(syncKey);
+  });
+  inFlightStoreSyncs.set(syncKey, syncPromise);
+  return syncPromise;
+}
+
+async function executeShopifyStoreSync(
   shopDomain: string,
   accessToken: string,
   userId?: string | null
@@ -166,41 +292,85 @@ export async function fetchShopifyStoreData(
   const shop = shopData?.shop;
   if (!shop) throw new Error("Shopify store details unavailable; previous snapshot retained");
 
-  // Fetch optional pre-spend datasets independently. Individual GraphQL
-  // capability failures are recorded in the snapshot and never erase the
-  // reliable order/product data that powers the existing dashboard.
+  // Fetch optional pre-spend datasets and exact active catalog count independently.
   const intelligencePromise = fetchShopifyPrespendIntelligence(
     shopDomain,
     accessToken
   );
+  const productCountPromise = shopifyGet<{ count: number }>(
+    shopDomain,
+    accessToken,
+    "products/count.json?status=active"
+  ).catch(() => null);
 
-  // STEP 2 — Fetch true lifetime orders (removed 365-day truncation and 2k pagination cap)
-  let orders: ShopifyOrder[];
+  // STEP 2 — Fetch paid orders with a wall-clock & page budget so mega-stores never 504
+  let orders: ShopifyOrder[] = [];
+  let ordersTruncated = false;
   let ingestionComplete = true;
   try {
-    orders = await shopifyGetPaginated<ShopifyOrder>(
+    const orderResult = await shopifyGetPaginatedWithMeta<ShopifyOrder>(
       shopDomain,
       accessToken,
       `orders.json?status=any&financial_status=paid&limit=250&fields=id,total_price,subtotal_price,current_subtotal_price,created_at,customer,billing_address,shipping_address,financial_status,source_name,referring_site,landing_site,line_items`,
-      "orders"
+      "orders",
+      {
+        maxPages: ORDER_SYNC_MAX_PAGES,
+        maxDurationMs: ORDER_SYNC_BUDGET_MS,
+        allowPartial: true,
+      }
     );
+    orders = orderResult.items;
+    ordersTruncated = orderResult.truncated;
   } catch (err) {
     console.error("Order ingestion incomplete:", err);
     orders = [];
     ingestionComplete = false;
   }
 
-  const intelligence = await intelligencePromise;
+  const [intelligence, productCountRes] = await Promise.all([
+    intelligencePromise,
+    productCountPromise,
+  ]);
+  const totalCatalogProductsCount =
+    typeof productCountRes?.count === "number" && productCountRes.count > 0
+      ? productCountRes.count
+      : undefined;
 
-  // STEP 3 — Fetch all active products using pagination
-  let rawProducts: ShopifyProduct[];
+  // STEP 3 — Fetch bounded active catalog + backfill any order-referenced products by ID
+  let rawProducts: ShopifyProduct[] = [];
+  let productsTruncated = false;
   try {
-    rawProducts = await shopifyGetPaginated<ShopifyProduct>(
+    const productResult = await shopifyGetPaginatedWithMeta<ShopifyProduct>(
       shopDomain,
       accessToken,
       "products.json?limit=250&status=active&fields=id,title,handle,body_html,variants,images,product_type,vendor,tags,created_at",
-      "products"
+      "products",
+      {
+        maxPages: PRODUCT_SYNC_INITIAL_MAX_PAGES,
+        maxDurationMs: PRODUCT_SYNC_BUDGET_MS,
+        allowPartial: true,
+      }
     );
+    rawProducts = productResult.items;
+    productsTruncated = productResult.truncated;
+
+    if (orders.length > 0) {
+      const missingOrderProducts = await fetchMissingOrderProducts(
+        shopDomain,
+        accessToken,
+        orders,
+        rawProducts
+      );
+      if (missingOrderProducts.length > 0) {
+        const seenIds = new Set(rawProducts.map((p) => p.id));
+        for (const prod of missingOrderProducts) {
+          if (!seenIds.has(prod.id)) {
+            seenIds.add(prod.id);
+            rawProducts.push(prod);
+          }
+        }
+      }
+    }
   } catch (err) {
     console.error("Product ingestion incomplete:", err);
     rawProducts = [];
@@ -429,17 +599,37 @@ export async function fetchShopifyStoreData(
   // Repeat customer detection and First Order tracking
   const customerOrderCount: Record<string, number> = {};
   const customerFirstOrder: Record<string, number> = {};
-  
+  const customerLifetimeOrdersCount: Record<string, number> = {};
+
   const sortedOrders = [...orders].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-  
+
   sortedOrders.forEach((order) => {
     const customerId = order.customer?.id?.toString();
     if (!customerId) return;
     customerOrderCount[customerId] = (customerOrderCount[customerId] || 0) + 1;
+    const lifetimeCount = Number(order.customer?.orders_count) || 0;
+    if (lifetimeCount > (customerLifetimeOrdersCount[customerId] || 0)) {
+      customerLifetimeOrdersCount[customerId] = lifetimeCount;
+    }
     if (!customerFirstOrder[customerId]) {
       customerFirstOrder[customerId] = order.id;
     }
   });
+
+  // When order pagination was bounded on a mega-store (e.g. 100k+ orders),
+  // any buyer whose lifetime Shopify orders_count exceeds their orders inside
+  // the fetched window placed their true first order before the window.
+  // Count them accurately as returning customers and do not attribute their
+  // in-window repeat order as a first-time purchase.
+  if (ordersTruncated) {
+    for (const [customerId, inWindowCount] of Object.entries(customerOrderCount)) {
+      const lifetimeCount = customerLifetimeOrdersCount[customerId] || 0;
+      if (lifetimeCount > inWindowCount) {
+        customerOrderCount[customerId] = lifetimeCount;
+        delete customerFirstOrder[customerId];
+      }
+    }
+  }
 
   const totalCustomers = Object.keys(customerOrderCount).length;
   const returningCustomers = Object.values(customerOrderCount).filter(
@@ -454,7 +644,7 @@ export async function fetchShopifyStoreData(
     rawProducts.map((product) => [product.id, product.title]),
   );
   const buyerOutcomes = ingestionComplete
-    ? calculateBuyerOutcomes(orders, generatedAt, productNamesMap)
+    ? calculateBuyerOutcomes(orders, generatedAt, productNamesMap, ordersTruncated)
     : null;
   const gatewaySignalValidation = ingestionComplete
     ? validateGatewaySignal(orders, rawProducts.map((product) => product.id), generatedAt)
@@ -601,10 +791,10 @@ export async function fetchShopifyStoreData(
       image_url: images[0]?.src || "",
       should_advertise: !allOutOfStock,
       reason: allOutOfStock ? "Out of stock" : undefined,
-      description: product.body_html
+      description: (product.body_html
         ?.replace(/<[^>]*>/g, " ")
         ?.replace(/\s+/g, " ")
-        ?.trim() || "",
+        ?.trim() || "").slice(0, MAX_PRODUCT_DESCRIPTION_CHARS),
       tags: product.tags 
         ? product.tags.split(",")
           .map((t: string) => t.trim())
@@ -613,7 +803,9 @@ export async function fetchShopifyStoreData(
       has_partial_stock: hasPartialStock,
       in_stock_variant_count: inStockVariants.length,
       total_variant_count: totalVariants,
-      in_stock_variant_names: inStockVariants.map((v) => v.title),
+      in_stock_variant_names: inStockVariants
+        .slice(0, MAX_VARIANT_NAMES_PER_PRODUCT)
+        .map((v) => v.title),
       first_time_buyer_ratio,
       first_time_buyer_count: firstTimeBuyerCustomersCount,
       unique_customer_count: customersForProduct.size,
@@ -644,6 +836,7 @@ export async function fetchShopifyStoreData(
     {
       asOf: generatedAt,
       ingestionComplete,
+      ordersTruncated,
       buyerOutcomes: buyerOutcomes || undefined,
       returnEvidence: intelligence.prespend.capabilities.return_evidence?.status === "available"
         ? intelligence.returns : undefined,
@@ -660,8 +853,16 @@ export async function fetchShopifyStoreData(
     product.return_evidence = decision.return_evidence;
   }
 
-  // Sort products by revenue descending so the AI and dashboard prioritize top sellers
-  products.sort((a, b) => b.revenue - a.revenue);
+  // Sort products by revenue descending (with unit/order/stock tie-breakers for zero-revenue items)
+  // so high-volume catalogs always retain every order-backed and in-stock candidate within the snapshot cap.
+  products.sort(
+    (a, b) =>
+      b.revenue - a.revenue ||
+      b.units_sold - a.units_sold ||
+      (b.order_count || 0) - (a.order_count || 0) ||
+      (b.in_stock ? 1 : 0) - (a.in_stock ? 1 : 0)
+  );
+  const snapshotProducts = products.slice(0, MAX_SNAPSHOT_PRODUCTS);
 
   // Extract currency symbol from money_format (e.g. "${{amount}}" -> "$", "€{{amount}}" -> "€")
   let symbol = "₦"; // Fallback
@@ -686,6 +887,12 @@ export async function fetchShopifyStoreData(
   ).length;
   const qualityWarnings = [
     ...(!ingestionComplete ? ["Order or product data may be incomplete due to a sync error. Recommendations use the available data."] : []),
+    ...(ordersTruncated
+      ? [`Analyzed your ${orders.length.toLocaleString()} most recent paid orders to keep sync fast on high-volume order history.`]
+      : []),
+    ...(productsTruncated || products.length > MAX_SNAPSHOT_PRODUCTS
+      ? [`Prioritized top-selling and active products (${snapshotProducts.length.toLocaleString()} shown) from your large catalog for ad planning.`]
+      : []),
     ...(orders.length > 0 && anonymousOrders / orders.length > 0.4
       ? [`${anonymousOrders} guest checkout orders lacked customer IDs; repeat-buyer metrics reflect identified accounts.`]
       : []),
@@ -704,6 +911,7 @@ export async function fetchShopifyStoreData(
       currency_symbol: symbol,
       country: getEffectiveStoreCountry(shop?.country_code, shop?.currency, topLocations),
       platform: "shopify",
+      total_products: Math.max(totalCatalogProductsCount ?? 0, products.length),
     },
     orders: {
       total_revenue: totalRevenue,
@@ -725,7 +933,7 @@ export async function fetchShopifyStoreData(
       oldest_order_date: oldestOrderDate.toISOString(),
       acquisition_channels,
     },
-    products,
+    products: snapshotProducts,
     customers: {
       total_count: totalCustomers,
       new_count: newCustomers,

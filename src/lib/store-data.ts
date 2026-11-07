@@ -295,6 +295,7 @@ export interface StoreData {
     currency_symbol?: string;
     country: string;
     platform: "shopify" | "woocommerce" | "bigcommerce" | "other";
+    total_products?: number;
   };
   orders: {
     total_revenue: number;

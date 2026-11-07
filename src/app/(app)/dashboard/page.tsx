@@ -424,7 +424,7 @@ function DashboardContent() {
             aov={orders.average_order_value ?? 0}
             repeatRate={orders.repeat_customer_rate ?? 0}
             activeProducts={products.filter((p) => p.in_stock).length}
-            totalProducts={products.length}
+            totalProducts={(storeData?.store as { total_products?: number } | undefined)?.total_products ?? products.length}
             currency={currency}
           />
 
