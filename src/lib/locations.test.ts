@@ -11,60 +11,62 @@ vi.mock("@/lib/db", () => ({
 
 import { consolidateLocation, formatCityName, LAGOS_AREAS, ABUJA_AREAS, PH_AREAS } from "./locations";
 
+const consolidateNg = (city: string) => consolidateLocation(city, "NG");
+
 describe("consolidateLocation", () => {
   // ── Lagos neighborhoods ──────────────────────────────────────
   describe("Lagos resolution", () => {
     it("resolves 'Lagos' itself", () => {
-      expect(consolidateLocation("Lagos")).toBe("Lagos");
-      expect(consolidateLocation("lagos")).toBe("Lagos");
-      expect(consolidateLocation("LAGOS")).toBe("Lagos");
+      expect(consolidateNg("Lagos")).toBe("Lagos");
+      expect(consolidateNg("lagos")).toBe("Lagos");
+      expect(consolidateNg("LAGOS")).toBe("Lagos");
     });
 
     it("resolves Ikate → Lagos (the original bug)", () => {
-      expect(consolidateLocation("Ikate")).toBe("Lagos");
-      expect(consolidateLocation("ikate")).toBe("Lagos");
-      expect(consolidateLocation("Ikate Elegushi")).toBe("Lagos");
+      expect(consolidateNg("Ikate")).toBe("Lagos");
+      expect(consolidateNg("ikate")).toBe("Lagos");
+      expect(consolidateNg("Ikate Elegushi")).toBe("Lagos");
     });
 
     it("resolves Lekki axis neighborhoods → Lagos", () => {
-      expect(consolidateLocation("Lekki")).toBe("Lagos");
-      expect(consolidateLocation("Sangotedo")).toBe("Lagos");
-      expect(consolidateLocation("Agungi")).toBe("Lagos");
-      expect(consolidateLocation("Oniru")).toBe("Lagos");
-      expect(consolidateLocation("Jakande")).toBe("Lagos");
-      expect(consolidateLocation("Ologolo")).toBe("Lagos");
-      expect(consolidateLocation("Chevron")).toBe("Lagos");
+      expect(consolidateNg("Lekki")).toBe("Lagos");
+      expect(consolidateNg("Sangotedo")).toBe("Lagos");
+      expect(consolidateNg("Agungi")).toBe("Lagos");
+      expect(consolidateNg("Oniru")).toBe("Lagos");
+      expect(consolidateNg("Jakande")).toBe("Lagos");
+      expect(consolidateNg("Ologolo")).toBe("Lagos");
+      expect(consolidateNg("Chevron")).toBe("Lagos");
     });
 
     it("resolves mainland neighborhoods → Lagos", () => {
-      expect(consolidateLocation("Yaba")).toBe("Lagos");
-      expect(consolidateLocation("Surulere")).toBe("Lagos");
-      expect(consolidateLocation("Ikeja")).toBe("Lagos");
-      expect(consolidateLocation("Gbagada")).toBe("Lagos");
-      expect(consolidateLocation("Ojo")).toBe("Lagos");
-      expect(consolidateLocation("Ogba")).toBe("Lagos");
-      expect(consolidateLocation("Alausa")).toBe("Lagos");
-      expect(consolidateLocation("Oregun")).toBe("Lagos");
-      expect(consolidateLocation("Opebi")).toBe("Lagos");
+      expect(consolidateNg("Yaba")).toBe("Lagos");
+      expect(consolidateNg("Surulere")).toBe("Lagos");
+      expect(consolidateNg("Ikeja")).toBe("Lagos");
+      expect(consolidateNg("Gbagada")).toBe("Lagos");
+      expect(consolidateNg("Ojo")).toBe("Lagos");
+      expect(consolidateNg("Ogba")).toBe("Lagos");
+      expect(consolidateNg("Alausa")).toBe("Lagos");
+      expect(consolidateNg("Oregun")).toBe("Lagos");
+      expect(consolidateNg("Opebi")).toBe("Lagos");
     });
 
     it("resolves island/waterfront neighborhoods → Lagos", () => {
-      expect(consolidateLocation("Ikoyi")).toBe("Lagos");
-      expect(consolidateLocation("Victoria Island")).toBe("Lagos");
-      expect(consolidateLocation("VI")).toBe("Lagos");
-      expect(consolidateLocation("Banana Island")).toBe("Lagos");
-      expect(consolidateLocation("Obalende")).toBe("Lagos");
+      expect(consolidateNg("Ikoyi")).toBe("Lagos");
+      expect(consolidateNg("Victoria Island")).toBe("Lagos");
+      expect(consolidateNg("VI")).toBe("Lagos");
+      expect(consolidateNg("Banana Island")).toBe("Lagos");
+      expect(consolidateNg("Obalende")).toBe("Lagos");
     });
 
     it("resolves compound address strings → Lagos", () => {
-      expect(consolidateLocation("Lekki Phase 1")).toBe("Lagos");
-      expect(consolidateLocation("Ikeja, Lagos")).toBe("Lagos");
-      expect(consolidateLocation("Ajah Lagos")).toBe("Lagos");
+      expect(consolidateNg("Lekki Phase 1")).toBe("Lagos");
+      expect(consolidateNg("Ikeja, Lagos")).toBe("Lagos");
+      expect(consolidateNg("Ajah Lagos")).toBe("Lagos");
     });
 
     it("ensures ALL LAGOS_AREAS entries resolve to Lagos", () => {
       for (const area of LAGOS_AREAS) {
-        const result = consolidateLocation(area);
+        const result = consolidateNg(area);
         expect(result).toBe("Lagos");
       }
     });
@@ -73,16 +75,16 @@ describe("consolidateLocation", () => {
   // ── Abuja neighborhoods ──────────────────────────────────────
   describe("Abuja resolution", () => {
     it("resolves Abuja neighborhoods → Abuja", () => {
-      expect(consolidateLocation("Maitama")).toBe("Abuja");
-      expect(consolidateLocation("Wuse")).toBe("Abuja");
-      expect(consolidateLocation("Garki")).toBe("Abuja");
-      expect(consolidateLocation("Gwarinpa")).toBe("Abuja");
-      expect(consolidateLocation("FCT")).toBe("Abuja");
+      expect(consolidateNg("Maitama")).toBe("Abuja");
+      expect(consolidateNg("Wuse")).toBe("Abuja");
+      expect(consolidateNg("Garki")).toBe("Abuja");
+      expect(consolidateNg("Gwarinpa")).toBe("Abuja");
+      expect(consolidateNg("FCT")).toBe("Abuja");
     });
 
     it("ensures ALL ABUJA_AREAS entries resolve to Abuja", () => {
       for (const area of ABUJA_AREAS) {
-        const result = consolidateLocation(area);
+        const result = consolidateNg(area);
         expect(result).toBe("Abuja");
       }
     });
@@ -91,15 +93,15 @@ describe("consolidateLocation", () => {
   // ── Port Harcourt neighborhoods ──────────────────────────────
   describe("Port Harcourt resolution", () => {
     it("resolves PH neighborhoods → Port Harcourt", () => {
-      expect(consolidateLocation("Trans Amadi")).toBe("Port Harcourt");
-      expect(consolidateLocation("Rumuola")).toBe("Port Harcourt");
-      expect(consolidateLocation("PH")).toBe("Port Harcourt");
-      expect(consolidateLocation("Port-Harcourt")).toBe("Port Harcourt");
+      expect(consolidateNg("Trans Amadi")).toBe("Port Harcourt");
+      expect(consolidateNg("Rumuola")).toBe("Port Harcourt");
+      expect(consolidateNg("PH")).toBe("Port Harcourt");
+      expect(consolidateNg("Port-Harcourt")).toBe("Port Harcourt");
     });
 
     it("ensures ALL PH_AREAS entries resolve to Port Harcourt", () => {
       for (const area of PH_AREAS) {
-        const result = consolidateLocation(area);
+        const result = consolidateNg(area);
         expect(result).toBe("Port Harcourt");
       }
     });
@@ -108,67 +110,67 @@ describe("consolidateLocation", () => {
   // ── Other Nigerian cities ────────────────────────────────────
   describe("other Nigerian city resolution", () => {
     it("resolves Benin City", () => {
-      expect(consolidateLocation("Benin City")).toBe("Benin City");
-      expect(consolidateLocation("Oredo")).toBe("Benin City");
+      expect(consolidateNg("Benin City")).toBe("Benin City");
+      expect(consolidateNg("Oredo")).toBe("Benin City");
     });
 
     it("resolves Ibadan", () => {
-      expect(consolidateLocation("Ibadan")).toBe("Ibadan");
-      expect(consolidateLocation("Bodija")).toBe("Ibadan");
+      expect(consolidateNg("Ibadan")).toBe("Ibadan");
+      expect(consolidateNg("Bodija")).toBe("Ibadan");
     });
 
     it("resolves other major cities", () => {
-      expect(consolidateLocation("Enugu")).toBe("Enugu");
-      expect(consolidateLocation("Kaduna")).toBe("Kaduna");
-      expect(consolidateLocation("Kano")).toBe("Kano");
-      expect(consolidateLocation("Warri")).toBe("Warri");
-      expect(consolidateLocation("Calabar")).toBe("Calabar");
-      expect(consolidateLocation("Abeokuta")).toBe("Abeokuta");
+      expect(consolidateNg("Enugu")).toBe("Enugu");
+      expect(consolidateNg("Kaduna")).toBe("Kaduna");
+      expect(consolidateNg("Kano")).toBe("Kano");
+      expect(consolidateNg("Warri")).toBe("Warri");
+      expect(consolidateNg("Calabar")).toBe("Calabar");
+      expect(consolidateNg("Abeokuta")).toBe("Abeokuta");
     });
   });
 
   // ── International ────────────────────────────────────────────
   describe("international resolution", () => {
     it("resolves London", () => {
-      expect(consolidateLocation("London")).toBe("London");
-      expect(consolidateLocation("Greater London")).toBe("London");
+      expect(consolidateLocation("London", "GB")).toBe("London");
+      expect(consolidateLocation("Greater London", "GB")).toBe("London");
     });
   });
 
   // ── The core fix: unrecognized cities return null ────────────
   describe("null return for unrecognized cities", () => {
     it("returns null for empty/falsy input", () => {
-      expect(consolidateLocation("")).toBeNull();
-      expect(consolidateLocation(null as unknown as string)).toBeNull();
-      expect(consolidateLocation(undefined as unknown as string)).toBeNull();
+      expect(consolidateNg("")).toBeNull();
+      expect(consolidateNg(null as unknown as string)).toBeNull();
+      expect(consolidateNg(undefined as unknown as string)).toBeNull();
     });
 
     it("returns null for unrecognized neighborhoods (so AI tier resolves them)", () => {
       // These are real neighborhoods that are NOT in the static lists
       // and should flow to the AI tier for dynamic resolution
-      expect(consolidateLocation("Shoreditch")).toBeNull();
-      expect(consolidateLocation("Camden")).toBeNull();
-      expect(consolidateLocation("Brooklyn")).toBeNull();
-      expect(consolidateLocation("Queens")).toBeNull();
-      expect(consolidateLocation("Bronx")).toBeNull();
-      expect(consolidateLocation("East Legon")).toBeNull();
-      expect(consolidateLocation("Cantonments")).toBeNull();
+      expect(consolidateNg("Shoreditch")).toBeNull();
+      expect(consolidateNg("Camden")).toBeNull();
+      expect(consolidateNg("Brooklyn")).toBeNull();
+      expect(consolidateNg("Queens")).toBeNull();
+      expect(consolidateNg("Bronx")).toBeNull();
+      expect(consolidateNg("East Legon")).toBeNull();
+      expect(consolidateNg("Cantonments")).toBeNull();
     });
 
     it("returns null for legitimate foreign cities (AI returns them as-is)", () => {
-      expect(consolidateLocation("Manchester")).toBeNull();
-      expect(consolidateLocation("Paris")).toBeNull();
-      expect(consolidateLocation("Houston")).toBeNull();
-      expect(consolidateLocation("Toronto")).toBeNull();
+      expect(consolidateNg("Manchester")).toBeNull();
+      expect(consolidateNg("Paris")).toBeNull();
+      expect(consolidateNg("Houston")).toBeNull();
+      expect(consolidateNg("Toronto")).toBeNull();
     });
   });
 
   // ── Dirty input handling ─────────────────────────────────────
   describe("dirty input handling", () => {
     it("handles punctuation and extra whitespace", () => {
-      expect(consolidateLocation("  Ikate  ")).toBe("Lagos");
-      expect(consolidateLocation("Lekki, Lagos.")).toBe("Lagos");
-      expect(consolidateLocation("Maitama - Abuja")).toBe("Abuja");
+      expect(consolidateNg("  Ikate  ")).toBe("Lagos");
+      expect(consolidateNg("Lekki, Lagos.")).toBe("Lagos");
+      expect(consolidateNg("Maitama - Abuja")).toBe("Abuja");
     });
   });
 });
@@ -187,5 +189,37 @@ describe("formatCityName", () => {
 
   it("returns Unknown for empty input", () => {
     expect(formatCityName("")).toBe("Unknown");
+  });
+});
+
+describe("Nigerian rules never apply to other countries (GEO-01)", () => {
+  it.each([
+    ["Riverside", "US"],
+    ["San Jose", "United States"],
+    ["Warrington", "GB"],
+    ["Allen", "US"],
+    ["APO", "US"],
+    ["Maryland", "US"],
+    ["Lagos", "PT"],
+    ["Benin", "BJ"],
+    ["Rivers", "CA"],
+  ])("%s in %s is not rewritten to a Nigerian metro", (city, country) => {
+    expect(consolidateLocation(city, country)).toBeNull();
+  });
+
+  it("does not assume Nigeria when the order has no country", () => {
+    expect(consolidateLocation("Lagos", undefined)).toBeNull();
+    expect(consolidateLocation("Ikeja", "")).toBeNull();
+  });
+
+  it("matches whole words even within Nigeria", () => {
+    expect(consolidateLocation("Riverside Estate", "NG")).toBeNull();
+    expect(consolidateLocation("Rivers State", "NG")).toBe("Port Harcourt");
+    expect(consolidateLocation("Jos North", "Nigeria")).toBe("Jos");
+  });
+
+  it("applies the London rule only to UK orders", () => {
+    expect(consolidateLocation("London", "United Kingdom")).toBe("London");
+    expect(consolidateLocation("London", "US")).toBeNull();
   });
 });

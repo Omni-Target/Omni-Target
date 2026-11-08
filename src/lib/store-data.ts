@@ -3,6 +3,8 @@ export interface StoreLocation {
   country: string;
   percentage: number;
   source?: "from_data" | "recommended";
+  /** Up to 10 unnormalized city strings from orders, kept for auditing (GEO-01). */
+  raw_cities?: string[];
 }
 
 export interface StoreProduct {

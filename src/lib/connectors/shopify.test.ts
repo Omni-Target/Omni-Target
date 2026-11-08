@@ -247,3 +247,59 @@ describe("large catalog & 70k+ SKU store sync resilience", () => {
     expect(prod20.later_order_count).toBe(1);
   });
 });
+
+describe("order geography (GEO-01)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("keeps each city in its own country and only trusts a province that is a known city there", async () => {
+    let nextId = 1;
+    const order = (shipping_address: Record<string, string>) => {
+      const id = nextId++;
+      return {
+        id,
+        name: `#${id}`,
+        created_at: new Date().toISOString(),
+        processed_at: new Date().toISOString(),
+        total_price: "50.00",
+        subtotal_price: "50.00",
+        financial_status: "paid",
+        line_items: [],
+        customer: { id, orders_count: 1 },
+        shipping_address,
+      };
+    };
+    const orders = [
+      order({ city: "Riverside", province: "California", country: "United States", country_code: "US" }),
+      order({ city: "Lagos", province: "Faro", country: "Portugal", country_code: "PT" }),
+      order({ city: "Lagos", province: "Lagos", country: "Nigeria", country_code: "NG" }),
+      order({ city: "Ikeja", province: "Lagos", country: "Nigeria", country_code: "NG" }),
+      // Autofilled foreign city: the province is a known city in the order's country.
+      order({ city: "London", province: "Lagos", country: "Nigeria", country_code: "NG" }),
+      // No city and an unverifiable province: not counted as a city at all.
+      order({ province: "Maryland", country: "United States", country_code: "US" }),
+    ];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      const json = (body: unknown) =>
+        new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url.includes("/shop.json")) {
+        return json({ shop: { name: "Geo", domain: "geo.test", myshopify_domain: "geo-test.myshopify.com", currency: "USD", country_code: "US", money_format: "${{amount}}" } });
+      }
+      if (url.includes("/orders.json")) return json({ orders });
+      return json({ products: [] });
+    });
+
+    const data = await fetchShopifyStoreData("geo-test.myshopify.com", "shpat_test", "user_1");
+    const locations = data.orders.top_locations;
+    const find = (city: string, country: string) => locations.find((l) => l.city === city && l.country === country);
+
+    expect(find("Riverside", "United States")).toBeDefined();
+    expect(find("Lagos", "Portugal")).toBeDefined();
+    expect(find("Lagos", "Nigeria")?.percentage).toBe(50); // 3 of 6, including Ikeja and the autofill
+    expect(find("Lagos", "Nigeria")?.raw_cities).toEqual(expect.arrayContaining(["Lagos", "Ikeja"]));
+    expect(locations.some((l) => l.city === "Port Harcourt")).toBe(false);
+    expect(locations.some((l) => l.city === "Maryland")).toBe(false);
+  });
+});
