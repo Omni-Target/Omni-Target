@@ -248,6 +248,22 @@ export async function GET(request: Request) {
       console.warn("Webhook registration warning:", whErr instanceof Error ? whErr.message : whErr);
     }
 
+    // SEC-09: revoke stored access as soon as the app is removed.
+    try {
+      await fetch(shopifyAdminRestUrl(shop, "webhooks.json"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({
+          webhook: { topic: "app/uninstalled", address: webhookUrl, format: "json" },
+        }),
+      });
+    } catch (whErr) {
+      console.warn("Uninstall webhook registration warning:", whErr instanceof Error ? whErr.message : whErr);
+    }
+
     // Onboarding: skip the audit for completed merchants, paid-plan intents,
     // dashboard reconnects and returning "Continue with Shopify" logins.
     const { clerkClient } = await import("@clerk/nextjs/server");
