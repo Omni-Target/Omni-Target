@@ -1,15 +1,21 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { SignIn } from "@clerk/nextjs";
 import { AuthShell, authAppearance, ShopifyLoginButton } from "@/components/auth";
-import { AlertCircle, ArrowRight } from "lucide-react";
+import { AlertCircle, ArrowRight, Store } from "lucide-react";
+import { PENDING_INSTALL_COOKIE, readPendingInstall } from "@/lib/shopify-oauth";
+
+/** After sign-in/sign-up, re-run Shopify OAuth for the pending store, bound to the new session. */
+const RESUME_SHOPIFY_INSTALL_URL = "/api/auth/shopify/connect?resume=1";
 
 interface LoginPageProps {
-  searchParams: Promise<{ error?: string; detail?: string; plan?: string }>;
+  searchParams: Promise<{ error?: string; detail?: string; plan?: string; reason?: string }>;
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
-  const { error, detail, plan } = await searchParams;
-  const normalizedPlan = plan?.toLowerCase() || null;
+  const { error, detail, plan, reason } = await searchParams;
+  const pendingInstall = readPendingInstall((await cookies()).get(PENDING_INSTALL_COOKIE)?.value);
+  const normalizedPlan = plan?.toLowerCase() || pendingInstall?.plan || null;
 
   return (
     <AuthShell
@@ -46,7 +52,23 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </div>
         )}
 
-        <ShopifyLoginButton plan={normalizedPlan} mode="login" />
+        {pendingInstall ? (
+          <div className="flex items-start gap-2.5 rounded-xl border border-brand-200 bg-brand-50/80 p-3 text-left">
+            <Store className="size-4 shrink-0 text-brand-700 mt-0.5" />
+            <div className="space-y-0.5">
+              <p className="text-xs font-semibold text-foreground">
+                Finish connecting {pendingInstall.shop}
+              </p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {reason === "multiple_accounts"
+                  ? "This store is connected to more than one Omni Target account. Sign in to the account you want to use and we'll continue."
+                  : "Sign in (or create an account) and we'll link this store to it automatically."}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <ShopifyLoginButton plan={normalizedPlan} mode="login" />
+        )}
 
         <SignIn
           routing="path"
@@ -54,6 +76,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           fallbackRedirectUrl={
             normalizedPlan ? `/dashboard?plan=${encodeURIComponent(normalizedPlan)}` : "/dashboard"
           }
+          forceRedirectUrl={pendingInstall ? RESUME_SHOPIFY_INSTALL_URL : undefined}
+          signUpForceRedirectUrl={pendingInstall ? RESUME_SHOPIFY_INSTALL_URL : undefined}
           appearance={authAppearance}
         />
       </div>

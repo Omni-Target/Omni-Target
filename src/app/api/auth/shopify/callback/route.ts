@@ -1,68 +1,141 @@
 import { auth } from "@clerk/nextjs/server";
-import { getExistingIntegrationByStore, upsertUserIntegration, updateUserIntegration } from "@/lib/db";
-import { createHmac } from "crypto";
+import { getUserIdsLinkedToStore, upsertUserIntegration, updateUserIntegration } from "@/lib/db";
 import { fetchWithRetry } from "@/lib/http";
 import { shopifyAdminRestUrl } from "@/lib/shopify-config";
 import { fetchShopifyStoreLogo } from "@/lib/shopify-store-logo";
 import { normalizeStoreLogoUrl } from "@/lib/store-logo-url";
+import { safeInternalPath } from "@/lib/safe-redirect";
+import {
+  OAUTH_STATE_COOKIE,
+  PENDING_INSTALL_COOKIE,
+  PENDING_INSTALL_TTL_SECONDS,
+  clearCookie,
+  createPendingInstall,
+  isFreshShopifyTimestamp,
+  isValidShopDomain,
+  readCookie,
+  readOAuthState,
+  resolveCallbackDecision,
+  serializeCookie,
+  verifyShopifyQueryHmac,
+} from "@/lib/shopify-oauth";
+
+/**
+ * Shopify OAuth callback.
+ *
+ * Security model (SEC-01):
+ *   1. The redirect must carry a valid Shopify HMAC, a genuine *.myshopify.com
+ *      shop and a fresh timestamp.
+ *   2. The returned `state` must equal the nonce in this browser's signed
+ *      `shopify_oauth_state` cookie, for the same shop. The cookie is single-use.
+ *   3. The account is chosen by `resolveCallbackDecision`: the browser's own
+ *      Clerk session, or — for a signed-out "Continue with Shopify" — the one
+ *      account already linked to this exact shop. Nothing in the URL and not
+ *      the shop's contact email can select an account, and accounts are never
+ *      created here. A signed-out install for an unlinked (or ambiguously
+ *      linked) shop becomes a pending install that resumes after sign-in.
+ */
+const GENERIC_FAILURE = "We could not complete the Shopify connection. Please try again.";
+
+function redirectTo(url: string, cookies: string[] = []): Response {
+  const response = new Response(null, {
+    status: 302,
+    headers: new Headers({ Location: url, "Cache-Control": "no-store" }),
+  });
+  for (const cookie of cookies) response.headers.append("Set-Cookie", cookie);
+  return response;
+}
 
 export async function GET(request: Request) {
-  const { userId } = await auth();
-  const { searchParams } = new URL(request.url);
-  
+  const url = new URL(request.url);
+  const searchParams = url.searchParams;
+  const appBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || url.origin).replace(/\/$/, "");
+  const clearState = clearCookie(OAUTH_STATE_COOKIE);
+
+  // 1. The redirect itself must come from Shopify.
+  if (!verifyShopifyQueryHmac(searchParams, process.env.SHOPIFY_CLIENT_SECRET)) {
+    return Response.json({ error: "Invalid HMAC" }, { status: 401, headers: { "Set-Cookie": clearState } });
+  }
+
+  const shop = (searchParams.get("shop") || "").trim().toLowerCase();
   const code = searchParams.get("code");
-  const shop = searchParams.get("shop");
-  const state = searchParams.get("state") || "";
-  const hmac = searchParams.get("hmac");
-
-  // Verify HMAC signature from Shopify
-  const params = Object.fromEntries(
-    searchParams.entries()
-  );
-  delete params.hmac;
-  
-  const message = Object.keys(params)
-    .sort()
-    .map(k => `${k}=${params[k]}`)
-    .join("&");
-
-  const computedHmac = createHmac(
-    "sha256", 
-    process.env.SHOPIFY_CLIENT_SECRET!
-  )
-    .update(message)
-    .digest("hex");
-
-  if (computedHmac !== hmac) {
-    return Response.json(
-      { error: "Invalid HMAC" }, 
-      { status: 401 }
+  const stateParam = searchParams.get("state") || "";
+  const statePayload = readOAuthState(readCookie(request.headers.get("cookie"), OAUTH_STATE_COOKIE));
+  const errorPage = statePayload?.from === "login" ? "login" : "signup";
+  const failure = (detail: string) =>
+    redirectTo(
+      `${appBaseUrl}/${errorPage}?error=shopify_auth_failed&detail=${encodeURIComponent(detail)}`,
+      [clearState],
     );
+
+  if (!isValidShopDomain(shop) || !isFreshShopifyTimestamp(searchParams.get("timestamp"))) {
+    return failure("This Shopify sign-in link is invalid or has expired. Please try again.");
   }
 
-  if (!code || !shop) {
-    const [, fromParam] = state.split("___");
-    const appBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin).replace(/\/$/, "");
-    if (fromParam === "login") {
-      return Response.redirect(`${appBaseUrl}/login?error=missing_code`);
+  if (!code) {
+    if (statePayload?.from === "login") {
+      return redirectTo(`${appBaseUrl}/login?error=missing_code`, [clearState]);
     }
-    return Response.redirect(
-      `${appBaseUrl}/onboarding/connect-shopify?error=missing`
+    return redirectTo(`${appBaseUrl}/onboarding/connect-shopify?error=missing`, [clearState]);
+  }
+
+  const { userId } = await auth();
+  const sessionUserId = userId ?? null;
+
+  // Accounts already linked to this exact shop are only consulted for a
+  // signed-out browser whose state cookie matches this shop.
+  let linkedUserIds: string[] = [];
+  if (!sessionUserId && statePayload && statePayload.shop === shop) {
+    try {
+      linkedUserIds = await getUserIdsLinkedToStore(shop);
+    } catch (lookupErr) {
+      console.error("Shopify OAuth: store link lookup failed:", lookupErr instanceof Error ? lookupErr.message : lookupErr);
+      return failure(GENERIC_FAILURE);
+    }
+  }
+
+  const decision = resolveCallbackDecision({ sessionUserId, statePayload, stateParam, shop, linkedUserIds });
+
+  if (decision.kind === "reject") {
+    console.warn(`Shopify OAuth callback rejected: ${decision.reason}`);
+    return failure(
+      decision.reason === "session_mismatch"
+        ? "You switched accounts while connecting Shopify. Please start the connection again."
+        : "Your Shopify sign-in expired or was started in another browser. Please try again.",
     );
   }
+
+  // resolveCallbackDecision only returns non-reject outcomes for a valid state.
+  const state = statePayload!;
+  const selectedPlan = state.plan;
+  const planQuery = selectedPlan ? `&plan=${encodeURIComponent(selectedPlan)}` : "";
+
+  if (decision.kind === "pending_install") {
+    // Signed-out install for a store with no (or several) linked accounts: the
+    // merchant must sign in or create an account first; OAuth then re-runs
+    // bound to that session (see /api/auth/shopify/connect?resume=1).
+    const ambiguous = decision.reason === "ambiguous_linked_accounts";
+    const page = ambiguous || state.from === "login" ? "login" : "signup";
+    const pending = createPendingInstall({ shop, from: state.from, plan: selectedPlan });
+    return redirectTo(
+      `${appBaseUrl}/${page}?pending=shopify${ambiguous ? "&reason=multiple_accounts" : ""}${planQuery}`,
+      [clearState, serializeCookie(PENDING_INSTALL_COOKIE, pending, PENDING_INSTALL_TTL_SECONDS)],
+    );
+  }
+
+  const targetUserId = decision.userId;
+  const isFromDashboard = state.from === "dashboard";
+  const isLogin = state.from === "login";
+  const hasPaidPlan = ["starter", "growth", "scale"].includes(selectedPlan);
 
   try {
-    // Exchange code for an EXPIRING offline access token.
-    // The key parameter is "expiring": 1 — this tells Shopify
-    // to return an expiring token + refresh token instead of the
-    // now-deprecated non-expiring token.
+    // Exchange code for an EXPIRING offline access token ("expiring": 1 returns
+    // an expiring token + refresh token instead of a non-expiring token).
     const tokenRes = await fetchWithRetry(
       `https://${shop}/admin/oauth/access_token`,
       {
         method: "POST",
-        headers: { 
-          "Content-Type": "application/json" 
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           client_id: process.env.SHOPIFY_CLIENT_ID,
           client_secret: process.env.SHOPIFY_CLIENT_SECRET,
@@ -70,7 +143,7 @@ export async function GET(request: Request) {
           expiring: 1,
         }),
       },
-      { timeoutMs: 12000, retries: 2 }
+      { timeoutMs: 12000, retries: 2 },
     );
 
     const tokenData = await tokenRes.json();
@@ -79,161 +152,54 @@ export async function GET(request: Request) {
     const expiresIn = tokenData.expires_in || null; // seconds
 
     if (!accessToken) {
-      console.error("Token exchange failed:", tokenData);
+      console.error("Shopify token exchange failed:", {
+        status: tokenRes.status,
+        error: tokenData?.error ?? null,
+        description: tokenData?.error_description ?? null,
+      });
       throw new Error("No access token returned");
     }
 
-    console.log("Shopify token exchange success. Shop:", shop);
-    console.log("Token type:", refreshToken ? "expiring" : "non-expiring");
-    if (expiresIn) console.log("Expires in:", expiresIn, "seconds");
-
-    // Calculate token expiration timestamp
-    const tokenExpiresAt = expiresIn
-      ? new Date(Date.now() + expiresIn * 1000).toISOString()
-      : null;
+    const tokenExpiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
 
     // Fetch shop details to get the primary custom domain
-    const shopDetailsRes = await fetch(
-      shopifyAdminRestUrl(shop, "shop.json"),
-      {
-        headers: {
-          "X-Shopify-Access-Token": accessToken
-        }
-      }
-    );
-
+    const shopDetailsRes = await fetch(shopifyAdminRestUrl(shop, "shop.json"), {
+      headers: { "X-Shopify-Access-Token": accessToken },
+    });
     const shopDetails = await shopDetailsRes.json();
-    const [, from, stateUserId, statePlan] = state.split("___");
-    const isFromDashboard = from === "dashboard";
-
-    let selectedPlan = statePlan?.trim().toLowerCase() || "";
-    if (!selectedPlan) {
-      const cookieHeader = request.headers.get("cookie") || "";
-      const match = cookieHeader.match(/(?:^|;\s*)selected_plan=([^;]+)/);
-      if (match) {
-        selectedPlan = decodeURIComponent(match[1]).toLowerCase();
-      }
-    }
-    const hasPaidPlan = ["starter", "growth", "scale"].includes(selectedPlan);
 
     const shopData = shopDetails.shop || {};
-    const storeEmail = shopData.email || shopData.customer_email || "";
-    const storeOwner = shopData.shop_owner || shopData.name || "Store Owner";
+    const storeEmail: string = shopData.email || shopData.customer_email || "";
     const customDomain = shopData.domain || null;
-    const myshopifyUrl = shopData.myshopify_domain || shop;
-
-    console.log("Shopify custom domain:", customDomain);
-    console.log("Shopify myshopify URL:", myshopifyUrl);
-    console.log("Shopify store email:", storeEmail);
+    const reportedDomain = String(shopData.myshopify_domain || "").toLowerCase();
+    const myshopifyUrl = isValidShopDomain(reportedDomain) ? reportedDomain : shop;
 
     // The Online Store theme exposes its own logo, even when the merchant has
     // not configured Shopify Brand assets. Use its original image size.
     const storeLogoUrl = await fetchShopifyStoreLogo(myshopifyUrl, customDomain);
     const storeName: string = shopData.name || "Store";
 
-    console.log("Shopify store branding resolved:", { storeName, storeLogoUrl });
-
     // Shopify data payload — store token + refresh token + expiry
     const shopifyData: Record<string, unknown> = {
       shopify_store_url: myshopifyUrl,
       shopify_custom_domain: customDomain,
       shopify_access_token: accessToken,
-      shop_domain: myshopifyUrl, // explicitly set shop_domain
-      access_token: accessToken, // explicitly set access_token
+      shop_domain: myshopifyUrl,
+      access_token: accessToken,
       shopify_refresh_token: refreshToken,
       shopify_token_expires_at: tokenExpiresAt,
       shopify_scopes: tokenData.scope,
     };
 
-    // Populate new schema columns if they exist (backward compatibility / redundancy check)
+    // Populate new schema columns if they exist (backward compatibility)
     const { detectColumns, handleFreeCreditOnInstall } = await import("@/lib/billing-db");
     const cols = await detectColumns();
-    if (cols.hasShopDomain) {
-      shopifyData.shop_domain = myshopifyUrl;
-    }
-    if (cols.hasAccessToken) {
-      shopifyData.access_token = accessToken;
-    }
-    if (cols.hasRefreshToken) {
-      shopifyData.refresh_token = refreshToken;
-    }
-    if (cols.hasTokenExpiresAt) {
-      shopifyData.token_expires_at = tokenExpiresAt;
-    }
+    if (cols.hasShopDomain) shopifyData.shop_domain = myshopifyUrl;
+    if (cols.hasAccessToken) shopifyData.access_token = accessToken;
+    if (cols.hasRefreshToken) shopifyData.refresh_token = refreshToken;
+    if (cols.hasTokenExpiresAt) shopifyData.token_expires_at = tokenExpiresAt;
 
-    // Resolve target Clerk user:
-    // 1. Check if user is already signed in in this browser session or in state
-    let targetUserId = userId || (stateUserId && stateUserId !== "anonymous" ? stateUserId : null);
-
-    // 2. If unauthenticated, check if this store is already linked to an existing integration
-    if (!targetUserId) {
-      const existingIntegration = await getExistingIntegrationByStore(myshopifyUrl);
-      if (existingIntegration?.clerk_user_id) {
-        targetUserId = existingIntegration.clerk_user_id;
-        console.log("Found existing integration for store:", myshopifyUrl, "→ user:", targetUserId);
-      }
-    }
-
-    // 3. If still no user, check if a Clerk user already exists with the store contact email
-    const { clerkClient } = await import("@clerk/nextjs/server");
-    const clerk = await clerkClient();
-
-    if (!targetUserId && storeEmail) {
-      const existingUsers = await clerk.users.getUserList({ emailAddress: [storeEmail] });
-      if (existingUsers.data && existingUsers.data.length > 0) {
-        targetUserId = existingUsers.data[0].id;
-        console.log("Found existing Clerk user by email:", storeEmail, "→ user:", targetUserId);
-      }
-    }
-
-    // 4. If still no user, auto-create the Clerk user from Shopify store details!
-    if (!targetUserId) {
-      const nameParts = storeOwner.trim().split(/\s+/);
-      const firstName = nameParts[0] || "Store";
-      const lastName = nameParts.slice(1).join(" ") || "Owner";
-      const cleanStoreSlug = myshopifyUrl.replace(/\.myshopify\.com$/i, "").replace(/[^a-zA-Z0-9_-]/g, "");
-      const effectiveEmail =
-        (storeEmail || "").trim() || `${cleanStoreSlug || "merchant"}@omnitarget.app`;
-
-      const { randomBytes } = await import("crypto");
-      const securePassword = randomBytes(16).toString("hex") + "A1!";
-
-      const initialMeta: Record<string, unknown> = {
-        onboardingStep: "audit",
-        source: "shopify_install",
-        shopifyStoreUrl: myshopifyUrl,
-      };
-      if (storeName) initialMeta.storeName = storeName;
-      if (storeLogoUrl) initialMeta.storeLogoUrl = storeLogoUrl;
-
-      try {
-        const newUser = await clerk.users.createUser({
-          emailAddress: [effectiveEmail],
-          password: securePassword,
-          firstName,
-          lastName,
-          publicMetadata: initialMeta,
-        });
-        targetUserId = newUser.id;
-        console.log("Auto-created Clerk user for Shopify merchant:", targetUserId, effectiveEmail);
-      } catch (createErr: unknown) {
-        console.warn("Clerk createUser error, attempting fallback user resolution:", createErr);
-        // If the email already exists in Clerk, resolve that user
-        const existingByEmail = await clerk.users.getUserList({ emailAddress: [effectiveEmail] });
-        if (existingByEmail.data && existingByEmail.data.length > 0) {
-          targetUserId = existingByEmail.data[0].id;
-          console.log("Resolved existing user on duplicate email conflict:", targetUserId);
-        } else {
-          throw createErr;
-        }
-      }
-    }
-
-    // Upsert the integration row matched by the resolved Clerk user ID
-    console.log("Upserting user integration for Clerk user:", targetUserId);
     await upsertUserIntegration(targetUserId, shopifyData);
-
-    console.log("Shopify upsert success");
 
     // Give 1 free credit on install if free_credit_used is false
     const { getUserIntegration } = await import("@/lib/db");
@@ -246,7 +212,6 @@ export async function GET(request: Request) {
       try {
         const { sendEmail } = await import("@/lib/email");
         const { welcomeEmailHtml } = await import("@/emails/welcome");
-
         await sendEmail({
           to: storeEmail,
           subject: "Your free brief is waiting",
@@ -254,64 +219,44 @@ export async function GET(request: Request) {
           userId: targetUserId,
           templateName: "welcome",
         });
-        console.log("Welcome email sent to", storeEmail);
       } catch (err) {
-        console.error("Failed to send welcome email:", err);
+        console.error("Failed to send welcome email:", err instanceof Error ? err.message : err);
       }
     }
 
     // Register the orders/paid webhook so confirmed purchases
     // are forwarded to Meta CAPI for attribution
-    const webhookUrl =
-      `${process.env.NEXT_PUBLIC_APP_URL}` +
-      `/api/shopify/webhook`;
-
+    const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/shopify/webhook`;
     try {
-      const webhookRes = await fetch(
-        shopifyAdminRestUrl(shop, "webhooks.json"),
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": accessToken,
-          },
-          body: JSON.stringify({
-            webhook: {
-              topic: "orders/paid",
-              address: webhookUrl,
-              format: "json",
-            },
-          }),
-        }
-      );
-
-      const webhookData = await webhookRes.json();
-      console.log("Webhook registration:", {
-        success: !!webhookData.webhook?.id,
-        webhookId: webhookData.webhook?.id,
-        error: webhookData.errors || null,
+      const webhookRes = await fetch(shopifyAdminRestUrl(shop, "webhooks.json"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({
+          webhook: { topic: "orders/paid", address: webhookUrl, format: "json" },
+        }),
       });
-
+      const webhookData = await webhookRes.json();
       if (webhookData.webhook?.id) {
         await updateUserIntegration(targetUserId, {
           shopify_webhook_id: String(webhookData.webhook.id),
         });
       }
     } catch (whErr) {
-      console.warn("Webhook registration warning:", whErr);
+      console.warn("Webhook registration warning:", whErr instanceof Error ? whErr.message : whErr);
     }
 
-    // Check onboarding status:
-    // If the merchant already completed onboarding previously, logged in via "Continue with Shopify",
-    // or selected a paid plan (starter, growth, scale), send them directly to /dashboard to review/activate.
-    // If this is a free scan or audit hasn't been completed, kick off the audit!
+    // Onboarding: skip the audit for completed merchants, paid-plan intents,
+    // dashboard reconnects and returning "Continue with Shopify" logins.
+    const { clerkClient } = await import("@clerk/nextjs/server");
+    const clerk = await clerkClient();
     const targetUser = await clerk.users.getUser(targetUserId);
     const currentOnboardingStep = (targetUser.publicMetadata as { onboardingStep?: string })?.onboardingStep;
     const isAlreadyComplete = currentOnboardingStep === "complete";
-    const isLogin = from === "login";
     const shouldSkipAudit = hasPaidPlan || isFromDashboard || isAlreadyComplete || (isLogin && !!userIntegration);
 
-    // Update Clerk metadata directly — store is connected, so step is either complete or audit
     const existingMeta = (targetUser.publicMetadata || {}) as Record<string, unknown>;
     const updatedMeta: Record<string, unknown> = {
       ...existingMeta,
@@ -324,76 +269,35 @@ export async function GET(request: Request) {
           : null),
     };
     if (storeName) updatedMeta.storeName = storeName;
+    await clerk.users.updateUserMetadata(targetUserId, { publicMetadata: updatedMeta });
 
-    await clerk.users.updateUserMetadata(targetUserId, {
-      publicMetadata: updatedMeta,
-    });
-
-    const appBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin).replace(/\/$/, "");
     let destination = shouldSkipAudit ? "/dashboard" : "/onboarding/audit";
+    if (selectedPlan) destination += `?plan=${encodeURIComponent(selectedPlan)}`;
+    if (isFromDashboard) destination += `${destination.includes("?") ? "&" : "?"}shopify=reconnected`;
+    destination = safeInternalPath(destination);
+
+    const cookies = [clearState];
     if (selectedPlan) {
-      destination += `?plan=${encodeURIComponent(selectedPlan)}`;
-    }
-    if (isFromDashboard) {
-      destination += `${destination.includes("?") ? "&" : "?"}shopify=reconnected`;
+      cookies.push(`selected_plan=${selectedPlan}; Secure; SameSite=Lax; Max-Age=3600; Path=/`);
     }
 
-    // Helper to build redirect with cookie
-    const buildRedirect = (url: string) => {
-      const resp = new Response(null, {
-        status: 302,
-        headers: new Headers({
-          Location: url,
-        }),
-      });
-      if (selectedPlan) {
-        resp.headers.append(
-          "Set-Cookie",
-          `selected_plan=${selectedPlan}; Secure; SameSite=Lax; Max-Age=3600; Path=/`
-        );
-      }
-      return resp;
-    };
-
-    // If the merchant is already logged into Clerk in this browser, redirect directly
-    if (userId) {
-      return buildRedirect(`${appBaseUrl}${destination}`);
+    if (decision.kind === "link_to_session") {
+      return redirectTo(`${appBaseUrl}${destination}`, cookies);
     }
 
-    // Otherwise (Shopify App Store install or Login with Shopify):
-    // Issue a single-use sign-in ticket so the browser authenticates instantly without a password
+    // decision.kind === "sign_in_linked_user": signed-out "Continue with
+    // Shopify" for a store already linked to exactly one account. Completing
+    // OAuth for this shop proves admin access to it; issue a single-use ticket.
     const signInToken = await clerk.signInTokens.createSignInToken({
       userId: targetUserId,
       expiresInSeconds: 300,
     });
-
-    const ssoUrl = `${appBaseUrl}/auth/shopify-callback?token=${encodeURIComponent(
-      signInToken.token
-    )}&destination=${encodeURIComponent(destination)}`;
-
-    return buildRedirect(ssoUrl);
-
-  } catch (err: unknown) {
-    let errMsg = "Authentication error";
-    if (err instanceof Error) {
-      errMsg = err.message;
-    } else if (err && typeof err === "object") {
-      if ("message" in err && typeof (err as { message: unknown }).message === "string") {
-        errMsg = (err as { message: string }).message;
-      } else {
-        try {
-          errMsg = JSON.stringify(err);
-        } catch {
-          errMsg = String(err);
-        }
-      }
-    } else {
-      errMsg = String(err);
-    }
-    console.error("Shopify OAuth error:", errMsg, err);
-    const appBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin).replace(/\/$/, "");
-    return Response.redirect(
-      `${appBaseUrl}/login?error=shopify_auth_failed&detail=${encodeURIComponent(errMsg.slice(0, 120))}`
+    return redirectTo(
+      `${appBaseUrl}/auth/shopify-callback?token=${encodeURIComponent(signInToken.token)}&destination=${encodeURIComponent(destination)}`,
+      cookies,
     );
+  } catch (err: unknown) {
+    console.error("Shopify OAuth error:", err instanceof Error ? err.message : "unknown error");
+    return failure(GENERIC_FAILURE);
   }
 }

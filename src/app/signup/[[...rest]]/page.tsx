@@ -1,6 +1,11 @@
+import { cookies } from "next/headers";
 import { SignUp } from "@clerk/nextjs";
 import { AuthShell, authAppearance, ShopifyLoginButton } from "@/components/auth";
-import { Sparkles, AlertCircle } from "lucide-react";
+import { Sparkles, AlertCircle, Store } from "lucide-react";
+import { PENDING_INSTALL_COOKIE, readPendingInstall } from "@/lib/shopify-oauth";
+
+/** After sign-up/sign-in, re-run Shopify OAuth for the pending store, bound to the new session. */
+const RESUME_SHOPIFY_INSTALL_URL = "/api/auth/shopify/connect?resume=1";
 
 interface SignupPageProps {
   searchParams: Promise<{
@@ -35,7 +40,8 @@ const PLAN_BANNERS: Record<string, { title: string; subtitle: string; badge: str
 
 export default async function SignupPage({ searchParams }: SignupPageProps) {
   const { plan, error, detail } = await searchParams;
-  const normalizedPlan = plan?.toLowerCase() || null;
+  const pendingInstall = readPendingInstall((await cookies()).get(PENDING_INSTALL_COOKIE)?.value);
+  const normalizedPlan = plan?.toLowerCase() || pendingInstall?.plan || null;
   const planInfo = normalizedPlan ? PLAN_BANNERS[normalizedPlan] : null;
 
   return (
@@ -71,11 +77,26 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
           </div>
         )}
 
-        <ShopifyLoginButton
-          plan={normalizedPlan}
-          mode="signup"
-          buttonText="Scan your store with Shopify"
-        />
+        {pendingInstall ? (
+          <div className="flex items-start gap-2.5 rounded-xl border border-brand-200 bg-brand-50/80 p-3 text-left">
+            <Store className="size-4 shrink-0 text-brand-700 mt-0.5" />
+            <div className="space-y-0.5">
+              <p className="text-xs font-semibold text-foreground">
+                Finish connecting {pendingInstall.shop}
+              </p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Create your Omni Target account (or sign in) and we&apos;ll link this store to it
+                automatically.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <ShopifyLoginButton
+            plan={normalizedPlan}
+            mode="signup"
+            buttonText="Scan your store with Shopify"
+          />
+        )}
 
         <SignUp
           routing="path"
@@ -83,6 +104,8 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
           fallbackRedirectUrl={
             normalizedPlan ? `/onboarding?plan=${encodeURIComponent(normalizedPlan)}` : "/onboarding"
           }
+          forceRedirectUrl={pendingInstall ? RESUME_SHOPIFY_INSTALL_URL : undefined}
+          signInForceRedirectUrl={pendingInstall ? RESUME_SHOPIFY_INSTALL_URL : undefined}
           appearance={authAppearance}
         />
       </div>
