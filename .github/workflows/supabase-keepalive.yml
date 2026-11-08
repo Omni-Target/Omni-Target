@@ -6,6 +6,14 @@ on:
     - cron: '0 5 */3 * *'
   workflow_dispatch: # Allows manual trigger from the GitHub Actions tab
 
+# Interim only: Phase S2.3 replaces this workflow with nightly encrypted
+# pg_dump backups (which also generate database activity). It is not a
+# production-reliability mechanism.
+#
+# The API key comes ONLY from repository secrets — never hard-code a key here
+# (this repository is public). Required secret: SUPABASE_ANON_KEY or
+# NEXT_PUBLIC_SUPABASE_ANON_KEY.
+
 jobs:
   keepalive:
     name: Ping Supabase Database
@@ -14,21 +22,31 @@ jobs:
       - name: Send keep-alive query to Supabase PostgREST
         env:
           SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://bafwrcyruaxzojwofxym.supabase.co' }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhZndyY3lydWF4em9qd29meHltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTk0NDIsImV4cCI6MjA5MDE3NTQ0Mn0.u1SZeVLF3xXloDEx-z6lqCQ1co2o8x1v_r1qws-WG_I' }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
         run: |
-          echo "Sending keep-alive request to Supabase project..."
-          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" \
-            "${SUPABASE_URL}/rest/v1/rate_limits?select=count" \
-            -H "apikey: ${SUPABASE_ANON_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}")
+          if [ -z "${SUPABASE_ANON_KEY}" ]; then
+            echo "::error::Repository secret SUPABASE_ANON_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY) is not set."
+            exit 1
+          fi
+
+          ping() {
+            curl -s -o response.json -w "%{http_code}" "$1" \
+              -H "apikey: ${SUPABASE_ANON_KEY}" \
+              -H "Authorization: Bearer ${SUPABASE_ANON_KEY}"
+          }
+
+          # After migration 0012_rls_lockdown the anon key can only call
+          # keepalive_ping(); before it, fall back to the original table ping.
+          HTTP_STATUS=$(ping "${SUPABASE_URL}/rest/v1/rpc/keepalive_ping")
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "keepalive_ping unavailable (HTTP ${HTTP_STATUS}); falling back to table ping"
+            HTTP_STATUS=$(ping "${SUPABASE_URL}/rest/v1/rate_limits?select=count")
+          fi
 
           echo "Response HTTP Status: ${HTTP_STATUS}"
-          cat response.json
-          echo ""
-
           if [ "$HTTP_STATUS" -eq 200 ]; then
-            echo "✅ Successfully pinged Supabase. Database activity recorded; pause timer reset."
+            echo "Successfully pinged Supabase. Database activity recorded; pause timer reset."
           else
-            echo "❌ Keep-alive request failed with HTTP status ${HTTP_STATUS}"
+            echo "::error::Keep-alive request failed with HTTP status ${HTTP_STATUS}"
             exit 1
           fi

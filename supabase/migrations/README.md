@@ -49,3 +49,28 @@ reversal exists (dropping tables in production loses data).
 > Note: statements that cannot run inside a transaction (e.g.
 > `CREATE INDEX CONCURRENTLY`) need their own dedicated migration handling and
 > are not supported by the default transactional runner.
+
+## Client-role lockdown (0012) — rules for every later migration
+
+`0012_rls_lockdown.sql` enables RLS on every table in `public`, revokes all
+privileges from the client roles `anon` and `authenticated`, and removes the
+default privileges that would re-grant them on new objects. The application
+only uses the service-role key, which bypasses RLS. When writing new
+migrations:
+
+- New tables get no client-role access automatically; keep it that way. Enable
+  RLS explicitly anyway (`alter table … enable row level security`) so the
+  intent is visible in review.
+- New functions no longer receive `EXECUTE` through `PUBLIC`. Grant it to
+  `service_role` explicitly (as 0009/0010 do) — default privileges cover
+  functions created by the migration role, but explicit grants keep reviews
+  honest.
+- Never grant anything to `anon`/`authenticated`. The single exception is
+  `public.keepalive_ping()` (temporary, until nightly backups replace the
+  keep-alive workflow).
+
+Verify any environment (read-only, exits non-zero on a violation):
+
+```bash
+node scripts/ops/assert-rls-lockdown.mjs --env-file .env.local
+```
