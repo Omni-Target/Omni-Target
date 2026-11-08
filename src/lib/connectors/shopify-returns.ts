@@ -1,5 +1,4 @@
-import { fetchWithRetry } from "../http";
-import { shopifyAdminGraphqlUrl } from "../shopify-config";
+import { shopifyGraphql } from "./shopify-graphql";
 import type { StoreProductReturnEvidence } from "../store-data";
 
 // Initial review policy; calibrate against observed store distributions before changing it.
@@ -110,6 +109,10 @@ export function calculateReturnEvidence(orders: ReturnOrder[]): Record<string, S
 }
 
 /** Bounded mature-order cohort. Any pagination gap withholds every derived rate. */
+interface ReturnOrdersResponse {
+  orders?: { nodes: ReturnOrder[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
+}
+
 export async function fetchShopifyReturnEvidence(
   shopDomain: string,
   accessToken: string,
@@ -127,20 +130,11 @@ export async function fetchShopifyReturnEvidence(
 
   while (hasNextPage && pages < 25) {
     if (Date.now() >= deadline) throw new Error("Return evidence sync exceeded its time budget");
-    const response = await fetchWithRetry(shopifyAdminGraphqlUrl(shopDomain), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": accessToken },
-      body: JSON.stringify({ query: QUERY, variables: { after: cursor, filter } }),
-    }, { timeoutMs: 12_000, retries: 1 });
-    if (!response.ok) throw new Error(`Shopify return evidence HTTP ${response.status}`);
-    const body = await response.json() as {
-      data?: { orders?: { nodes: ReturnOrder[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } };
-      errors?: Array<{ message: string }>;
-    };
-    if (body.errors?.length || !body.data?.orders) {
-      throw new Error(body.errors?.map((error) => error.message).join("; ") || "Return evidence query failed");
-    }
-    const page = body.data.orders;
+    const data: ReturnOrdersResponse = await shopifyGraphql<ReturnOrdersResponse>(
+      shopDomain, accessToken, QUERY, { after: cursor, filter },
+    );
+    if (!data.orders) throw new Error("Return evidence query failed");
+    const page = data.orders;
     for (const order of page.nodes) {
       if (order.lineItems.pageInfo.hasNextPage || order.returns.pageInfo.hasNextPage ||
           order.returns.nodes.some((item) => item.returnLineItems.pageInfo.hasNextPage) ||

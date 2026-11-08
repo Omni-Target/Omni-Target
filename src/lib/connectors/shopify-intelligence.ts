@@ -1,9 +1,10 @@
-import { fetchWithRetry } from "../http";
 import { fetchShopifyReturnEvidence } from "./shopify-returns";
 import {
-  getMissingShopifyScopes,
-  shopifyAdminGraphqlUrl,
-} from "../shopify-config";
+  ShopifyGraphqlError,
+  collectDeniedFields,
+  shopifyGraphql as graphql,
+} from "./shopify-graphql";
+import { getMissingShopifyScopes } from "../shopify-config";
 import type {
   StoreAnalytics,
   StoreCapability,
@@ -18,11 +19,6 @@ import type {
   StoreShippingZone,
 } from "../store-data";
 
-interface GraphqlEnvelope<T> {
-  data?: T;
-  errors?: Array<{ message?: string }>;
-}
-
 interface ProductEnrichment {
   unitCost: number | null;
   currency?: string;
@@ -35,48 +31,6 @@ export interface ShopifyIntelligenceResult {
   products: Record<string, ProductEnrichment>;
   returns: Record<string, StoreProductReturnEvidence>;
   warnings: string[];
-}
-
-class ShopifyGraphqlError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ShopifyGraphqlError";
-  }
-}
-
-async function graphql<T>(
-  shopDomain: string,
-  accessToken: string,
-  query: string,
-  variables?: Record<string, unknown>
-): Promise<T> {
-  const response = await fetchWithRetry(
-    shopifyAdminGraphqlUrl(shopDomain),
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": accessToken,
-      },
-      body: JSON.stringify({ query, variables }),
-    },
-    { timeoutMs: 12_000, retries: 1 }
-  );
-
-  if (!response.ok) {
-    throw new ShopifyGraphqlError(
-      `Shopify GraphQL HTTP ${response.status} ${response.statusText}`
-    );
-  }
-
-  const payload = (await response.json()) as GraphqlEnvelope<T>;
-  if (payload.errors?.length) {
-    throw new ShopifyGraphqlError(
-      payload.errors.map((error) => error.message || "Unknown GraphQL error").join("; ")
-    );
-  }
-  if (!payload.data) throw new ShopifyGraphqlError("Shopify GraphQL returned no data");
-  return payload.data;
 }
 
 function compactError(error: unknown): string {
@@ -695,10 +649,10 @@ export async function fetchShopifyPrespendIntelligence(
     const missing = task.scopes.filter((scope) => grantedScopes.length > 0 && !granted.has(scope));
     if (missing.length) return [name, { missing, value: undefined }] as const;
     try {
-      return [
-        name,
-        { missing: [], value: await withTimeout(task.run(), 25_000, name) },
-      ] as const;
+      const { value, deniedFields } = await collectDeniedFields(() =>
+        withTimeout(task.run(), 25_000, name),
+      );
+      return [name, { missing: [], value, deniedFields }] as const;
     } catch (error) {
       return [name, { missing: [], error: compactError(error), value: undefined }] as const;
     }
@@ -708,6 +662,7 @@ export async function fetchShopifyPrespendIntelligence(
     missing: string[];
     error?: string;
     value?: unknown;
+    deniedFields?: string[];
   }>;
   const capabilities: Record<string, StoreCapability> = {};
   for (const [name, task] of entries) {
@@ -716,7 +671,14 @@ export async function fetchShopifyPrespendIntelligence(
       ? capability("missing_scope", [...task.scopes], `Missing ${item.missing.join(", ")}`)
       : item.error
         ? capability("error", [...task.scopes], item.error)
-        : capability("available", [...task.scopes]);
+        : item.deniedFields?.length
+          ? capability("partial", [...task.scopes], `Shopify withheld: ${item.deniedFields.slice(0, 10).join(", ")}`)
+          : capability("available", [...task.scopes]);
+    if (item.deniedFields?.length) {
+      warnings.push(
+        `Shopify withheld ${item.deniedFields.length} protected field(s) from ${name}; those values are unavailable until access is approved.`,
+      );
+    }
   }
 
   const policyValue = result.policies.value as Awaited<ReturnType<typeof fetchPoliciesAndLocales>> | undefined;
