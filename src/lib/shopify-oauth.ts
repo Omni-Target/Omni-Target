@@ -117,6 +117,20 @@ export function isFreshShopifyTimestamp(timestamp: string | null, nowMs = Date.n
   return ageSeconds <= CALLBACK_MAX_AGE_SECONDS && ageSeconds >= -CALLBACK_MAX_FUTURE_SKEW_SECONDS;
 }
 
+/**
+ * True only for Shopify's signed app entry at the App URL root
+ * (`/?shop=…&timestamp=…&hmac=…`, SEC-10). Any other URL that happens to carry
+ * a `shop` parameter, such as the billing return URL, is not an install.
+ */
+export function isSignedShopifyAppEntry(url: URL, secret: string | undefined): boolean {
+  return (
+    url.pathname === "/" &&
+    url.searchParams.has("shop") &&
+    verifyShopifyQueryHmac(url.searchParams, secret) &&
+    isFreshShopifyTimestamp(url.searchParams.get("timestamp"))
+  );
+}
+
 // ── Signed cookies ───────────────────────────────────────────────────────────
 
 function cookieKey(purpose: string): Buffer {
