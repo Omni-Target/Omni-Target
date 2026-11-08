@@ -144,6 +144,18 @@ describe("cross-instance races never force a reconnect", () => {
   });
 });
 
+describe("staging guard", () => {
+  it("never calls Shopify when refresh is disabled", async () => {
+    vi.stubEnv("SHOPIFY_TOKEN_REFRESH_DISABLED", "true");
+    db.row = rowExpiring(-1);
+    await expect(getValidShopifyToken("u1")).resolves.toMatchObject({ status: "temporarily_unavailable" });
+    db.row = rowExpiring(2);
+    await expect(getValidShopifyToken("u1")).resolves.toMatchObject({ status: "ok", accessToken: "old-access" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
+});
+
 describe("failure outcomes", () => {
   it("asks for a reconnect only when the refresh token is really dead", async () => {
     fetchMock.mockResolvedValueOnce(

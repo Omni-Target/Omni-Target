@@ -170,7 +170,7 @@ export async function getValidShopifyToken(
   // If no expiry info and no refresh token, automatically migrate the legacy
   // non-expiring offline token to an expiring offline token + refresh token
   // via Shopify's Token Exchange API (required before Jan 1, 2027).
-  if (!expiresAt && !refreshToken) {
+  if (!expiresAt && !refreshToken && process.env.SHOPIFY_TOKEN_REFRESH_DISABLED !== "true") {
     const existingMigration = inflightRefreshes.get(userId);
     if (existingMigration) {
       return existingMigration;
@@ -192,6 +192,12 @@ export async function getValidShopifyToken(
 
   if (isFresh(expiresAt)) {
     return { status: "ok", accessToken, shopUrl };
+  }
+
+  // Staging mirrors production tokens. Refresh tokens are single-use, so a
+  // staging refresh would silently disconnect the real merchant.
+  if (process.env.SHOPIFY_TOKEN_REFRESH_DISABLED === "true") {
+    return usableOrUnavailable(accessToken, expiresAt, shopUrl);
   }
 
   if (!refreshToken) {
