@@ -95,8 +95,12 @@ node scripts/ops/assert-rls-lockdown.mjs --env-file .env.local
 0012 is independent of every other migration: `--only` lets it be applied or
 rolled back on its own, in either order relative to later migrations.
 
-**Limitation:** `alter default privileges` only covers objects created by the
-role that runs the migration. Tables created later by a different role (for
-example through a dashboard that runs as another role) can still receive
-client-role grants without RLS — re-run the assert script after any schema
-change made outside these migrations.
+**Limitation (verified on the Supabase local stack, Postgres 17):** on
+Supabase, `public` also carries default privileges owned by the platform
+superuser `supabase_admin`, which grant everything to `anon`/`authenticated`
+on objects *that role* creates. The migration role (`postgres`) is not a member
+of `supabase_admin`, so no migration can revoke them; 0012 removes only the
+ones the migration role controls. The assert script reports the platform-owned
+defaults as a WARN and still FAILS on any actual object that lacks RLS or has
+client-role grants — run it after every schema change made outside these
+migrations.

@@ -9,7 +9,8 @@
  *   1. Every table in `public` has row-level security enabled.
  *   2. anon / authenticated hold no privileges on any relation or sequence.
  *   3. anon / authenticated can EXECUTE no function except the allowlist.
- *   4. No default privileges grant anything to anon / authenticated.
+ *   4. No default privileges the migration role controls grant anything to
+ *      anon / authenticated (platform-owned ones are reported as warnings).
  *   5. service_role bypasses RLS and can EXECUTE every public function.
  *
  * Usage:
@@ -56,6 +57,7 @@ async function main() {
   const client = new pg.Client({ connectionString, ssl: { rejectUnauthorized: false } });
   await client.connect();
   const violations = [];
+  const warnings = [];
   const q = async (sql, params = []) => (await client.query(sql, params)).rows;
 
   try {
@@ -122,9 +124,17 @@ async function main() {
         if (!allowed) violations.push(`${role} can EXECUTE public.${r.sig}`);
       }
 
-      // 4. default privileges
+      // 4. default privileges. Ones held by a grantor the connected (migration)
+      //    role can act for are violations: 0012 should have removed them. Ones
+      //    held by a role it cannot act for — on Supabase, the platform
+      //    superuser supabase_admin — cannot be revoked by any migration; they
+      //    are reported as warnings, and any object such a role creates is
+      //    still caught by checks 1–3 above.
       for (const r of await q(
-        `select d.defaclobjtype as objtype, a.privilege_type
+        `select d.defaclobjtype as objtype, a.privilege_type,
+                pg_get_userbyid(d.defaclrole) as grantor,
+                (d.defaclrole = (select oid from pg_roles where rolname = current_user)
+                  or pg_has_role(current_user, d.defaclrole, 'MEMBER')) as revocable
            from pg_default_acl d
            join pg_namespace n on n.oid = d.defaclnamespace
            cross join lateral aclexplode(d.defaclacl) a
@@ -132,7 +142,9 @@ async function main() {
           where n.nspname = 'public' and g.rolname = $1`,
         [role],
       )) {
-        violations.push(`default privileges grant ${r.privilege_type} on future ${r.objtype} objects to ${role}`);
+        const msg = `default privileges of ${r.grantor} grant ${r.privilege_type} on future ${r.objtype} objects to ${role}`;
+        if (r.revocable) violations.push(msg);
+        else warnings.push(`${msg} (not revocable by the migration role)`);
       }
     }
 
@@ -156,12 +168,22 @@ async function main() {
     await client.end();
   }
 
+  const printWarnings = () => {
+    if (!warnings.length) return;
+    const grantors = [...new Set(warnings.map((w) => w.split(" ")[3]))].join(", ");
+    console.log(
+      `WARN: ${warnings.length} default privilege(s) held by ${grantors} cannot be revoked by migrations. ` +
+        "Objects that role creates in public would receive client-role access; checks 1-3 catch any such object, so run this after every schema change.",
+    );
+  };
   if (violations.length) {
     console.log(`FAIL: ${violations.length} lockdown violation(s)`);
     for (const v of violations) console.log(`  - ${v}`);
+    printWarnings();
     process.exit(1);
   }
   console.log("PASS: public schema is locked down for anon/authenticated; service_role intact.");
+  printWarnings();
 }
 
 main().catch((err) => {
