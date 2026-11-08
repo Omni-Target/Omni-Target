@@ -518,7 +518,7 @@ async function generateRawTargetingProfile(
 - Product Title: ${targetProductTitle}
 - Product Description: ${targetProductDescription}
 - Category: ${targetProductType}
-- Tags: ${targetProductTags}
+- Tags (internal merchant labels, never state them as product facts): ${targetProductTags}
 - Price: ${targetProductPrice} ${storeCurrency}
 - Product URL: ${targetProductUrl}
 - Verified Catalog Claims from Shopify Metafields/Metaobjects: ${catalogClaims}

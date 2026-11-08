@@ -45,3 +45,34 @@ describe("copy validation evidence", () => {
     expect(errors).toContain('Sibling product reference detected: "Ego Dress"');
   });
 });
+
+describe("claim evidence rules (AI-02)", () => {
+  const product = { id: "shirt", name: "Camp Shirt", description: "A relaxed everyday shirt." };
+  const validate = (text: string, target: typeof product & { tags?: string[] }, claims = "") => {
+    const { groundedProductEvidence, forbiddenProductNames, factualEvidence } = buildCopyValidationEvidence(
+      target,
+      [{ id: "shirt", name: "Camp Shirt" }],
+      claims,
+    );
+    return validateCopy(
+      { headline: "For slower days", primaryText: text, description: "An easy everyday layer.", cta: "Shop Now" },
+      groundedProductEvidence,
+      forbiddenProductNames,
+      factualEvidence,
+    );
+  };
+
+  it("rejects a 'Made in' claim with no product evidence, whatever country the store is in", () => {
+    expect(validate("Made in Nigeria for slower days.", product).join(" ")).toContain("Made in Nigeria");
+  });
+
+  it("does not accept a tag as support for a material claim", () => {
+    const errors = validate("Soft organic cotton for slower days.", { ...product, tags: ["organic cotton"] });
+    expect(errors.join(" ").toLowerCase()).toContain("organic");
+  });
+
+  it("still accepts the same claims when the description or catalog claims state them", () => {
+    expect(validate("Soft organic cotton for slower days.", { ...product, description: "Made from organic cotton." })).toEqual([]);
+    expect(validate("Made in Nigeria for slower days.", product, "Made in Nigeria")).toEqual([]);
+  });
+});

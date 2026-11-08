@@ -208,7 +208,6 @@ export function validateBrief(
   const hookEvidence = [
     factualEvidence.title,
     factualEvidence.description,
-    ...factualEvidence.tags,
     factualEvidence.product_type,
   ].join(" ");
   for (const hook of response.creative_hooks || []) {
