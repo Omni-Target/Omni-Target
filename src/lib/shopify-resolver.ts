@@ -1,12 +1,37 @@
-export async function resolveShopifyDomain(
-  input: string
-): Promise<{ 
+import { safeFetch } from "@/lib/net/safe-fetch";
+
+/**
+ * Resolve a merchant-entered store domain to its *.myshopify.com domain.
+ *
+ * SEC-07: every request goes through safeFetch (https only, DNS-validated
+ * public destinations, re-validated redirects, size caps), and only a genuine
+ * `*.myshopify.com` domain is ever returned as `myshopifyDomain` — a custom
+ * domain or a value read from the storefront is never echoed back as one.
+ */
+const MYSHOPIFY_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
+
+const NOT_FOUND = "This Shopify store could not be found. Please check your store name or URL.";
+const UNREACHABLE = "Could not reach this website. Please verify your domain and internet connection.";
+const NOT_DETECTED =
+  "We could not detect a Shopify store at this domain. Please verify your store URL or enter your .myshopify.com address.";
+const NEEDS_MYSHOPIFY =
+  "This looks like a Shopify store, but we could not determine its .myshopify.com address. Please enter it directly (e.g. yourstore.myshopify.com).";
+
+export interface ShopifyResolution {
   myshopifyDomain: string | null;
   isShopify: boolean;
   error?: string;
-}> {
+}
+
+function myshopifyCandidate(value: unknown): string | null {
+  const candidate = String(value ?? "").trim().toLowerCase();
+  return MYSHOPIFY_RE.test(candidate) ? candidate : null;
+}
+
+export async function resolveShopifyDomain(input: string): Promise<ShopifyResolution> {
   // Clean the input: trim, remove protocol, www, paths, queries, and ports
-  const domain = input.trim()
+  const domain = input
+    .trim()
     .replace(/^https?:\/\//i, "")
     .replace(/^www\./i, "")
     .split("/")[0]
@@ -15,143 +40,76 @@ export async function resolveShopifyDomain(
     .toLowerCase();
 
   if (!domain) {
-    return {
-      myshopifyDomain: null,
-      isShopify: false,
-      error: "Please enter your store website.",
-    };
+    return { myshopifyDomain: null, isShopify: false, error: "Please enter your store website." };
   }
 
-  // 1. Direct .myshopify.com domain check:
-  // Pre-flight verify that the Shopify store actually exists before redirecting to OAuth.
-  // Nonexistent .myshopify.com subdomains return HTTP 404 from Shopify edge.
-  if (domain.includes("myshopify.com")) {
+  // 1. Direct .myshopify.com domain: verify the store exists before OAuth.
+  //    Nonexistent subdomains return HTTP 404 from Shopify's edge.
+  if (domain.endsWith(".myshopify.com") || domain === "myshopify.com") {
+    if (!MYSHOPIFY_RE.test(domain)) {
+      return { myshopifyDomain: null, isShopify: false, error: NOT_FOUND };
+    }
     try {
-      const res = await fetch(`https://${domain}`, {
-        method: "HEAD",
-        redirect: "manual",
-        signal: AbortSignal.timeout(5000),
-      });
-
-      // Shopify explicitly returns 404 when a subdomain has not been registered or created
+      const res = await safeFetch(`https://${domain}`, { method: "HEAD", maxRedirects: 0, timeoutMs: 5000, maxBytes: 1024 });
       if (res.status === 404) {
-        return {
-          myshopifyDomain: null,
-          isShopify: false,
-          error: "This Shopify store could not be found. Please check your store name or URL.",
-        };
+        return { myshopifyDomain: null, isShopify: false, error: NOT_FOUND };
       }
-
-      // Valid store subdomains return 200, 301, 302, 303, 307, 308, 401, or 403
-      return {
-        myshopifyDomain: domain,
-        isShopify: true,
-      };
+      // Valid store subdomains return 200, 30x, 401 or 403.
+      return { myshopifyDomain: domain, isShopify: true };
     } catch {
-      // Network or DNS failure
-      return {
-        myshopifyDomain: null,
-        isShopify: false,
-        error: "Could not reach this website. Please verify your domain and internet connection.",
-      };
+      return { myshopifyDomain: null, isShopify: false, error: UNREACHABLE };
     }
   }
 
-  // 2. Custom domain check:
-  // Attempt to resolve storefront meta or inspect headers/HTML.
-  let metaRes: Response | null = null;
+  // 2. Custom domain: Shopify storefronts expose /meta.json with myshopify_domain.
   let metaNetworkFailed = false;
-
+  let detectedShopify = false;
   try {
-    metaRes = await fetch(`https://${domain}/meta.json`, {
-      signal: AbortSignal.timeout(5000),
-      headers: {
-        Accept: "application/json",
-      },
+    const metaRes = await safeFetch(`https://${domain}/meta.json`, {
+      headers: { Accept: "application/json" },
+      timeoutMs: 5000,
+      maxBytes: 64 * 1024,
     });
-
-    if (metaRes.ok) {
-      const meta = await metaRes.json().catch(() => null);
-      if (meta?.myshopify_domain) {
-        return {
-          myshopifyDomain: meta.myshopify_domain,
-          isShopify: true,
-        };
+    if (metaRes.status >= 200 && metaRes.status < 300 && !metaRes.truncated) {
+      let meta: { myshopify_domain?: unknown } | null = null;
+      try {
+        meta = JSON.parse(metaRes.body.toString("utf8"));
+      } catch {
+        meta = null;
       }
+      const fromMeta = myshopifyCandidate(meta?.myshopify_domain);
+      if (fromMeta) return { myshopifyDomain: fromMeta, isShopify: true };
     }
-
-    const shopifyHeader = metaRes.headers.get("x-shopify-shop-id");
-    if (shopifyHeader) {
-      return {
-        myshopifyDomain: domain,
-        isShopify: true,
-      };
-    }
+    if (metaRes.headers["x-shopify-shop-id"]) detectedShopify = true;
   } catch {
     metaNetworkFailed = true;
   }
 
-  // Fallback: check root storefront domain
+  // 3. Fallback: inspect the storefront root (bounded) for its myshopify domain.
   try {
-    const rootRes = await fetch(`https://${domain}`, {
-      method: "GET",
-      signal: AbortSignal.timeout(6000),
+    const rootRes = await safeFetch(`https://${domain}`, {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; OmniTarget/1.0)",
         Accept: "text/html,application/xhtml+xml",
       },
+      timeoutMs: 6000,
+      maxBytes: 1_000_000,
     });
 
-    // Check Shopify response headers
-    const shopId = rootRes.headers.get("x-shopify-shop-id");
-    const poweredBy = rootRes.headers.get("powered-by");
-    if (shopId || (poweredBy && poweredBy.toLowerCase().includes("shopify"))) {
-      return {
-        myshopifyDomain: domain,
-        isShopify: true,
-      };
-    }
+    const poweredBy = rootRes.headers["powered-by"] || "";
+    if (rootRes.headers["x-shopify-shop-id"] || poweredBy.toLowerCase().includes("shopify")) detectedShopify = true;
 
-    // Inspect body for Shopify indicators
-    const html = await rootRes.text().catch(() => "");
-    const match = html.match(/([a-zA-Z0-9-]+\.myshopify\.com)/i);
-    if (match) {
-      return {
-        myshopifyDomain: match[1].toLowerCase(),
-        isShopify: true,
-      };
-    }
+    const html = rootRes.body.toString("utf8");
+    const match = html.match(/([a-z0-9][a-z0-9-]*\.myshopify\.com)/i);
+    const fromHtml = myshopifyCandidate(match?.[1]);
+    if (fromHtml) return { myshopifyDomain: fromHtml, isShopify: true };
 
-    if (html.includes("window.Shopify") || html.includes("cdn.shopify.com")) {
-      return {
-        myshopifyDomain: domain,
-        isShopify: true,
-      };
+    if (detectedShopify || html.includes("window.Shopify") || html.includes("cdn.shopify.com")) {
+      return { myshopifyDomain: null, isShopify: true, error: NEEDS_MYSHOPIFY };
     }
-
-    // The site is reachable (rootRes succeeded), but is not a Shopify store
-    return {
-      myshopifyDomain: null,
-      isShopify: false,
-      error:
-        "We could not detect a Shopify store at this domain. Please verify your store URL or enter your .myshopify.com address.",
-    };
+    return { myshopifyDomain: null, isShopify: false, error: NOT_DETECTED };
   } catch {
-    // If meta also failed with a network error, the domain is unreachable
-    if (metaNetworkFailed) {
-      return {
-        myshopifyDomain: null,
-        isShopify: false,
-        error: "Could not reach this website. Please verify your domain and internet connection.",
-      };
-    }
-
-    // If metaRes connected earlier (e.g. returned 404) but root GET timed out / failed
-    return {
-      myshopifyDomain: null,
-      isShopify: false,
-      error:
-        "We could not detect a Shopify store at this domain. Please verify your store URL or enter your .myshopify.com address.",
-    };
+    if (detectedShopify) return { myshopifyDomain: null, isShopify: true, error: NEEDS_MYSHOPIFY };
+    return { myshopifyDomain: null, isShopify: false, error: metaNetworkFailed ? UNREACHABLE : NOT_DETECTED };
   }
 }
