@@ -2,12 +2,34 @@ import { z } from "zod";
 import { resolveShopifyDomain } from "@/lib/shopify-resolver";
 import { validateShopifyInput } from "@/lib/domain-validation";
 import { apiError, apiServerError } from "@/lib/api/response";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 const BodySchema = z.object({
   domain: z.string().min(1).max(255),
 });
 
+/** Client IP for rate limiting (Vercel sets x-forwarded-for to the real client). */
+function clientIp(request: Request): string {
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwarded || request.headers.get("x-real-ip") || "unknown";
+}
+
+/**
+ * Public (pre-sign-up) store-domain check. SEC-07: rate-limited per client IP
+ * because every call makes outbound requests; the resolver itself only
+ * contacts DNS-validated public hosts (see src/lib/net/safe-fetch.ts).
+ */
 export async function POST(request: Request) {
+  const limited = await enforceRateLimit({
+    action: "shopify:resolve-domain",
+    identifier: `ip:${clientIp(request)}`,
+    limit: 20,
+    windowSeconds: 600,
+    // Public and unauthenticated: never run without the limiter.
+    onUnavailable: "deny",
+  });
+  if (!limited.ok) return limited.response;
+
   let rawBody: unknown;
   try {
     rawBody = await request.json();

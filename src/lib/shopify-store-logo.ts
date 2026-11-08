@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { safeFetch } from "@/lib/net/safe-fetch";
 import { SHOPIFY_API_VERSION } from "@/lib/shopify-config";
 import { normalizeStoreLogoUrl } from "@/lib/store-logo-url";
 
@@ -94,27 +95,10 @@ function safeStorefrontHost(value?: string | null): string | null {
   return host;
 }
 
-async function readLimitedHtml(response: Response): Promise<string | null> {
-  if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) return null;
-  const maxBytes = 2_000_000;
-  if (Number(response.headers.get("content-length")) > maxBytes) return null;
-  if (!response.body) return null;
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let bytes = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      bytes += value.byteLength;
-      if (bytes > maxBytes) return null;
-      chunks.push(value);
-    }
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-  return new TextDecoder().decode(Buffer.concat(chunks));
-}
+// SEC-07: storefront hosts come from merchant-controlled Shopify data (custom
+// domain), so every request goes through safeFetch: DNS-validated public
+// destinations only, re-validated redirects, bounded bodies and deadlines.
+const MAX_STOREFRONT_HTML_BYTES = 2_000_000;
 
 async function fetchBrandFromStorefrontApi(host: string): Promise<string | null> {
   try {
@@ -136,18 +120,20 @@ async function fetchBrandFromStorefrontApi(host: string): Promise<string | null>
         }
       }
     `;
-    const response = await fetch(`https://${host}/api/${SHOPIFY_API_VERSION}/graphql.json`, {
+    const response = await safeFetch(`https://${host}/api/${SHOPIFY_API_VERSION}/graphql.json`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
       },
       body: JSON.stringify({ query }),
-      signal: AbortSignal.timeout(5000),
+      timeoutMs: 5000,
+      maxBytes: 256 * 1024,
+      maxRedirects: 0,
     });
 
-    if (!response.ok) return null;
-    const json = await response.json();
+    if (response.status < 200 || response.status >= 300 || response.truncated) return null;
+    const json = JSON.parse(response.body.toString("utf8"));
     const brand = json?.data?.shop?.brand;
     // Prefer squareLogo (purpose-built for profile pictures & app avatars), then general brand logo
     const squareCandidate = normalizeStoreLogoUrl(brand?.squareLogo?.image?.url);
@@ -180,37 +166,21 @@ export async function fetchShopifyStoreLogo(
   // 2. Fall back to theme storefront HTML (JSON-LD structured data or header logo image)
   for (const host of hosts) {
     try {
-      let currentHost: string | null = host;
-      for (let redirectCount = 0; redirectCount < 3 && currentHost; redirectCount++) {
-        const response = await fetch(`https://${currentHost}/`, {
-          headers: { Accept: "text/html" },
-          redirect: "manual",
-          signal: AbortSignal.timeout(5000),
-        });
-
-        if (response.status >= 300 && response.status < 400) {
-          const location = response.headers.get("location");
-          if (!location) break;
-          try {
-            const redirectUrl = new URL(location, `https://${currentHost}/`);
-            const nextHost = safeStorefrontHost(redirectUrl.hostname);
-            if (nextHost && nextHost !== currentHost) {
-              currentHost = nextHost;
-              continue;
-            }
-          } catch {
-            break;
-          }
-        }
-
-        const html = await readLimitedHtml(response);
-        if (!html) break;
-        const logo = extractStoreLogoFromHtml(html, `https://${currentHost}/`);
-        if (logo) return logo;
-        break;
-      }
+      const response = await safeFetch(`https://${host}/`, {
+        headers: { Accept: "text/html" },
+        timeoutMs: 5000,
+        maxBytes: MAX_STOREFRONT_HTML_BYTES,
+        maxRedirects: 3,
+      });
+      const isHtml = (response.headers["content-type"] || "").includes("text/html");
+      if (response.status < 200 || response.status >= 300 || !isHtml || response.truncated) continue;
+      // Resolve relative logo paths against the host that actually served the page.
+      const finalHost = safeStorefrontHost(new URL(response.url).hostname);
+      if (!finalHost) continue;
+      const logo = extractStoreLogoFromHtml(response.body.toString("utf8"), `https://${finalHost}/`);
+      if (logo) return logo;
     } catch {
-      // The storefront can be password-protected or temporarily unavailable.
+      // Password-protected, unavailable, or a blocked (non-public) destination.
     }
   }
   return null;

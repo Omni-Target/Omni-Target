@@ -191,6 +191,10 @@ export function PdfBriefModal({
             srcDoc={html}
             title="Campaign brief preview"
             className="h-full w-full border-0"
+            // SEC-06: no `allow-scripts` — nothing inside the brief can execute.
+            // Same-origin + modals keep Print (contentDocument / print()) working;
+            // popups keep the product link opening in a new tab.
+            sandbox="allow-same-origin allow-modals allow-popups allow-popups-to-escape-sandbox"
           />
         ) : null}
       </div>

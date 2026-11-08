@@ -461,8 +461,9 @@ describe("buildBriefHTML tests", () => {
     });
 
     const html = await buildBriefHTML(payload);
-    expect(html).toContain("Calibrated for your product's ₦120,000 price point:");
-    expect(html).not.toContain("Calibrated for your product's ₦230,000 price point:");
+    // HTML output escapes apostrophes (&#39;) as part of SEC-06 hardening.
+    expect(html).toContain("Calibrated for your product&#39;s ₦120,000 price point:");
+    expect(html).not.toContain("Calibrated for your product&#39;s ₦230,000 price point:");
   });
 
   it("separates proven store orders and AI-recommended expansion hubs in Card 04", async () => {
