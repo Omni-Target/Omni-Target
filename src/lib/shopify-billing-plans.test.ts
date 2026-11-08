@@ -47,3 +47,23 @@ describe("planForShopifyCharge", () => {
     expect(planForShopifyCharge("Starter + Growth bundle", "subscription")).toBeNull();
   });
 });
+
+describe("legacy one-time packs (observed on the omni-dev test store)", () => {
+  // Names sold 2026-05-28 → 2026-09-03; the merchant is credited what they bought.
+  it("credits legacy names with their original amounts, not today's pack sizes", () => {
+    expect(planForShopifyCharge("Starter Pack – 5 Credits", "one_time")).toMatchObject({ credits: 5, legacy: true });
+    expect(planForShopifyCharge("Growth Pack – 15 Credits", "one_time")).toMatchObject({ credits: 15, legacy: true });
+    expect(planForShopifyCharge("Scale Pack – 30 Credits", "one_time")).toMatchObject({ credits: 30 });
+    expect(planForShopifyCharge("Starter Pack – 3 Credits", "one_time")?.legacy).toBeUndefined();
+  });
+
+  it("still never credits a legacy-named TEST charge in production", () => {
+    const charge = { status: "ACTIVE", test: true };
+    expect(planForShopifyCharge("Growth Pack – 15 Credits", "one_time")).not.toBeNull();
+    expect(isCreditableCharge(charge, { NODE_ENV: "production" })).toBe(false);
+  });
+
+  it("never offers legacy packs for new charges", () => {
+    expect(Object.values(SHOPIFY_CREDIT_PLANS).map((p) => p.chargeName)).not.toContain("Starter Pack – 5 Credits");
+  });
+});
