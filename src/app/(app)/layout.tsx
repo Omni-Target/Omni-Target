@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/layout/app-shell";
+import { StoreCacheOwner } from "@/components/providers/session-cache-guard";
 
 export default async function AppGroupLayout({
   children,
@@ -15,5 +16,9 @@ export default async function AppGroupLayout({
     redirect("/login");
   }
 
-  return <AppShell>{children}</AppShell>;
+  return (
+    <StoreCacheOwner userId={userId}>
+      <AppShell>{children}</AppShell>
+    </StoreCacheOwner>
+  );
 }
