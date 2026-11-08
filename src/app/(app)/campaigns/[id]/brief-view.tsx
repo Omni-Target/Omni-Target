@@ -19,6 +19,7 @@ import type {
   AdvantagePlusGuidance,
 } from "@/lib/brief-pdf-types";
 import { buildBriefPdfPayload, buildBriefText } from "@/lib/campaigns/brief";
+import { savedMaxTestBudget } from "@/lib/budget-plan";
 
 // The full-screen PDF modal is only reached on click — load its chunk on demand.
 const PdfBriefModal = dynamic(
@@ -185,6 +186,10 @@ export function BriefView({
   const [selectedIntlDuration, setSelectedIntlDuration] = useState<7 | 14 | 30>(
     bd.selectedIntlDuration ?? 14,
   );
+  // S0.6: the merchant's own maximum test budget (the only budget amount shown).
+  const [maxTestBudget, setMaxTestBudget] = useState<number | null>(
+    savedMaxTestBudget(bd),
+  );
   const [modalOpen, setModalOpen] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -209,8 +214,10 @@ export function BriefView({
         selectedIntlStrategyIndex,
         gatewayInsight,
         isNewLaunch,
+        maxTestBudget,
       }),
     [
+      maxTestBudget,
       bd.generatedAt,
       brandName,
       productName,
@@ -247,6 +254,7 @@ export function BriefView({
       selectedDuration,
       selectedIntlDuration,
       gatewayInsight,
+      maxTestBudget,
     });
     navigator.clipboard.writeText(briefText);
     setCopiedField("full-brief");
@@ -295,7 +303,7 @@ export function BriefView({
           versionId: activeVersionId,
           copy: displayedCopy,
           status: "complete",
-          briefData: { ...bd, selectedStrategyIndex, selectedIntlStrategyIndex, selectedDuration, selectedIntlDuration, selectedCta: displayedCta },
+          briefData: { ...bd, selectedStrategyIndex, selectedIntlStrategyIndex, selectedDuration, selectedIntlDuration, selectedCta: displayedCta, maxTestBudget },
         }),
       });
       if (!response.ok) throw new Error("Save failed");
@@ -339,6 +347,7 @@ export function BriefView({
                       setSelectedIntlStrategyIndex(context?.selectedIntlStrategyIndex ?? 1);
                       setSelectedDuration(context?.selectedDuration ?? 14);
                       setSelectedIntlDuration(context?.selectedIntlDuration ?? 14);
+                      setMaxTestBudget(savedMaxTestBudget(context));
                     }}
                     aria-current={isActive ? "true" : undefined}
                     className={cn(
@@ -393,6 +402,8 @@ export function BriefView({
             onCreateNew={() => router.push("/campaigns")}
             gatewayInsight={gatewayInsight}
             productPrice={productPrice}
+            maxTestBudget={maxTestBudget}
+            setMaxTestBudget={setMaxTestBudget}
           />
         </div>
       </div>

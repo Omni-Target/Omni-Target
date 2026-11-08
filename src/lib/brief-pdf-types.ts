@@ -100,6 +100,8 @@ export interface BriefPDFParams {
     age_reasoning?: string;
     interest_reasoning?: string;
   };
+  /** S0.6: the merchant's maximum test budget — the only source of budget amounts. */
+  budget_plan?: import("./budget-plan").BudgetPlan;
   budget: {
     calculation?: import("./budget-evidence").BudgetCalculation;
     recommended_daily?: number;

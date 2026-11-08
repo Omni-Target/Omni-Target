@@ -3,8 +3,7 @@
 import { motion } from "motion/react";
 import { Sparkles, Check, Loader2, Lightbulb } from "lucide-react";
 import { useState, useEffect } from "react";
-import { formatCurrency } from "@/lib/currency";
-import { estimateDailyTestBudget, type BudgetCalculation } from "@/lib/budget-evidence";
+import type { BudgetCalculation } from "@/lib/budget-evidence";
 
 interface GeneratingStateProps {
   productName?: string;
@@ -14,6 +13,7 @@ interface GeneratingStateProps {
   isNewLaunch?: boolean;
   productPrice?: string;
   storeCurrency?: string;
+  /** @deprecated S0.6 — budgets are no longer previewed from store revenue; ignored. */
   budgetCalculation?: BudgetCalculation;
 }
 
@@ -45,16 +45,9 @@ export function GeneratingState({
   tonePreference,
   isGateway,
   isNewLaunch,
-  productPrice,
-  storeCurrency,
-  budgetCalculation,
 }: GeneratingStateProps) {
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [tipIndex, setTipIndex] = useState(0);
-  const numericPrice = Number((productPrice || "").replace(/[^0-9.]/g, ""));
-  const budgetPreview = numericPrice > 0 && budgetCalculation?.baseline_daily && storeCurrency === budgetCalculation.fx.currency
-    ? Math.round(estimateDailyTestBudget(budgetCalculation.baseline_daily, numericPrice))
-    : null;
 
   const generationSteps: StepItem[] = [
     {
@@ -74,12 +67,9 @@ export function GeneratingState({
         : "Reviewing customer purchase patterns and catalog signals…",
     },
     {
-      title: "Matching store pricing → Calculating safe daily test budget",
-      detail: budgetPreview !== null && storeCurrency
-        ? `Estimated ${formatCurrency(budgetPreview, storeCurrency)}/day from your product price and store sales. Your final plan follows…`
-        : numericPrice > 0 && storeCurrency
-        ? `Using ${formatCurrency(numericPrice, storeCurrency)} product price and store sales signals to calculate your daily recommendation…`
-        : "Using store sales signals to calculate your daily recommendation…",
+      // S0.6: budgets are no longer estimated from store-wide sales.
+      title: "Preparing your test budget section",
+      detail: "You'll set the maximum you want to spend on this test in your brief.",
     },
     {
       title: `Tuning your brand voice → ${formatToneLabel(tonePreference)}`,

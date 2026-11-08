@@ -3,8 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { Sparkles, Zap, Target } from "lucide-react";
 import type { AiInsights, StoreInsights } from "./types";
-import { isDomesticCity, getInternationalBudgetFloor, getEffectiveStoreCountry, getInternationalStrategies, isTier1Market } from "@/lib/market-geography";
-import { formatCurrency } from "@/lib/currency";
+import { isDomesticCity, getEffectiveStoreCountry, isTier1Market } from "@/lib/market-geography";
 
 type DisplayLocation = {
   name?: string;
@@ -18,9 +17,6 @@ export function TargetingSummary({
   storeInsights,
   aiInsights,
   loadingAiInsights,
-  selectedStrategyIndex,
-  selectedIntlStrategyIndex,
-  goal,
 }: {
   storeInsights: StoreInsights | null;
   aiInsights: AiInsights | null;
@@ -136,41 +132,9 @@ export function TargetingSummary({
           .filter(Boolean)
           .join(" · ");
 
-  const chosenDomesticStrategy =
-    aiInsights?.budget?.strategies?.[selectedStrategyIndex ?? 1] ||
-    aiInsights?.budget?.strategies?.[1];
-  const domesticBaseDaily =
-    chosenDomesticStrategy?.daily ?? aiInsights?.budget?.recommended_daily;
-  const domesticGoalMult =
-    goal && aiInsights?.budget?.breakdown?.goal_multipliers?.[goal]
-      ? aiInsights.budget.breakdown.goal_multipliers[goal]
-      : 1;
-  const domesticAdjustedDaily = domesticBaseDaily
-    ? Math.round(domesticBaseDaily * domesticGoalMult)
-    : undefined;
-
-  const domesticBudgetFormatted =
-    legacyTargeting?.domestic_budget_formatted ||
-    (domesticAdjustedDaily
-      ? `${formatCurrency(domesticAdjustedDaily, storeCurrency || "USD", storeInsights?.store?.currency_symbol || aiInsights?.budget?.currency_symbol)}/day (${chosenDomesticStrategy?.label || "Sweet Spot"})`
-      : aiInsights?.budget?.recommended_daily
-      ? `${aiInsights.budget.recommended_daily.toLocaleString()} ${storeCurrency || ""}/day`
-      : undefined);
-
-  const intlStrategies =
-    aiInsights?.budget?.international_strategies ||
-    getInternationalStrategies(
-      storeCurrency || "USD",
-      undefined,
-      aiInsights?.budget?.recommended_daily
-    );
-  const chosenIntlStrategy =
-    intlStrategies[selectedIntlStrategyIndex ?? 1] || intlStrategies[1];
-
-  const intlBudgetFormatted =
-    chosenIntlStrategy?.daily
-      ? `${formatCurrency(chosenIntlStrategy.daily, storeCurrency || "USD", storeInsights?.store?.currency_symbol || aiInsights?.budget?.currency_symbol)}/day (${chosenIntlStrategy.label})`
-      : (legacyTargeting?.international_budget_formatted || getInternationalBudgetFloor(storeCurrency || "USD"));
+  // S0.6: budget amounts are no longer derived here (revenue strategies and
+  // overseas floors are withdrawn); the Test budget card shows the merchant's
+  // own maximum via describeBudgetPlan().
 
   const campaignType =
     guidance?.campaign_type ??
@@ -311,11 +275,9 @@ export function TargetingSummary({
               </p>
             )}
 
-            {domesticBudgetFormatted && (
-              <p className="text-[11px] text-muted-foreground font-medium pt-1">
-                <span className="text-foreground font-semibold">Daily budget:</span> {domesticBudgetFormatted} — {isTier1 && isUS ? "run as 1 ad set to let Meta find buyers without splitting your spend" : "run as 1 ad set to keep your local spend focused"}
-              </p>
-            )}
+            <p className="text-[11px] text-muted-foreground font-medium pt-1">
+              <span className="text-foreground font-semibold">Budget:</span> set your maximum test budget in the Test budget section below, and {isTier1 && isUS ? "run as 1 ad set to let Meta find buyers without splitting your spend" : "run as 1 ad set to keep your local spend focused"}.
+            </p>
           </div>
 
           {intlLocationText && (
@@ -324,11 +286,6 @@ export function TargetingSummary({
                 <span className="flex items-center gap-1.5">
                   <span>🌍</span> International locations to consider (Optional)
                 </span>
-                {intlBudgetFormatted && (
-                  <span className="rounded bg-indigo-100 px-2 py-0.5 text-[11px] font-bold text-indigo-800">
-                    Optional · {intlBudgetFormatted}
-                  </span>
-                )}
               </div>
 
               {provenIntlLocs.length > 0 && recommendedIntlLocs.length > 0 ? (

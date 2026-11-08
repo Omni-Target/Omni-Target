@@ -3,14 +3,11 @@ import { BriefPDFParams, CreativeHook } from "./brief-pdf-types";
 import { getCurrencySymbol, formatCurrency } from "./currency";
 import {
   isDomesticCity,
-  getInternationalBudgetFloor,
   getEffectiveStoreCountry,
-  getInternationalStrategies,
-  getEstimatedExchangeRate,
   getStoreTimezoneName,
   isTier1Market,
 } from "./market-geography";
-import { parseBudgetReasoning } from "./campaigns/qualitative-guidance";
+import { describeBudgetPlan, readBudgetPlan } from "./budget-plan";
 import fs from "fs";
 import path from "path";
 
@@ -202,9 +199,12 @@ export async function buildBriefHTML(
 
   const currency = budget.currency || "USD";
   const symbol = budget.currency_symbol || getCurrencySymbol(currency);
-  const daily = budget.goal_adjusted_daily ?? budget.recommended_daily ?? null;
-  const duration = budget.recommended_duration_days ?? 14;
-  const intlDuration = budget.international_duration_days ?? duration;
+  // S0.6: revenue-derived budgets are withdrawn. The only budget amounts are the
+  // merchant's own maximum test budget (BudgetPlan), recomputed from its inputs.
+  const budgetPlan = readBudgetPlan(params.budget_plan, currency, budget.currency_symbol ?? null);
+  const budgetPlanText = describeBudgetPlan(budgetPlan);
+  const daily = budgetPlan.daily_cap;
+  const duration = budgetPlan.duration_days;
 
   const campaignType =
     guidance?.campaign_type ?? "Manual Sales with Advantage+ Audience";
@@ -262,24 +262,9 @@ export async function buildBriefHTML(
             source: "from_data" as const,
           }));
 
-  const domesticBudgetStr =
-    legacyTargeting.domestic_budget_formatted ||
-    (daily ? `${formatCurrency(daily, currency, symbol)}/day` : "");
-
-  const intlStrategies = getInternationalStrategies(currency, undefined, daily ?? undefined);
-  const intlDaily =
-    budget.international_daily ||
-    intlStrategies[1]?.daily;
-  const intlTier =
-    budget.international_tier ||
-    intlStrategies[1]?.label ||
-    "Sweet Spot";
-
-  const intlBudgetStr =
-    budget.international_budget_formatted ||
-    legacyTargeting.international_budget_formatted ||
-    (intlDaily ? `${formatCurrency(intlDaily, currency, symbol)}/day` : "") ||
-    getInternationalBudgetFloor(currency);
+  // Overseas budget amounts were fixed floors attached to the withdrawn rule;
+  // an overseas test needs its own merchant-set budget (S0.6), so none is shown.
+  const domesticBudgetStr = budgetPlan.basis === "merchant_cap" ? budgetPlanText.daily : "";
 
   const seedInterests =
     seed?.seed_interests ??
@@ -548,9 +533,9 @@ export async function buildBriefHTML(
 
     <div class="flight-metric-grid">
       <div class="flight-metric">
-        <div class="flight-metric-val">${daily ? fmt(daily, currency, symbol) : "Set manually"}<span class="flight-metric-unit">/day</span></div>
-        <div class="flight-metric-label">${showOverseas && intlDaily ? "Primary Local Daily" : "Recommended Daily Budget"}</div>
-        <div class="flight-metric-sub">${esc(budget.tier || "Sweet Spot")} Strategy · 1 Ad Set</div>
+        <div class="flight-metric-val">${daily ? fmt(daily, currency, symbol) : "Not set"}<span class="flight-metric-unit">/day</span></div>
+        <div class="flight-metric-label">${budgetPlan.basis === "merchant_cap" ? "Your Daily Cap" : "Daily Budget"}</div>
+        <div class="flight-metric-sub">${esc(budgetPlanText.duration)} · 1 Ad Set</div>
       </div>
       <div class="flight-metric">
         <div class="flight-metric-val">${esc(optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent === "InitiateCheckout" ? "Initiate Checkout" : optimizationEvent)}</div>
@@ -568,21 +553,6 @@ export async function buildBriefHTML(
         <div class="flight-metric-sub">${campaignType.includes("ASC") ? "Automated Shopping Campaign" : "Targeted Audience Setup"}</div>
       </div>
     </div>
-    ${
-      showOverseas && intlDaily
-        ? `<div class="flight-reconcile-bar" style="margin-top:10px; padding:8px 12px; border-radius:8px; background:#f8fafc; border:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; font-size:11px; flex-wrap:wrap; gap:6px;">
-      <div>
-        <span style="font-weight:700; color:#0f172a;">Independent Ad Set Budgets:</span>
-        <span style="color:#16a34a; font-weight:700; margin-left:6px;">Primary Local:</span> ${daily ? fmt(daily, currency, symbol) : "—"}/day (${esc(budget.tier || "Sweet Spot")})
-        <span style="color:#94a3b8; margin:0 4px;">·</span>
-        <span style="color:#6366f1; font-weight:700;">Optional Overseas:</span> ${fmt(intlDaily, currency, symbol)}/day (${esc(intlTier || budget.international_tier || "Sweet Spot")})
-      </div>
-      <div style="font-weight:700; color:#334155;">
-        Combined Total: <span style="color:#0f172a; font-weight:800;">${fmt((daily || 0) + intlDaily, currency, symbol)}/day</span> (${duration === intlDuration ? `${duration}d: ` : `Local ${duration}d + Overseas ${intlDuration}d: `}${fmt((daily ? daily * duration : 0) + intlDaily * intlDuration, currency, symbol)})
-      </div>
-    </div>`
-        : ""
-    }
     <div style="margin-top:10px; padding:9px 12px; border-radius:8px; background:#fffaeb; border:1px solid #fbe6bf; color:#92400e; font-size:11px; line-height:1.45;">
       <strong>Before publishing:</strong> Confirm that ${esc(optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent === "InitiateCheckout" ? "Initiate Checkout" : optimizationEvent)} is active and receiving recent website events in Meta Events Manager. Shopify sessions do not verify Meta event health.
     </div>
@@ -607,11 +577,11 @@ export async function buildBriefHTML(
           <span class="cheat-val">${esc(primaryDomesticStr)}</span>
         </div>
         <div class="cheat-cell">
-          <span class="cheat-label">Test Duration &amp; Total Spend</span>
+          <span class="cheat-label">Test Length &amp; Max Spend</span>
           <span class="cheat-val">${
-            showOverseas && intlDaily
-              ? `Local: ${duration}d (${daily ? fmt(daily * duration, currency, symbol) : "—"}) · Overseas: ${intlDuration}d (${fmt(intlDaily * intlDuration, currency, symbol)}) · Total: ${fmt((daily ? daily * duration : 0) + intlDaily * intlDuration, currency, symbol)}`
-              : `${duration} Days · Total ${daily ? fmt(daily * duration, currency, symbol) : "—"}`
+            budgetPlan.basis === "merchant_cap"
+              ? esc(budgetPlanText.total)
+              : `${esc(budgetPlanText.duration)} · Budget not set`
           }</span>
         </div>
         <div class="cheat-cell">
@@ -912,17 +882,7 @@ export async function buildBriefHTML(
       intlLocs.length > 0
         ? field(
             "🌍 International locations to consider (Optional)",
-            `${intlLocationMarkup}${
-              intlBudgetStr
-                ? `<div style="font-size:11px; color:#4338ca; margin-top:6px;"><strong>Optional overseas budget:</strong> ${esc(
-                    intlBudgetStr
-                  )} (${esc(intlTier)} Strategy) — ${
-                    isTier1
-                      ? "run as a separate campaign only when you want to explore overseas buyers without diluting your domestic ad delivery or complicating fulfillment."
-                      : "run as a separate campaign only when you want to explore overseas buyers without diluting your local budget."
-                  }</div>`
-                : ""
-            }`
+            intlLocationMarkup
           )
         : ""
     }
@@ -956,349 +916,26 @@ export async function buildBriefHTML(
   );
 
   // ── Budget (Card 5) ──
-  const cleanBudgetReasoning = (() => {
-    let text = budget.reasoning || "";
-    if (!text) return "";
-    text = fixPunctuationSpacing(text);
-
-    if (numProductPrice > 0) {
-      text = text.replace(
-        /Calibrated for your product's [^ ]+ price point:/i,
-        `Calibrated for your product's ${fmt(numProductPrice, currency, symbol)} price point:`
-      );
-    }
-
-    // Sync international cities mentioned with the actual international cities displayed on Card 4
-    if (intlLocs && intlLocs.length > 0) {
-      const displayedIntlCityNames = intlLocs
-        .map((l: { name?: string; city?: string }) => (l?.name || l?.city || "").split(",")[0].trim())
-        .filter(Boolean)
-        .slice(0, 4)
-        .join(" · ");
-      if (displayedIntlCityNames) {
-        text = text.replace(
-          /Should you ever wish to (?:explore international demand|test overseas sales) in [^,]+,/i,
-          `Should you ever wish to test overseas sales in ${displayedIntlCityNames},`
-        );
-      }
-    }
-
-    const effectiveOverseas =
-      intlBudgetStr ||
-      (intlDaily ? `${formatCurrency(intlDaily, currency, symbol)}/day` : "");
-    if (effectiveOverseas) {
-      text = text.replace(
-        /launch a separate overseas ad set at [^.]+?\./gi,
-        `launch a separate overseas ad set at ${effectiveOverseas}.`
-      );
-    }
-    // Clean up any double periods, stray closing parens before periods, or mismatched parens
-    text = text.replace(/\)\./g, ".").replace(/\s*\.\s*/g, ". ").trim();
-    return text;
-  })();
-
-  const parsedBudget = cleanBudgetReasoning ? parseBudgetReasoning(cleanBudgetReasoning) : null;
-
-  const formattedBudgetReasoningHTML = (() => {
-    if (!cleanBudgetReasoning && !budget.calculation) return "";
-    const parsed = parsedBudget || {};
-    let html = "";
-
-    const dipDailyVal = Math.round((daily || 0) * 0.7);
-    const dipDailyStr = parsed.dipDailyFormatted || (daily ? `${fmt(dipDailyVal, currency, symbol)}/day` : "");
-    const dipTotalStr = daily ? fmt(dipDailyVal * duration, currency, symbol) : "";
-    const sweetSpotDailyStr = daily ? `${fmt(daily, currency, symbol)}/day` : "";
-    const sweetSpotTotalStr = daily ? fmt(daily * duration, currency, symbol) : "";
-
-    const c = budget.calculation;
-    const recentRevNum =
-      c?.revenue_30d ??
-      budget.breakdown?.revenue_based ??
-      (parsed.recentRevenueFormatted
-        ? parseFloat(parsed.recentRevenueFormatted.replace(/[^0-9.]/g, "")) || 0
-        : 0);
-    const totalTestSpendNum = daily ? daily * duration : 0;
-    const pctOfRecent =
-      recentRevNum > 0 ? Math.round((totalTestSpendNum / recentRevNum) * 100) : 0;
-    const isTightCashFlow =
-      Boolean(parsed.isCashFlowConstrained) || (recentRevNum > 0 && pctOfRecent > 25);
-
-    html += `
-      <div style="margin-top:7px; margin-bottom:7px; border:1px solid rgba(255,255,255,0.12); border-radius:8px; overflow:hidden; background:rgba(15,23,42,0.6);">
-        <div style="padding:6px 10px; background:rgba(255,255,255,0.06); font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#cbd5e1; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center;">
-          <span>Transparent Budget Calculation Breakdown</span>
-          <span style="font-size:9px; color:#94a3b8; font-weight:500;">Pre-Spend Intelligence</span>
-        </div>
-        <table style="width:100%; border-collapse:collapse; font-size:10px; text-align:left;">
-          <tbody>
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
-              <td style="padding:5px 10px; font-weight:600; color:#94a3b8; width:34%;">Store Sales Context</td>
-              <td style="padding:5px 10px; color:#f1f5f9;">${
-                recentRevNum > 0
-                  ? `${esc(parsed.recentRevenueFormatted || fmt(recentRevNum, currency, symbol))} verified over latest 30 days`
-                  : parsed.recentRevenueFormatted
-                  ? `${esc(parsed.recentRevenueFormatted)} verified in Shopify store`
-                  : "New store / early catalog testing baseline"
-              }</td>
-            </tr>
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
-              <td style="padding:5px 10px; font-weight:600; color:#94a3b8;">How Budget Was Chosen</td>
-              <td style="padding:5px 10px; color:#f1f5f9; line-height:1.4;">${
-                c
-                  ? c.selected_rule === "price_guardrail"
-                    ? `<strong>Product-Calibrated Testing Budget:</strong> Sized for ${esc(params.productName)}'s ${esc(fmt(c.effective_price, currency, symbol))} price point, giving Meta sufficient daily budget headroom to identify genuine buyers while protecting test spend.`
-                    : recentRevNum > 0
-                    ? `<strong>Revenue-Calibrated Budget:</strong> Scaled to your store's recent ${esc(fmt(recentRevNum, currency, symbol))} monthly volume, providing enough ad delivery to test reliably while protecting cash flow.`
-                    : `<strong>Starter Testing Baseline:</strong> Calibrated for your product's ${numProductPrice > 0 ? esc(fmt(numProductPrice, currency, symbol)) : "catalog"} price point to give Meta enough daily headroom to discover your first customers.`
-                  : isTightCashFlow
-                  ? `<strong>Starter Testing Baseline:</strong> Sized for your product's ${numProductPrice > 0 ? esc(fmt(numProductPrice, currency, symbol)) : "catalog"} price point to give Meta room to find buyers while keeping spend disciplined relative to recent sales.`
-                  : recentRevNum > 0
-                  ? `<strong>Revenue-Tier Testing Rule:</strong> Uses your store's recent ${esc(parsed.recentRevenueFormatted || fmt(recentRevNum, currency, symbol))} monthly volume to test reliably while protecting cash flow.`
-                  : `<strong>Starter Testing Baseline:</strong> Calibrated for your product's ${numProductPrice > 0 ? esc(fmt(numProductPrice, currency, symbol)) : "catalog"} price point to give Meta enough daily headroom to discover your first customers.`
-              }</td>
-            </tr>
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(99,102,241,0.08);">
-              <td style="padding:6px 10px; font-weight:700; color:#a5b4fc;">Recommended Test (${esc(budget.tier && budget.tier !== "Balanced" ? budget.tier : "Sweet Spot")})</td>
-              <td style="padding:6px 10px; color:#fff; font-weight:600;"><span style="font-size:11.5px; color:#818cf8; font-weight:800;">${sweetSpotTotalStr} Total Spend</span> (${sweetSpotDailyStr} × ${duration} days) · Balanced testing baseline</td>
-            </tr>
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(245,158,11,0.08);">
-              <td style="padding:6px 10px; font-weight:700; color:#fcd34d;">Lower-Spend Option (Dip Your Toe)</td>
-              <td style="padding:6px 10px; color:#fff; font-weight:600;">
-                <span style="font-size:11.5px; color:#fbbf24; font-weight:800;">${dipTotalStr || "—"} Total Spend</span> (${esc(dipDailyStr)} × ${duration} days)
-                ${
-                  isTightCashFlow
-                    ? `<div style="font-size:9px; color:#fef3c7; font-weight:400; margin-top:2px; line-height:1.35;">⚠️ Cash Flow Advisory: ${sweetSpotTotalStr} is about ${pctOfRecent}% of your recent 30-day sales. If cash is tight right now during this quiet spell, test with this lower option (${esc(dipDailyStr)}) to reduce your upfront risk while you collect early data, though gathering enough signals may take a few more days.</div>`
-                    : `<div style="font-size:9px; color:#fef3c7; font-weight:400; margin-top:2px; line-height:1.35;">A lower-commitment test option (${esc(dipDailyStr)}). Reduces your upfront financial risk while you validate customer interest.</div>`
-                }
-              </td>
-            </tr>
-            ${
-              showOverseas && intlDaily
-                ? `<tr style="background:rgba(147,51,234,0.08);">
-              <td style="padding:6px 10px; font-weight:700; color:#c084fc;">Optional Overseas Expansion</td>
-              <td style="padding:6px 10px; color:#fff; font-weight:600;">
-                <span style="font-size:11.5px; color:#c084fc; font-weight:800;">${fmt(intlDaily * intlDuration, currency, symbol)} Total Spend</span> (${fmt(intlDaily, currency, symbol)}/day × ${intlDuration} days) · Test only after your domestic campaign is proven profitable
-              </td>
-            </tr>`
-                : ""
-            }
-          </tbody>
-        </table>
-        ${
-          c?.fx && currency !== "USD"
-            ? `<div style="padding:4px 10px; font-size:8.5px; color:#94a3b8; border-top:1px solid rgba(255,255,255,0.06); background:rgba(0,0,0,0.15);">
-                💱 Budget baseline converted from Meta's global USD test volume at $1 USD ≈ ${c.fx.rate >= 10 ? Math.round(c.fx.rate).toLocaleString() : c.fx.rate.toFixed(2)} ${esc(c.fx.currency)}. This gives your campaign the same competitive ad delivery volume as international stores.
-              </div>`
-            : ""
-        }
-      </div>`;
-
-    if (parsed.calibrationTitle || parsed.calibrationBody) {
-      html += `<p style="margin-top:4px; font-size:10px; color:#e2e8f0; line-height:1.4;">${
-        parsed.calibrationTitle ? `<strong style="color:#fff;">${esc(parsed.calibrationTitle)}</strong> ` : ""
-      }${esc(parsed.calibrationBody || "")}</p>`;
-    }
-    if (parsed.recommendedPlan) {
-      html += `<p style="margin-top:3px; font-size:10px; color:#e2e8f0; line-height:1.4;"><strong style="color:#fff;">Recommended Allocation:</strong> ${esc(parsed.recommendedPlan)}</p>`;
-    }
-    if (parsed.overseasExpansion) {
-      html += `<div style="margin-top:5px; padding:5px 8px; background:rgba(99,102,241,0.12); border:1px solid rgba(129,140,248,0.25); border-radius:6px; font-size:9.5px; color:#e0e7ff; line-height:1.35;"><strong style="color:#a5b4fc;">🌍 Optional Overseas Expansion:</strong> ${esc(parsed.overseasExpansion)}</div>`;
-    }
-    if (parsed.rawFallback) {
-      html += `<p style="margin-top:5px; font-size:10px; color:#e2e8f0; line-height:1.4;">${esc(parsed.rawFallback)}</p>`;
-    }
-    return html;
-  })();
-
-  let pricingStrategyHTML = "";
-  if (numProductPrice > 0 && daily !== null && daily > 0) {
-    const dailyAmount = daily;
-    const totalTestSpend = dailyAmount * duration;
-    const priceToDailyRatio = numProductPrice / dailyAmount;
-    const formattedPrice = fmt(numProductPrice, currency, symbol);
-    const formattedDaily = fmt(dailyAmount, currency, symbol);
-
-    if (priceToDailyRatio >= 2.0 || (totalTestSpend > 0 && numProductPrice >= totalTestSpend * 0.7)) {
-      pricingStrategyHTML = `
-        <div style="padding:7px 10px; background:rgba(99,102,241,0.16); border:1px solid rgba(129,140,248,0.3); border-left:3px solid #818cf8; border-radius:6px;">
-          <div style="font-size:10px; font-weight:700; color:#c7d2fe; display:flex; align-items:center; gap:5px; margin-bottom:2px;">
-            <span>💎</span> Premium Piece Consideration Strategy (${formattedPrice} unit price vs ${formattedDaily}/day budget)
-          </div>
-          <p style="font-size:9.5px; color:#e2e8f0; margin-top:3px; line-height:1.4;">
-            Because <strong style="color:#fff;">${esc(params.productName)}</strong> (${formattedPrice}) is a premium piece, shoppers often take time to consider sizing and details before purchasing. During your initial test, watch Add-to-Carts and Checkout Starts as strong leading indicators of intent. Even 1–2 orders at this price point delivers an exceptional return on ad spend.
-          </p>
-        </div>`;
-    } else if (priceToDailyRatio < 1.2) {
-      pricingStrategyHTML = `
-        <div style="padding:7px 10px; background:rgba(16,185,129,0.16); border:1px solid rgba(52,211,153,0.3); border-left:3px solid #34d399; border-radius:6px;">
-          <div style="font-size:10px; font-weight:700; color:#a7f3d0; display:flex; align-items:center; gap:5px; margin-bottom:2px;">
-            <span>⚡</span> Fast-Conversion Impulse Strategy (${formattedPrice} unit price)
-          </div>
-          <p style="font-size:9.5px; color:#e2e8f0; margin-top:3px; line-height:1.4;">
-            With a unit price well within your daily spend of ${formattedDaily}/day, <strong style="color:#fff;">${esc(params.productName)}</strong> sits at an accessible purchase threshold. New shoppers can make quick buying decisions on their very first visit.
-          </p>
-        </div>`;
-    }
-  }
-
-  const budgetNotesGridHTML =
-    (parsedBudget?.cashFlowTip || pricingStrategyHTML)
-      ? `<div class="budget-notes-grid">
-          ${
-            parsedBudget?.cashFlowTip
-              ? `<div style="padding:7px 10px; background:rgba(245,158,11,0.12); border:1px solid rgba(251,191,36,0.25); border-radius:6px; font-size:9.5px; color:#fef3c7; line-height:1.4;"><strong style="color:#fde68a;">💡 Cash Flow Protection:</strong> ${esc(parsedBudget.cashFlowTip)}</div>`
-              : ""
-          }
-          ${pricingStrategyHTML}
-        </div>`
-      : "";
-
-  const budgetHTML = (() => {
-    const fallbackRate = getEstimatedExchangeRate(currency);
-    const overseasTargetUSD =
-      intlTier === "Dip Your Toe" ? 18 : intlTier === "Full Send" ? 40 : 25;
-    const effectiveRate =
-      showOverseas && intlDaily && intlDaily > 0 && overseasTargetUSD > 0
-        ? intlDaily / overseasTargetUSD
-        : fallbackRate;
-
-    const localDailyUSD =
-      daily && effectiveRate > 0 ? Math.max(1, Math.round(daily / effectiveRate)) : null;
-    const localDailyStr = daily ? fmt(daily, currency, symbol) : "";
-    const intlDailyUSD =
-      intlDaily && effectiveRate > 0 ? Math.max(1, Math.round(intlDaily / effectiveRate)) : overseasTargetUSD;
-    const intlDailyStr = intlDaily ? fmt(intlDaily, currency, symbol) : "";
-
-    const multiMarketCurrencyTipHTML =
-      currency !== "USD" && localDailyUSD
-        ? `<p style="margin-top:7px; color:#cbd5e1;"><strong>💱 Ad Account Currency Tip:</strong> If your Meta Ads Manager account bills you in US Dollars ($) instead of ${esc(
-            currency
-          )}, enter <strong>~$${localDailyUSD}/day USD</strong> for your primary local campaign (equivalent to ${localDailyStr}/day)${
-            showOverseas && intlDaily
-              ? `, or <strong>~$${intlDailyUSD}/day USD</strong> if you launch the separate overseas test campaign (${intlDailyStr}/day)`
-              : ""
-          }. <em>(Estimated currency conversion; actual billing depends on your payment card's daily exchange rate.)</em></p>`
-        : currency !== "USD"
-        ? `<p style="margin-top:7px; color:#cbd5e1;"><strong>💱 Ad Account Currency Tip:</strong> If your Meta Ads Manager account bills you in US Dollars ($) instead of ${esc(
-            currency
-          )}, enter the equivalent daily USD directly in Ads Manager so exchange rate shifts don't cause Meta to slow down ad delivery. <em>(Estimated currency conversion; verify with your current exchange rate.)</em></p>`
-        : "";
-
-    const singleMarketCurrencyTipHTML =
-      currency !== "USD" && localDailyUSD
-        ? `<p style="margin-top:7px; color:#cbd5e1;"><strong>💱 Ad Account Currency Tip:</strong> If your Meta Ads Manager account bills you in US Dollars ($) instead of ${esc(
-            currency
-          )}, enter <strong>~$${localDailyUSD}/day USD</strong> (equivalent to ${localDailyStr}/day) directly in Ads Manager so exchange rate shifts don't cause Meta to slow down ad delivery. <em>(Estimated currency conversion; actual billing depends on your payment card's daily exchange rate.)</em></p>`
-        : currency !== "USD"
-        ? `<p style="margin-top:7px; color:#cbd5e1;"><strong>💱 Ad Account Currency Tip:</strong> If your Meta Ads Manager account bills you in US Dollars ($) instead of ${esc(
-            currency
-          )}, enter the equivalent daily USD directly in Ads Manager so exchange rate shifts don't cause Meta to slow down ad delivery. <em>(Estimated currency conversion; verify with your current exchange rate.)</em></p>`
-        : "";
-
-    return card(
-      "Budget & spending plan",
-      `
-      ${
-        showOverseas
-          ? `<div class="budget-grid">
-        <!-- Local Primary Market -->
-        <div class="budget-card local">
-          <div class="budget-card-header">
-            <span class="budget-card-title">📍 Primary Market (Local)</span>
-            <span class="budget-badge local">Start Here</span>
-          </div>
-          <div class="budget-card-amount">
-            ${daily ? fmt(daily, currency, symbol) : "Set manually"}<span class="budget-unit">/day</span>
-          </div>
-          <div class="budget-card-sub">
-            ${esc(budget.tier || "Sweet Spot")} Strategy · 1 Local Ad Set
-          </div>
-          <div class="budget-meta" style="min-width:0; border-top:1px solid var(--subtle-2); padding-top:8px;">
-            ${row("Test Duration", `${duration} days`)}
-            ${daily ? row("Total Test Spend", fmt(daily * duration, currency, symbol)) : ""}
-            ${row("Delivery", "Core domestic sales")}
-          </div>
-        </div>
-
-        <!-- Overseas Test (Optional) -->
-        <div class="budget-card intl">
-          <div class="budget-card-header">
-            <span class="budget-card-title">🌍 Overseas Test (Optional)</span>
-            <span class="budget-badge intl">Suggested Expansion</span>
-          </div>
-          <div class="budget-card-amount">
-            ${
-              intlDaily
-                ? fmt(intlDaily, currency, symbol)
-                : esc(intlBudgetStr || "Set manually")
-            }<span class="budget-unit">/day</span>
-          </div>
-          <div class="budget-card-sub">
-            ${esc(intlTier)} Strategy · 1 Separate Ad Set
-          </div>
-          <div class="budget-meta" style="min-width:0; border-top:1px solid #e0e7ff; padding-top:8px;">
-            ${row("Optional Duration", `${intlDuration} days`)}
-            ${intlDaily ? row("Estimated Test Spend", fmt(intlDaily * intlDuration, currency, symbol)) : ""}
-            ${row("Delivery", "Group into 1 ad set")}
-          </div>
-        </div>
-      </div>
-
-      ${
-        showOverseas && intlDaily
-          ? `<div style="margin-top:10px; margin-bottom:12px; padding:10px 14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; display:flex; justify-content:space-between; align-items:center; font-size:11px; flex-wrap:wrap; gap:6px;">
-        <div style="color:#475569;">
-          <strong style="color:#0f172a;">Combined Ad Commitment:</strong> If launching both independent ad sets simultaneously:
-        </div>
-        <div style="font-weight:800; color:#0f172a;">
-          Local: ${daily ? fmt(daily * duration, currency, symbol) : "—"} (${duration}d) + Overseas: ${fmt(intlDaily * intlDuration, currency, symbol)} (${intlDuration}d) = Total ${fmt((daily ? daily * duration : 0) + intlDaily * intlDuration, currency, symbol)}
-        </div>
-      </div>`
-          : ""
-      }
-
-      ${engineLogic(
-        "How your budget was calculated",
-        `<p style="font-size:10px; line-height:1.45;"><strong>Two Independent Budgets:</strong> Run your <strong>Primary Local Campaign</strong> first to establish solid domestic cash flow. The <strong>Overseas Campaign</strong> is an optional expansion to test only when you want to explore buyers abroad — never combine local and overseas audiences into the same ad set.</p>
-         ${multiMarketCurrencyTipHTML}
-         ${formattedBudgetReasoningHTML}
-         ${budgetNotesGridHTML}`
-      )}`
-          : `<div class="budget-grid" style="grid-template-columns: 1fr;">
-        <!-- Single Consolidated Campaign -->
-        <div class="budget-card local">
-          <div class="budget-card-header">
-            <span class="budget-card-title">📍 Recommended Campaign Budget</span>
-            <span class="budget-badge local">Advantage+</span>
-          </div>
-          <div class="budget-card-amount">
-            ${daily ? fmt(daily, currency, symbol) : "Set manually"}<span class="budget-unit">/day</span>
-          </div>
-          <div class="budget-card-sub">
-            ${esc(budget.tier || "Sweet Spot")} Strategy · 1 Consolidated Ad Set
-          </div>
-          <div class="budget-meta" style="min-width:0; border-top:1px solid var(--subtle-2); padding-top:6px;">
-            ${row("Test Duration", `${duration} days`)}
-            ${daily ? row("Total Test Spend", fmt(daily * duration, currency, symbol)) : ""}
-            ${row("Delivery", isUS ? "United States (Nationwide)" : "Core domestic sales")}
-          </div>
-        </div>
-      </div>
-
-      ${engineLogic(
-        "How your budget was calculated",
-        `<p style="font-size:10px; line-height:1.45;"><strong>Single Consolidated Campaign:</strong> Run as 1 Advantage+ ad set so Meta can focus your entire budget on finding your best customers without splitting your spend across multiple ad sets.</p>
-         ${singleMarketCurrencyTipHTML}
-         ${formattedBudgetReasoningHTML}
-         ${budgetNotesGridHTML}`
-      )}`
-      }`,
-      ICONS.budget,
-      "neutral",
-      5,
-      "page-break-before"
-    );
-  })();
+  // S0.6: revenue-derived budgets, strategies and overseas floors are withdrawn.
+  // This card renders only the merchant's own maximum test budget, worded by
+  // describeBudgetPlan() exactly as in the brief view and plain-text export.
+  const budgetHTML = card(
+    "Budget & spending plan",
+    `
+    <div class="callout callout-info">
+      <div class="callout-label">${esc(budgetPlanText.heading)}</div>
+      <p class="prose">${esc(budgetPlanText.explanation)}</p>
+    </div>
+    ${row("Daily cap", esc(budgetPlanText.daily))}
+    ${row("Maximum total spend", esc(budgetPlanText.total))}
+    ${row("Test length", esc(budgetPlanText.duration))}
+    ${row("Ad sets", "1 (your primary domestic market)")}
+    <p class="prose" style="margin-top:8px;">Run the test as 1 ad set so your budget is not split. If you choose to test overseas buyers, give that test its own separate budget.</p>`,
+    ICONS.budget,
+    "neutral",
+    5,
+    "page-break-before"
+  );
 
   // ── Timing & Sales Expectations (Card 6) ──
   const cleanTimingReasoning = fixPunctuationSpacing(
@@ -1375,7 +1012,7 @@ export async function buildBriefHTML(
     {
       level: "Ad set level" as const,
       title: "Budget, Audience & Conversion",
-      instructions: `First confirm the ${optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent === "InitiateCheckout" ? "Initiate Checkout" : optimizationEvent} event is active in Meta Events Manager. Then under Conversion, choose 'Website' and select that event. Set your daily budget to ${domesticBudgetStr || "your recommended daily budget"}. Set start schedule to ${preciseLaunchTiming}. Under Audience, add your suggested locations and set age to ${ageMin}–${ageMax} (${genderLabel === "All" ? "Men & Women" : genderLabel}).`,
+      instructions: `First confirm the ${optimizationEvent === "AddToCart" ? "Add to Cart" : optimizationEvent === "InitiateCheckout" ? "Initiate Checkout" : optimizationEvent} event is active in Meta Events Manager. Then under Conversion, choose 'Website' and select that event. Set your daily budget to ${domesticBudgetStr || "the daily cap from the maximum test budget you set"}. Set start schedule to ${preciseLaunchTiming}. Under Audience, add your suggested locations and set age to ${ageMin}–${ageMax} (${genderLabel === "All" ? "Men & Women" : genderLabel}).`,
     },
     {
       level: "Ad level" as const,
@@ -1405,9 +1042,9 @@ export async function buildBriefHTML(
   );
 
   // ── Day 7 Decision Tree & Scaling Playbook (Card 8) ──
-  const totalTestSpend = daily ? Math.round(daily * duration) : 0;
+  // The merchant's cap itself (not daily × days, which is floored and can differ).
+  const totalTestSpend = budgetPlan.max_total_budget ?? 0;
   const midpointSpend = totalTestSpend ? Math.round(totalTestSpend * 0.5) : 0;
-  const scaleBudgetVal = daily ? Math.round(daily * 1.2) : 0;
   const contributionCeiling = decisionEvidence?.price_less_unit_cost ?? null;
   const targetCpa = numProductPrice > 0 ? Math.round(numProductPrice * 0.35) : null;
   const contributionLabel = contributionCeiling !== null
@@ -1438,7 +1075,7 @@ export async function buildBriefHTML(
           </div>
           <div style="display:flex; flex-direction:column; gap:3px;">
             <div><strong>• Verify net profit:</strong> Ensure customer revenue comfortably covers production, shipping, and payment gateway fees.</div>
-            <div><strong>• When to scale:</strong> Once you see consistent orders, increase your daily budget gradually (by ~20% every 3–4 days${daily ? `, e.g. from ${fmt(daily, currency, symbol)} to ${fmt(scaleBudgetVal, currency, symbol)}/day` : ""}) to grow volume while preserving ad delivery efficiency.</div>
+            <div><strong>• When to scale:</strong> Once you see consistent orders, increase your daily budget gradually (by ~20% every 3–4 days) to grow volume while preserving ad delivery efficiency. Raise the maximum test budget you set first; never exceed it.</div>
           </div>
         </div>
       </div>

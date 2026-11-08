@@ -1,9 +1,8 @@
 import { groundTargetingProfile } from "./recommendation-evidence";
 import { StoreData, StoreProduct } from "./store-data";
 import Anthropic from "@anthropic-ai/sdk";
-import { formatCurrency } from "@/lib/currency";
 import { fetchExchangeRateSnapshot } from "./exchange-rates";
-import { estimateDailyTestBudget } from "./budget-evidence";
+import { withdrawnEngineBudget } from "./budget-plan";
 import { getAdvantagePlusGuidance } from "./advantage-plus";
 import { summarizeShopifyReadiness } from "./shopify-readiness";
 import { summarizeMarketingHistory } from "./marketing-evidence";
@@ -11,8 +10,6 @@ import { compareProductsForTest, selectGatewayTestCandidate } from "./gateway-de
 import {
   isDomesticCity,
   getEffectiveStoreCountry,
-  getInternationalStrategies,
-  getInternationalBudgetFloor,
   isTier1Market,
   isFallbackCountryEntry,
 } from "./market-geography";
@@ -938,14 +935,21 @@ export interface MetaRecommendations {
     behaviours?: string[];
   };
   budget: {
+    /** S0.6: revenue-derived budgets are withdrawn; amounts come only from the merchant's BudgetPlan. */
+    status?: "withdrawn";
+    rule_version?: string;
+    /** Legacy (historical briefs only). */
     calculation?: import("./budget-evidence").BudgetCalculation;
-    recommended_daily: number;
+    /** Legacy (historical briefs only). */
+    recommended_daily?: number;
     recommended_duration_days: number;
     reasoning: string;
     currency: string;
     currency_symbol?: string;
-    tier: "Starter" | "Testing" | "Growth" | "Scale";
-    breakdown: {
+    /** Legacy (historical briefs only). */
+    tier?: "Starter" | "Testing" | "Growth" | "Scale";
+    /** Legacy (historical briefs only). */
+    breakdown?: {
       revenue_based: number;
       aov_based: number;
       goal_multipliers: Record<string, number>;
@@ -1012,20 +1016,6 @@ export async function generateRecommendations(
 
   // ─── Before running calculations: data sufficiency check ───
   if (storeData.orders.order_count < 20 && !targetProductOverride) {
-    const lowDataCatalogPrices = (storeData.products || [])
-      .map((p) => p.price)
-      .filter((p): p is number => typeof p === "number" && p > 0)
-      .sort((a, b) => a - b);
-    const lowDataMedianCatalogPrice =
-      lowDataCatalogPrices.length > 0
-        ? lowDataCatalogPrices[Math.floor(lowDataCatalogPrices.length / 2)]
-        : 0;
-    const effectiveLowDataAov =
-      storeData.orders.average_order_value > 0
-        ? storeData.orders.average_order_value
-        : lowDataMedianCatalogPrice > 0
-        ? lowDataMedianCatalogPrice
-        : 25 * exchangeRate;
 
     return {
       generation_status: "fallback",
@@ -1068,56 +1058,12 @@ export async function generateRecommendations(
         interest_reasoning:
           "Starting with broad interest seed hints is recommended for stores with low order volume.",
       },
-      budget: {
-        recommended_daily: Math.round(15 * exchangeRate),
-        recommended_duration_days: 14,
-        reasoning:
-          "Starter testing budget: 1 consolidated ad set focused on your primary domestic market to jumpstart conversions and build initial pixel data.",
+      // S0.6: no budget amounts; the merchant sets the test budget (BudgetPlan).
+      budget: withdrawnEngineBudget({
         currency: storeCurrency,
-        currency_symbol: storeData.store.currency_symbol || "$",
-        tier: "Starter",
-        ad_sets: 1,
-        optimization_event: {
-          event: guidance.optimization_event,
-          reasoning: guidance.default_reasoning,
-        },
-        breakdown: {
-          revenue_based: 0,
-          aov_based: Math.round(effectiveLowDataAov),
-          goal_multipliers: {
-            "Drive Website Sales": 1.0,
-            "Grow Brand Awareness": 0.6,
-            "Promote a New Collection": 1.2,
-            "Retarget Past Visitors": 0.4,
-          },
-          meta_optimal_daily: Math.round(15 * exchangeRate),
-        },
-        strategies: [
-          {
-            label: "Dip Your Toe",
-            daily: Math.round(15 * exchangeRate * 0.7),
-            total_daily: Math.round(15 * exchangeRate * 0.7),
-            description:
-              "Lowers upfront financial risk. Best if cash is tight, but may take longer to collect customer signals.",
-          },
-          {
-            label: "Sweet Spot",
-            daily: Math.round(15 * exchangeRate * 1.0),
-            total_daily: Math.round(15 * exchangeRate * 1.0),
-            description:
-              "Our recommended starter baseline. Balances clear shopper feedback without overspending upfront.",
-          },
-          {
-            label: "Full Send",
-            daily: Math.round(15 * exchangeRate * 1.4),
-            total_daily: Math.round(15 * exchangeRate * 1.4),
-            description:
-              "Faster data collection at higher daily spend. Best when you already know your creative works.",
-          },
-        ],
-        international_strategies: getInternationalStrategies(storeCurrency, exchangeRate),
-        international_recommended_daily: Math.round(18 * exchangeRate),
-      },
+        currencySymbol: storeData.store.currency_symbol,
+        optimizationEvent: { event: guidance.optimization_event, reasoning: guidance.default_reasoning },
+      }),
       timing: {
         peak_days: [],
         launch_recommendation:
@@ -1220,101 +1166,17 @@ export async function generateRecommendations(
     (l) => !isDomestic(l.city, l.country)
   );
 
-  const hasInternationalDemand = internationalLocations.length > 0;
-
-  // ── BUDGET CALCULATION (USD tiered revenue ratio with AOV liquidity guardrail) ──
-  const avgMonthlyRevenue =
-    (storeData.orders as { revenue_avg_3_months?: number })
-      .revenue_avg_3_months ||
-    storeData.orders.revenue_last_30_days ||
-    0;
-  const avgMonthlyRevenueUSD = avgMonthlyRevenue / exchangeRate;
-
-  const TEST_DURATION_DAYS = 14;
-
-  let totalTestBudgetUSD = 150;
-  let budgetTier: "Starter" | "Testing" | "Growth" | "Scale" = "Starter";
-
-  if (avgMonthlyRevenueUSD < 2000) {
-    totalTestBudgetUSD = 150;
-    budgetTier = "Starter";
-  } else if (avgMonthlyRevenueUSD <= 10000) {
-    totalTestBudgetUSD = Math.min(avgMonthlyRevenueUSD * 0.12, 800);
-    budgetTier = "Growth";
-  } else {
-    totalTestBudgetUSD = Math.min(avgMonthlyRevenueUSD * 0.07, 2000);
-    budgetTier = "Scale";
-  }
-
-  const totalDailySpendUSD = totalTestBudgetUSD / TEST_DURATION_DAYS;
-
-  // ── AOV & PRODUCT PRICE GUARDRAIL WATERFALL ──
-  // Fallback hierarchy if store had a dry spell / low-to-no recent orders:
-  // 1. Historical store AOV (from rolling 60d or lifetime orders)
-  // 2. Target product price being advertised (if generating for a specific product)
-  // 3. Median product price from store catalog
-  // 4. Default testing baseline ($25)
-  const catalogPrices = (storeData.products || [])
-    .map((p) => p.price)
-    .filter((p): p is number => typeof p === "number" && p > 0)
-    .sort((a, b) => a - b);
-  const medianCatalogPrice =
-    catalogPrices.length > 0
-      ? catalogPrices[Math.floor(catalogPrices.length / 2)]
-      : 0;
-
-  const effectiveAOV =
-    (targetProductOverride?.price && targetProductOverride.price > 0)
-      ? targetProductOverride.price
-      : storeData.orders.average_order_value > 0
-      ? storeData.orders.average_order_value
-      : medianCatalogPrice > 0
-      ? medianCatalogPrice
-      : 25 * exchangeRate;
-
-  const aovUSD = effectiveAOV / exchangeRate;
-  const aovGuardrailUSD = aovUSD * 0.5;
-
-  let budgetWarning = false;
-  let budgetWarningMessage: string | undefined;
-
-  if (aovGuardrailUSD > totalDailySpendUSD * 3) {
-    budgetWarning = true;
-    const guardrailLocal = Math.round(aovGuardrailUSD * exchangeRate);
-    const tierLocal = Math.round(totalDailySpendUSD * exchangeRate);
-    budgetWarningMessage = `For a premium product at this price point, a daily budget of ${storeData.store.currency_symbol || ""}${guardrailLocal.toLocaleString()}/day may give the test more room to gather evidence. Starting at ${storeData.store.currency_symbol || ""}${tierLocal.toLocaleString()}/day limits the amount you risk, but results may be inconclusive. Verify the Purchase event in Meta Events Manager before launch and reassess any event change using measured campaign results.`;
-  }
-
-  const finalDailyUSD = estimateDailyTestBudget(totalDailySpendUSD, aovUSD);
-
-  const recommendedDailyLocal = finalDailyUSD * exchangeRate;
-  const recommendedDaily = Math.round(recommendedDailyLocal);
-
-  // Multi-market allocation decision
-  const intlFloorStrategies = getInternationalStrategies(storeCurrency, exchangeRate);
-  const MIN_INTL_DAILY_LOCAL = intlFloorStrategies[0]?.daily || Math.round(18 * exchangeRate);
-  const intlFloorFormatted = getInternationalBudgetFloor(storeCurrency, exchangeRate);
-
-  let adSets: number;
-  let adSetReasoning: string;
-
-  if (hasInternationalDemand) {
-    const intlCityNames = internationalLocations.map((l) => l.city).join(" · ");
-    adSets = 1;
-    adSetReasoning =
-      `Recommended Plan: 1 consolidated ad set at ${formatCurrency(recommendedDaily, storeCurrency, storeData.store.currency_symbol)}/day focused on your primary domestic market.\n\n` +
-      `💡 Optional Overseas Expansion: Should you ever wish to test overseas sales in ${intlCityNames}, launch a separate overseas ad set at ${intlFloorFormatted}. You do not need to run both at once — win your home market first to protect your cash flow.`;
-  } else {
-    // Pure domestic store
-    adSets = 1;
-    adSetReasoning = `Recommended Plan: 1 consolidated ad set at ${formatCurrency(recommendedDaily, storeCurrency, storeData.store.currency_symbol)}/day to focus your entire budget on finding your best customers without splitting your spend.`;
-  }
+  // ── BUDGET (S0.6 containment) ──
+  // Revenue-derived budgets are withdrawn: the engine produces no budget
+  // amounts. The merchant sets a maximum test budget on the brief
+  // (src/lib/budget-plan.ts); Phase 4 introduces per-product economics.
+  const adSets = 1;
 
   // Run unified AI single-pass call
   const profile = await generateTargetingProfile(
     storeData,
     adSets,
-    recommendedDaily,
+    0, // budget is not an input to targeting (S0.6: no engine budget amounts)
     userId,
     targetProductOverride,
     excludedAngle
@@ -1349,92 +1211,6 @@ export async function generateRecommendations(
     "Standard e-commerce age targeting (25-44) is highly recommended for early validation campaigns.";
   const locations = profile.locations;
   const interests = profile.seed_interests;
-
-  // Goal multipliers
-  const goalMultipliers: Record<string, number> = {
-    "Drive Website Sales": 1.0,
-    "Grow Brand Awareness": 0.6,
-    "Promote a New Collection": 1.2,
-    "Retarget Past Visitors": 0.4,
-  };
-
-  // ── Strategies ──
-  const strategies = [
-    {
-      label: "Dip Your Toe",
-      daily: Math.round(finalDailyUSD * 0.7 * exchangeRate),
-      total_daily:
-        Math.round(finalDailyUSD * 0.7 * exchangeRate) * adSets,
-      description:
-        "Lowers upfront financial risk. Best if cash is tight, but may take longer to collect customer signals.",
-    },
-    {
-      label: "Sweet Spot",
-      daily: recommendedDaily,
-      total_daily: recommendedDaily * adSets,
-      description:
-        "Our recommended starter baseline. Balances clear shopper feedback without overspending upfront.",
-    },
-    {
-      label: "Full Send",
-      daily: Math.round(finalDailyUSD * 1.4 * exchangeRate),
-      total_daily:
-        Math.round(finalDailyUSD * 1.4 * exchangeRate) * adSets,
-      description:
-        "Faster data collection at higher daily spend. Best when you already know your creative works.",
-    },
-  ];
-
-  const internationalStrategies = getInternationalStrategies(storeCurrency, exchangeRate);
-
-  const isAovPaced = finalDailyUSD === aovGuardrailUSD && aovGuardrailUSD > totalDailySpendUSD;
-  const formattedAov = formatCurrency(
-    Math.round(effectiveAOV),
-    storeCurrency,
-    storeData.store.currency_symbol
-  );
-  const formattedMonthlyRev = formatCurrency(
-    Math.round(avgMonthlyRevenue),
-    storeCurrency,
-    storeData.store.currency_symbol
-  );
-  const formattedDipDaily = formatCurrency(
-    Math.round(finalDailyUSD * 0.7 * exchangeRate),
-    storeCurrency,
-    storeData.store.currency_symbol
-  );
-
-  let budgetReasoning = "";
-  if (isAovPaced) {
-    budgetReasoning =
-      `Calibrated for your product's ${formattedAov} price point: Higher-ticket items naturally have longer consideration cycles, so the price-based test rule raises the daily estimate; it does not establish an affordable acquisition cost. If you prefer lower upfront risk, the Dip Your Toe option is a valid starting point that simply takes longer to accumulate conclusive signals. ` +
-      adSetReasoning;
-    if (avgMonthlyRevenue > 0 && (recommendedDaily * TEST_DURATION_DAYS) > (avgMonthlyRevenue * 0.3)) {
-      budgetReasoning += `\n\n💡 Cash Flow Tip: Your recent 30-day store sales were ${formattedMonthlyRev}. If cash flow is tight right now, choose the Dip Your Toe option (${formattedDipDaily}/day) to test with less risk, or wait until your busy season picks up.`;
-    }
-  } else if (avgMonthlyRevenue > 0) {
-    budgetReasoning =
-      `Based on the ${budgetTier} testing rule and recent store revenue of ${formattedMonthlyRev}. This is a test-spend estimate, not a profitability forecast. ` +
-      adSetReasoning;
-  } else {
-    budgetReasoning =
-      `Based on your product price point of ${formattedAov} and our Starter Testing model. ` +
-      adSetReasoning;
-  }
-
-  // Check high budget warning
-  let highBudgetWarning = false;
-  let highBudgetWarningMessage: string | undefined;
-
-  if (!budgetWarning && finalDailyUSD > 50) {
-    highBudgetWarning = true;
-    const formattedAmount = formatCurrency(
-      recommendedDaily,
-      storeCurrency,
-      storeData.store.currency_symbol
-    );
-    highBudgetWarningMessage = `For a higher-priced product, we recommend a daily budget of at least ${formattedAmount} to give Meta room to find qualified buyers.`;
-  }
 
   // --- TIMING ---
   const timing = profile.timing;
@@ -1525,9 +1301,6 @@ export async function generateRecommendations(
 
   if (newStoreCautionMessage) {
     warnings.push(newStoreCautionMessage);
-  }
-  if (highBudgetWarningMessage) {
-    warnings.push(highBudgetWarningMessage);
   }
 
   // --- OPPORTUNITIES ---
@@ -1623,34 +1396,6 @@ export async function generateRecommendations(
             })
             .map((l) => ({ ...l, source: "recommended" as const, market_type: "international" as const }));
 
-    if (finalInternationalLocations.length > 0) {
-      const displayedIntlCityNames = finalInternationalLocations
-        .map((l) => (l.name || (l as { city?: string }).city || "").split(",")[0].trim())
-        .filter(Boolean)
-        .slice(0, 4)
-        .join(" · ");
-      if (displayedIntlCityNames) {
-        budgetReasoning = budgetReasoning.replace(
-          /Should you ever wish to (?:explore international demand|test overseas sales) in [^,]+,/i,
-          `Should you ever wish to test overseas sales in ${displayedIntlCityNames},`
-        );
-      }
-    }
-
-    const domesticBudgetFormatted =
-      formatCurrency(
-        recommendedDaily,
-        storeCurrency,
-        storeData.store.currency_symbol
-      ) + "/day";
-
-    const intlBudgetFormatted =
-      formatCurrency(
-        MIN_INTL_DAILY_LOCAL,
-        storeCurrency,
-        storeData.store.currency_symbol
-      ) + "/day ($18/day min)";
-
     return {
     generation_status: profile.generation_status,
     creative_hooks_status: profile.creative_hooks_status ?? (creative_hooks.length === 3 ? "generated" : "fallback"),
@@ -1659,10 +1404,6 @@ export async function generateRecommendations(
       : {
           newStoreCaution,
           newStoreCautionMessage,
-          highBudgetWarning,
-          highBudgetWarningMessage,
-          budgetWarning,
-          budgetWarningMessage,
         }),
     creative_hooks,
     advantage_plus_guidance,
@@ -1672,11 +1413,6 @@ export async function generateRecommendations(
       international_locations:
         finalInternationalLocations.length > 0
           ? finalInternationalLocations
-          : undefined,
-      domestic_budget_formatted: domesticBudgetFormatted,
-      international_budget_formatted:
-        finalInternationalLocations.length > 0
-          ? intlBudgetFormatted
           : undefined,
       overseas_demand:
         finalInternationalLocations.length > 0
@@ -1691,46 +1427,17 @@ export async function generateRecommendations(
       interest_reasoning:
         "Starting interest suggestions to help Meta find your first wave of shoppers.",
     },
-    budget: {
-      calculation: {
-        rule_version: "prespend-v1",
-        product_price: targetProductOverride?.price ?? null,
-        price_basis: targetProductOverride?.price ? "selected_product" : "store_aov_or_catalog",
-        effective_price: effectiveAOV,
-        revenue_30d: avgMonthlyRevenue,
-        product_revenue_30d: targetProductOverride?.revenue ? Math.round(targetProductOverride.revenue) : null,
-        baseline_test_usd: totalTestBudgetUSD,
-        baseline_duration_days: TEST_DURATION_DAYS,
-        baseline_daily: totalDailySpendUSD * exchangeRate,
-        price_guardrail_daily: effectiveAOV * 0.5,
-        selected_rule: isAovPaced ? "price_guardrail" : "revenue_tier_baseline",
-        daily_before_strategy: recommendedDaily,
-        fx: { currency: storeCurrency, rate: exchangeRate, source: fx.source, fetched_at: fx.fetched_at },
-      },
-      recommended_daily: recommendedDaily,
-      recommended_duration_days: TEST_DURATION_DAYS,
-      reasoning: budgetReasoning,
+    // S0.6: no revenue-derived amounts; the merchant sets the test budget (BudgetPlan).
+    budget: withdrawnEngineBudget({
       currency: storeCurrency,
-      currency_symbol: storeData.store.currency_symbol,
-      tier: budgetTier,
-      ad_sets: adSets,
-      optimization_event: {
+      currencySymbol: storeData.store.currency_symbol,
+      optimizationEvent: {
         event: guidance.optimization_event,
         reasoning: guidance.default_reasoning,
         upgrade_milestone: guidance.event_evidence.conditional_alternative?.condition ||
           "Confirm the Purchase event in Meta Events Manager before publishing and reassess after measured results.",
       },
-      ad_set_reasoning: adSetReasoning,
-      breakdown: {
-        revenue_based: avgMonthlyRevenue,
-        aov_based: Math.round(effectiveAOV),
-        goal_multipliers: goalMultipliers,
-        meta_optimal_daily: strategies[0].daily,
-      },
-      strategies,
-      international_strategies: internationalStrategies,
-      international_recommended_daily: internationalStrategies[1]?.daily,
-    },
+    }),
     timing,
     placements: {
       recommended: placements,
