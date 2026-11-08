@@ -1,46 +1,45 @@
 import { auth } from "@clerk/nextjs/server";
-import {
-  getIntegrationByShop,
-  getIntegrationByUser,
-  addCreditsToIntegration,
-  addCreditsToUser,
-} from "@/lib/billing-db";
+import { getIntegrationByUser, addCreditsToUser } from "@/lib/billing-db";
 import { claimPayment, releasePayment, createPayment } from "@/lib/db";
 import { shopifyAdminGraphqlUrl } from "@/lib/shopify-config";
+import { isValidShopDomain, verifyBillingReturn } from "@/lib/shopify-oauth";
 import { isCreditableCharge, planForShopifyCharge } from "@/lib/shopify-billing-plans";
+
+const CHARGE_ID_RE = /^(?:gid:\/\/shopify\/(?:AppPurchaseOneTime|AppSubscription)\/)?\d+$/;
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const chargeId = searchParams.get("charge_id");
   const shop = searchParams.get("shop");
-  // Present on charges initiated after the user-scoped billing fix; if Shopify
-  // App Store Managed Pricing redirected without `uid`, fall back to active Clerk session.
-  const clerkAuth = await auth().catch(() => ({ userId: null }));
-  const uid = searchParams.get("uid") || clerkAuth.userId || null;
+  const fail = (message: string) =>
+    Response.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/dashboard?billing=error&message=${encodeURIComponent(message)}`);
 
-  console.log(
-    `Shopify billing callback received. Shop: ${shop}, Charge ID: ${chargeId}, User: ${uid ?? "(legacy)"}`
-  );
+  if (!chargeId || !shop) return fail("Missing charge_id or shop");
+  if (!isValidShopDomain(shop) || !CHARGE_ID_RE.test(chargeId)) return fail("Invalid billing return");
 
-  if (!chargeId || !shop) {
-    return Response.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?billing=error&message=Missing+charge_id+or+shop`
-    );
+  // A return URL we issued carries a signed uid, which survives an expired
+  // session. Managed Pricing returns carry no uid and need a live session.
+  // Anything else is not trusted; a real charge is still credited later by
+  // reconciliation, which reads it from Shopify directly.
+  const claimedUid = searchParams.get("uid");
+  const session = await auth().catch(() => ({ userId: null }));
+  if (claimedUid && !verifyBillingReturn(claimedUid, shop, searchParams.get("sig"))) {
+    console.warn("[billing-callback] rejected a return with an invalid signature");
+    return fail("Invalid billing return");
   }
+  const uid = claimedUid || session.userId;
+  if (!uid) return fail("Please sign in to confirm this purchase");
 
   try {
-    // 1. Retrieve access token. Prefer the user-scoped lookup (unique key, no
-    //    ambiguity for shared stores); fall back to shop for legacy charges.
-    const integration = uid
-      ? await getIntegrationByUser(uid)
-      : await getIntegrationByShop(shop);
+    // 1. The charge is read with this account's own token, on its own shop.
+    const integration = await getIntegrationByUser(uid);
     if (!integration || !integration.access_token) {
-      console.error(
-        `Integration or token not found for ${uid ? `user: ${uid}` : `shop: ${shop}`}`
-      );
-      return Response.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?billing=error&message=Shopify+integration+not+found`
-      );
+      console.error(`Integration or token not found for user: ${uid}`);
+      return fail("Shopify integration not found");
+    }
+    if ((integration.shop_domain || "").toLowerCase() !== shop.toLowerCase()) {
+      console.warn("[billing-callback] rejected a return for a shop this account does not own");
+      return fail("This purchase does not belong to your store");
     }
 
     // 2. Query the charge from Shopify GraphQL API (check both AppPurchaseOneTime
@@ -116,8 +115,6 @@ export async function GET(request: Request) {
       );
     }
 
-    console.log(`Retrieved charge from Shopify:`, chargeNode);
-
     // 3. Verify charge is ACTIVE
     if (chargeNode.status !== "ACTIVE") {
       console.warn(`Charge status is not ACTIVE. Current status: ${chargeNode.status}`);
@@ -167,11 +164,7 @@ export async function GET(request: Request) {
     //    balance; otherwise fall back to the legacy shop-keyed path. If the
     //    grant fails, release the claim so a retry can re-process the charge.
     try {
-      if (uid) {
-        await addCreditsToUser(uid, creditsToAdd);
-      } else {
-        await addCreditsToIntegration(shop, creditsToAdd);
-      }
+      await addCreditsToUser(uid, creditsToAdd);
     } catch (grantError) {
       await releasePayment(claimId).catch(() => {});
       throw grantError;

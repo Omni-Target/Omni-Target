@@ -131,6 +131,18 @@ export function isSignedShopifyAppEntry(url: URL, secret: string | undefined): b
   );
 }
 
+/**
+ * Binds a billing return URL to the account and shop that started the charge,
+ * so the callback (which may run with no session) can trust `uid` (billing).
+ */
+export function signBillingReturn(userId: string, shop: string): string {
+  return createHmac("sha256", cookieKey("billing-return")).update(`${userId}|${shop}`).digest("hex");
+}
+
+export function verifyBillingReturn(userId: string, shop: string, signature: string | null): boolean {
+  return Boolean(signature) && safeEqual(signBillingReturn(userId, shop), signature as string);
+}
+
 // ── Signed cookies ───────────────────────────────────────────────────────────
 
 function cookieKey(purpose: string): Buffer {

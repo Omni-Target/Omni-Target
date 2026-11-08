@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { getIntegrationByUser } from "@/lib/billing-db";
 import { requireUser } from "@/lib/api/require-user";
+import { signBillingReturn } from "@/lib/shopify-oauth";
 import { apiError, apiServerError } from "@/lib/api/response";
 import { shopifyAdminGraphqlUrl } from "@/lib/shopify-config";
 import { SHOPIFY_CREDIT_PLANS, type ShopifyCreditPlanKey } from "@/lib/shopify-billing-plans";
@@ -74,7 +75,7 @@ export async function POST(request: Request) {
     // Include the paying user's id so the callback (which is a Shopify redirect
     // with no auth context) can attribute the credits to the exact account,
     // even when the shop is shared across accounts.
-    const returnUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/shopify/billing/callback?shop=${encodeURIComponent(shop)}&uid=${encodeURIComponent(userId)}`;
+    const returnUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/shopify/billing/callback?shop=${encodeURIComponent(shop)}&uid=${encodeURIComponent(userId)}&sig=${signBillingReturn(userId, shop)}`;
     
     // Default to test mode in development, or if configured
     const testMode = process.env.NODE_ENV !== "production" || process.env.SHOPIFY_TEST_BILLING === "true";
