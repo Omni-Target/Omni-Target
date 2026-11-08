@@ -1,9 +1,9 @@
 import {
   detectDbColumns,
   selectIntegrationFieldsByShop,
-  updateIntegrationByShop,
   getUserIntegration,
-  updateUserIntegration,
+  incrementCredits,
+  grantFreeCredit,
   claimPayment,
   releasePayment,
   createPayment,
@@ -96,133 +96,42 @@ function mapIntegrationData(data: UserIntegration, cols: DBColumns) {
 }
 
 /**
- * Grant credits to a specific Clerk user, keeping BOTH balance columns in sync.
- *
- * The schema carries a legacy `credits` column alongside `credits_balance`, and
- * every reader prefers `credits` when it exists (see /api/user/credits and the
- * generate credit gate). The `increment_credits` RPC only writes
- * `credits_balance`, so a grant made through it is invisible to the UI on this
- * schema — this helper follows the app-wide writer convention instead and
- * updates both columns (plus `credits_total_purchased` for bookkeeping).
- *
- * Callers are responsible for idempotency (e.g. `claimPayment`), which also
- * covers the read-modify-write here for the realistic replay scenario.
+ * Grant purchased credits to a specific Clerk user. Atomic, and keeps both
+ * balance columns in step (see incrementCredits). Callers remain responsible
+ * for idempotency (e.g. `claimPayment`). Throws if the user has no integration,
+ * so the caller can release its claim and retry.
  */
 export async function addCreditsToUser(userId: string, creditsToAdd: number) {
-  const cols = await detectColumns();
-  const data = await getUserIntegration(userId);
-  if (!data) {
-    throw new Error(`No integration row for user ${userId} — cannot grant credits`);
-  }
-
-  // Read the balance exactly the way the UI reads it.
-  const currentCredits =
-    (cols.hasCredits ? data.credits : data.credits_balance) ??
-    data.credits_balance ??
-    0;
-  const newCredits = currentCredits + creditsToAdd;
-
-  const updateData: Record<string, unknown> = {
-    credits_balance: newCredits,
-    credits_total_purchased:
-      (data.credits_total_purchased || 0) + creditsToAdd,
-  };
-  if (cols.hasCredits) {
-    updateData.credits = newCredits;
-  }
-
-  await updateUserIntegration(userId, updateData);
-  console.log(
-    `[addCreditsToUser] granted ${creditsToAdd} credits to ${userId}. New balance: ${newCredits}`
-  );
-  return newCredits;
+  return incrementCredits(userId, creditsToAdd, creditsToAdd);
 }
 
-/**
- * Handle free credits on install
- */
+/** Adds the free install credit to the balance, at most once per user. */
 export async function handleFreeCreditOnInstall(userId: string) {
-  const cols = await detectColumns();
-  const data = await getUserIntegration(userId);
-
-  if (!data) {
-    console.error("Could not find integration to award free credits for:", userId);
-    return;
-  }
-
-  const freeCreditUsed = cols.hasFreeCreditUsed ? !!data.free_credit_used : false;
-  
-  // If not used, update
-  if (!freeCreditUsed) {
-    const updateData: Record<string, unknown> = {};
-    if (cols.hasCredits) {
-      updateData.credits = 1;
-    }
-    // Always update credits_balance to be consistent
-    updateData.credits_balance = 1;
-    
-    if (cols.hasFreeCreditUsed) {
-      updateData.free_credit_used = true;
-    }
-
-    try {
-      await updateUserIntegration(userId, updateData);
-      console.log(`Successfully applied 1 free credit for user ${userId}`);
-    } catch (updateError) {
-      console.error("Failed to apply free credit:", updateError);
-    }
+  try {
+    await grantFreeCredit(userId);
+  } catch (err) {
+    console.error("Failed to apply free credit:", err);
   }
 }
 
 /**
- * Add credits to integration. Updates credits and credits_balance.
+ * Grant credits to the owner of a shop (legacy charges with no recorded payer).
+ * Throws when no owner is found, so the caller releases its payment claim
+ * instead of silently losing the purchase.
  */
 export async function addCreditsToIntegration(shop: string, creditsToAdd: number) {
   const cols = await detectColumns();
   const queryField = cols.hasShopDomain ? "shop_domain" : "shopify_store_url";
+  const altField = queryField === "shop_domain" ? "shopify_store_url" : "shop_domain";
 
-  // First fetch current balance
-  const selectQuery = [
-    cols.hasCredits ? "credits" : "credits_balance",
-    "credits_balance",
-  ].join(", ");
+  const data =
+    (await selectIntegrationFieldsByShop(shop, "credits_balance", queryField)) ??
+    (await selectIntegrationFieldsByShop(shop, "credits_balance", altField));
 
-  let data = await selectIntegrationFieldsByShop(shop, selectQuery, queryField);
-  let finalQueryField = queryField;
-
-  if (!data) {
-    // Try alternate field if first lookup failed
-    const altField = queryField === "shop_domain" ? "shopify_store_url" : "shop_domain";
-    data = await selectIntegrationFieldsByShop(shop, selectQuery, altField);
-    if (data) {
-      finalQueryField = altField;
-    }
+  if (!data?.clerk_user_id) {
+    throw new Error(`No integration found for shop ${shop} — cannot grant credits`);
   }
-
-  if (data?.clerk_user_id) {
-    await addCreditsToUser(data.clerk_user_id, creditsToAdd);
-    return;
-  }
-
-  let currentCredits = 0;
-  if (data) {
-    currentCredits = cols.hasCredits ? (data.credits || 0) : (data.credits_balance || 0);
-  }
-
-  const newCredits = currentCredits + creditsToAdd;
-
-  const updateData: Record<string, unknown> = {};
-  if (cols.hasCredits) {
-    updateData.credits = newCredits;
-  }
-  updateData.credits_balance = newCredits;
-
-  try {
-    await updateIntegrationByShop(shop, updateData, finalQueryField);
-    console.log(`Added ${creditsToAdd} credits to shop ${shop}. New total: ${newCredits}`);
-  } catch (updateError) {
-    console.error("Failed to add credits to integration:", updateError);
-  }
+  await addCreditsToUser(data.clerk_user_id, creditsToAdd);
 }
 
 const lastBillingReconcileByUser = new Map<string, number>();

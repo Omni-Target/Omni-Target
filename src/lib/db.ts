@@ -85,23 +85,6 @@ export async function setExchangeRateCache(rates: Record<string, number>) {
 }
 
 /**
- * Update user credits balance.
- */
-export async function updateCredits(userId: string, credits: number) {
-  const { error } = await supabaseAdmin
-    .from("user_integrations")
-    .update({
-      credits_balance: credits,
-    })
-    .eq("clerk_user_id", userId);
-
-  if (error) {
-    console.error("Error in updateCredits:", error);
-    throw error;
-  }
-}
-
-/**
  * Update user integration fields selectively (e.g. metadata, selected ad account, etc.).
  */
 export async function updateUserIntegration(userId: string, data: Record<string, unknown>) {
@@ -228,40 +211,69 @@ export async function releasePayment(paymentId: string): Promise<void> {
   }
 }
 
+const isMissingRpc = (error: { code?: string }) =>
+  error.code === "42883" || error.code === "PGRST202";
+
 /**
- * Atomically add credits to a user's balance via the `increment_credits` RPC.
- * Falls back to a (non-atomic) read-modify-write with a loud warning if the RPC
- * has not been deployed yet.
- *
- * See supabase/migrations/0001_payment_integrity.sql.
+ * Non-atomic stand-in used only until migration 0014 is applied. Writes both
+ * balance columns so the grant is visible to every reader.
+ */
+async function addCreditsWithoutRpc(
+  userId: string,
+  credits: number,
+  totalPurchased: number,
+): Promise<number> {
+  const current = await getUserIntegration(userId);
+  if (!current) throw new Error(`No integration row for user ${userId}`);
+  const hasCreditsColumn = "credits" in current;
+  const newBalance = (current.credits ?? current.credits_balance ?? 0) + credits;
+  await updateUserIntegration(userId, {
+    credits_balance: newBalance,
+    credits_total_purchased: (current.credits_total_purchased || 0) + totalPurchased,
+    ...(hasCreditsColumn ? { credits: newBalance } : {}),
+  });
+  return newBalance;
+}
+
+/**
+ * Atomically add credits to a user's balance, keeping both balance columns in
+ * step (migration 0014). Returns the new balance.
  */
 export async function incrementCredits(
   userId: string,
   credits: number,
-  totalPurchased: number
-): Promise<void> {
-  const { error } = await supabaseAdmin.rpc("increment_credits", {
+  totalPurchased: number,
+): Promise<number> {
+  const { data, error } = await supabaseAdmin.rpc("add_user_credits", {
     p_user_id: userId,
     p_credits: credits,
-    p_total: totalPurchased,
+    p_purchased: totalPurchased,
   });
+  if (!error) return data as number;
 
-  if (!error) return;
-
-  // RPC missing (migration not applied) → fall back to non-atomic update.
-  if (error.code === "42883" || error.code === "PGRST202") {
-    console.error(
-      "[incrementCredits] increment_credits RPC is missing — apply migration 0001. Falling back to NON-ATOMIC update."
-    );
-    const current = await getUserIntegration(userId);
-    await updateUserIntegration(userId, {
-      credits_balance: (current?.credits_balance || 0) + credits,
-      credits_total_purchased:
-        (current?.credits_total_purchased || 0) + totalPurchased,
-    });
-    return;
+  if (isMissingRpc(error)) {
+    console.error("[incrementCredits] add_user_credits is missing — apply migration 0014.");
+    return addCreditsWithoutRpc(userId, credits, totalPurchased);
   }
+  throw error;
+}
 
+/**
+ * Grant the one free install credit: added to the balance, at most once.
+ * Returns true only for the call that granted it.
+ */
+export async function grantFreeCredit(userId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin.rpc("grant_free_credit", { p_user_id: userId });
+  if (!error) return data === true;
+
+  if (isMissingRpc(error)) {
+    console.error("[grantFreeCredit] grant_free_credit is missing — apply migration 0014.");
+    const current = await getUserIntegration(userId);
+    if (!current || current.free_credit_used) return false;
+    await addCreditsWithoutRpc(userId, 1, 0);
+    await updateUserIntegration(userId, { free_credit_used: true });
+    return true;
+  }
   throw error;
 }
 
