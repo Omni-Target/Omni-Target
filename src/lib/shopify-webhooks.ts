@@ -22,8 +22,11 @@ function isPrivacyTopic(topic: string | null): topic is PrivacyTopic {
  * `/api/webhooks/privacy` and `/api/webhooks/gdpr` delegate here so HMAC
  * verification and the redaction logic live in exactly one place.
  *
- *   • customers/data_request — customer requested their data
- *   • customers/redact       — customer requested deletion
+ *   • customers/data_request — customer requested their data. Omni Target keeps
+ *     no customer-level records: store snapshots hold aggregates and Meta send
+ *     logs hold order ids and values, so the request is logged and there is
+ *     nothing to return (SEC-09).
+ *   • customers/redact       — customer requested deletion; same reasoning.
  *   • shop/redact            — shop uninstalled; delete shop data (sent 48h later)
  *
  * All paths return 200 once authenticated — Shopify retries and flags the app
@@ -64,10 +67,9 @@ export async function handleShopifyPrivacyWebhook(
   }
 
   if (topic === "shop/redact") {
-    // 48h after uninstall: clear the Shopify-scoped tokens + cached store
-    // snapshot for this shop (best-effort; redactShopData never throws so we
-    // can still return the required 200). The customer topics need no action —
-    // no customer PII is persisted.
+    // 48h after uninstall: clear credentials, the store snapshot and its copies
+    // in saved briefs (best-effort; redactShopData never throws so we can still
+    // return the required 200). The customer topics need no action.
     const redacted = await redactShopData(shop);
     log.info(
       `shop/redact redaction ${redacted ? "completed" : "no-op/failed"}`,

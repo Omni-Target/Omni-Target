@@ -481,6 +481,9 @@ export async function updateIntegrationByShop(shop: string, data: Record<string,
   }
 }
 
+const isMissingRpc = (error: { code?: string }) =>
+  error.code === "42883" || error.code === "PGRST202";
+
 /**
  * GDPR `shop/redact`: erase the Shopify-scoped data held for a shop (OAuth
  * tokens + cached store snapshot) without touching the user's Meta connection
@@ -491,25 +494,59 @@ export async function updateIntegrationByShop(shop: string, data: Record<string,
  * `true` on success, `false` if the update errored.
  */
 export async function redactShopData(shop: string): Promise<boolean> {
-  const cols = await detectDbColumns();
+  return callShopRedaction(shop, false);
+}
 
-  const payload: Record<string, null> = { store_snapshot: null };
+/** Clears only credentials, on app/uninstalled. Data waits for shop/redact. */
+export async function revokeShopAccess(shop: string): Promise<boolean> {
+  return callShopRedaction(shop, true);
+}
+
+async function callShopRedaction(shop: string, tokensOnly: boolean): Promise<boolean> {
+  const { error } = await supabaseAdmin.rpc("redact_shop_data", {
+    p_shop: shop,
+    p_tokens_only: tokensOnly,
+  });
+  if (!error) return true;
+  if (!isMissingRpc(error)) {
+    console.error("[redact_shop_data] failed:", error.message);
+    return false;
+  }
+
+  // Until migration 0016 is applied, at least clear every token column.
+  console.error("[redact_shop_data] missing — apply migration 0016.");
+  const cols = await detectDbColumns();
+  const payload: Record<string, null> = {
+    shopify_access_token: null,
+    shopify_refresh_token: null,
+    shopify_token_expires_at: null,
+  };
   if (cols.hasAccessToken) payload.access_token = null;
   if (cols.hasRefreshToken) payload.refresh_token = null;
   if (cols.hasTokenExpiresAt) payload.token_expires_at = null;
+  if (!tokensOnly) payload.store_snapshot = null;
 
-  const queryField = cols.hasShopDomain ? "shop_domain" : "shopify_store_url";
-
-  const { error } = await supabaseAdmin
+  const { error: updateError } = await supabaseAdmin
     .from("user_integrations")
     .update(payload)
-    .eq(queryField, shop);
-
-  if (error) {
-    console.error("[redactShopData] failed:", error);
+    .or(storeUrlOrFilter(shop));
+  if (updateError) {
+    console.error("[redactShopData] fallback failed:", updateError.message);
     return false;
   }
   return true;
+}
+
+/** Removes one account's data from every table (migration 0016). */
+export async function deleteUserData(userId: string): Promise<void> {
+  const { error } = await supabaseAdmin.rpc("delete_user_data", { p_user_id: userId });
+  if (!error) return;
+  if (!isMissingRpc(error)) throw error;
+
+  console.error("[delete_user_data] missing — apply migration 0016.");
+  await deleteUserCampaigns(userId);
+  await deleteUserCapiEvents(userId);
+  await deleteUserIntegration(userId);
 }
 
 /**

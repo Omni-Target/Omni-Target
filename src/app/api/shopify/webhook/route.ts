@@ -1,5 +1,5 @@
 import { verifyShopifyHmac } from "@/lib/verify-shopify-hmac";
-import { supabaseAdmin } from "@/lib/db";
+import { revokeShopAccess, supabaseAdmin } from "@/lib/db";
 import { createHash } from "crypto";
 import { after } from "next/server";
 
@@ -126,6 +126,12 @@ async function forwardPurchaseToMeta(integration: WebhookIntegration, payload: S
 
 /** Runs after the response is sent, so Shopify gets its 200 immediately. */
 async function processWebhook(shopDomain: string, topic: string | null, payload: ShopifyOrderPayload) {
+  if (topic === "app/uninstalled") {
+    // SEC-09: the tokens are dead. Stored data waits for shop/redact (48h).
+    await revokeShopAccess(shopDomain);
+    return;
+  }
+
   // Newest row first: duplicate rows for one shop must not drop the webhook.
   const { data, error } = await supabaseAdmin
     .from("user_integrations")

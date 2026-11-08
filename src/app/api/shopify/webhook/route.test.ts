@@ -48,10 +48,10 @@ const h = vi.hoisted(() => {
       }),
     };
   };
-  return { state, from, verify: vi.fn(), sync: vi.fn() };
+  return { state, from, verify: vi.fn(), sync: vi.fn(), revoke: vi.fn() };
 });
 
-vi.mock("@/lib/db", () => ({ supabaseAdmin: { from: h.from } }));
+vi.mock("@/lib/db", () => ({ supabaseAdmin: { from: h.from }, revokeShopAccess: h.revoke }));
 vi.mock("@/lib/verify-shopify-hmac", () => ({ verifyShopifyHmac: h.verify }));
 vi.mock("@/lib/connectors/shopify", () => ({ fetchShopifyStoreData: h.sync }));
 vi.mock("next/server", async (importOriginal) => ({
@@ -146,6 +146,15 @@ describe("Shopify order webhook (ING-05)", () => {
     await deliver(order, "products/update");
     await flush();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("revokes credentials on app/uninstalled without touching Meta (SEC-09)", async () => {
+    h.revoke.mockReset().mockResolvedValue(true);
+    await deliver({}, "app/uninstalled");
+    await flush();
+    expect(h.revoke).toHaveBeenCalledWith("s.myshopify.com");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(h.state.staleUpdates).toHaveLength(0);
   });
 
   it("does no work for an invalid signature", async () => {

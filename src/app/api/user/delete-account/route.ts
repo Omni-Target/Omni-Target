@@ -1,5 +1,5 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { deleteUserCampaigns, deleteUserCapiEvents, deleteUserIntegration } from "@/lib/db";
+import { deleteUserData } from "@/lib/db";
 
 export async function DELETE() {
   const { userId } = await auth();
@@ -12,9 +12,7 @@ export async function DELETE() {
 
   try {
     // Delete all user data from database layer
-    await deleteUserCampaigns(userId);
-    await deleteUserCapiEvents(userId);
-    await deleteUserIntegration(userId);
+    await deleteUserData(userId);
 
     // Delete from Clerk
     const client = await clerkClient();
