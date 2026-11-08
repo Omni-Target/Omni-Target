@@ -34,6 +34,21 @@ function fixture(): StorePrespendIntelligence {
 }
 
 describe("assessShopifyMarketReadiness", () => {
+  it("treats a country as supported when any active market contains it (ING-08)", () => {
+    const draftFirst = fixture();
+    draftFirst.markets = [
+      { id: "1", name: "Europe draft", status: "DRAFT", countries: ["GB"] },
+      { id: "2", name: "United Kingdom", status: "ACTIVE", countries: ["GB"] },
+    ];
+    const assessment = assessShopifyMarketReadiness(draftFirst, "GB");
+    expect(assessment.market_active).toBe(true);
+    expect(assessment.evidence[0]).toContain("United Kingdom is active");
+
+    const draftOnly = fixture();
+    draftOnly.markets = [{ id: "1", name: "Europe draft", status: "DRAFT", countries: ["GB"] }];
+    expect(assessShopifyMarketReadiness(draftOnly, "GB").market_active).toBe(false);
+  });
+
   it("requires an active market, shipping method, and fulfillment inventory", () => {
     expect(assessShopifyMarketReadiness(fixture(), "GB").status).toBe("ready");
   });
