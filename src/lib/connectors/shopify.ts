@@ -840,7 +840,10 @@ async function executeShopifyStoreSync(
       buyerOutcomes: buyerOutcomes || undefined,
       returnEvidence: intelligence.prespend.capabilities.return_evidence?.status === "available"
         ? intelligence.returns : undefined,
-      returnEvidenceStatus: intelligence.prespend.capabilities.return_evidence?.status,
+      returnEvidenceStatus:
+        intelligence.prespend.capabilities.return_evidence?.status === "partial"
+          ? "unavailable"
+          : intelligence.prespend.capabilities.return_evidence?.status,
     },
   );
   for (const product of products) {

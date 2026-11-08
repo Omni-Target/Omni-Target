@@ -261,7 +261,7 @@ export interface StoreMarketingEvidence {
 }
 
 export interface StoreCapability {
-  status: "available" | "missing_scope" | "unavailable" | "error";
+  status: "available" | "partial" | "missing_scope" | "unavailable" | "error";
   required_scopes: string[];
   detail?: string;
 }
