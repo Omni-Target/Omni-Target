@@ -14,10 +14,32 @@ export const SHOPIFY_CREDIT_PLANS = {
 } as const;
 
 export type ShopifyCreditPlanKey = keyof typeof SHOPIFY_CREDIT_PLANS;
-export type ShopifyCreditPlan = (typeof SHOPIFY_CREDIT_PLANS)[ShopifyCreditPlanKey];
 export type ShopifyChargeKind = "one_time" | "subscription";
 
-const PLANS = Object.values(SHOPIFY_CREDIT_PLANS) as ShopifyCreditPlan[];
+/** A plan a Shopify charge can be credited as (current catalogue or legacy name). */
+export interface ShopifyCreditPlan {
+  key: ShopifyCreditPlanKey;
+  label: string;
+  credits: number;
+  chargeName: string;
+  price: string;
+  /** True for a pack that is no longer sold but must still be honoured. */
+  legacy?: boolean;
+}
+
+/**
+ * One-time packs sold under these names from 2026-05-28 until commit a9b93e4
+ * (2026-09-03) renamed and re-priced them. A purchase is credited with what
+ * the merchant bought, so these names keep their original credit amounts.
+ * They are never used to create new charges. ("Scale Pack – 30 Credits" kept
+ * its name and credit amount, so it needs no legacy entry.)
+ */
+export const LEGACY_SHOPIFY_ONE_TIME_PLANS: readonly ShopifyCreditPlan[] = [
+  { key: "starter", label: "Starter", credits: 5, chargeName: "Starter Pack – 5 Credits", price: "39.00", legacy: true },
+  { key: "growth", label: "Growth", credits: 15, chargeName: "Growth Pack – 15 Credits", price: "99.00", legacy: true },
+];
+
+const PLANS: readonly ShopifyCreditPlan[] = Object.values(SHOPIFY_CREDIT_PLANS);
 
 function normalize(value: string): string {
   return (value || "")
@@ -30,7 +52,8 @@ function normalize(value: string): string {
 /**
  * Map a Shopify charge to a credit plan.
  *  - One-time purchases are created by this app, so their name must match one
- *    of our charge names exactly (normalized for dashes/spacing/case).
+ *    of our current or legacy charge names exactly (normalized for
+ *    dashes/spacing/case); legacy names credit their original amounts.
  *  - Managed-pricing subscriptions are named in the Partner Dashboard; they are
  *    matched by an unambiguous plan keyword (exactly one of starter/growth/scale).
  */
@@ -38,7 +61,9 @@ export function planForShopifyCharge(name: string, kind: ShopifyChargeKind): Sho
   const normalized = normalize(name);
   if (!normalized) return null;
   if (kind === "one_time") {
-    return PLANS.find((plan) => normalize(plan.chargeName) === normalized) ?? null;
+    return (
+      [...PLANS, ...LEGACY_SHOPIFY_ONE_TIME_PLANS].find((plan) => normalize(plan.chargeName) === normalized) ?? null
+    );
   }
   const words = new Set(normalized.split(" "));
   const matches = PLANS.filter((plan) => words.has(plan.key));
