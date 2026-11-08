@@ -1,7 +1,7 @@
 import { verifyShopifyHmac } from "@/lib/verify-shopify-hmac";
-import { supabaseAdmin, updateUserIntegration } from "@/lib/db";
-import { fetchShopifyStoreData } from "@/lib/connectors/shopify";
+import { supabaseAdmin } from "@/lib/db";
 import { createHash } from "crypto";
+import { after } from "next/server";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +23,138 @@ function hashSha256(value?: string): string | null {
   return createHash("sha256")
     .update(value.trim().toLowerCase())
     .digest("hex");
+}
+
+/** A webhook only marks a snapshot stale if it is older than this. */
+const STALE_MARK_MIN_AGE_MS = 15 * 60_000;
+
+/**
+ * Claims the Meta send for this order. Returns the claim row's id, or null if
+ * another delivery already claimed it. The unique key is migration 0015; until
+ * it is applied, a best-effort existence check stands in.
+ */
+async function claimCapiEvent(row: Record<string, unknown>): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from("capi_events")
+    .upsert(row, { onConflict: "clerk_user_id,shopify_order_id", ignoreDuplicates: true })
+    .select("id");
+  if (!error) return (data as { id: string }[])[0]?.id ?? null;
+
+  if (error.code !== "42P10") throw error;
+  const { data: existing } = await supabaseAdmin
+    .from("capi_events")
+    .select("id")
+    .eq("clerk_user_id", row.clerk_user_id as string)
+    .eq("shopify_order_id", row.shopify_order_id as string)
+    .limit(1);
+  if (existing?.length) return null;
+  const { data: inserted, error: insertError } = await supabaseAdmin
+    .from("capi_events")
+    .insert(row)
+    .select("id");
+  if (insertError) throw insertError;
+  return (inserted as { id: string }[])[0]?.id ?? null;
+}
+
+interface WebhookIntegration {
+  clerk_user_id: string;
+  meta_access_token?: string | null;
+  meta_pixel_id?: string | null;
+}
+
+async function forwardPurchaseToMeta(integration: WebhookIntegration, payload: ShopifyOrderPayload) {
+  const { meta_access_token: metaAccessToken, meta_pixel_id: metaPixelId } = integration;
+  if (!metaAccessToken || !metaPixelId || payload.id === undefined) return;
+
+  const eventId = String(payload.id);
+  const currency = payload.currency || "NGN";
+  const totalValue = parseFloat(payload.total_price || payload.current_total_price || "0");
+
+  const claimId = await claimCapiEvent({
+    clerk_user_id: integration.clerk_user_id,
+    shopify_order_id: eventId,
+    order_value: totalValue,
+    currency,
+    status: "pending",
+  });
+  if (!claimId) return; // Redelivered webhook: this order was already sent.
+
+  // Hash customer data for Meta CAPI privacy requirements (SHA-256)
+  const phone = payload.customer?.phone || payload.billing_address?.phone || payload.shipping_address?.phone;
+  const userData: Record<string, unknown> = {};
+  const hashedEmail = hashSha256(payload.customer?.email);
+  if (hashedEmail) userData.em = [hashedEmail];
+  const hashedPhone = hashSha256(phone);
+  if (hashedPhone) userData.ph = [hashedPhone];
+  if (payload.client_details?.browser_ip) userData.client_ip_address = payload.client_details.browser_ip;
+  if (payload.client_details?.user_agent) userData.client_user_agent = payload.client_details.user_agent;
+
+  const capiPayload: Record<string, unknown> = {
+    data: [
+      {
+        event_name: "Purchase",
+        event_time: Math.floor(new Date(payload.created_at || Date.now()).getTime() / 1000),
+        event_id: eventId,
+        user_data: userData,
+        custom_data: { currency, value: totalValue },
+        action_source: "website",
+      },
+    ],
+  };
+  if (process.env.META_CAPI_TEST_CODE) capiPayload.test_event_code = process.env.META_CAPI_TEST_CODE;
+
+  let status = "failed";
+  let metaResponse: unknown = null;
+  try {
+    const metaRes = await fetch(`https://graph.facebook.com/v19.0/${metaPixelId}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...capiPayload, access_token: metaAccessToken }),
+    });
+    metaResponse = await metaRes.json();
+    status = metaRes.ok ? "sent" : "failed";
+  } catch (err) {
+    console.error("Meta CAPI send failed:", err instanceof Error ? err.name : "unknown");
+  }
+
+  const { error } = await supabaseAdmin
+    .from("capi_events")
+    .update({ meta_response: metaResponse, status })
+    .eq("id", claimId);
+  if (error) console.error("Failed to record CAPI result:", error.message);
+}
+
+/** Runs after the response is sent, so Shopify gets its 200 immediately. */
+async function processWebhook(shopDomain: string, topic: string | null, payload: ShopifyOrderPayload) {
+  // Newest row first: duplicate rows for one shop must not drop the webhook.
+  const { data, error } = await supabaseAdmin
+    .from("user_integrations")
+    .select("clerk_user_id, meta_access_token, meta_pixel_id")
+    .or(`shopify_store_url.eq.${shopDomain},shop_domain.eq.${shopDomain}`)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (error) {
+    console.error("Error looking up integration for webhook:", error.message);
+    return;
+  }
+  const integration = (data as WebhookIntegration[] | null)?.[0];
+  if (!integration) {
+    console.warn(`No integration found matching shop domain: ${shopDomain}`);
+    return;
+  }
+
+  if (topic === "orders/paid") {
+    await forwardPurchaseToMeta(integration, payload);
+  }
+
+  // ING-05: the next visit refreshes the store. A full sync per order was
+  // unbounded work inside a webhook, and busy stores re-synced constantly.
+  const { error: staleError } = await supabaseAdmin
+    .from("user_integrations")
+    .update({ store_snapshot_at: null })
+    .eq("clerk_user_id", integration.clerk_user_id)
+    .lt("store_snapshot_at", new Date(Date.now() - STALE_MARK_MIN_AGE_MS).toISOString());
+  if (staleError) console.error("Failed to mark snapshot stale:", staleError.message);
 }
 
 export async function POST(request: Request) {
@@ -68,154 +200,12 @@ export async function POST(request: Request) {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  // 3. Send 200 OK immediately before any heavy processing
-  const response = Response.json({ received: true }, { status: 200 });
+  // 3. Acknowledge immediately; the work runs after the response is sent.
+  after(() =>
+    processWebhook(shopDomain, topicHeader, payload).catch((err) =>
+      console.error("Webhook processing failed:", err instanceof Error ? err.message : "unknown"),
+    ),
+  );
 
-  // 4. Run heavy processing asynchronously in the background
-  (async () => {
-    try {
-      // Find the user integration matching this Shopify store
-      const { data: integration, error: dbError } = await supabaseAdmin
-        .from("user_integrations")
-        .select("*")
-        .or(`shopify_store_url.eq.${shopDomain},shop_domain.eq.${shopDomain}`)
-        .maybeSingle();
-
-      if (dbError) {
-        console.error("Error looking up integration for webhook:", dbError);
-        return;
-      }
-
-      if (!integration) {
-        console.warn(`No integration found matching shop domain: ${shopDomain}`);
-        return;
-      }
-
-      console.log(`Processing background job for user: ${integration.clerk_user_id}`);
-
-      // Handle specific webhook topics
-      if (topicHeader === "orders/paid") {
-        console.log(`Processing orders/paid for order ID: ${payload.id}`);
-
-        // Forward to Meta Conversions API (CAPI) if credentials exist
-        const metaAccessToken = integration.meta_access_token;
-        const metaPixelId = integration.meta_pixel_id;
-
-        if (metaAccessToken && metaPixelId) {
-          try {
-            const eventId = String(payload.id);
-            const eventTime = Math.floor(new Date(payload.created_at || Date.now()).getTime() / 1000);
-
-            // Hash customer data for Meta CAPI privacy requirements (SHA-256)
-            const email = payload.customer?.email;
-            const phone = payload.customer?.phone || payload.billing_address?.phone || payload.shipping_address?.phone;
-
-            const userData: Record<string, unknown> = {};
-            
-            const hashedEmail = hashSha256(email);
-            if (hashedEmail) {
-              userData.em = [hashedEmail];
-            }
-
-            const hashedPhone = hashSha256(phone);
-            if (hashedPhone) {
-              userData.ph = [hashedPhone];
-            }
-
-            if (payload.client_details?.browser_ip) {
-              userData.client_ip_address = payload.client_details.browser_ip;
-            }
-            if (payload.client_details?.user_agent) {
-              userData.client_user_agent = payload.client_details.user_agent;
-            }
-
-            const currency = payload.currency || "NGN";
-            const totalValue = parseFloat(payload.total_price || payload.current_total_price || "0");
-
-            const capiPayload: Record<string, unknown> = {
-              data: [
-                {
-                  event_name: "Purchase",
-                  event_time: eventTime,
-                  event_id: eventId,
-                  user_data: userData,
-                  custom_data: {
-                    currency: currency,
-                    value: totalValue,
-                  },
-                  action_source: "website",
-                },
-              ],
-            };
-
-            // Route test events if test code is configured
-            if (process.env.META_CAPI_TEST_CODE) {
-              capiPayload.test_event_code = process.env.META_CAPI_TEST_CODE;
-            }
-
-            console.log(`Sending Meta CAPI Purchase event for order ${eventId} to Pixel ${metaPixelId}`);
-
-            const metaRes = await fetch(
-              `https://graph.facebook.com/v19.0/${metaPixelId}/events`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  ...capiPayload,
-                  access_token: metaAccessToken,
-                }),
-              }
-            );
-
-            const metaResult = await metaRes.json();
-            console.log("Meta CAPI API response:", metaResult);
-
-            // Log event to Supabase capi_events table
-            const { error: capiInsertErr } = await supabaseAdmin
-              .from("capi_events")
-              .insert({
-                clerk_user_id: integration.clerk_user_id,
-                shopify_order_id: eventId,
-                order_value: totalValue,
-                currency: currency,
-                meta_response: metaResult,
-                status: metaRes.ok ? "sent" : "failed",
-              });
-
-            if (capiInsertErr) {
-              console.error("Failed to insert CAPI event log:", capiInsertErr);
-            } else {
-              console.log("Saved CAPI event log successfully");
-            }
-          } catch (capiErr) {
-            console.error("Meta CAPI processing failed:", capiErr);
-          }
-        } else {
-          console.log("Skipping Meta CAPI: Missing Meta pixel ID or access token");
-        }
-      }
-
-      // 5. Trigger database sync of Shopify store data to update dashboard
-      try {
-        const accessToken = integration.shopify_access_token || integration.access_token;
-        if (accessToken) {
-          console.log(`Starting background Shopify store sync for ${shopDomain}`);
-          const storeData = await fetchShopifyStoreData(shopDomain, accessToken, integration.clerk_user_id);
-
-          await updateUserIntegration(integration.clerk_user_id, {
-            store_snapshot: storeData,
-            store_snapshot_at: new Date().toISOString(),
-          });
-          console.log(`Background Shopify store sync complete for ${shopDomain}`);
-        }
-      } catch (syncErr) {
-        console.error("Background Shopify store sync failed:", syncErr);
-      }
-
-    } catch (backgroundErr) {
-      console.error("Background webhook execution error:", backgroundErr);
-    }
-  })();
-
-  return response;
+  return Response.json({ received: true }, { status: 200 });
 }
