@@ -8,6 +8,7 @@ const h = vi.hoisted(() => {
     staleUpdates: [] as { filters: unknown[] }[],
     orderedByUpdatedAt: false,
     upsertError: null as null | { code: string; message: string },
+    deliveries: [] as string[],
   };
   const from = (table: string) => {
     if (table === "user_integrations") {
@@ -30,11 +31,23 @@ const h = vi.hoisted(() => {
         }),
       };
     }
+    if (table === "webhook_deliveries") {
+      return {
+        upsert: (row: Record<string, unknown>) => ({
+          select: async () => {
+            const key = `${row.shop_domain}|${row.webhook_id}`;
+            if (state.deliveries.includes(key)) return { data: [], error: null };
+            state.deliveries.push(key);
+            return { data: [{ webhook_id: row.webhook_id }], error: null };
+          },
+        }),
+      };
+    }
     return {
       upsert: (row: Record<string, unknown>) => ({
         select: async () => {
           if (state.upsertError) return { data: null, error: state.upsertError };
-          if (state.capi.some((r) => r.shopify_order_id === row.shopify_order_id)) return { data: [], error: null };
+          if (state.capi.some((r) => r.shop_domain === row.shop_domain && r.shopify_order_id === row.shopify_order_id && r.event_type === row.event_type)) return { data: [], error: null };
           const saved = { ...row, id: `claim-${state.capi.length + 1}` };
           state.capi.push(saved);
           return { data: [{ id: saved.id }], error: null };
@@ -61,7 +74,8 @@ vi.mock("next/server", async (importOriginal) => ({
 
 import { POST } from "./route";
 
-const deliver = (body: unknown, topic = "orders/paid") =>
+let nextDelivery = 0;
+const deliver = (body: unknown, topic = "orders/paid", webhookId = `delivery-${++nextDelivery}`) =>
   POST(
     new Request("http://localhost/api/shopify/webhook", {
       method: "POST",
@@ -69,6 +83,7 @@ const deliver = (body: unknown, topic = "orders/paid") =>
         "X-Shopify-Hmac-SHA256": "sig",
         "X-Shopify-Topic": topic,
         "X-Shopify-Shop-Domain": "s.myshopify.com",
+        "X-Shopify-Webhook-Id": webhookId,
       },
       body: JSON.stringify(body),
     }),
@@ -88,6 +103,7 @@ beforeEach(() => {
     staleUpdates: [],
     orderedByUpdatedAt: false,
     upsertError: null,
+    deliveries: [],
   });
   h.verify.mockReset().mockResolvedValue(true);
   h.sync.mockReset();
@@ -155,6 +171,32 @@ describe("Shopify order webhook (ING-05)", () => {
     expect(h.revoke).toHaveBeenCalledWith("s.myshopify.com");
     expect(fetchMock).not.toHaveBeenCalled();
     expect(h.state.staleUpdates).toHaveLength(0);
+  });
+
+  it("ignores a repeat of the same delivery, including when concurrent", async () => {
+    const results = await Promise.all([deliver(order, "orders/paid", "w1"), deliver(order, "orders/paid", "w1"), deliver(order, "orders/paid", "w1")]);
+    await flush();
+    const bodies = await Promise.all(results.map((r) => r.json()));
+    expect(bodies.filter((b) => b.duplicate)).toHaveLength(2);
+    expect(results.every((r) => r.status === 200)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not suppress later updates or refunds for the same order", async () => {
+    await deliver(order, "orders/paid", "w1");
+    await deliver(order, "orders/updated", "w2");
+    await deliver({ id: 9, order_id: 1001 }, "refunds/create", "w3");
+    await flush();
+    expect(h.state.staleUpdates).toHaveLength(3); // each distinct event was processed
+    expect(fetchMock).toHaveBeenCalledTimes(1); // only the purchase went to Meta
+  });
+
+  it("never sends a second Purchase when orders/paid fires again under a new webhook id", async () => {
+    await deliver(order, "orders/paid", "w1");
+    await deliver(order, "orders/paid", "w2");
+    await flush();
+    expect(h.state.deliveries).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("does no work for an invalid signature", async () => {

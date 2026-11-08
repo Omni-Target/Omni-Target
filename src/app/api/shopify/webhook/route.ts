@@ -29,18 +29,43 @@ function hashSha256(value?: string): string | null {
 const STALE_MARK_MIN_AGE_MS = 15 * 60_000;
 
 /**
- * Claims the Meta send for this order. Returns the claim row's id, or null if
- * another delivery already claimed it. The unique key is migration 0015; until
- * it is applied, a best-effort existence check stands in.
+ * Delivery deduplication (ING-05): one row per (shop, webhook id). Returns false
+ * only for a repeat delivery. Without a webhook id, or before migration 0015,
+ * processing continues and the business-event key below still protects Meta.
+ */
+async function claimWebhookDelivery(shopDomain: string, webhookId: string | null, topic: string | null): Promise<boolean> {
+  if (!webhookId) return true;
+  const { data, error } = await supabaseAdmin
+    .from("webhook_deliveries")
+    .upsert(
+      { shop_domain: shopDomain.toLowerCase(), webhook_id: webhookId, topic: topic ?? "unknown" },
+      { onConflict: "shop_domain,webhook_id", ignoreDuplicates: true },
+    )
+    .select("webhook_id");
+  if (error) {
+    console.error("Webhook delivery claim unavailable:", error.message);
+    return true;
+  }
+  return (data as unknown[]).length > 0;
+}
+
+/**
+ * Business-event idempotency (ING-05): one row per (shop, order, event type),
+ * so a Purchase is sent once however many webhooks mention the order. Returns
+ * the claim id, or null if already claimed. Until migration 0015 is applied the
+ * new columns do not exist, and a best-effort existence check stands in.
  */
 async function claimCapiEvent(row: Record<string, unknown>): Promise<string | null> {
   const { data, error } = await supabaseAdmin
     .from("capi_events")
-    .upsert(row, { onConflict: "clerk_user_id,shopify_order_id", ignoreDuplicates: true })
+    .upsert(row, { onConflict: "shop_domain,shopify_order_id,event_type", ignoreDuplicates: true })
     .select("id");
   if (!error) return (data as { id: string }[])[0]?.id ?? null;
 
-  if (error.code !== "42P10") throw error;
+  if (error.code !== "42P10" && error.code !== "PGRST204" && error.code !== "42703") throw error;
+  const legacyRow = { ...row };
+  delete legacyRow.shop_domain;
+  delete legacyRow.event_type;
   const { data: existing } = await supabaseAdmin
     .from("capi_events")
     .select("id")
@@ -50,7 +75,7 @@ async function claimCapiEvent(row: Record<string, unknown>): Promise<string | nu
   if (existing?.length) return null;
   const { data: inserted, error: insertError } = await supabaseAdmin
     .from("capi_events")
-    .insert(row)
+    .insert(legacyRow)
     .select("id");
   if (insertError) throw insertError;
   return (inserted as { id: string }[])[0]?.id ?? null;
@@ -62,7 +87,7 @@ interface WebhookIntegration {
   meta_pixel_id?: string | null;
 }
 
-async function forwardPurchaseToMeta(integration: WebhookIntegration, payload: ShopifyOrderPayload) {
+async function forwardPurchaseToMeta(shopDomain: string, integration: WebhookIntegration, payload: ShopifyOrderPayload) {
   const { meta_access_token: metaAccessToken, meta_pixel_id: metaPixelId } = integration;
   if (!metaAccessToken || !metaPixelId || payload.id === undefined) return;
 
@@ -71,6 +96,8 @@ async function forwardPurchaseToMeta(integration: WebhookIntegration, payload: S
   const totalValue = parseFloat(payload.total_price || payload.current_total_price || "0");
 
   const claimId = await claimCapiEvent({
+    shop_domain: shopDomain.toLowerCase(),
+    event_type: "Purchase",
     clerk_user_id: integration.clerk_user_id,
     shopify_order_id: eventId,
     order_value: totalValue,
@@ -150,7 +177,7 @@ async function processWebhook(shopDomain: string, topic: string | null, payload:
   }
 
   if (topic === "orders/paid") {
-    await forwardPurchaseToMeta(integration, payload);
+    await forwardPurchaseToMeta(shopDomain, integration, payload);
   }
 
   // ING-05: the next visit refreshes the store. A full sync per order was
@@ -204,6 +231,12 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error("Failed to parse webhook JSON payload:", err);
     return new Response("Invalid JSON", { status: 400 });
+  }
+
+  // Repeat delivery of this exact webhook: acknowledge and do nothing.
+  const webhookId = request.headers.get("X-Shopify-Webhook-Id");
+  if (!(await claimWebhookDelivery(shopDomain, webhookId, topicHeader))) {
+    return Response.json({ received: true, duplicate: true }, { status: 200 });
   }
 
   // 3. Acknowledge immediately; the work runs after the response is sent.
