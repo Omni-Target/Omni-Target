@@ -6,11 +6,14 @@ import { useClerk, useAuth, ClerkLoaded, ClerkLoading } from "@clerk/nextjs";
 import { Loader2, AlertCircle, ArrowRight } from "lucide-react";
 import { Wordmark } from "@/components/shared/logo";
 import { Button } from "@/components/ui/button";
+import { safeInternalPath } from "@/lib/safe-redirect";
 
 function ShopifyCallbackContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
-  const destination = searchParams.get("destination") || "/onboarding/audit";
+  // SEC-03: never navigate to a URL-supplied value without the allow-list
+  // (blocks javascript: execution and open redirects).
+  const destination = safeInternalPath(searchParams.get("destination"));
   const { isSignedIn } = useAuth();
   const clerk = useClerk();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);

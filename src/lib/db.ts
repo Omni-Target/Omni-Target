@@ -289,7 +289,7 @@ export async function queryUserIntegrationSelect(
 /**
  * Retrieve user integration record matched by store URL (using or operator).
  */
-export async function getExistingIntegrationByStore(shopUrl: string, excludeUserId?: string) {
+function storeUrlOrFilter(shopUrl: string): string {
   const cleanShop = shopUrl
     .trim()
     .replace(/^https?:\/\//i, "")
@@ -304,9 +304,37 @@ export async function getExistingIntegrationByStore(shopUrl: string, excludeUser
     new Set([cleanShop, slug, fullShop, `https://${fullShop}`, `https://${cleanShop}`])
   );
 
-  const orFilter = variants
+  return variants
     .flatMap((v) => [`shopify_store_url.eq.${v}`, `shop_domain.eq.${v}`])
     .join(",");
+}
+
+/**
+ * Distinct Clerk users whose integration is linked to this store (at most
+ * `max`). Used by the Shopify OAuth callback to decide whether a signed-out
+ * "Continue with Shopify" maps to exactly one account. Throws on database
+ * errors so the caller fails closed instead of treating them as "no account".
+ */
+export async function getUserIdsLinkedToStore(shopUrl: string, max = 2): Promise<string[]> {
+  const { data, error } = await supabaseAdmin
+    .from("user_integrations")
+    .select("clerk_user_id")
+    .or(storeUrlOrFilter(shopUrl))
+    .limit(25);
+
+  if (error) {
+    throw new Error(`Store link lookup failed: ${error.code || error.message}`);
+  }
+  const ids = new Set<string>();
+  for (const row of data || []) {
+    if (row?.clerk_user_id) ids.add(String(row.clerk_user_id));
+    if (ids.size >= max) break;
+  }
+  return [...ids];
+}
+
+export async function getExistingIntegrationByStore(shopUrl: string, excludeUserId?: string) {
+  const orFilter = storeUrlOrFilter(shopUrl);
 
   let query = supabaseAdmin
     .from("user_integrations")
