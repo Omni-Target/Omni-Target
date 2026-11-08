@@ -27,6 +27,7 @@ import {
   STRUCTURED_HOOK_THINKING,
 } from "@/lib/insights-engine";
 import { resolveVerifiedMetaInterests } from "@/lib/meta-interest-resolver";
+import { retiredEndpointResponse } from "@/lib/api/retired-endpoint";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
@@ -50,6 +51,10 @@ export async function POST(request: Request) {
   const authResult = await requireUser();
   if (!authResult.ok) return authResult.response;
   const { userId } = authResult;
+
+  // SEC-08: uncharged LLM endpoint with no in-app callers — retired by default.
+  const retired = retiredEndpointResponse("/api/generate-brief", request, userId);
+  if (retired) return retired;
 
   const limited = await enforceRateLimit({
     action: "brief:generate",

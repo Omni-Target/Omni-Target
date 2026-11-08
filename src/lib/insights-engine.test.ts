@@ -9,7 +9,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
 }));
 vi.mock("@/lib/db", () => ({ logApiUsage: vi.fn() }));
 
-import { generateCreativeHooksOnly, generateTargetingProfile } from "./insights-engine";
+import { generateCreativeHooksOnly, generateRecommendations, generateTargetingProfile } from "./insights-engine";
 
 it("auto-recovers verified creative hooks when first-pass hooks are missing or rejected by validator", async () => {
   const product: StoreData["products"][number] = {
@@ -206,4 +206,79 @@ it("generateCreativeHooksOnly standalone recovery succeeds and uses generate_pro
     max_tokens: 1200,
     tool_choice: { name: "generate_product_hooks" },
   });
+});
+
+it("never derives a budget from store revenue — a $78k/month store gets no engine budget amounts (S0.6 / BIZ-01)", async () => {
+  // The incident: min(monthly revenue × 7%, $2,000) / 14 gave every product
+  // priced under ~$286 in a $78,035/month store the same $142.86/day.
+  const product: StoreData["products"][number] = {
+    id: "pants-1",
+    name: "Ego Pants (Noir)",
+    revenue: 9000,
+    units_sold: 180,
+    in_stock: true,
+    price: 50,
+    collection: "Pants",
+    image_url: "",
+    should_advertise: true,
+    description: "Wide-leg linen pants with hand-beaded cowrie details.",
+    tags: ["linen"],
+    product_type: "Pants",
+    has_partial_stock: false,
+    in_stock_variant_count: 1,
+    total_variant_count: 1,
+  };
+  const store = {
+    store: { name: "Big Store", domain: "example.com", currency: "USD", country: "United States", platform: "shopify" },
+    orders: {
+      total_revenue: 936420, order_count: 18728, average_order_value: 50,
+      top_locations: [{ city: "Austin", country: "United States", percentage: 12 }],
+      peak_days: ["Friday"], peak_hours: [], repeat_customer_rate: 0.3,
+      revenue_last_30_days: 78035, orders_last_30_days: 1561,
+    },
+    products: [product],
+    customers: { total_count: 12000, new_count: 900, returning_count: 661 },
+    generated_at: "2026-09-26T00:00:00.000Z",
+  } as StoreData;
+
+  createMessage.mockReset().mockResolvedValue({
+    usage: { input_tokens: 100, output_tokens: 110 },
+    stop_reason: "tool_use",
+    content: [{ type: "tool_use", id: "tool-78k", input: {
+      target_product_title: product.name,
+      creative_hooks: [
+        {
+          angle: "Problem / Friction",
+          visual_cue: "Open on the wide-leg cut in motion.",
+          on_screen_text: "Room in every step.",
+          primary_text_hook: "See how the wide-leg cut moves on Ego Pants (Noir).",
+        },
+        {
+          angle: "Material / Craftsmanship",
+          visual_cue: "Macro shot of the hand-beaded cowrie details.",
+          on_screen_text: "Hand-beaded cowrie details.",
+          primary_text_hook: "A closer view of the hand-beaded cowrie details.",
+        },
+        {
+          angle: "Identity / Status",
+          visual_cue: "Style the pants with two different tops.",
+          on_screen_text: "One pair. Two looks.",
+          primary_text_hook: "Build a look around Ego Pants (Noir).",
+        },
+      ],
+    } }],
+  });
+
+  const result = await generateRecommendations(store, { USD: 1 }, null, product);
+
+  expect(result.budget.status).toBe("withdrawn");
+  expect(result.budget.strategies).toEqual([]);
+  for (const key of ["recommended_daily", "breakdown", "tier", "calculation", "international_daily"]) {
+    expect(result.budget).not.toHaveProperty(key);
+  }
+  expect(result.targeting).not.toHaveProperty("domestic_budget_formatted");
+  expect(result.targeting).not.toHaveProperty("international_budget_formatted");
+  // No revenue-derived figure or per-day amount anywhere in the engine output.
+  const serialized = JSON.stringify(result);
+  expect(serialized).not.toMatch(/142\.86|\$143|\/day|Revenue-Tier/);
 });

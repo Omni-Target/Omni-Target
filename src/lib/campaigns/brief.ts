@@ -12,6 +12,38 @@ import type {
 } from "@/lib/brief-pdf-types";
 import { getAdvantagePlusGuidance } from "@/lib/advantage-plus";
 import { getInternationalStrategies } from "@/lib/market-geography";
+import { computeBudgetPlan, describeBudgetPlan, type BudgetPlan } from "@/lib/budget-plan";
+
+/**
+ * The merchant's maximum test budget for this brief (S0.6). Same inputs →
+ * same plan on every surface (brief view, PDF, plain text, server save).
+ */
+export function budgetPlanFor(input: {
+  aiInsights: AiInsights | null;
+  storeInsights: StoreInsights | null;
+  maxTestBudget?: number | null;
+  selectedDuration?: number;
+}): BudgetPlan {
+  return computeBudgetPlan({
+    currency: input.storeInsights?.store?.currency || input.aiInsights?.budget?.currency,
+    currencySymbol: input.storeInsights?.store?.currency_symbol || input.aiInsights?.budget?.currency_symbol,
+    maxTotalBudget: input.maxTestBudget ?? null,
+    durationDays: input.selectedDuration,
+  });
+}
+
+/** Plain-text budget lines (same labels as the PDF budget card). */
+export function budgetPlanTextLines(plan: BudgetPlan): string[] {
+  const text = describeBudgetPlan(plan);
+  return [
+    text.heading,
+    `Daily cap: ${text.daily}`,
+    `Maximum total spend: ${text.total}`,
+    `Test length: ${text.duration}`,
+    "Ad sets: 1 (your primary domestic market)",
+    text.explanation,
+  ];
+}
 
 export interface BuildBriefPdfPayloadParams {
   generatedAt?: string;
@@ -29,6 +61,8 @@ export interface BuildBriefPdfPayloadParams {
   selectedIntlStrategyIndex?: number;
   gatewayInsight: BriefPDFParams["gatewayInsight"] | null;
   isNewLaunch: boolean;
+  /** S0.6: the merchant's maximum total test budget (null = not set). */
+  maxTestBudget?: number | null;
 }
 
 function usableCreativeHooks(aiInsights: AiInsights | null | undefined): CreativeHook[] {
@@ -97,6 +131,7 @@ export function buildBriefPdfPayload({
   selectedIntlStrategyIndex,
   gatewayInsight,
   isNewLaunch,
+  maxTestBudget,
 }: BuildBriefPdfPayloadParams): BriefPDFParams {
   const cp = storeInsights?.products?.find((p) => p.name === productName);
   const finalProductPrice =
@@ -221,6 +256,8 @@ export function buildBriefPdfPayload({
     aiInsights?.budget?.recommended_daily;
 
   return {
+    // S0.6: the template renders budget amounts only from this plan.
+    budget_plan: budgetPlanFor({ aiInsights, storeInsights, maxTestBudget, selectedDuration }),
     brandName,
     storeCountry: storeInsights?.store?.country,
     productName,
@@ -394,6 +431,8 @@ export interface BuildBriefTextParams {
   selectedDuration: number;
   selectedIntlDuration?: number;
   gatewayInsight?: BriefPDFParams["gatewayInsight"] | null;
+  /** S0.6: the merchant's maximum total test budget (null = not set). */
+  maxTestBudget?: number | null;
 }
 
 /** Builds the plain-text campaign brief copied to the clipboard. Pure. */
@@ -402,12 +441,9 @@ export function buildBriefText({
   selectedCta,
   aiInsights,
   storeInsights,
-  goal,
-  selectedStrategyIndex,
-  selectedIntlStrategyIndex,
   selectedDuration,
-  selectedIntlDuration,
   gatewayInsight,
+  maxTestBudget,
 }: BuildBriefTextParams): string {
   const monthlyOrders =
     storeInsights?.orders?.orders_last_30_days ?? 0;
@@ -528,56 +564,9 @@ export function buildBriefText({
       : "Locations: Set manually in Meta Ads Manager",
     "",
     "── BUDGET ──",
-    aiInsights?.budget
-      ? (() => {
-          const strategies = aiInsights.budget.strategies || [];
-          const currentS =
-            strategies[selectedStrategyIndex] ||
-            strategies[1] ||
-            strategies[0] ||
-            { daily: aiInsights.budget.recommended_daily || 0, label: "Sweet Spot" };
-          const adSets = aiInsights.budget.ad_sets || 1;
-          const gm = aiInsights.budget.breakdown?.goal_multipliers?.[goal] ?? 1;
-          const adjustedBase = currentS.daily || 0;
-          const adj = Math.round(adjustedBase * adSets * gm);
-          const curr = aiInsights.budget.currency || "USD";
-          const sym = aiInsights.budget.currency_symbol;
-
-          const intlStrategies =
-            aiInsights.budget.international_strategies ||
-            getInternationalStrategies(curr);
-          const selectedIntlStrategy =
-            intlStrategies[selectedIntlStrategyIndex ?? 1] || intlStrategies[1];
-          const intlDaily = selectedIntlStrategy?.daily;
-
-          const intlDuration = selectedIntlDuration ?? selectedDuration;
-          const lines = [
-            `Strategy: ${currentS.label}`,
-            `Ad Sets: ${adSets}`,
-            `Recommended Daily: ${formatCurrency(adj, curr, sym)}/day`,
-            `Test Duration: ${selectedDuration} days`,
-            `Total Test Spend: ${formatCurrency(adj * selectedDuration, curr, sym)}`,
-          ];
-
-          if (intlDaily && (selectedIntlStrategyIndex !== undefined || aiInsights.budget.international_recommended_daily)) {
-            const combinedDaily = adj + intlDaily;
-            const combinedSpend = (adj * selectedDuration) + (intlDaily * intlDuration);
-            lines.push(
-              "",
-              `Optional Overseas Strategy: ${selectedIntlStrategy.label}`,
-              `Optional Overseas Daily: ${formatCurrency(intlDaily, curr, sym)}/day`,
-              `Optional Overseas Test Duration: ${intlDuration} days`,
-              `Optional Overseas Test Spend: ${formatCurrency(intlDaily * intlDuration, curr, sym)} (1 separate ad set)`,
-              `Combined Total Daily: ${formatCurrency(combinedDaily, curr, sym)}/day`,
-              `Combined Total Test Spend: ${formatCurrency(combinedSpend, curr, sym)} (${selectedDuration === intlDuration ? `${selectedDuration} days` : `Local ${selectedDuration}d + Overseas ${intlDuration}d`})`
-            );
-          }
-
-          lines.push(`Meta Context: ${aiInsights.budget.reasoning}`);
-          return lines.filter(Boolean).join("\n");
-        })()
-      : `Recommended starting budget: ${formatCurrency(5000, storeInsights?.store?.currency || "USD", storeInsights?.store?.currency_symbol)}/day for 14 days`,
-    aiInsights?.budget?.reasoning || "Set final budget in Meta Ads Manager",
+    // S0.6: the merchant's own maximum test budget is the only budget shown;
+    // wording comes from describeBudgetPlan() so it matches the brief and PDF.
+    ...budgetPlanTextLines(budgetPlanFor({ aiInsights, storeInsights, maxTestBudget, selectedDuration })),
     "",
     "── TIMING ──",
     storeInsights?.orders?.peak_days &&

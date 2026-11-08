@@ -14,6 +14,7 @@ import {
   generateRecommendations,
 } from "@/lib/insights-engine";
 import type { MetaRecommendations } from "@/lib/insights-engine";
+import { TargetingGenerationError, assertUsableRecommendations } from "@/lib/campaigns/generation-guard";
 import { resolveVerifiedMetaInterests } from "@/lib/meta-interest-resolver";
 import { reusableRecommendationsFromVersions } from "@/lib/campaigns/reuse-insights";
 import { canonicalRegenerationProduct } from "@/lib/campaigns/regeneration-product";
@@ -861,7 +862,7 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
     }
 
     if (copyValidationErrors.length > 0) {
-      return NextResponse.json({ error: "We could not validate the product claims in this copy. Please retry. No credit was charged." }, { status: 422 });
+      return NextResponse.json({ error: "We could not validate the product claims in this copy. Please retry. No credit was charged.", charged: false }, { status: 422 });
     }
 
     // ── Step 2: Generate targeting profile with copy angle as exclusion ──────
@@ -881,6 +882,9 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
     const recommendations = reusableRecommendations ?? await generateRecommendations(
       integration.store_snapshot, undefined, userId, targetProductOverride, angleUsed
     );
+    // AI-03: never charge for a brief whose AI targeting or hooks fell back to
+    // generic defaults. Throws before the commit (the only credit debit).
+    if (!reusableRecommendations) assertUsableRecommendations(recommendations);
     if (reusableRecommendations) {
       const verifiedInterests = await resolveVerifiedMetaInterests({
         candidateInterests:
@@ -955,11 +959,25 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
       return NextResponse.json({ error: error.message }, { status: 503 });
     }
 
+    // Definitive pre-commit failures: nothing was saved or charged, so the
+    // client must not poll for a receipt (`charged: false`).
     if (error instanceof CreativeHookGenerationError) {
       return NextResponse.json(
         {
           error:
             "Creative hooks could not be generated. Please retry. No credit was charged.",
+          charged: false,
+        },
+        { status: 502 }
+      );
+    }
+
+    if (error instanceof TargetingGenerationError) {
+      return NextResponse.json(
+        {
+          error:
+            "Audience targeting could not be generated. Please retry. No credit was charged.",
+          charged: false,
         },
         { status: 502 }
       );

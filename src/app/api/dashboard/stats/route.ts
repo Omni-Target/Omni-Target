@@ -2,6 +2,7 @@ import { getUserIntegration, getUserCampaigns } from "@/lib/db";
 import { getUsdRate } from "@/lib/exchange-rates";
 import { fetchWithRetry } from "@/lib/http";
 import { requireUser } from "@/lib/api/require-user";
+import { logDeprecatedEndpointHit } from "@/lib/api/retired-endpoint";
 import { createLogger } from "@/lib/logger";
 import type { MetaInsight, MetaInsightsResponse } from "@/lib/types/meta";
 
@@ -14,8 +15,10 @@ const num = (value: string | undefined): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export async function GET() {
+export async function GET(request: Request) {
   const authResult = await requireUser();
+  // SEC-08: no known caller; observed before removal (S2.4).
+  logDeprecatedEndpointHit("/api/dashboard/stats", request, authResult.ok ? authResult.userId : null);
   if (!authResult.ok) return authResult.response;
   const { userId } = authResult;
 

@@ -43,3 +43,14 @@ export function clearPendingGeneration(): void {
     // The storage entry was not writable, so there is nothing durable to clear.
   }
 }
+
+/**
+ * Whether a failed generation response is final (show the error now) rather
+ * than ambiguous (the brief may still have been saved, so poll the receipt).
+ * 4xx responses are final; so is any response where the server states nothing
+ * was charged (`charged: false`, e.g. AI targeting/hooks failed before commit).
+ */
+export function isDefinitiveGenerationResponse(status: number, body: unknown): boolean {
+  if (status < 500) return true;
+  return typeof body === "object" && body !== null && (body as { charged?: unknown }).charged === false;
+}

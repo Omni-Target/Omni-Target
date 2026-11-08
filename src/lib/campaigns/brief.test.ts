@@ -312,35 +312,39 @@ describe("buildBriefText", () => {
     expect(text).toContain("Suggested Age: 25 — 45");
     expect(text).toContain("Suggested Gender: Women");
     expect(text).toContain("Suggested Interests (AI Starting Hints): Fashion, Shopping");
-    expect(text).toContain("Strategy: Balanced");
-    expect(text).toContain("Ad Sets: 2");
-    expect(text).toContain(`Recommended Daily: ${formatCurrency(40, "USD")}/day`);
+    // S0.6: no revenue-derived budget; the merchant has not set a cap yet.
+    expect(text).toContain("No budget recommendation yet");
+    expect(text).toContain("Daily cap: Not set");
+    expect(text).not.toContain("Strategy: Balanced");
+    expect(text).not.toContain("Recommended Daily");
     expect(text).toContain("Best days: Friday, Saturday");
   });
 
-  it("includes independent overseas strategy and combined spend in brief text", () => {
+  it("shows only the merchant's maximum test budget, never overseas or combined totals (BIZ-04 regression)", () => {
     const text = buildBriefText({
       generatedCopy: copy,
       selectedCta: "Buy Now",
-      aiInsights: baseInsights(1),
+      aiInsights: baseInsights(1), // still carries legacy strategies — must be ignored
       storeInsights: {
         orders: { peak_days: ["Friday"] },
         store: { currency: "USD" },
       },
       goal: "Drive Website Sales",
-      selectedStrategyIndex: 1, // Balanced (20) * 2 ad sets = 40/day
-      selectedIntlStrategyIndex: 2, // Full Send (40/day)
+      selectedStrategyIndex: 1,
+      selectedIntlStrategyIndex: 2,
       selectedDuration: 7,
+      maxTestBudget: 280,
     });
 
-    expect(text).toContain("Strategy: Balanced");
-    expect(text).toContain(`Recommended Daily: ${formatCurrency(40, "USD")}/day`);
-    expect(text).toContain(`Total Test Spend: ${formatCurrency(280, "USD")}`); // 40 * 7
-    expect(text).toContain("Optional Overseas Strategy: Full Send");
-    expect(text).toContain(`Optional Overseas Daily: ${formatCurrency(40, "USD")}/day`);
-    expect(text).toContain(`Optional Overseas Test Spend: ${formatCurrency(280, "USD")} (1 separate ad set)`);
-    expect(text).toContain(`Combined Total Daily: ${formatCurrency(80, "USD")}/day`);
-    expect(text).toContain(`Combined Total Test Spend: ${formatCurrency(560, "USD")} (7 days)`);
+    expect(text).toContain("Your maximum test budget");
+    expect(text).toContain(`Daily cap: Up to ${formatCurrency(40, "USD")}/day`); // 280 / 7
+    expect(text).toContain(`Maximum total spend: ${formatCurrency(280, "USD")} maximum over 7 days`);
+    expect(text).toContain("Test length: 7-day test");
+    for (const withdrawn of ["Optional Overseas", "Combined Total", "Recommended Daily", "Total Test Spend"]) {
+      expect(text).not.toContain(withdrawn);
+    }
+    // The withdrawn budget-tier line ("Strategy: Balanced") — distinct from "Optimization Strategy:".
+    expect(text).not.toMatch(/^Strategy:/m);
   });
 });
 
@@ -435,8 +439,9 @@ describe("buildBriefHTML tests", () => {
     expect(html).not.toContain("Before you launch");
   });
 
-  it("synchronizes product price in budget reasoning text", async () => {
+  it("never renders legacy revenue-derived budget reasoning; the card shows the merchant's plan (S0.6)", async () => {
     const payload = buildBriefPdfPayload({
+      maxTestBudget: 140000,
       brandName: "K | KASA",
       productName: "Ego Pants (Matcha)",
       productPrice: 120000,
@@ -461,9 +466,15 @@ describe("buildBriefHTML tests", () => {
     });
 
     const html = await buildBriefHTML(payload);
-    // HTML output escapes apostrophes (&#39;) as part of SEC-06 hardening.
-    expect(html).toContain("Calibrated for your product&#39;s ₦120,000 price point:");
-    expect(html).not.toContain("Calibrated for your product&#39;s ₦230,000 price point:");
+    expect(html).not.toContain("Calibrated for your product");
+    expect(html).toContain("Your maximum test budget");
+    expect(html).toContain(`Up to ${formatCurrency(10000, "NGN", "₦")}/day`); // 140,000 / 14
+    expect(html).toContain(`${formatCurrency(140000, "NGN", "₦")} maximum over 14 days`);
+    // SEC-06 (carried over from the PDF-hardening side of the merge): apostrophes in
+    // free text that IS still rendered must be HTML-escaped.
+    const quoted = await buildBriefHTML({ ...payload, productName: "Kemi's Closet Tee", brandName: "Kemi's" });
+    expect(quoted).toContain("Kemi&#39;s Closet Tee");
+    expect(quoted).not.toContain("Kemi's");
   });
 
   it("separates proven store orders and AI-recommended expansion hubs in Card 04", async () => {
@@ -691,23 +702,32 @@ describe("buildBriefHTML tests", () => {
     });
 
     const html = await buildBriefHTML(payload);
-    expect(html).toContain("Transparent Budget Calculation Breakdown");
-    expect(html).toContain("Store Sales Context");
-    expect(html).toContain("₦253,250");
-    expect(html).toContain("How Budget Was Chosen");
-    expect(html).toContain("Starter Testing Baseline");
-    expect(html).toContain("Cash Flow Advisory");
-    expect(html).toContain("Recommended Test (Sweet Spot)");
-    expect(html).toContain("Lower-Spend Option (Dip Your Toe)");
+    // S0.6: the revenue-derived budget breakdown, store-sales sizing and
+    // strategy tiers are withdrawn even when present in saved brief data.
+    for (const withdrawn of [
+      "Transparent Budget Calculation Breakdown",
+      "Store Sales Context",
+      "₦253,250",
+      "How Budget Was Chosen",
+      "Starter Testing Baseline",
+      "Cash Flow Advisory",
+      "Recommended Test (Sweet Spot)",
+      "Lower-Spend Option (Dip Your Toe)",
+    ]) {
+      expect(html).not.toContain(withdrawn);
+    }
+    expect(html).toContain("No budget recommendation yet");
     expect(html).toContain("3 Creative angles to test");
     expect(html).toContain("Suggested starting age");
     expect(html).toContain("Strong interest: shoppers adding to cart, but drop-offs before checkout");
-    expect(html).toContain("Target ad spend per sale");
+    // BIZ-05: no unit cost in this fixture, so no cost-per-sale number is invented.
+    expect(html).toContain("No unit cost is recorded in Shopify");
+    expect(html).not.toContain("Target ad spend per sale");
     expect(html).toContain("Founder Profit Check: Money Made − Ad Spend − Product Cost − Delivery − Payment Fees = Real Cash in Pocket");
     expect(html).not.toContain("TikTok");
   });
 
-  it("dynamically calculates local USD equivalent in ad account currency tip", async () => {
+  it("does not render budget currency-conversion tips derived from withdrawn amounts (S0.6)", async () => {
     const payload = buildBriefPdfPayload({
       brandName: "K | KASA",
       productName: "Ego Pants",
@@ -738,11 +758,9 @@ describe("buildBriefHTML tests", () => {
     });
 
     const html = await buildBriefHTML(payload);
-    expect(html).toContain("Ad Account Currency Tip");
-    expect(html).toContain(
-      "enter <strong>~$9/day USD</strong> for your primary local campaign (equivalent to ₦14,238/day)"
-    );
-    expect(html).not.toContain("enter $18/day USD directly in Ads Manager");
+    expect(html).not.toContain("Ad Account Currency Tip");
+    expect(html).not.toContain("₦14,238/day");
+    expect(html).not.toContain("$18/day USD");
   });
 
   it("derives first-time buyer count from ratio when explicit count is missing in gateway insight", async () => {
@@ -777,7 +795,7 @@ describe("buildBriefHTML tests", () => {
     );
   });
 
-  it("renders the revenue-tier rule and no cash flow warning for healthy stores with adequate revenue", async () => {
+  it("never sizes a budget from store revenue, even for a high-revenue store (BIZ-01 regression)", async () => {
     const payload = buildBriefPdfPayload({
       brandName: "Acme Apparel",
       productName: "Basic Tee",
@@ -808,10 +826,11 @@ describe("buildBriefHTML tests", () => {
     });
 
     const html = await buildBriefHTML(payload);
-    expect(html).toContain("Revenue-Tier Testing Rule");
-    expect(html).toContain("₦3,000,000 verified over latest 30 days");
+    expect(html).not.toContain("Revenue-Tier Testing Rule");
+    expect(html).not.toContain("₦3,000,000 verified over latest 30 days");
     expect(html).not.toContain("Cash Flow Advisory");
     expect(html).not.toContain("If cash is tight right now");
+    expect(html).toContain("No budget recommendation yet");
   });
 
   it("uses a store-specific or explicitly unavailable cart baseline and displays verified order history peak days", async () => {
@@ -872,6 +891,8 @@ describe("buildBriefHTML tests", () => {
 
   it("renders founder-friendly Yellow Light friction checks and Red Light testing spend range", async () => {
     const payload = buildBriefPdfPayload({
+      // S0.6: spend checkpoints derive from the merchant's own cap (₦70,000 over 7 days).
+      maxTestBudget: 70000,
       brandName: "K | KASA",
       productName: "Ego Pants",
       productPrice: 120000,
@@ -905,7 +926,8 @@ describe("buildBriefHTML tests", () => {
     expect(html).toContain("Founder Rule: Give Meta 48–72 hours before making changes");
 
     // Green Light scaling & profit check
-    expect(html).toContain("🟢 It's Working · Profitable Orders");
+    expect(html).toContain("🟢 It's Working · Orders Coming In");
+    expect(html).not.toContain("Profitable Orders"); // BIZ-05
     expect(html).toContain("Founder Profit Check");
     expect(html).toContain("Verify net profit");
 
@@ -916,7 +938,7 @@ describe("buildBriefHTML tests", () => {
 
     // Red Light 3-4 days spend range & action
     expect(html).toContain("🔴 Low Clicks / Refresh Hook");
-    expect(html).toContain("At 50% of test budget (₦49,795 spent): link CTR &lt; 0.8% and few page visits");
+    expect(html).toContain("At 50% of test budget (₦35,000 spent): link CTR &lt; 0.8% and few page visits");
     expect(html).toContain("Don't start over or delete your campaign");
   });
 
@@ -956,7 +978,7 @@ describe("buildBriefHTML tests", () => {
     expect(html).not.toContain("on a Sunday");
   });
 
-  it("handles independent duration timelines for Primary Local and Overseas markets cleanly", async () => {
+  it("shows identical merchant-set budget figures in text and PDF, with no overseas or combined totals (S0.6)", async () => {
     const customInsights: AiInsights = {
       ...baseInsights(1),
       budget: {
@@ -1000,12 +1022,16 @@ describe("buildBriefHTML tests", () => {
       selectedIntlStrategyIndex: 2, // Full Send: 53135
       gatewayInsight: null,
       isNewLaunch: false,
+      maxTestBudget: 280000,
     });
 
-    expect(payload.budget.recommended_duration_days).toBe(14);
-    expect(payload.budget.international_duration_days).toBe(7);
-    expect(payload.budget.recommended_daily).toBe(28466);
-    expect(payload.budget.international_daily).toBe(53135);
+    expect(payload.budget_plan).toMatchObject({
+      basis: "merchant_cap",
+      currency: "NGN",
+      max_total_budget: 280000,
+      duration_days: 14,
+      daily_cap: 20000,
+    });
 
     // Plain-text brief check
     const briefText = buildBriefText({
@@ -1021,23 +1047,64 @@ describe("buildBriefHTML tests", () => {
       selectedDuration: 14,
       selectedIntlDuration: 7,
       gatewayInsight: null,
+      maxTestBudget: 280000,
     });
 
-    expect(briefText).toContain("Test Duration: 14 days");
-    expect(briefText).toContain("Total Test Spend: ₦398,524");
-    expect(briefText).toContain("Optional Overseas Strategy: Full Send");
-    expect(briefText).toContain("Optional Overseas Test Duration: 7 days");
-    expect(briefText).toContain("Optional Overseas Test Spend: ₦371,945 (1 separate ad set)");
-    expect(briefText).toContain("Combined Total Daily: ₦81,601/day");
-    expect(briefText).toContain("Combined Total Test Spend: ₦770,469 (Local 14d + Overseas 7d)");
+    // Same plan → same figures in the plain-text export and the PDF.
+    const daily = `Up to ${formatCurrency(20000, "NGN")}/day`;
+    const total = `${formatCurrency(280000, "NGN")} maximum over 14 days`;
+    expect(briefText).toContain(`Daily cap: ${daily}`);
+    expect(briefText).toContain(`Maximum total spend: ${total}`);
+    expect(briefText).toContain("Test length: 14-day test");
 
-    // HTML / PDF template check
     const html = await buildBriefHTML(payload);
-    expect(html).toContain("Local 14d + Overseas 7d: ₦770,469");
-    expect(html).toContain('<span class="row-label">Test Duration</span><span class="row-value">14 days</span>');
-    expect(html).toContain('<span class="row-label">Total Test Spend</span><span class="row-value">₦398,524</span>');
-    expect(html).toContain('<span class="row-label">Optional Duration</span><span class="row-value">7 days</span>');
-    expect(html).toContain('<span class="row-label">Estimated Test Spend</span><span class="row-value">₦371,945</span>');
-    expect(html).toContain("Local: ₦398,524 (14d) + Overseas: ₦371,945 (7d) = Total ₦770,469");
+    expect(html).toContain(`<span class="row-label">Daily cap</span><span class="row-value">${daily}</span>`);
+    expect(html).toContain(`<span class="row-label">Maximum total spend</span><span class="row-value">${total}</span>`);
+    expect(html).toContain(`<span class="row-label">Test length</span><span class="row-value">14-day test</span>`);
+
+    // Withdrawn legacy amounts (strategies, overseas floors, combined totals) never appear.
+    for (const withdrawn of ["Overseas Test Spend", "Combined Total", "₦770,469", "₦398,524", "₦371,945", "28,466"]) {
+      expect(briefText).not.toContain(withdrawn);
+      expect(html).not.toContain(withdrawn);
+    }
+  });
+});
+
+describe("BIZ-05: no profitability promises in the brief", () => {
+  const PROFIT_CLAIMS = /keeps each order profitable|Profitable Orders|35% of piece price|exceptional return on ad spend|(?<!not )guarantees? (?:a )?profit/i;
+  const build = (products: StoreInsights["products"]) =>
+    buildBriefHTML(
+      buildBriefPdfPayload({
+        brandName: "Acme",
+        productName: "Tee",
+        productPrice: 50,
+        goal: "Drive Website Sales",
+        generatedCopy: copy,
+        selectedCta: "Shop Now",
+        aiInsights: baseInsights(),
+        storeInsights: { store: { currency: "USD" }, products } as StoreInsights,
+        selectedDuration: 14,
+        selectedStrategyIndex: 1,
+        gatewayInsight: null,
+        isNewLaunch: false,
+        maxTestBudget: 700,
+      }),
+    );
+
+  it("shows price minus unit cost only as a break-even ceiling, never as a profit target", async () => {
+    const html = await build([
+      { id: "1", name: "Tee", price: 50, unit_cost: 28, price_less_unit_cost: 22 },
+    ] as StoreInsights["products"]);
+    expect(html).toContain("Break-even ceiling");
+    expect(html).toContain(`~${formatCurrency(22, "USD")} per sale loses money on product cost alone`);
+    expect(html).toContain("does not guarantee a profit");
+    expect(html).not.toMatch(PROFIT_CLAIMS);
+  });
+
+  it("invents no cost-per-sale number when Shopify has no unit cost (no 35% fallback)", async () => {
+    const html = await build([{ id: "1", name: "Tee", price: 50 }] as StoreInsights["products"]);
+    expect(html).toContain("No unit cost is recorded in Shopify");
+    expect(html).not.toContain(formatCurrency(18, "USD")); // 35% of 50 rounded
+    expect(html).not.toMatch(PROFIT_CLAIMS);
   });
 });

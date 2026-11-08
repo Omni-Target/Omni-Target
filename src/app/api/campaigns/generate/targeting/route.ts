@@ -47,8 +47,10 @@ export async function POST(request: Request) {
       );
     }
 
-    if (Boolean(body.campaignId) !== Boolean(body.versionId)) {
-      return NextResponse.json({ error: "Campaign and version are required together." }, { status: 400 });
+    // SEC-08: this route makes LLM calls without charging a credit, so it only
+    // serves hook recovery for a brief the user already owns (and paid for).
+    if (!body.campaignId || !body.versionId) {
+      return NextResponse.json({ error: "Campaign and version are required." }, { status: 400 });
     }
     let savedProductDescription: string | null = null;
     let savedProductPrice: string | number | null = null;

@@ -35,6 +35,9 @@ export interface BriefStepProps {
   onCreateNew: () => void;
   gatewayInsight?: BriefPDFParams["gatewayInsight"] | null;
   productPrice?: number;
+  /** S0.6: the merchant's maximum total test budget (null = not set). */
+  maxTestBudget?: number | null;
+  setMaxTestBudget?: (value: number | null) => void;
   // Outer container class — defaults to a centered narrow column; the durable
   // /campaigns/[id] page overrides it to fill the width beside its rail.
   className?: string;
@@ -54,19 +57,16 @@ export function BriefStep({
   hooksRetryError,
   goal,
   selectedStrategyIndex,
-  setSelectedStrategyIndex,
   selectedIntlStrategyIndex,
-  setSelectedIntlStrategyIndex,
   selectedDuration,
   setSelectedDuration,
-  selectedIntlDuration,
-  setSelectedIntlDuration,
   isDownloadingPdf,
   onDownloadPdf,
   onCopyBrief,
   onCreateNew,
   gatewayInsight,
-  productPrice,
+  maxTestBudget = null,
+  setMaxTestBudget,
   className = "mx-auto max-w-3xl",
 }: BriefStepProps) {
   const isGateway = gatewayInsight?.currentProductClassification === "Gateway";
@@ -187,19 +187,13 @@ export function BriefStep({
         />
 
         <BudgetPlanner
+          key={String(maxTestBudget ?? "")}
           aiInsights={aiInsights}
           storeInsights={storeInsights}
-          goal={goal}
-          selectedStrategyIndex={selectedStrategyIndex}
-          setSelectedStrategyIndex={setSelectedStrategyIndex}
-          selectedIntlStrategyIndex={selectedIntlStrategyIndex}
-          setSelectedIntlStrategyIndex={setSelectedIntlStrategyIndex}
           selectedDuration={selectedDuration}
           setSelectedDuration={setSelectedDuration}
-          selectedIntlDuration={selectedIntlDuration}
-          setSelectedIntlDuration={setSelectedIntlDuration}
-          loadingAiInsights={loadingAiInsights}
-          productPrice={productPrice}
+          maxTestBudget={maxTestBudget}
+          setMaxTestBudget={setMaxTestBudget ?? (() => {})}
         />
 
         {Boolean(

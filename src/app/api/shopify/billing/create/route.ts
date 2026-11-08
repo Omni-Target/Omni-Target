@@ -3,23 +3,15 @@ import { getIntegrationByUser } from "@/lib/billing-db";
 import { requireUser } from "@/lib/api/require-user";
 import { apiError, apiServerError } from "@/lib/api/response";
 import { shopifyAdminGraphqlUrl } from "@/lib/shopify-config";
+import { SHOPIFY_CREDIT_PLANS, type ShopifyCreditPlanKey } from "@/lib/shopify-billing-plans";
 
-const PLANS = {
-  starter: {
-    name: "Starter Pack – 3 Credits",
-    price: "9.00",
-  },
-  growth: {
-    name: "Growth Pack – 10 Credits",
-    price: "25.00",
-  },
-  scale: {
-    name: "Scale Pack – 30 Credits",
-    price: "59.00",
-  },
-} as const;
+// Charge names/prices come from the shared catalogue so the callback and
+// reconciliation can match purchases exactly (SEC-12).
+const PLANS = Object.fromEntries(
+  Object.entries(SHOPIFY_CREDIT_PLANS).map(([key, plan]) => [key, { name: plan.chargeName, price: plan.price }]),
+) as Record<ShopifyCreditPlanKey, { name: string; price: string }>;
 
-type PlanKey = keyof typeof PLANS;
+type PlanKey = ShopifyCreditPlanKey;
 
 const BodySchema = z.object({
   shop: z.string().min(1).max(255),

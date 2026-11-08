@@ -2,6 +2,7 @@ import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
 import { createPayment } from "@/lib/db";
 import { getPackById } from "@/lib/credit-packs";
+import { paymentProviderDisabledResponse } from "@/lib/payments/provider-flags";
 
 const BodySchema = z.object({
   packId: z.string().min(1).max(100),
@@ -9,6 +10,11 @@ const BodySchema = z.object({
 });
 
 export async function POST(request: Request) {
+  // SEC-08: Paystack initiation is off unless PAYMENTS_PAYSTACK_ENABLED=true.
+  // The verify callback stays active so started payments still settle.
+  const disabled = paymentProviderDisabledResponse("paystack");
+  if (disabled) return disabled;
+
   const { userId } = await auth();
   if (!userId) {
     return Response.json(

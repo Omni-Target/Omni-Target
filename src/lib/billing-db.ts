@@ -10,6 +10,7 @@ import {
 } from "./db";
 import { getValidShopifyToken } from "./shopify-token";
 import { shopifyAdminGraphqlUrl } from "./shopify-config";
+import { isCreditableCharge, planForShopifyCharge, type ShopifyChargeKind } from "./shopify-billing-plans";
 import type { UserIntegration } from "@/lib/types/integration";
 
 export interface DBColumns {
@@ -227,13 +228,6 @@ export async function addCreditsToIntegration(shop: string, creditsToAdd: number
 const lastBillingReconcileByUser = new Map<string, number>();
 const RECONCILE_COOLDOWN_MS = 60_000;
 
-export function creditsForShopifyPlanName(name: string): { credits: number; planName: string } | null {
-  const lower = (name || "").toLowerCase();
-  if (lower.includes("starter")) return { credits: 3, planName: "Starter" };
-  if (lower.includes("growth")) return { credits: 10, planName: "Growth" };
-  if (lower.includes("scale")) return { credits: 30, planName: "Scale" };
-  return null;
-}
 
 /**
  * Reconciles any ACTIVE Shopify one-time purchases or App Store Managed Pricing
@@ -258,6 +252,7 @@ export async function reconcileShopifyBillingForUser(userId: string): Promise<vo
             id
             name
             status
+            test
             createdAt
           }
           oneTimePurchases(first: 15, sortKey: CREATED_AT, reverse: true) {
@@ -266,6 +261,7 @@ export async function reconcileShopifyBillingForUser(userId: string): Promise<vo
                 id
                 name
                 status
+                test
                 createdAt
                 price {
                   amount
@@ -297,6 +293,8 @@ export async function reconcileShopifyBillingForUser(userId: string): Promise<vo
       id: string;
       name: string;
       status: string;
+      test: boolean;
+      kind: ShopifyChargeKind;
       createdAt?: string;
       amount?: number | null;
       currency?: string;
@@ -308,6 +306,8 @@ export async function reconcileShopifyBillingForUser(userId: string): Promise<vo
           id: sub.id,
           name: sub.name || "",
           status: sub.status,
+          test: sub.test === true,
+          kind: "subscription",
           createdAt: sub.createdAt,
           amount: null,
           currency: "USD",
@@ -322,6 +322,8 @@ export async function reconcileShopifyBillingForUser(userId: string): Promise<vo
           id: node.id,
           name: node.name || "",
           status: node.status,
+          test: node.test === true,
+          kind: "one_time",
           createdAt: node.createdAt,
           amount: Number(node.price?.amount) || null,
           currency: node.price?.currencyCode || "USD",
@@ -330,7 +332,9 @@ export async function reconcileShopifyBillingForUser(userId: string): Promise<vo
     }
 
     for (const item of candidates) {
-      const plan = creditsForShopifyPlanName(item.name);
+      // SEC-12: test charges never grant credits in production.
+      if (!isCreditableCharge(item)) continue;
+      const plan = planForShopifyCharge(item.name, item.kind);
       if (!plan) continue;
 
       const claimId = `shopify:${item.id}`;
@@ -342,7 +346,7 @@ export async function reconcileShopifyBillingForUser(userId: string): Promise<vo
         (userId === "user_3JsfGBNmO7sOAjbXcJ9TOwAaCEd" ||
           userId === "user_3KSNDD4EnLJdAPzQ81z0xGq4032" ||
           userId === "user_3KsRmP6KIeihqKf5DY4sHio7pPq") &&
-        plan.planName === "Starter" &&
+        plan.key === "starter" &&
         item.createdAt &&
         new Date(item.createdAt).getTime() <= new Date("2026-10-30T10:00:00Z").getTime()
       ) {
@@ -358,7 +362,7 @@ export async function reconcileShopifyBillingForUser(userId: string): Promise<vo
         await createPayment({
           clerk_user_id: userId,
           provider: "shopify",
-          pack: plan.planName.toLowerCase(),
+          pack: plan.key,
           amount_usd: item.amount ?? null,
           currency: item.currency || "USD",
           credits_granted: plan.credits,

@@ -7,6 +7,7 @@ import {
 } from "@/lib/billing-db";
 import { claimPayment, releasePayment, createPayment } from "@/lib/db";
 import { shopifyAdminGraphqlUrl } from "@/lib/shopify-config";
+import { isCreditableCharge, planForShopifyCharge } from "@/lib/shopify-billing-plans";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -57,6 +58,7 @@ export async function GET(request: Request) {
             id
             name
             status
+            test
             price {
               amount
               currencyCode
@@ -68,6 +70,7 @@ export async function GET(request: Request) {
             id
             name
             status
+            test
           }
         }
       }
@@ -123,28 +126,30 @@ export async function GET(request: Request) {
       );
     }
 
-    // 4. Map charge name to credits
-    const name = chargeNode.name || "";
-    let creditsToAdd = 0;
-    let planName = "";
+    // 4. SEC-12: Shopify test charges (free, e.g. on development stores) never
+    //    grant credits in production.
+    if (!isCreditableCharge(chargeNode)) {
+      console.warn(`[billing-callback] refusing test charge ${chargeNode.id} in this environment`);
+      return Response.redirect(
+        `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?billing=error&message=Test+charges+cannot+be+used+to+buy+credits`
+      );
+    }
 
-    if (name.toLowerCase().includes("starter")) {
-      creditsToAdd = 3;
-      planName = "Starter";
-    } else if (name.toLowerCase().includes("growth")) {
-      creditsToAdd = 10;
-      planName = "Growth";
-    } else if (name.toLowerCase().includes("scale")) {
-      creditsToAdd = 30;
-      planName = "Scale";
-    } else {
+    // 5. Map the charge to a plan: exact name for app-created one-time
+    //    purchases; unambiguous plan keyword for managed-pricing subscriptions.
+    const name = chargeNode.name || "";
+    const chargeKind = result.data?.oneTime?.id ? "one_time" : "subscription";
+    const plan = planForShopifyCharge(name, chargeKind);
+    if (!plan) {
       console.error(`Unrecognized charge name: ${name}`);
       return Response.redirect(
         `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?billing=error&message=Unrecognized+plan+name`
       );
     }
+    const creditsToAdd: number = plan.credits;
+    const planName: string = plan.label;
 
-    // 5. Idempotency: claim this charge before granting so a callback replay
+    // 6. Idempotency: claim this charge before granting so a callback replay
     //    (refresh, back-button, double redirect) can never double-credit. A
     //    lost claim means the charge was already processed — redirect to
     //    success without granting again.
@@ -157,7 +162,7 @@ export async function GET(request: Request) {
       );
     }
 
-    // 6. Grant the credits. When we know the payer (uid), credit that exact
+    // 7. Grant the credits. When we know the payer (uid), credit that exact
     //    account, writing BOTH balance columns so every reader sees the new
     //    balance; otherwise fall back to the legacy shop-keyed path. If the
     //    grant fails, release the claim so a retry can re-process the charge.
@@ -172,7 +177,7 @@ export async function GET(request: Request) {
       throw grantError;
     }
 
-    // 7. Record the transaction (bookkeeping only — never blocks the grant).
+    // 8. Record the transaction (bookkeeping only — never blocks the grant).
     if (uid) {
       try {
         await createPayment({
@@ -191,7 +196,7 @@ export async function GET(request: Request) {
       }
     }
 
-    // 8. Redirect to dashboard with success query param
+    // 9. Redirect to dashboard with success query param
     return Response.redirect(
       `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?billing=success&credits=${creditsToAdd}&plan=${planName}`
     );

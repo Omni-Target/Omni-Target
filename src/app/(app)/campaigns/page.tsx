@@ -41,6 +41,7 @@ import { buildBriefPdfPayload, buildBriefText } from "@/lib/campaigns/brief";
 import {
   PENDING_GENERATION_KEY,
   clearPendingGeneration,
+  isDefinitiveGenerationResponse,
   parsePendingGeneration,
   savePendingGeneration,
   type PendingGeneration,
@@ -535,7 +536,9 @@ function CampaignsContent() {
       }
 
       if (!res.ok) {
-        if (res.status < 500) {
+        // Final when 4xx, or when the server states nothing was charged
+        // (AI targeting/hooks failed before commit) — no receipt to poll for.
+        if (isDefinitiveGenerationResponse(res.status, data)) {
           responseConfirmed = true;
           clearPendingGeneration();
         }
