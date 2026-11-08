@@ -14,6 +14,11 @@ let owner: string | null = null;
 export function setStoreCacheOwner(userId: string): void {
   if (typeof window === "undefined") return; // module state must not cross requests
   owner = userId;
+  try {
+    localStorage.removeItem(LEGACY_KEY); // never read; don't leave it behind
+  } catch {
+    // Storage may be unavailable in private browsing.
+  }
 }
 
 export function readStoreCache(): unknown {
