@@ -22,10 +22,11 @@ describe("per-user store cache (SEC-11)", () => {
     expect(readStoreCache()).toBeUndefined();
   });
 
-  it("does not read the old shared key", () => {
+  it("never reads the old shared key and removes it as soon as the owner is known", () => {
     localStorage.setItem("omni_store_data_v1", JSON.stringify({ store: "someone else" }));
     setStoreCacheOwner("user_a");
     expect(readStoreCache()).toBeUndefined();
+    expect(localStorage.getItem("omni_store_data_v1")).toBeNull();
   });
 
   it("removes every snapshot, and the old shared key, on sign-out", () => {
