@@ -7,6 +7,7 @@ import {
   getInternationalBudgetFloor,
   getInternationalStrategies,
   isTier1Market,
+  isFallbackCountryEntry,
 } from "./market-geography";
 
 describe("market-geography dynamic utility", () => {
@@ -135,5 +136,42 @@ describe("market-geography dynamic utility", () => {
     expect(ngnStrategies[0].daily).toBe(28800);
     expect(ngnStrategies[1].daily).toBe(40000);
     expect(ngnStrategies[2].daily).toBe(64000);
+  });
+});
+
+describe("exact country comparison (GEO-02)", () => {
+  it.each([
+    ["ES", "United States"],
+    ["IT", "United States"],
+    ["AT", "United States"],
+    ["Niger", "Nigeria"],
+    ["NE", "NG"],
+    ["India", "Indonesia"],
+  ])("%s is not %s", (a, b) => {
+    expect(isSameCountry(a, b)).toBe(false);
+  });
+
+  it.each([
+    ["ES", "Spain"],
+    ["IT", "Italy"],
+    ["AT", "Austria"],
+    ["NE", "Niger"],
+    ["NG", "Nigeria"],
+    ["US", "United States of America"],
+    ["GB", "England"],
+    ["CZ", "Czech Republic"],
+    ["TR", "Turkey"],
+  ])("%s is %s", (a, b) => {
+    expect(isSameCountry(a, b)).toBe(true);
+  });
+
+  it("keeps real two-letter places and drops only actual country codes", () => {
+    for (const city of ["LA", "NY", "DC"]) {
+      expect(isFallbackCountryEntry({ city, country: "United States" })).toBe(false);
+    }
+    expect(isFallbackCountryEntry({ city: "US", country: "United States" })).toBe(true);
+    expect(isFallbackCountryEntry({ city: "NG", country: "Nigeria" })).toBe(true);
+    expect(isFallbackCountryEntry({ city: "Nigeria", country: "NG" })).toBe(true);
+    expect(isFallbackCountryEntry({ city: "Austin", country: "United States" })).toBe(false);
   });
 });

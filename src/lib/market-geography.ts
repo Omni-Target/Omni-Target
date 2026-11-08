@@ -4,12 +4,19 @@
  * 100% dynamic — zero hardcoded city lists. All classification is driven by country metadata and AI inference.
  */
 
+const regionNames = new Intl.DisplayNames(["en"], { type: "region" });
+
 /**
  * Normalizes country strings, common aliases, and ISO codes for accurate comparison.
  */
 export function normalizeCountry(countryStr?: string): string {
   if (!countryStr) return "";
-  const cleaned = countryStr.toLowerCase().trim().replace(/[^a-z]/g, "");
+  const cleaned = countryStr
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z]/g, "");
 
   // Common international ISO-2 / ISO-3 code aliases
   if (cleaned === "ng" || cleaned === "nga" || cleaned === "nigeria") return "nigeria";
@@ -54,6 +61,16 @@ export function normalizeCountry(countryStr?: string): string {
   if (cleaned === "ie" || cleaned === "irl" || cleaned === "ireland") return "ireland";
   if (cleaned === "nl" || cleaned === "nld" || cleaned === "netherlands" || cleaned === "holland") return "netherlands";
   if (cleaned === "in" || cleaned === "ind" || cleaned === "india") return "india";
+  if (cleaned === "czechrepublic") return "czechia";
+  if (cleaned === "turkiye") return "turkey";
+  if (cleaned === "ivorycoast") return "cotedivoire";
+
+  // Any other ISO-3166 alpha-2 code ("ES", "IT", "AT", "NE") resolves to its
+  // country name, so codes and names compare equal without substring matching.
+  if (/^[a-z]{2}$/.test(cleaned)) {
+    const name = regionNames.of(cleaned.toUpperCase());
+    if (name && name.toUpperCase() !== cleaned.toUpperCase()) return normalizeCountry(name);
+  }
 
   return cleaned;
 }
@@ -66,7 +83,9 @@ export function isSameCountry(countryA?: string, countryB?: string): boolean {
   const a = normalizeCountry(countryA);
   const b = normalizeCountry(countryB);
   if (!a || !b) return false;
-  return a === b || a.includes(b) || b.includes(a);
+  // Exact only (GEO-02): substring matching made "ES" equal "unitedstates" and
+  // "Niger" equal "Nigeria".
+  return a === b;
 }
 
 /**
@@ -671,16 +690,9 @@ export function isFallbackCountryEntry(loc: { city?: string; country?: string })
   const country = (loc.country || "").trim();
   if (!city) return true;
   if (city.toLowerCase() === country.toLowerCase()) return true;
-  if (/^[A-Z]{2}$/.test(city)) return true;
-  // Check against common country name resolutions
-  const COMMON_CODES: Record<string, string> = {
-    NG: "Nigeria", GB: "United Kingdom", US: "United States", AE: "UAE", GH: "Ghana",
-    KE: "Kenya", ZA: "South Africa", CA: "Canada", AU: "Australia",
-    DE: "Germany", FR: "France", IT: "Italy", ES: "Spain", NL: "Netherlands",
-    IN: "India", CN: "China", JP: "Japan", BR: "Brazil",
-  };
-  const resolvedCountry = COMMON_CODES[country] || country;
-  if (city.toLowerCase() === resolvedCountry.toLowerCase()) return true;
-  return false;
+  // A two-letter "city" is a country code only if it IS this order's country:
+  // LA, NY and DC are real places (GEO-02).
+  if (/^[A-Z]{2}$/.test(city) && !country) return true;
+  return isSameCountry(city, country);
 }
 

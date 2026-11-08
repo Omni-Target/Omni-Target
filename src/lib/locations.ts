@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { normalizeCountry } from "./market-geography";
 
 export const LAGOS_AREAS = [
   "ikoyi", "lekki", "victoria island", "vi", "surulere", "yaba", "ikeja",
@@ -30,131 +31,53 @@ export const PH_AREAS = [
   "diobu", "borokiri", "ph", "port harcourt", "port-harcourt"
 ];
 
-export function consolidateLocation(city: string): string | null {
+const NIGERIAN_METROS: { city: string; terms: string[]; exact?: string[] }[] = [
+  { city: "Lagos", terms: ["lagos", ...LAGOS_AREAS] },
+  { city: "Abuja", terms: ABUJA_AREAS },
+  { city: "Port Harcourt", terms: [...PH_AREAS, "rivers"] },
+  { city: "Benin City", terms: ["benin", "oredo"] },
+  { city: "Ibadan", terms: ["ibadan", "bodija", "oluyole", "oyo state"], exact: ["oyo"] },
+  { city: "Warri", terms: ["warri", "effurun"] },
+  { city: "Enugu", terms: ["enugu"] },
+  { city: "Kaduna", terms: ["kaduna"] },
+  { city: "Kano", terms: ["kano"] },
+  { city: "Calabar", terms: ["calabar"] },
+  { city: "Uyo", terms: ["uyo"] },
+  { city: "Owerri", terms: ["owerri"] },
+  { city: "Ilorin", terms: ["ilorin"] },
+  { city: "Jos", terms: ["jos"] },
+  { city: "Asaba", terms: ["asaba"] },
+  { city: "Akure", terms: ["akure"] },
+  { city: "Abeokuta", terms: ["abeokuta"] },
+];
+
+/** Whole-word match, so "riverside" is not "rivers" and "san jose" is not "jos". */
+const hasTerm = (text: string, term: string) => ` ${text} `.includes(` ${term} `);
+
+/**
+ * Maps a raw city to its parent metro using static rules for the order's own
+ * country (GEO-01). Nigerian rules apply only to Nigerian orders and the
+ * London rule only to UK orders, so Riverside, CA is never Port Harcourt.
+ * Returns null when no rule applies, including for an unknown country, so the
+ * AI tier can attempt resolution with the country in context.
+ */
+export function consolidateLocation(city: string, country: string | null | undefined): string | null {
   if (!city) return null;
-  
+
   const clean = city.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, " ").replace(/\s+/g, " ").trim();
   const cityLower = clean.toLowerCase();
-  
-  // 1. Lagos check: If it matches or contains "lagos", or is in LAGOS_AREAS, or matches any LAGOS_AREAS as a word
-  if (cityLower.includes("lagos")) {
-    return "Lagos";
+  const market = normalizeCountry(country ?? "");
+
+  if (market === "unitedkingdom") {
+    return cityLower === "england" || hasTerm(cityLower, "london") ? "London" : null;
   }
-  for (const area of LAGOS_AREAS) {
-    if (cityLower === area || cityLower.includes(` ${area}`) || cityLower.includes(`${area} `)) {
-      return "Lagos";
+  if (market !== "nigeria") return null;
+
+  for (const metro of NIGERIAN_METROS) {
+    if (metro.exact?.includes(cityLower) || metro.terms.some((term) => hasTerm(cityLower, term))) {
+      return metro.city;
     }
   }
-
-  // 2. Abuja check: If it matches or contains "abuja" or "fct", or is in ABUJA_AREAS
-  if (cityLower.includes("abuja") || cityLower.includes("fct")) {
-    return "Abuja";
-  }
-  for (const area of ABUJA_AREAS) {
-    if (cityLower === area || cityLower.includes(` ${area}`) || cityLower.includes(`${area} `)) {
-      return "Abuja";
-    }
-  }
-
-  // 3. Port Harcourt check: If contains "port harcourt" or matches PH areas or Rivers state
-  if (
-    cityLower.includes("port harcourt") ||
-    cityLower.includes("port-harcourt") ||
-    cityLower === "ph" ||
-    cityLower.includes("rivers")
-  ) {
-    return "Port Harcourt";
-  }
-  for (const area of PH_AREAS) {
-    if (cityLower === area || cityLower.includes(` ${area}`) || cityLower.includes(`${area} `)) {
-      return "Port Harcourt";
-    }
-  }
-
-  // 4. Benin City check
-  if (cityLower.includes("benin") || cityLower.includes("oredo")) {
-    return "Benin City";
-  }
-
-  // 5. Ibadan check
-  if (
-    cityLower.includes("ibadan") ||
-    cityLower.includes("bodija") ||
-    cityLower.includes("oluyole") ||
-    cityLower === "oyo" ||
-    cityLower.includes("oyo state")
-  ) {
-    return "Ibadan";
-  }
-
-  // 6. London / UK metro check
-  if (cityLower === "england" || cityLower.includes("london") || cityLower.includes("greater london")) {
-    return "London";
-  }
-
-  // 7. Warri check
-  if (cityLower.includes("warri") || cityLower.includes("effurun")) {
-    return "Warri";
-  }
-
-  // 7. Enugu check
-  if (cityLower.includes("enugu")) {
-    return "Enugu";
-  }
-
-  // 8. Kaduna check
-  if (cityLower.includes("kaduna")) {
-    return "Kaduna";
-  }
-
-  // 9. Kano check
-  if (cityLower.includes("kano")) {
-    return "Kano";
-  }
-
-  // 10. Calabar check
-  if (cityLower.includes("calabar")) {
-    return "Calabar";
-  }
-
-  // 11. Uyo check
-  if (cityLower.includes("uyo")) {
-    return "Uyo";
-  }
-
-  // 12. Owerri check
-  if (cityLower.includes("owerri")) {
-    return "Owerri";
-  }
-
-  // 13. Ilorin check
-  if (cityLower.includes("ilorin")) {
-    return "Ilorin";
-  }
-
-  // 14. Jos check
-  if (cityLower.includes("jos")) {
-    return "Jos";
-  }
-
-  // 15. Asaba check
-  if (cityLower.includes("asaba")) {
-    return "Asaba";
-  }
-
-  // 16. Akure check
-  if (cityLower.includes("akure")) {
-    return "Akure";
-  }
-
-  // 17. Abeokuta check
-  if (cityLower.includes("abeokuta")) {
-    return "Abeokuta";
-  }
-
-  // Unrecognized — return null so the AI tier can attempt dynamic resolution.
-  // This is the key fix: previously this returned a title-cased version of the raw
-  // input, which made the pre-filter think it was already resolved and skipped AI.
   return null;
 }
 
