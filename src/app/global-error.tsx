@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import * as Sentry from "@sentry/nextjs";
 
 /**
  * Catches errors thrown in the root layout itself. It replaces the root layout
@@ -17,6 +18,7 @@ export default function GlobalError({
 }) {
   React.useEffect(() => {
     console.error("[global] root layout error", error);
+    Sentry.captureException(error);
   }, [error]);
 
   return (
