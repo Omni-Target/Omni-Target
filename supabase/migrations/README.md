@@ -22,8 +22,10 @@ also accepted.
 
 ```bash
 yarn migrate              # apply all pending migrations
+yarn migrate --only 0013  # apply exactly one pending migration (id or NNNN prefix)
 yarn migrate:status       # show applied / pending
 yarn migrate:down         # roll back the last applied migration
+yarn migrate:down --only 0012   # roll back one specific applied migration
 yarn migrate:create "add widgets table"   # scaffold the next NNNN_*.sql file
 ```
 
@@ -74,3 +76,27 @@ Verify any environment (read-only, exits non-zero on a violation):
 ```bash
 node scripts/ops/assert-rls-lockdown.mjs --env-file .env.local
 ```
+
+### Applying 0012 to an environment (production needs separate approval)
+
+1. **Keep-alive first.** Scheduled workflows run from `main`. The old
+   keep-alive pinged a table with the anon key, which 0012 denies, so merge the
+   updated `.github/workflows/supabase-keepalive.yml` to `main` and confirm the
+   `SUPABASE_ANON_KEY` (or `NEXT_PUBLIC_SUPABASE_ANON_KEY`) repository secret
+   exists *before* applying 0012. The new workflow works both before 0012
+   (table-ping fallback) and after it (`keepalive_ping`).
+2. Run the assert script (expected: violations listed), then
+   `yarn migrate --only 0012`, then the assert script again (expected: PASS).
+3. Smoke-test the app: it uses only the service-role key, so behaviour must be
+   unchanged.
+4. Rollback: `yarn migrate:down --only 0012` restores the recorded client-role
+   grants (RLS stays enabled; see the down script).
+
+0012 is independent of every other migration: `--only` lets it be applied or
+rolled back on its own, in either order relative to later migrations.
+
+**Limitation:** `alter default privileges` only covers objects created by the
+role that runs the migration. Tables created later by a different role (for
+example through a dashboard that runs as another role) can still receive
+client-role grants without RLS — re-run the assert script after any schema
+change made outside these migrations.
