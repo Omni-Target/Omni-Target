@@ -64,7 +64,7 @@ const h = vi.hoisted(() => {
   return { state, from, verify: vi.fn(), sync: vi.fn(), revoke: vi.fn() };
 });
 
-vi.mock("@/lib/db", () => ({ supabaseAdmin: { from: h.from }, revokeShopAccess: h.revoke }));
+vi.mock("@/lib/db", () => ({ supabaseAdmin: { from: h.from }, disconnectShopInstallation: h.revoke }));
 vi.mock("@/lib/verify-shopify-hmac", () => ({ verifyShopifyHmac: h.verify }));
 vi.mock("@/lib/connectors/shopify", () => ({ fetchShopifyStoreData: h.sync }));
 vi.mock("next/server", async (importOriginal) => ({

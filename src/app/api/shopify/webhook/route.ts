@@ -1,5 +1,5 @@
 import { verifyShopifyHmac } from "@/lib/verify-shopify-hmac";
-import { revokeShopAccess, supabaseAdmin } from "@/lib/db";
+import { disconnectShopInstallation, supabaseAdmin } from "@/lib/db";
 import { createHash } from "crypto";
 import { after } from "next/server";
 
@@ -154,8 +154,8 @@ async function forwardPurchaseToMeta(shopDomain: string, integration: WebhookInt
 /** Runs after the response is sent, so Shopify gets its 200 immediately. */
 async function processWebhook(shopDomain: string, topic: string | null, payload: ShopifyOrderPayload) {
   if (topic === "app/uninstalled") {
-    // SEC-09: the tokens are dead. Stored data waits for shop/redact (48h).
-    await revokeShopAccess(shopDomain);
+    // SEC-09: operational disconnect. Stored data waits for shop/redact (48h).
+    await disconnectShopInstallation(shopDomain);
     return;
   }
 

@@ -491,27 +491,32 @@ export async function updateIntegrationByShop(shop: string, data: Record<string,
  * `true` on success, `false` if the update errored.
  */
 export async function redactShopData(shop: string): Promise<boolean> {
-  return callShopRedaction(shop, false);
-}
-
-/** Clears only credentials, on app/uninstalled. Data waits for shop/redact. */
-export async function revokeShopAccess(shop: string): Promise<boolean> {
-  return callShopRedaction(shop, true);
-}
-
-async function callShopRedaction(shop: string, tokensOnly: boolean): Promise<boolean> {
-  const { error } = await supabaseAdmin.rpc("redact_shop_data", {
-    p_shop: shop,
-    p_tokens_only: tokensOnly,
-  });
+  const { error } = await supabaseAdmin.rpc("redact_shop_data", { p_shop: shop });
   if (!error) return true;
   if (!isMissingRpc(error)) {
     console.error("[redact_shop_data] failed:", error.message);
     return false;
   }
-
-  // Until migration 0016 is applied, at least clear every token column.
   console.error("[redact_shop_data] missing — apply migration 0016.");
+  return clearShopCredentials(shop, true);
+}
+
+/**
+ * app/uninstalled: revokes stored credentials and stops syncing. Operational
+ * only; shop data stays until Shopify sends shop/redact 48 hours later.
+ */
+export async function disconnectShopInstallation(shop: string): Promise<boolean> {
+  const { error } = await supabaseAdmin.rpc("disconnect_shop_installation", { p_shop: shop });
+  if (!error) return true;
+  if (!isMissingRpc(error)) {
+    console.error("[disconnect_shop_installation] failed:", error.message);
+    return false;
+  }
+  console.error("[disconnect_shop_installation] missing — apply migration 0016.");
+  return clearShopCredentials(shop, false);
+}
+
+async function clearShopCredentials(shop: string, clearSnapshot: boolean): Promise<boolean> {
   const cols = await detectDbColumns();
   const payload: Record<string, null> = {
     shopify_access_token: null,
@@ -521,14 +526,14 @@ async function callShopRedaction(shop: string, tokensOnly: boolean): Promise<boo
   if (cols.hasAccessToken) payload.access_token = null;
   if (cols.hasRefreshToken) payload.refresh_token = null;
   if (cols.hasTokenExpiresAt) payload.token_expires_at = null;
-  if (!tokensOnly) payload.store_snapshot = null;
+  if (clearSnapshot) payload.store_snapshot = null;
 
-  const { error: updateError } = await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from("user_integrations")
     .update(payload)
     .or(storeUrlOrFilter(shop));
-  if (updateError) {
-    console.error("[redactShopData] fallback failed:", updateError.message);
+  if (error) {
+    console.error("[clearShopCredentials] failed:", error.message);
     return false;
   }
   return true;

@@ -21,7 +21,7 @@ vi.mock("@supabase/supabase-js", () => ({
   createClient: () => ({ rpc: h.state.rpc, from: h.from }),
 }));
 
-import { deleteUserData, redactShopData, revokeShopAccess } from "./db";
+import { deleteUserData, disconnectShopInstallation, redactShopData } from "./db";
 
 const missing = { error: { code: "PGRST202", message: "not found" } };
 beforeEach(() => {
@@ -35,13 +35,13 @@ describe("shop redaction (SEC-09)", () => {
   it("runs the full redaction in one database call", async () => {
     h.state.rpc.mockResolvedValue({ error: null });
     await expect(redactShopData("s.myshopify.com")).resolves.toBe(true);
-    expect(h.state.rpc).toHaveBeenCalledWith("redact_shop_data", { p_shop: "s.myshopify.com", p_tokens_only: false });
+    expect(h.state.rpc).toHaveBeenCalledWith("redact_shop_data", { p_shop: "s.myshopify.com" });
   });
 
-  it("revokes only credentials on uninstall", async () => {
+  it("uses a separate operational workflow on uninstall", async () => {
     h.state.rpc.mockResolvedValue({ error: null });
-    await revokeShopAccess("s.myshopify.com");
-    expect(h.state.rpc).toHaveBeenCalledWith("redact_shop_data", { p_shop: "s.myshopify.com", p_tokens_only: true });
+    await disconnectShopInstallation("s.myshopify.com");
+    expect(h.state.rpc).toHaveBeenCalledWith("disconnect_shop_installation", { p_shop: "s.myshopify.com" });
   });
 
   it("reports failure without throwing, so the webhook can still answer 200", async () => {
@@ -57,7 +57,7 @@ describe("shop redaction (SEC-09)", () => {
 
   it("before migration 0016, uninstall leaves the snapshot in place", async () => {
     h.state.rpc.mockResolvedValue(missing);
-    await revokeShopAccess("s.myshopify.com");
+    await disconnectShopInstallation("s.myshopify.com");
     expect(h.state.updates[0]).not.toHaveProperty("store_snapshot");
   });
 });
