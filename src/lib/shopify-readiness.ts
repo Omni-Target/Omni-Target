@@ -37,12 +37,13 @@ export function assessShopifyMarketReadiness(
   const shippingAvailable = prespend.capabilities.shipping?.status === "available";
   const locationsAvailable = prespend.capabilities.locations?.status === "available";
 
-  const matchingMarket = prespend.markets.find((market) =>
-    market.countries.some((candidate) => sameCountry(country, candidate)),
+  // A country can sit in several markets; any active one counts (ING-08).
+  const activeMarket = prespend.markets.find(
+    (market) =>
+      market.status.toUpperCase() === "ACTIVE" &&
+      market.countries.some((candidate) => sameCountry(country, candidate)),
   );
-  const marketActive = marketsAvailable
-    ? Boolean(matchingMarket && matchingMarket.status.toUpperCase() === "ACTIVE")
-    : null;
+  const marketActive = marketsAvailable ? Boolean(activeMarket) : null;
 
   const matchingZone = prespend.shipping_zones.find(
     (zone) =>
@@ -75,7 +76,7 @@ export function assessShopifyMarketReadiness(
     marketActive === null
       ? "Shopify Markets could not be checked."
       : marketActive
-        ? `${matchingMarket?.name || country} is active in Shopify Markets.`
+        ? `${activeMarket?.name || country} is active in Shopify Markets.`
         : `${country} is not in an active Shopify Market.`,
   );
   evidence.push(
