@@ -143,7 +143,8 @@ export async function GET(request: Request) {
           expiring: 1,
         }),
       },
-      { timeoutMs: 12000, retries: 2 },
+      // Never retried: authorization codes are single-use (ING-04).
+      { timeoutMs: 12000, retries: 0 },
     );
 
     const tokenData = await tokenRes.json();

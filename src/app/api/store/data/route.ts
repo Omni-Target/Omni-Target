@@ -114,6 +114,24 @@ export async function GET(request: Request) {
     });
   }
 
+  if (tokenResult.status === "temporarily_unavailable") {
+    // Transient: keep showing the last sync rather than asking for a reconnect.
+    if (creditsRow?.store_snapshot?.data_quality?.schema_version === 9) {
+      return Response.json({
+        connected: true,
+        data: creditsRow.store_snapshot,
+        credits_balance: creditsRow?.credits_balance || 0,
+        credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
+        ...reauthMetadata,
+        snapshotAt: creditsRow?.store_snapshot_at,
+      });
+    }
+    return Response.json(
+      { error: "Shopify is temporarily unavailable. Please retry shortly." },
+      { status: 503 },
+    );
+  }
+
   try {
     const storeData = await fetchShopifyStoreData(
       tokenResult.shopUrl,
