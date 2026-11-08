@@ -113,7 +113,6 @@ export function validateCopy(
   const evidenceLower = [
     productDescription,
     factualEvidence?.title,
-    ...(factualEvidence?.tags || []),
     factualEvidence?.product_type,
     factualEvidence?.catalog_claims,
   ]

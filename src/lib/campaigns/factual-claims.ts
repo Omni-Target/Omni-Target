@@ -1,6 +1,7 @@
 export interface ProductFactualEvidence {
   title?: string;
   description: string;
+  /** Category hints only; never accepted as support for a factual claim (AI-02). */
   tags?: string[];
   product_type?: string;
   catalog_claims?: string;
@@ -52,7 +53,6 @@ export function validateFactualClaims(
   const evidenceSources = [
     evidence.title,
     evidence.description,
-    ...(evidence.tags || []),
     evidence.product_type,
     evidence.catalog_claims,
   ].filter((source): source is string => typeof source === "string" && !!source.trim())

@@ -190,7 +190,7 @@ PILLAR 4: UNIVERSAL COPYWRITING MANDATES & CONSTRAINTS
    - NEVER reference stock counts (e.g. "only 3 left") — stock goes stale and violates advertising policies.
    - NEVER assume the reader's geographic location or local currency.
 6. Grounded Material, Demand & Feature Truthfulness (Strict Zero-Hallucination Mandate):
-   - ONLY reference physical materials (e.g. linen, silk, leather, titanium, ceramic, organic botanicals), closures/hardware (e.g. drawstring, zipper, magnetic, snap), or physical attributes that are EXPLICITLY documented in the product title, description, verified catalog tags/claims, or clearly visible in the product image.
+   - ONLY reference physical materials (e.g. linen, silk, leather, titanium, ceramic, organic botanicals), closures/hardware (e.g. drawstring, zipper, magnetic, snap), or physical attributes that are EXPLICITLY documented in the product title, description, verified catalog claims, or clearly visible in the product image.
    - NEVER invent or assume closures, components, mechanisms, or unstated ingredients.
    - NEVER invent unstated fabrics, materials, ingredients, or formulations.
    - For apparel products: NEVER claim an item is "unisex" unless documented. If womenswear, write with female styling nuance; if menswear, write with male nuance.
@@ -402,7 +402,7 @@ export async function POST(request: Request) {
 Brand: ${brandName}
 Product: ${productName}
 Description: ${productDescription}
-Verified Shopify catalog tags: ${catalogEvidenceProduct?.tags?.join(", ") || "None recorded"}
+Shopify catalog tags (internal merchant labels, never state them as product facts): ${catalogEvidenceProduct?.tags?.join(", ") || "None recorded"}
 Verified Shopify catalog claims: ${catalogClaimEvidence || "None recorded"}
 
 Store Primary Country: ${shopifyStoreCountry || "Unknown"}
@@ -436,7 +436,7 @@ ${channelGuidance ? `${channelGuidance}\n` : ""}${geographicGuidance ? `${geogra
   - If the image shows a lifestyle, dynamic, or editorial context → copy anchors to product truth — what it is made of, what specific physical detail makes this product worth buying, what distinguishes it from anything else.
   - If the image is a flat lay, product-only, or white-background shot → copy sells the transformation — what changes for the person who owns this, what problem it solves, what feeling, utility, or elevation it creates in real-world use.
 
-  In every case: never describe what the eye already sees. Never claim any material, closure, or feature not explicitly stated in the product title, description, verified catalog tags, or catalog claims.`
+  In every case: never describe what the eye already sees. Never claim any material, closure, or feature not explicitly stated in the product title, description, or verified catalog claims.`
   : ""}
   
 ${productVariants ? 
@@ -469,7 +469,7 @@ ${isNewLaunch ? `NEW LAUNCH BRIEF: This product has fewer than 3 orders — sell
 ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
   `SPARSE DESCRIPTION ALERT: The product description provided is minimal (under 30 words).
   CRITICAL — do NOT extrapolate, invent, or assume any material, closure, fabric blend, fit detail, or feature not explicitly stated.
-  Stay anchored exclusively to what is confirmed in the product title, description, verified catalog tags and claims, or what is directly visible in the image.
+  Stay anchored exclusively to what is confirmed in the product title, description, verified catalog claims, or what is directly visible in the image.
   Narrow and specific copy grounded in confirmed truth always outperforms broad plausible-sounding copy. Write less and mean more.` : ""}`;
 
     const messageContent: Anthropic.ContentBlockParam[] = [];
@@ -783,7 +783,6 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
       },
       storeProducts.map((product) => ({ id: String(product.id), name: product.name })),
       catalogClaimEvidence,
-      storeSnapshot?.store?.country || shopifyStoreCountry || "",
     );
     let copyValidationErrors = validateCopy(
       parsedResponse,
