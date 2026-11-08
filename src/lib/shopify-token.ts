@@ -21,7 +21,9 @@ import { fetchWithRetry } from "./http";
 export type ShopifyTokenResult =
   | { status: "ok"; accessToken: string; shopUrl: string }
   | { status: "not_connected" }
-  | { status: "reauth_required"; shopUrl: string };
+  | { status: "reauth_required"; shopUrl: string }
+  /** The token has expired and refreshing failed transiently; retry shortly. */
+  | { status: "temporarily_unavailable"; shopUrl: string };
 
 /**
  * In-flight refresh promises keyed by userId. Shopify refresh tokens are
@@ -31,14 +33,62 @@ export type ShopifyTokenResult =
  * a single network call so they all observe the same rotated token.
  *
  * Note: this only guards races within a single runtime instance. Separate
- * serverless instances refreshing simultaneously can still collide; that
- * residual race surfaces as a transient `reauth_required` that self-heals on
- * the next request (the winning instance has already persisted a fresh token).
+ * instances are serialized by the distributed lock in refreshShopifyToken.
  */
 const inflightRefreshes = new Map<string, Promise<ShopifyTokenResult>>();
 
-/** Treat a token as needing refresh once it is within this window of expiry. */
-const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+/**
+ * Refresh only once a token is this close to expiry (ING-04). Shopify's
+ * expiring offline tokens live for 60 minutes, so the previous 24-hour window
+ * meant every single call rotated the single-use refresh token.
+ */
+const REFRESH_WINDOW_MS = 5 * 60 * 1000;
+
+/** How long a lock loser waits for the winner to store a rotated token. */
+const ROTATION_WAIT_ATTEMPTS = 4;
+const ROTATION_WAIT_MS = 500;
+
+/** A rotated refresh token exists nowhere else, so its DB write is retried. */
+const PERSIST_ATTEMPTS = 3;
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+type IntegrationTokens = {
+  shopify_access_token?: string | null;
+  access_token?: string | null;
+  shopify_refresh_token?: string | null;
+  refresh_token?: string | null;
+  token_expires_at?: string | null;
+  shopify_token_expires_at?: string | null;
+};
+
+/** Reads whichever duplicate token columns are populated. */
+function readTokenState(integration: IntegrationTokens | null | undefined) {
+  const rawExpiresAt =
+    integration?.token_expires_at || integration?.shopify_token_expires_at;
+  return {
+    accessToken:
+      integration?.shopify_access_token || integration?.access_token || null,
+    refreshToken:
+      integration?.refresh_token || integration?.shopify_refresh_token || null,
+    expiresAt: rawExpiresAt ? new Date(rawExpiresAt).getTime() : null,
+  };
+}
+
+function isFresh(expiresAt: number | null): expiresAt is number {
+  return expiresAt !== null && Date.now() <= expiresAt - REFRESH_WINDOW_MS;
+}
+
+/** After a failed or skipped refresh: the old token is only usable until it expires. */
+function usableOrUnavailable(
+  accessToken: string,
+  expiresAt: number,
+  shopUrl: string,
+): ShopifyTokenResult {
+  return Date.now() < expiresAt
+    ? { status: "ok", accessToken, shopUrl }
+    : { status: "temporarily_unavailable", shopUrl };
+}
 
 /**
  * Lease length for the cross-instance refresh lock — long enough to cover the
@@ -89,7 +139,7 @@ async function releaseRefreshLock(userId: string): Promise<void> {
 
 /**
  * Ensures the Shopify access token for a given user is still valid.
- * If the token has expired or is within 24 hours of expiring, and a refresh
+ * If the token has expired or is within 5 minutes of expiring, and a refresh
  * token is available, it will automatically rotate the token and update the DB.
  */
 export async function getValidShopifyToken(
@@ -140,20 +190,16 @@ export async function getValidShopifyToken(
     return { status: "ok", accessToken, shopUrl };
   }
 
-  // Check if token is within 24 hours of expiry
-  const isWithin24HoursOfExpiry = Date.now() > expiresAt - TWENTY_FOUR_HOURS;
-
-  if (!isWithin24HoursOfExpiry) {
+  if (isFresh(expiresAt)) {
     return { status: "ok", accessToken, shopUrl };
   }
 
-  // Token is within 24 hours of expiry — attempt refresh
   if (!refreshToken) {
-    console.error(
-      "Token within 24 hours of expiry but no refresh token available for user:",
-      userId,
-    );
-    // No way to refresh — the merchant needs to reconnect.
+    // Still usable until it actually expires; after that only a reconnect helps.
+    if (Date.now() < expiresAt) {
+      return { status: "ok", accessToken, shopUrl };
+    }
+    console.error("Token expired and no refresh token available for user:", userId);
     return { status: "reauth_required", shopUrl };
   }
 
@@ -169,6 +215,7 @@ export async function getValidShopifyToken(
     shopUrl,
     accessToken,
     refreshToken,
+    expiresAt,
   ).finally(() => {
     inflightRefreshes.delete(userId);
   });
@@ -180,56 +227,79 @@ export async function getValidShopifyToken(
 /**
  * Resolves a fresh Shopify token, serialized across serverless instances by a
  * distributed lease lock so the single-use refresh token rotates exactly once.
- * The loser of the lock reuses the still-valid current token (it is only within
- * the 24h window, not yet expired) and picks up the rotated token on a later
- * request; {@link doRefreshShopifyToken} performs the actual rotation. The
- * in-process `inflightRefreshes` guard collapses same-instance concurrency
- * before we ever reach the distributed lock.
+ * The lock loser keeps using the current token while it is still valid; once
+ * it has expired, the loser waits briefly for the winner's rotated token. The
+ * winner re-reads the tokens under the lock, because the refresh token it read
+ * earlier may already have been consumed. {@link doRefreshShopifyToken}
+ * performs the actual rotation. The in-process `inflightRefreshes` guard
+ * collapses same-instance concurrency before we reach the distributed lock.
  */
 async function refreshShopifyToken(
   userId: string,
   shopUrl: string,
   currentAccessToken: string,
   refreshToken: string,
+  expiresAt: number,
 ): Promise<ShopifyTokenResult> {
   const locked = await acquireRefreshLock(userId);
   if (!locked) {
-    console.log(
-      `[shopify-token] refresh already in progress on another instance for ${userId}; using current token`,
-    );
-    return { status: "ok", accessToken: currentAccessToken, shopUrl };
+    if (Date.now() < expiresAt) {
+      return { status: "ok", accessToken: currentAccessToken, shopUrl };
+    }
+    const rotated = await waitForRotatedToken(userId);
+    return rotated
+      ? { status: "ok", accessToken: rotated, shopUrl }
+      : { status: "temporarily_unavailable", shopUrl };
   }
 
   try {
-    // Another instance may have rotated the token between our expiry check and
-    // acquiring the lock — re-read and skip the network call if it is now fresh.
-    const latest = await getUserIntegration(userId);
-    const latestToken = latest?.shopify_access_token || latest?.access_token;
-    const latestRawExpiry =
-      latest?.token_expires_at || latest?.shopify_token_expires_at;
-    const latestExpiry = latestRawExpiry
-      ? new Date(latestRawExpiry).getTime()
-      : null;
-    if (
-      latestToken &&
-      latestExpiry &&
-      Date.now() <= latestExpiry - TWENTY_FOUR_HOURS
-    ) {
-      console.log(
-        `[shopify-token] token already refreshed by another request for ${userId}`,
-      );
-      return { status: "ok", accessToken: latestToken, shopUrl };
+    const latest = readTokenState(await getUserIntegration(userId));
+    if (latest.accessToken && isFresh(latest.expiresAt)) {
+      return { status: "ok", accessToken: latest.accessToken, shopUrl };
     }
 
     return await doRefreshShopifyToken(
       userId,
       shopUrl,
-      currentAccessToken,
-      refreshToken,
+      latest.accessToken || currentAccessToken,
+      latest.refreshToken || refreshToken,
+      latest.expiresAt ?? expiresAt,
     );
   } finally {
     await releaseRefreshLock(userId);
   }
+}
+
+/** Polls for the token another instance is rotating. Returns null if it never appears. */
+async function waitForRotatedToken(userId: string): Promise<string | null> {
+  for (let attempt = 0; attempt < ROTATION_WAIT_ATTEMPTS; attempt++) {
+    await delay(ROTATION_WAIT_MS);
+    const latest = readTokenState(await getUserIntegration(userId));
+    if (latest.accessToken && isFresh(latest.expiresAt)) {
+      return latest.accessToken;
+    }
+  }
+  return null;
+}
+
+/**
+ * Stores a rotated token, retrying because Shopify has already invalidated the
+ * previous refresh token: losing this write would force the merchant to
+ * reconnect. Returns false only if every attempt failed.
+ */
+async function persistRotatedToken(
+  userId: string,
+  updateData: Record<string, string>,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= PERSIST_ATTEMPTS; attempt++) {
+    try {
+      await updateUserIntegration(userId, updateData);
+      return true;
+    } catch {
+      if (attempt < PERSIST_ATTEMPTS) await delay(200 * attempt);
+    }
+  }
+  return false;
 }
 
 /**
@@ -241,11 +311,8 @@ async function doRefreshShopifyToken(
   shopUrl: string,
   currentAccessToken: string,
   refreshToken: string,
+  expiresAt: number,
 ): Promise<ShopifyTokenResult> {
-  console.log(
-    "Shopify token is within 24 hours of expiry or already expired. Refreshing for user:",
-    userId,
-  );
 
   // Normalize the host: strip any protocol/path so we always hit the
   // Shopify admin OAuth endpoint and never a storefront/custom domain
@@ -269,7 +336,9 @@ async function doRefreshShopifyToken(
           refresh_token: refreshToken,
         }),
       },
-      { timeoutMs: 12000, retries: 1 }
+      // Never retried: refresh tokens are single-use, so a retry after a lost
+      // response would present an already-consumed token.
+      { timeoutMs: 12000, retries: 0 },
     );
 
     // Guard against non-JSON responses (HTML error/redirect pages). Without
@@ -280,26 +349,32 @@ async function doRefreshShopifyToken(
     if (!refreshRes.ok || !contentType.includes("application/json")) {
       console.error(
         `Token refresh failed for user ${userId}: HTTP ${refreshRes.status} ` +
-          `(content-type: ${contentType || "none"}) from ${refreshUrl}. ` +
-          `Body: ${rawBody.slice(0, 300)}`,
+          `(content-type: ${contentType || "none"})`,
       );
 
-      // A 401 / invalid_request means the refresh token itself is dead
-      // (expired or already consumed via rotation). This is terminal — the
-      // merchant must reconnect.
+      // A 401 / invalid_request means the refresh token we sent is dead. If a
+      // different one is now stored, another writer rotated it first and the
+      // merchant is fine; otherwise this is terminal and they must reconnect.
       if (isDeadRefreshToken(refreshRes.status, rawBody)) {
+        const latest = readTokenState(await getUserIntegration(userId));
+        if (
+          latest.accessToken &&
+          latest.refreshToken !== refreshToken &&
+          latest.expiresAt !== null &&
+          Date.now() < latest.expiresAt
+        ) {
+          return { status: "ok", accessToken: latest.accessToken, shopUrl };
+        }
         return { status: "reauth_required", shopUrl };
       }
       // Anything else (5xx, HTML proxy error, etc.) is potentially transient.
-      // We're only within the 24h expiry window, so the current token is most
-      // likely still valid — keep the session working and retry next time.
-      return { status: "ok", accessToken: currentAccessToken, shopUrl };
+      return usableOrUnavailable(currentAccessToken, expiresAt, shopUrl);
     }
 
     const refreshData = JSON.parse(rawBody);
 
     if (!refreshData.access_token) {
-      console.error("Token refresh failed (no access_token):", refreshData);
+      console.error(`Token refresh returned no access_token for user ${userId}`);
       return { status: "reauth_required", shopUrl };
     }
 
@@ -332,9 +407,9 @@ async function doRefreshShopifyToken(
       }
     }
 
-    await updateUserIntegration(userId, updateData);
-
-    console.log("Token refreshed successfully for user:", userId);
+    if (!(await persistRotatedToken(userId, updateData))) {
+      console.error(`Rotated Shopify token could not be stored for user ${userId}`);
+    }
 
     return {
       status: "ok",
@@ -342,10 +417,12 @@ async function doRefreshShopifyToken(
       shopUrl,
     };
   } catch (err) {
-    console.error("Token refresh error:", err);
-    // Network/parse error — transient. The current token is still within its
-    // validity window, so keep the session working and retry on the next call.
-    return { status: "ok", accessToken: currentAccessToken, shopUrl };
+    console.error(
+      `Token refresh error for user ${userId}:`,
+      err instanceof Error ? err.name : "unknown",
+    );
+    // Network/parse error — transient.
+    return usableOrUnavailable(currentAccessToken, expiresAt, shopUrl);
   }
 }
 
@@ -411,7 +488,7 @@ async function migrateLegacyShopifyToken(
           expiring: 1,
         }),
       },
-      { timeoutMs: 12000, retries: 1 },
+      { timeoutMs: 12000, retries: 0 },
     );
 
     const contentType = res.headers.get("content-type") || "";
