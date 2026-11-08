@@ -280,13 +280,6 @@ export async function buildBriefHTML(
       : legacyTargeting.gender === "male"
       ? "Men"
       : "All");
-  const numProductPrice =
-    typeof params.productPrice === "number"
-      ? params.productPrice
-      : params.productPrice
-      ? parseFloat(String(params.productPrice).replace(/[^0-9.]/g, ""))
-      : 0;
-
   const decisionEvidence = params.decisionEvidence;
   const recentFunnel = guidance?.event_evidence?.recent_funnel ?? decisionEvidence?.recent_funnel;
   const recentFunnelSummary = recentFunnel?.cart_sessions !== null &&
@@ -1045,13 +1038,14 @@ export async function buildBriefHTML(
   // The merchant's cap itself (not daily × days, which is floored and can differ).
   const totalTestSpend = budgetPlan.max_total_budget ?? 0;
   const midpointSpend = totalTestSpend ? Math.round(totalTestSpend * 0.5) : 0;
+  // BIZ-05: price less recorded unit cost is a break-even ceiling on product
+  // cost alone (shipping, payment fees, returns and overhead are excluded), not
+  // a profitability target. With no recorded unit cost there is no basis for a
+  // number at all, so none is invented.
   const contributionCeiling = decisionEvidence?.price_less_unit_cost ?? null;
-  const targetCpa = numProductPrice > 0 ? Math.round(numProductPrice * 0.35) : null;
-  const contributionLabel = contributionCeiling !== null
-    ? `Target ad spend per sale: under ${fmt(contributionCeiling, currency, symbol)} (keeps each order profitable)`
-    : targetCpa
-    ? `Target ad spend per sale: under ~${fmt(targetCpa, currency, symbol)} (~35% of piece price)`
-    : "Keep ad spend per sale comfortably under your product profit margin";
+  const contributionLabel = contributionCeiling !== null && contributionCeiling > 0
+    ? `Break-even ceiling: ad spend above ~${fmt(contributionCeiling, currency, symbol)} per sale loses money on product cost alone (price minus recorded unit cost, before shipping, fees and returns). Staying under it does not guarantee a profit.`
+    : "No unit cost is recorded in Shopify, so no cost-per-sale ceiling can be calculated. Work out your margin before judging ad spend per sale.";
 
   const decisionTreeHTML = card(
     `What to do after Day ${duration} (How to read your results)`,
@@ -1065,7 +1059,7 @@ export async function buildBriefHTML(
       <!-- Green Light -->
       <div class="decision-card decision-green">
         <div class="decision-card-head">
-          <span class="decision-tag green">🟢 It's Working · Profitable Orders</span>
+          <span class="decision-tag green">🟢 It's Working · Orders Coming In</span>
           <div class="decision-metric">${esc(contributionLabel)}</div>
         </div>
         <p class="decision-meaning">Shoppers are buying and orders are rolling in! Your creative angle and audience are resonating with paying customers.</p>

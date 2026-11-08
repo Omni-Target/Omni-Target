@@ -715,7 +715,9 @@ describe("buildBriefHTML tests", () => {
     expect(html).toContain("3 Creative angles to test");
     expect(html).toContain("Suggested starting age");
     expect(html).toContain("Strong interest: shoppers adding to cart, but drop-offs before checkout");
-    expect(html).toContain("Target ad spend per sale");
+    // BIZ-05: no unit cost in this fixture, so no cost-per-sale number is invented.
+    expect(html).toContain("No unit cost is recorded in Shopify");
+    expect(html).not.toContain("Target ad spend per sale");
     expect(html).toContain("Founder Profit Check: Money Made − Ad Spend − Product Cost − Delivery − Payment Fees = Real Cash in Pocket");
     expect(html).not.toContain("TikTok");
   });
@@ -919,7 +921,8 @@ describe("buildBriefHTML tests", () => {
     expect(html).toContain("Founder Rule: Give Meta 48–72 hours before making changes");
 
     // Green Light scaling & profit check
-    expect(html).toContain("🟢 It's Working · Profitable Orders");
+    expect(html).toContain("🟢 It's Working · Orders Coming In");
+    expect(html).not.toContain("Profitable Orders"); // BIZ-05
     expect(html).toContain("Founder Profit Check");
     expect(html).toContain("Verify net profit");
 
@@ -1059,5 +1062,44 @@ describe("buildBriefHTML tests", () => {
       expect(briefText).not.toContain(withdrawn);
       expect(html).not.toContain(withdrawn);
     }
+  });
+});
+
+describe("BIZ-05: no profitability promises in the brief", () => {
+  const PROFIT_CLAIMS = /keeps each order profitable|Profitable Orders|35% of piece price|exceptional return on ad spend|(?<!not )guarantees? (?:a )?profit/i;
+  const build = (products: StoreInsights["products"]) =>
+    buildBriefHTML(
+      buildBriefPdfPayload({
+        brandName: "Acme",
+        productName: "Tee",
+        productPrice: 50,
+        goal: "Drive Website Sales",
+        generatedCopy: copy,
+        selectedCta: "Shop Now",
+        aiInsights: baseInsights(),
+        storeInsights: { store: { currency: "USD" }, products } as StoreInsights,
+        selectedDuration: 14,
+        selectedStrategyIndex: 1,
+        gatewayInsight: null,
+        isNewLaunch: false,
+        maxTestBudget: 700,
+      }),
+    );
+
+  it("shows price minus unit cost only as a break-even ceiling, never as a profit target", async () => {
+    const html = await build([
+      { id: "1", name: "Tee", price: 50, unit_cost: 28, price_less_unit_cost: 22 },
+    ] as StoreInsights["products"]);
+    expect(html).toContain("Break-even ceiling");
+    expect(html).toContain(`~${formatCurrency(22, "USD")} per sale loses money on product cost alone`);
+    expect(html).toContain("does not guarantee a profit");
+    expect(html).not.toMatch(PROFIT_CLAIMS);
+  });
+
+  it("invents no cost-per-sale number when Shopify has no unit cost (no 35% fallback)", async () => {
+    const html = await build([{ id: "1", name: "Tee", price: 50 }] as StoreInsights["products"]);
+    expect(html).toContain("No unit cost is recorded in Shopify");
+    expect(html).not.toContain(formatCurrency(18, "USD")); // 35% of 50 rounded
+    expect(html).not.toMatch(PROFIT_CLAIMS);
   });
 });
