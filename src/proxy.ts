@@ -4,6 +4,7 @@ import {
   clerkClient,
 } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { isSignedShopifyAppEntry } from "@/lib/shopify-oauth";
 
 // Map old step values to new ones
 const STEP_MAP: Record<string, string> = {
@@ -35,9 +36,12 @@ const isPublicRoute = createRouteMatcher([
   //  - Cron: CRON_SECRET bearer token
   //  - Paystack verify: confirms the transaction with Paystack + amount match,
   //    and is idempotent (handles an expired browser session on redirect-back).
+  //  - Shopify billing return: re-reads the charge from Shopify with the
+  //    merchant's token and claims it idempotently; the session may have lapsed.
   "/api/payments/stripe/webhook",
   "/api/cron/(.*)",
   "/api/payments/paystack/verify",
+  "/api/shopify/billing/callback",
   // Shopify App Store install, login with Shopify, and SSO ticket consumption
   "/api/auth/shopify/(.*)",
   "/auth/shopify-callback(.*)",
@@ -64,10 +68,9 @@ export default clerkMiddleware(async (auth, request) => {
   // When a merchant clicks "Install" on the Shopify App Store listing, Shopify directs them to:
   //   https://app.omnitarget.co/?shop={shop}&timestamp={timestamp}&hmac={hmac}
   // Intercept this immediately and initiate the OAuth installation flow instead of bouncing to login!
-  if (
-    nextUrl.searchParams.has("shop") &&
-    !nextUrl.pathname.startsWith("/api/auth/shopify")
-  ) {
+  // SEC-10: only that signed entry at the root counts. Matching any `?shop=`
+  // URL hijacked the billing return and let any link start an OAuth flow.
+  if (isSignedShopifyAppEntry(nextUrl, process.env.SHOPIFY_CLIENT_SECRET)) {
     const connectUrl = new URL("/api/auth/shopify/connect", request.url);
     nextUrl.searchParams.forEach((val, key) => {
       connectUrl.searchParams.set(key, val);
