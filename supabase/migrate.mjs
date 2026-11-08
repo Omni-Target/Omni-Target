@@ -114,11 +114,41 @@ async function withClient(fn) {
   }
 }
 
-async function up() {
+/**
+ * `--only <id>` targets exactly one migration (full id or its NNNN prefix) so
+ * independently approved changes can ship and roll back separately — e.g.
+ * 0013 without the 0012 lockdown. Without it, `up` applies everything pending
+ * and `down` rolls back the most recently numbered applied migration.
+ */
+function onlyArg(args) {
+  const i = args.indexOf("--only");
+  if (i === -1) return null;
+  const value = args[i + 1];
+  if (!value || value.startsWith("--")) {
+    console.error("✗ --only needs a migration id, e.g. --only 0013");
+    process.exit(1);
+  }
+  return value.replace(/\.sql$/, "");
+}
+
+function pickOnly(ids, only, label) {
+  const match = ids.filter((id) => id === only || id.startsWith(`${only}_`));
+  if (match.length !== 1) {
+    console.error(`✗ "${only}" is not exactly one ${label} migration (${label}: ${ids.join(", ") || "none"}).`);
+    process.exit(1);
+  }
+  return match[0];
+}
+
+async function up(only = null) {
   await withClient(async (client) => {
     await ensureTable(client);
     const applied = await appliedIds(client);
-    const pending = migrationFiles().filter((f) => !applied.has(migrationId(f)));
+    let pending = migrationFiles().filter((f) => !applied.has(migrationId(f)));
+    if (only) {
+      const target = pickOnly(pending.map(migrationId), only, "pending");
+      pending = pending.filter((f) => migrationId(f) === target);
+    }
 
     if (pending.length === 0) {
       console.log("✓ Up to date — no pending migrations.");
@@ -152,17 +182,17 @@ async function up() {
   });
 }
 
-async function down() {
+async function down(only = null) {
   await withClient(async (client) => {
     await ensureTable(client);
     const { rows } = await client.query(
-      "select id from public.schema_migrations order by id desc limit 1",
+      "select id from public.schema_migrations order by id desc",
     );
     if (rows.length === 0) {
       console.log("No applied migrations to roll back.");
       return;
     }
-    const id = rows[0].id;
+    const id = only ? pickOnly(rows.map((r) => r.id), only, "applied") : rows[0].id;
     const downFile = join(MIGRATIONS_DIR, `${id}.down.sql`);
     if (!existsSync(downFile)) {
       console.error(
@@ -238,10 +268,10 @@ const [cmd, ...args] = process.argv.slice(2);
 switch (cmd) {
   case undefined:
   case "up":
-    await up();
+    await up(onlyArg(args));
     break;
   case "down":
-    await down();
+    await down(onlyArg(args));
     break;
   case "status":
     await status();
@@ -251,7 +281,7 @@ switch (cmd) {
     break;
   default:
     console.error(
-      `Unknown command "${cmd}". Use: up | down | status | create <name>`,
+      `Unknown command "${cmd}". Use: up [--only <id>] | down [--only <id>] | status | create <name>`,
     );
     process.exit(1);
 }
