@@ -11,6 +11,13 @@ export interface RateLimitConfig {
   limit: number;
   /** Window length in seconds. */
   windowSeconds: number;
+  /**
+   * What to do when the limiter itself is unavailable (RPC missing or
+   * erroring). "allow" (default) keeps authenticated routes up; public,
+   * unauthenticated routes that trigger outbound requests should pass "deny"
+   * so a database outage never removes their only abuse control.
+   */
+  onUnavailable?: "allow" | "deny";
 }
 
 export type RateLimitResult =
@@ -24,14 +31,30 @@ export type RateLimitResult =
  *   const limited = await enforceRateLimit({ ... });
  *   if (!limited.ok) return limited.response;
  *
- * Fails OPEN (allows the request) if the backing `check_rate_limit` RPC is
- * missing or errors — it logs a warning instead — so a not-yet-applied
- * migration (0002_rate_limits.sql) never takes a route down.
+ * By default fails OPEN (allows the request, logs a warning) if the backing
+ * `check_rate_limit` RPC is missing or errors, so a limiter outage never takes
+ * an authenticated route down. Public routes pass `onUnavailable: "deny"` to
+ * fail CLOSED with a 503 instead (SEC-07/SEC-13).
  */
 export async function enforceRateLimit(
   config: RateLimitConfig,
 ): Promise<RateLimitResult> {
   const key = `${config.action}:${config.identifier}`;
+  const unavailable = (detail: unknown): RateLimitResult => {
+    if (config.onUnavailable === "deny") {
+      console.warn(`[rate-limit] limiter unavailable for ${config.action}; denying request:`, detail);
+      return {
+        ok: false,
+        response: apiError(
+          "This check is temporarily unavailable. Please try again shortly.",
+          503,
+          "rate_limit_unavailable",
+        ),
+      };
+    }
+    console.warn(`[rate-limit] limiter unavailable for ${key}; allowing request:`, detail);
+    return { ok: true };
+  };
   try {
     const { data, error } = await supabaseAdmin.rpc("check_rate_limit", {
       p_key: key,
@@ -39,13 +62,7 @@ export async function enforceRateLimit(
       p_window_seconds: config.windowSeconds,
     });
 
-    if (error) {
-      console.warn(
-        `[rate-limit] RPC unavailable for ${key}; allowing request:`,
-        error.message,
-      );
-      return { ok: true };
-    }
+    if (error) return unavailable(error.message);
 
     if (data === false) {
       return {
@@ -60,7 +77,6 @@ export async function enforceRateLimit(
 
     return { ok: true };
   } catch (err) {
-    console.warn(`[rate-limit] error for ${key}; allowing request:`, err);
-    return { ok: true };
+    return unavailable(err);
   }
 }

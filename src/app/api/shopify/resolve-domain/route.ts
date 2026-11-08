@@ -25,6 +25,8 @@ export async function POST(request: Request) {
     identifier: `ip:${clientIp(request)}`,
     limit: 20,
     windowSeconds: 600,
+    // Public and unauthenticated: never run without the limiter.
+    onUnavailable: "deny",
   });
   if (!limited.ok) return limited.response;
 
