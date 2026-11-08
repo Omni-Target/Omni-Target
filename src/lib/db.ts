@@ -481,9 +481,6 @@ export async function updateIntegrationByShop(shop: string, data: Record<string,
   }
 }
 
-const isMissingRpc = (error: { code?: string }) =>
-  error.code === "42883" || error.code === "PGRST202";
-
 /**
  * GDPR `shop/redact`: erase the Shopify-scoped data held for a shop (OAuth
  * tokens + cached store snapshot) without touching the user's Meta connection
