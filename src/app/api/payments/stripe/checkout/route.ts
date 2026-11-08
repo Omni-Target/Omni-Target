@@ -2,10 +2,16 @@ import Stripe from "stripe";
 import { auth } from "@clerk/nextjs/server";
 import { createPayment } from "@/lib/db";
 import { getPackById } from "@/lib/credit-packs";
+import { paymentProviderDisabledResponse } from "@/lib/payments/provider-flags";
 
 export async function POST(
   request: Request
 ) {
+  // SEC-08: direct Stripe checkout is off unless PAYMENTS_STRIPE_ENABLED=true.
+  // The Stripe webhook stays active so started payments still settle.
+  const disabled = paymentProviderDisabledResponse("stripe");
+  if (disabled) return disabled;
+
   const stripe = new Stripe(
     process.env.STRIPE_SECRET_KEY!
   );

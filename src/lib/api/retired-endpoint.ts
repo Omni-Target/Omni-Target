@@ -12,12 +12,10 @@ export function legacyAiEndpointsEnabled(env: Record<string, string | undefined>
   return env.LEGACY_AI_ENDPOINTS_ENABLED === "true";
 }
 
-/** Returns a 410 response (after logging the hit) when the endpoint is retired, else null. */
-export function retiredEndpointResponse(endpoint: string, request: Request | null, userId: string | null): Response | null {
-  if (legacyAiEndpointsEnabled()) return null;
+function logEndpointHit(event: string, endpoint: string, request: Request | null, userId: string | null): void {
   console.warn(
     JSON.stringify({
-      event: "retired_endpoint_hit",
+      event,
       endpoint,
       user: userId,
       user_agent: request?.headers.get("user-agent")?.slice(0, 200) ?? null,
@@ -25,6 +23,22 @@ export function retiredEndpointResponse(endpoint: string, request: Request | nul
       at: new Date().toISOString(),
     }),
   );
+}
+
+/**
+ * Observation log for routes with no known caller that are scheduled for
+ * removal (SEC-08: /api/dashboard/stats, /api/media/proxy). Behaviour is
+ * unchanged; every hit is recorded so the S2.4 observation window can prove
+ * there are no legitimate external callers before deletion.
+ */
+export function logDeprecatedEndpointHit(endpoint: string, request: Request | null, userId: string | null): void {
+  logEndpointHit("deprecated_endpoint_hit", endpoint, request, userId);
+}
+
+/** Returns a 410 response (after logging the hit) when the endpoint is retired, else null. */
+export function retiredEndpointResponse(endpoint: string, request: Request | null, userId: string | null): Response | null {
+  if (legacyAiEndpointsEnabled()) return null;
+  logEndpointHit("retired_endpoint_hit", endpoint, request, userId);
   return Response.json(
     { error: "This endpoint has been retired.", code: "endpoint_retired" },
     { status: 410 },

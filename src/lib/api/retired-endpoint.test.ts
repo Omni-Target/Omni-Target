@@ -26,7 +26,7 @@ vi.mock("@/lib/insights-engine", () => ({
   generateRecommendations: m.generateRecommendations,
 }));
 
-import { legacyAiEndpointsEnabled, retiredEndpointResponse } from "./retired-endpoint";
+import { legacyAiEndpointsEnabled, logDeprecatedEndpointHit, retiredEndpointResponse } from "./retired-endpoint";
 import { GET as storeInsights } from "@/app/api/store/insights/route";
 import { POST as targeting } from "@/app/api/campaigns/generate/targeting/route";
 
@@ -79,5 +79,25 @@ describe("hook recovery requires an owned brief (SEC-08)", () => {
     expect(res.status).toBe(400);
     expect(m.generateCreativeHooksOnly).not.toHaveBeenCalled();
     expect(m.getCampaignById).not.toHaveBeenCalled();
+  });
+});
+
+describe("logDeprecatedEndpointHit (SEC-08 observation)", () => {
+  it("records endpoint, user, user agent and referer without changing the response", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    logDeprecatedEndpointHit(
+      "/api/dashboard/stats",
+      new Request("http://localhost/api/dashboard/stats", { headers: { "user-agent": "curl/8", referer: "https://x.test/" } }),
+      "user_1",
+    );
+    const entry = JSON.parse(String(warn.mock.calls[0][0]));
+    expect(entry).toMatchObject({
+      event: "deprecated_endpoint_hit",
+      endpoint: "/api/dashboard/stats",
+      user: "user_1",
+      user_agent: "curl/8",
+      referer: "https://x.test/",
+    });
+    warn.mockRestore();
   });
 });
