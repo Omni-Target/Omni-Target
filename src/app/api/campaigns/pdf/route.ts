@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { BriefPDFParams, pdfFileName } from "@/lib/brief-pdf-types";
+import { pdfFileName } from "@/lib/brief-pdf-types";
+import { MAX_PDF_BODY_BYTES, parseBriefPdfParams } from "@/lib/brief-pdf-schema";
 import { buildBriefHTML } from "@/lib/brief-html-template";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+/**
+ * Renders a campaign brief to HTML (in-app preview) or PDF (download).
+ *
+ * SEC-06: the payload comes from the browser, so it is size-capped and
+ * schema-validated before rendering; the HTML carries a strict document CSP
+ * (no script, no external requests), the preview iframe is sandboxed, and the
+ * headless Chromium renderer blocks every non-data: request.
+ */
 export async function POST(request: Request) {
   const authResult = await requireUser();
   if (!authResult.ok) return authResult.response;
@@ -20,12 +29,29 @@ export async function POST(request: Request) {
   });
   if (!limited.ok) return limited.response;
 
-  let params: BriefPDFParams;
+  // JSON only: a cross-site HTML form cannot send application/json without a
+  // CORS preflight, so this also closes the form-POST path to this endpoint.
+  if (!(request.headers.get("content-type") || "").toLowerCase().includes("application/json")) {
+    return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
+  }
+
+  const raw = await request.text();
+  if (Buffer.byteLength(raw, "utf8") > MAX_PDF_BODY_BYTES) {
+    return NextResponse.json({ error: "Brief payload too large" }, { status: 413 });
+  }
+
+  let body: unknown;
   try {
-    params = await request.json();
+    body = JSON.parse(raw);
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
+
+  const validated = parseBriefPdfParams(body);
+  if (!validated.ok) {
+    return NextResponse.json({ error: "Invalid brief payload", field: validated.error }, { status: 400 });
+  }
+  const params = validated.params;
 
   const searchParams = new URL(request.url).searchParams;
   // `format=pdf` → render a real, downloadable PDF via headless Chromium.
@@ -56,15 +82,12 @@ export async function POST(request: Request) {
     return new NextResponse(html, {
       status: 200,
       headers: {
-        "Content-Type": "text/html",
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
       },
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[PDF API] Generation error:", message);
-    return NextResponse.json(
-      { error: "Failed to generate brief", detail: message },
-      { status: 500 }
-    );
+    console.error("[PDF API] Generation error:", err instanceof Error ? err.message : String(err));
+    return NextResponse.json({ error: "Failed to generate brief" }, { status: 500 });
   }
 }

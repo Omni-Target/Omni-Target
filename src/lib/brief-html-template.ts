@@ -13,18 +13,51 @@ import {
 import { parseBudgetReasoning } from "./campaigns/qualitative-guidance";
 import fs from "fs";
 import path from "path";
+import { randomBytes } from "crypto";
 
 function esc(s: string | undefined | null): string {
   if (!s) return "";
-  return s
+  return String(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
+/** Currency text for HTML: the symbol comes from the request, so escape it. */
 function fmt(amount: number, currency: string, symbol?: string): string {
-  return formatCurrency(amount, currency, symbol);
+  return esc(formatCurrency(amount, currency, symbol));
+}
+
+/** Only http(s) links may be rendered as hrefs (blocks javascript:/data: URLs). */
+function safeHttpUrl(value: string | undefined | null): string {
+  if (!value) return "";
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === "https:" || protocol === "http:" ? value : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Document-level CSP (SEC-06). The brief only uses inline styles and data:
+ * fonts/images, so everything else — scripts, external requests, forms, base
+ * changes — is denied. Applies in the preview iframe (srcdoc) and in the
+ * headless Chromium PDF renderer alike.
+ */
+function documentCsp(scriptNonce: string | null): string {
+  const directives = [
+    "default-src 'none'",
+    "img-src data:",
+    "font-src data:",
+    "style-src 'unsafe-inline'",
+    "base-uri 'none'",
+    "form-action 'none'",
+  ];
+  if (scriptNonce) directives.push(`script-src 'nonce-${scriptNonce}'`);
+  return directives.join("; ");
 }
 
 // ── Inline icon set (stroke = currentColor) ──────────────────────────────────
@@ -324,9 +357,11 @@ export async function buildBriefHTML(
   if (gi?.currentProductImage) {
     try {
       const res = await fetchSafeImage(gi.currentProductImage);
-      if (res.ok) {
+      // The content-type comes from a remote server and is written into an
+      // attribute: only embed known raster image types.
+      const ct = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      if (res.ok && /^image\/(png|jpe?g|gif|webp|avif)$/.test(ct)) {
         const buf = await res.arrayBuffer();
-        const ct = res.headers.get("content-type") || "image/jpeg";
         productImgSrc = `data:${ct};base64,${Buffer.from(buf).toString(
           "base64"
         )}`;
@@ -932,7 +967,7 @@ export async function buildBriefHTML(
         "Suggested starting age",
         `<span class="stat-inline">${ageMin}–${ageMax}</span>`
       )}
-      ${field("Suggested gender", `<span class="stat-inline">${genderLabel === "All" ? "Men & Women" : genderLabel}</span>`)}
+      ${field("Suggested gender", `<span class="stat-inline">${esc(genderLabel === "All" ? "Men & Women" : genderLabel)}</span>`)}
     </div>
     <div style="font-size:10px; color:#475569; margin-top:4px; line-height:1.45; background:#f8fafc; border-left:3px solid #cbd5e1; padding:5px 8px; border-radius:4px;">
       <span style="font-weight:600; color:#334155;">💡 Suggested starting age:</span>
@@ -1481,15 +1516,19 @@ export async function buildBriefHTML(
     "page-break-before"
   );
 
+  // Standalone-tab variant only: its print helper runs under a per-render
+  // nonce; embed/PDF variants allow no script at all.
+  const scriptNonce = opts?.embed ? null : randomBytes(16).toString("base64");
   const chrome = opts?.embed
     ? ""
     : `
 <div class="toolbar no-print">
   <span class="toolbar-text">Your campaign brief is ready</span>
-  <button class="btn" onclick="window.print()">Save as PDF</button>
+  <button class="btn" id="omni-print-btn" type="button">Save as PDF</button>
 </div>
 
-<script>
+<script nonce="${scriptNonce}">
+  document.getElementById("omni-print-btn").addEventListener("click", function () { window.print(); });
   window.onload = function () {
     setTimeout(function () { window.print(); }, 800);
   };
@@ -1499,6 +1538,7 @@ export async function buildBriefHTML(
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
+<meta http-equiv="Content-Security-Policy" content="${documentCsp(scriptNonce)}"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>${esc(params.productName ? `${params.productName} — Omni Target Campaign Brief` : "Omni Target Campaign Brief")}</title>
 <style>
@@ -1752,10 +1792,10 @@ export async function buildBriefHTML(
     <h1 class="h1">${esc(params.productName)}</h1>
     <div class="brand">by ${esc(params.brandName)}</div>
     ${
-      params.productUrl
+      safeHttpUrl(params.productUrl)
         ? `<div style="margin-top:6px;"><a class="prod-link" href="${esc(
-            params.productUrl
-          )}" target="_blank">${esc(params.productUrl)}</a></div>`
+            safeHttpUrl(params.productUrl)
+          )}" target="_blank" rel="noopener noreferrer">${esc(params.productUrl)}</a></div>`
         : ""
     }
 

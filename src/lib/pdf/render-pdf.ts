@@ -50,19 +50,42 @@ async function launchBrowser(): Promise<Browser> {
   return browser as unknown as Browser;
 }
 
+/**
+ * SEC-06: the rendered HTML is built from browser-supplied data, so the page
+ * is network-isolated. The brief embeds every font and image as a data: URI;
+ * any other request (http/https to internal or external hosts, file://,
+ * ws:// …) is aborted, so injected markup cannot reach the network or local
+ * files and nothing can be read back into the PDF.
+ */
+export function isAllowedRenderRequest(url: string): boolean {
+  return url.startsWith("data:") || url === "about:blank";
+}
+
 export async function renderHtmlToPdf(html: string): Promise<Buffer> {
   const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
-    // The HTML embeds its fonts/images as data URIs, so there are no external
-    // requests — but wait for fonts so nothing snapshots mid-swap.
+    page.setDefaultTimeout(20_000);
+    await page.setRequestInterception(true);
+    page.on("request", (request) => {
+      if (isAllowedRenderRequest(request.url())) {
+        void request.continue();
+      } else {
+        void request.abort("blockedbyclient");
+      }
+    });
+
+    // Wait for fonts so nothing snapshots mid-swap.
     await page.setContent(html, { waitUntil: "load" });
     try {
-      await page.evaluate(async () => {
-        if (document.fonts && document.fonts.ready) {
-          await document.fonts.ready;
-        }
-      });
+      await Promise.race([
+        page.evaluate(async () => {
+          if (document.fonts && document.fonts.ready) {
+            await document.fonts.ready;
+          }
+        }),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ]);
     } catch {
       // Non-fatal — fonts are embedded, ready() is just a best-effort barrier.
     }
