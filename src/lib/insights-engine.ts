@@ -39,12 +39,10 @@ import { resolveVerifiedMetaInterests } from "./meta-interest-resolver";
 // on a forced tool call for schema-safe output, so this must stay disabled.
 export const STRUCTURED_HOOK_THINKING = { type: "disabled" } as const;
 
-export class CreativeHookGenerationError extends Error {
-  constructor() {
-    super("Product-specific creative hooks could not be generated.");
-    this.name = "CreativeHookGenerationError";
-  }
-}
+// Defined in a dependency-free module (see generation-errors.ts); re-exported
+// here so existing imports from the engine keep working.
+import { CreativeHookGenerationError } from "./campaigns/generation-errors";
+export { CreativeHookGenerationError };
 
 export interface LocationResult {
   name: string;
