@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { readStoreCache, writeStoreCache } from "@/lib/store-cache";
 
 /**
  * The shape returned by `/api/store/data`. `data` holds the store snapshot
@@ -19,23 +20,18 @@ export interface StoreDataResponse {
 // reads one cached snapshot instead of re-hitting Shopify on every mount.
 export const STORE_DATA_QUERY_KEY = ["store-data"] as const;
 
-const LOCAL_STORAGE_KEY = "omni_store_data_v1";
-
 function getInitialStoreSnapshot(): StoreDataResponse | undefined {
-  if (typeof window === "undefined") return undefined;
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (!raw) return undefined;
-    const parsed = JSON.parse(raw);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      parsed.connected &&
-      parsed.data?.data_quality?.schema_version === 9
-    ) {
-      return parsed;
-    }
-  } catch {}
+  const parsed = readStoreCache() as
+    | (StoreDataResponse & { data?: { data_quality?: { schema_version?: number } } | null })
+    | undefined;
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    parsed.connected &&
+    parsed.data?.data_quality?.schema_version === 9
+  ) {
+    return parsed;
+  }
   return undefined;
 }
 
@@ -58,11 +54,7 @@ export async function fetchStoreData(force = false): Promise<StoreDataResponse> 
   });
   if (!res.ok) throw new Error(`Store data failed (${res.status})`);
   const json: StoreDataResponse = await res.json();
-  if (typeof window !== "undefined" && json && json.connected && json.data) {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(json));
-    } catch {}
-  }
+  if (json && json.connected && json.data) writeStoreCache(json);
   return json;
 }
 

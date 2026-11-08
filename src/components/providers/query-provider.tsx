@@ -38,6 +38,11 @@ function getQueryClient() {
   return browserQueryClient;
 }
 
+/** Drops all cached queries in this browser, e.g. when the session ends. */
+export function clearQueryCache() {
+  browserQueryClient?.clear();
+}
+
 export function QueryProvider({ children }: { children: React.ReactNode }) {
   const queryClient = getQueryClient();
   return (
