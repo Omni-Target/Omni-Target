@@ -18,7 +18,10 @@ const m = vi.hoisted(() => ({
   fetchWithRetry: vi.fn(),
   sendEmail: vi.fn(),
   disconnectShopInstallation: vi.fn(),
-  preflight: vi.fn(),
+  acquireLease: vi.fn(),
+  releaseLease: vi.fn(),
+  leaseHeld: vi.fn(),
+  check: vi.fn(),
   bind: vi.fn(),
   activeWorkspaceForShop: vi.fn(),
   disconnectWorkspace: vi.fn(),
@@ -28,13 +31,16 @@ const m = vi.hoisted(() => ({
 }));
 
 vi.mock("@/modules/workspaces/repository", () => ({
-  preflightShopConnection: m.preflight,
-  bindShopForInstall: m.bind,
+  acquireInstallLease: m.acquireLease,
+  releaseInstallLease: m.releaseLease,
+  installLeaseHeld: m.leaseHeld,
+  connectCheckUnderLease: m.check,
+  bindShopUnderLease: m.bind,
+  completeTransferUnderLease: m.completeTransfer,
   activeWorkspaceForShop: m.activeWorkspaceForShop,
   disconnectWorkspace: m.disconnectWorkspace,
   transferForRequester: m.transferForRequester,
   verifyOwnershipTransfer: m.verifyTransfer,
-  completeOwnershipTransfer: m.completeTransfer,
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -128,8 +134,12 @@ beforeEach(() => {
   m.getUser.mockResolvedValue({ publicMetadata: { onboardingStep: "complete" } });
   m.createSignInToken.mockResolvedValue({ token: "ticket-123" });
   m.getUserList.mockResolvedValue({ data: [{ id: "user_victim" }] });
-  m.preflight.mockResolvedValue("allowed");
+  m.acquireLease.mockResolvedValue("holder-1");
+  m.releaseLease.mockResolvedValue(undefined);
+  m.leaseHeld.mockResolvedValue(true);
+  m.check.mockResolvedValue("allowed");
   m.bind.mockResolvedValue({ outcome: "bound_new_workspace", workspace_id: "ws-new" });
+  m.completeTransfer.mockResolvedValue({ outcome: "completed", workspace_id: "ws-new" });
   m.activeWorkspaceForShop.mockResolvedValue(null);
   m.disconnectShopInstallation.mockResolvedValue(true);
   m.transferForRequester.mockResolvedValue(null);
@@ -237,18 +247,24 @@ describe("Shopify OAuth callback — workspace ownership (Phase 1 task 3)", () =
   const WS = "1b4e28ba-2fa1-41d2-883f-0016d3cca427";
   const TR = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b";
 
-  it("binds the store by Shopify's shop id to the chosen workspace", async () => {
+  it("takes the shop's lease, checks ownership under it, then binds by Shopify's shop id", async () => {
     m.auth.mockResolvedValue({ userId: "user_a" });
     const { nonce, cookie } = stateCookie({ from: "dashboard", uid: "user_a", ws: WS });
     await GET(signedCallback({ state: nonce, cookie }));
-    expect(m.preflight).toHaveBeenCalledWith(SHOP, "user_a");
-    expect(m.bind).toHaveBeenCalledWith({ shopifyShopId: 548380009, domain: SHOP, actor: "user_a", selectedWorkspaceId: WS, shopName: "Attacker" });
+    expect(m.acquireLease).toHaveBeenCalledWith(SHOP, "user_a", 60);
+    expect(m.check).toHaveBeenCalledWith(SHOP, "holder-1", "user_a", null);
+    expect(m.check.mock.invocationCallOrder[0]).toBeLessThan(m.fetchWithRetry.mock.invocationCallOrder[0]);
+    expect(m.bind).toHaveBeenCalledWith({
+      leaseDomain: SHOP, holder: "holder-1", shopifyShopId: 548380009, domain: SHOP,
+      actor: "user_a", selectedWorkspaceId: WS, shopName: "Attacker",
+    });
     expect(m.upsertUserIntegration).toHaveBeenCalledWith("user_a", expect.objectContaining({ shopify_store_url: SHOP }));
+    expect(m.releaseLease).toHaveBeenCalledWith(SHOP, "holder-1");
   });
 
   it("refuses a store owned by another account before exchanging the code", async () => {
     m.auth.mockResolvedValue({ userId: "user_b" });
-    m.preflight.mockResolvedValue("rejected_other_owner");
+    m.check.mockResolvedValue("rejected_other_owner");
     const { nonce, cookie } = stateCookie({ from: "onboarding", uid: "user_b" });
     const res = await GET(signedCallback({ state: nonce, cookie }));
     expect(res.headers.get("location")).toContain("error=shopify_auth_failed");
@@ -256,15 +272,53 @@ describe("Shopify OAuth callback — workspace ownership (Phase 1 task 3)", () =
     expect(m.fetchWithRetry).not.toHaveBeenCalled();
     expect(m.bind).not.toHaveBeenCalled();
     expect(m.upsertUserIntegration).not.toHaveBeenCalled();
+    expect(m.releaseLease).toHaveBeenCalledWith(SHOP, "holder-1");
+  });
+
+  it("never exchanges while another installation of the store holds the lease", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      m.auth.mockResolvedValue({ userId: "user_b" });
+      m.acquireLease.mockResolvedValue(null);
+      const { nonce, cookie } = stateCookie({ from: "onboarding", uid: "user_b" });
+      const pending = GET(signedCallback({ state: nonce, cookie }));
+      await vi.runAllTimersAsync();
+      const res = await pending;
+      expect(decodeURIComponent(res.headers.get("location") ?? "")).toContain("being connected right now");
+      expect(m.acquireLease).toHaveBeenCalledTimes(20);
+      expect(m.check).not.toHaveBeenCalled();
+      expect(m.fetchWithRetry).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stores nothing when its lease was taken over before the commit", async () => {
+    m.auth.mockResolvedValue({ userId: "user_a" });
+    m.bind.mockResolvedValue({ outcome: "rejected_lease_lost" });
+    const { nonce, cookie } = stateCookie({ from: "onboarding", uid: "user_a" });
+    const res = await GET(signedCallback({ state: nonce, cookie }));
+    expect(res.headers.get("location")).toContain("error=shopify_auth_failed");
+    expect(m.upsertUserIntegration).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite a newer credential when its lease expired after the commit", async () => {
+    m.auth.mockResolvedValue({ userId: "user_a" });
+    m.leaseHeld.mockResolvedValue(false);
+    const { nonce, cookie } = stateCookie({ from: "onboarding", uid: "user_a" });
+    await GET(signedCallback({ state: nonce, cookie }));
+    expect(m.bind).toHaveBeenCalled();
+    expect(m.upsertUserIntegration).not.toHaveBeenCalled();
   });
 
   it("fails closed when the ownership check errors", async () => {
     m.auth.mockResolvedValue({ userId: "user_a" });
-    m.preflight.mockRejectedValue(new Error("db down"));
+    m.check.mockRejectedValue(new Error("db down"));
     const { nonce, cookie } = stateCookie({ from: "onboarding", uid: "user_a" });
     const res = await GET(signedCallback({ state: nonce, cookie }));
     expect(res.headers.get("location")).toContain("error=shopify_auth_failed");
     expect(m.fetchWithRetry).not.toHaveBeenCalled();
+    expect(m.releaseLease).toHaveBeenCalled();
   });
 
   it("stores nothing when the binding is refused after the exchange", async () => {
@@ -297,15 +351,16 @@ describe("Shopify OAuth callback — workspace ownership (Phase 1 task 3)", () =
     expect(m.verifyTransfer).toHaveBeenCalledWith(TR, "user_b", SHOP);
     expect(res.headers.get("location")).toBe(`${APP}/dashboard?transfer=verified`);
     expect(m.fetchWithRetry).not.toHaveBeenCalled();
-    expect(m.preflight).not.toHaveBeenCalled();
+    expect(m.acquireLease).not.toHaveBeenCalled();
   });
 
-  it("completes an approved transfer with the new owner's own installation", async () => {
+  it("completes an approved transfer with the new owner's own installation, under the lease", async () => {
     m.auth.mockResolvedValue({ userId: "user_b" });
     m.transferForRequester.mockResolvedValue({ status: "approved", shop_domain: SHOP });
     const { nonce, cookie } = stateCookie({ from: "dashboard", uid: "user_b", tr: TR });
     await GET(signedCallback({ state: nonce, cookie }));
-    expect(m.completeTransfer).toHaveBeenCalledWith(TR, "user_b", 548380009);
+    expect(m.check).toHaveBeenCalledWith(SHOP, "holder-1", "user_b", TR);
+    expect(m.completeTransfer).toHaveBeenCalledWith({ leaseDomain: SHOP, holder: "holder-1", transferId: TR, requester: "user_b", shopifyShopId: 548380009 });
     expect(m.bind).not.toHaveBeenCalled();
     expect(m.disconnectShopInstallation).toHaveBeenCalledWith(SHOP);
     expect(m.disconnectShopInstallation.mock.invocationCallOrder[0]).toBeLessThan(m.upsertUserIntegration.mock.invocationCallOrder[0]);

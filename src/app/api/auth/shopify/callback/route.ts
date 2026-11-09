@@ -6,15 +6,27 @@ import {
   upsertUserIntegration,
   updateUserIntegration,
 } from "@/lib/db";
-import { connectionRefusalMessage, isRefusal, parseShopifyShopId } from "@/modules/workspaces/lifecycle";
 import {
+  INSTALL_LEASE_SECONDS,
+  installUnderLease,
+  type CommitInput,
+  type ExchangedToken,
+  type InstallResult,
+  type ShopIdentity,
+} from "@/modules/workspaces/install";
+import { connectionRefusalMessage, parseShopifyShopId } from "@/modules/workspaces/lifecycle";
+import {
+  acquireInstallLease,
   activeWorkspaceForShop,
-  bindShopForInstall,
-  completeOwnershipTransfer,
+  bindShopUnderLease,
+  completeTransferUnderLease,
+  connectCheckUnderLease,
   disconnectWorkspace,
-  preflightShopConnection,
+  installLeaseHeld,
+  releaseInstallLease,
   transferForRequester,
   verifyOwnershipTransfer,
+  type BindOutcome,
 } from "@/modules/workspaces/repository";
 import { fetchWithRetry } from "@/lib/http";
 import { shopifyAdminRestUrl } from "@/lib/shopify-config";
@@ -53,6 +65,86 @@ import {
  */
 const GENERIC_FAILURE = "We could not complete the Shopify connection. Please try again.";
 const TRANSFER_FAILURE = "This store transfer is not ready to complete. Check its status and try again.";
+const BUSY_FAILURE = "This store is being connected right now. Please try again in a minute.";
+
+/** Exchanges the single-use code for an expiring offline token. Never retried (ING-04). */
+async function exchangeShopifyCode(shop: string, code: string): Promise<ExchangedToken> {
+  const response = await fetchWithRetry(
+    `https://${shop}/admin/oauth/access_token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: process.env.SHOPIFY_CLIENT_ID,
+        client_secret: process.env.SHOPIFY_CLIENT_SECRET,
+        code,
+        expiring: 1,
+      }),
+    },
+    { timeoutMs: 12000, retries: 0 },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!data.access_token) {
+    console.error("Shopify token exchange failed:", { status: response.status, error: data?.error ?? null });
+    throw new Error("No access token returned");
+  }
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token || null,
+    expiresIn: data.expires_in || null,
+    scope: data.scope ?? null,
+  };
+}
+
+/** Shopify's immutable shop id is the store's identity; the domain can change. */
+async function fetchShopIdentity(shop: string, accessToken: string): Promise<ShopIdentity> {
+  const response = await fetch(shopifyAdminRestUrl(shop, "shop.json"), {
+    headers: { "X-Shopify-Access-Token": accessToken },
+    signal: AbortSignal.timeout(10_000),
+  });
+  const body = await response.json().catch(() => ({}));
+  const details = (body?.shop ?? {}) as Record<string, unknown>;
+  const id = parseShopifyShopId(details.id);
+  if (!id) throw new Error("Shopify returned no shop id");
+  const reported = String(details.myshopify_domain || "").toLowerCase();
+  return {
+    id,
+    myshopifyDomain: isValidShopDomain(reported) ? reported : shop,
+    name: typeof details.name === "string" ? details.name : null,
+    details,
+  };
+}
+
+/**
+ * Stores the new credential after the binding committed, still under the
+ * lease. Legacy plaintext storage until task 4 moves it into the commit.
+ */
+async function persistLegacyCredential(input: CommitInput): Promise<void> {
+  const domain = input.identity.myshopifyDomain;
+  if (input.transferId) {
+    // The new owner's exchange retired the previous owner's tokens.
+    if (!(await disconnectShopInstallation(domain))) throw new Error("previous_credentials_not_cleared");
+  } else {
+    await disconnectReplacedWorkspace(input.actor, domain);
+  }
+  const { token } = input;
+  const expiresAt = token.expiresIn ? new Date(Date.now() + token.expiresIn * 1000).toISOString() : null;
+  const data: Record<string, unknown> = {
+    shopify_store_url: domain,
+    shopify_custom_domain: typeof input.identity.details.domain === "string" ? input.identity.details.domain : null,
+    shopify_access_token: token.accessToken,
+    shop_domain: domain,
+    access_token: token.accessToken,
+    shopify_refresh_token: token.refreshToken,
+    shopify_token_expires_at: expiresAt,
+    shopify_scopes: token.scope,
+  };
+  const { detectColumns } = await import("@/lib/billing-db");
+  const cols = await detectColumns();
+  if (cols.hasRefreshToken) data.refresh_token = token.refreshToken;
+  if (cols.hasTokenExpiresAt) data.token_expires_at = expiresAt;
+  await upsertUserIntegration(input.actor, data);
+}
 
 const normalizeShopHost = (value: unknown) =>
   typeof value === "string" ? value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "") || null : null;
@@ -162,133 +254,90 @@ export async function GET(request: Request) {
   const isLogin = state.from === "login";
   const hasPaidPlan = ["starter", "growth", "scale"].includes(selectedPlan);
 
-  // Workspace rules (Phase 1, task 3), applied before the code is exchanged:
-  // an exchange retires the shop's current token, so an account that may not
-  // connect this shop must never reach it.
-  try {
-    if (state.tr) {
-      if (decision.kind !== "link_to_session") return failure(TRANSFER_FAILURE);
+  // A transfer is verified by the requester completing Shopify's authorization
+  // for the shop. The code is deliberately not exchanged: the current owner
+  // keeps working until they approve.
+  if (state.tr) {
+    if (decision.kind !== "link_to_session") return failure(TRANSFER_FAILURE);
+    try {
       const transfer = await transferForRequester(state.tr, targetUserId);
       if (!transfer || transfer.shop_domain !== shop) return failure(TRANSFER_FAILURE);
       if (transfer.status === "requested") {
-        // Completing Shopify's authorization for this shop proves control of
-        // it. The code is deliberately not exchanged: the current owner keeps
-        // working until they approve.
         await verifyOwnershipTransfer(state.tr, targetUserId, shop);
         return redirectTo(`${appBaseUrl}/dashboard?transfer=verified`, [clearState]);
       }
       if (transfer.status !== "approved") return failure(TRANSFER_FAILURE);
-    } else {
-      const outcome = await preflightShopConnection(shop, targetUserId);
-      if (isRefusal(outcome)) {
-        console.warn(`Shopify OAuth refused by workspace rules: ${outcome}`);
-        return failure(connectionRefusalMessage(outcome));
-      }
+    } catch (err) {
+      console.error("Transfer check failed:", err instanceof Error ? err.message : "unknown error");
+      return failure(TRANSFER_FAILURE);
     }
+  }
+
+  // Phase 1 task 3.1: from the ownership decision to the stored credential,
+  // everything runs under the shop's install lease, so an account that may not
+  // own the shop never reaches the code exchange that would retire the owner's
+  // token (see installUnderLease).
+  let installed: InstallResult;
+  try {
+    installed = await installUnderLease(
+      { shop, code, actor: targetUserId, selectedWorkspaceId: state.ws, transferId: state.tr },
+      {
+        acquireLease: (domain, actor) => acquireInstallLease(domain, actor, INSTALL_LEASE_SECONDS),
+        releaseLease: releaseInstallLease,
+        leaseHeld: installLeaseHeld,
+        check: connectCheckUnderLease,
+        exchangeCode: exchangeShopifyCode,
+        fetchShop: fetchShopIdentity,
+        commit: (input) =>
+          input.transferId
+            ? completeTransferUnderLease({
+                leaseDomain: input.shop,
+                holder: input.holder,
+                transferId: input.transferId,
+                requester: input.actor,
+                shopifyShopId: input.identity.id,
+              })
+            : bindShopUnderLease({
+                leaseDomain: input.shop,
+                holder: input.holder,
+                shopifyShopId: input.identity.id,
+                domain: input.identity.myshopifyDomain,
+                actor: input.actor,
+                selectedWorkspaceId: input.selectedWorkspaceId,
+                shopName: input.identity.name,
+              }),
+        persist: persistLegacyCredential,
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      },
+    );
   } catch (err) {
-    console.error("Workspace check failed:", err instanceof Error ? err.message : "unknown error");
+    console.error("Shopify OAuth error:", err instanceof Error ? err.message : "unknown error");
     return failure(state.tr ? TRANSFER_FAILURE : GENERIC_FAILURE);
   }
 
+  if (installed.kind !== "connected") {
+    const outcome = installed.kind === "refused" ? installed.outcome : installed.kind;
+    console.warn(`Shopify OAuth ended without connecting: ${outcome}`);
+    if (installed.kind === "busy") return failure(BUSY_FAILURE);
+    if (installed.kind === "lease_lost") return failure(GENERIC_FAILURE);
+    if (installed.outcome === "rejected_transfer_not_ready") return failure(TRANSFER_FAILURE);
+    return failure(connectionRefusalMessage(installed.outcome as BindOutcome));
+  }
+
   try {
-    // Exchange code for an EXPIRING offline access token ("expiring": 1 returns
-    // an expiring token + refresh token instead of a non-expiring token).
-    const tokenRes = await fetchWithRetry(
-      `https://${shop}/admin/oauth/access_token`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          client_id: process.env.SHOPIFY_CLIENT_ID,
-          client_secret: process.env.SHOPIFY_CLIENT_SECRET,
-          code,
-          expiring: 1,
-        }),
-      },
-      // Never retried: authorization codes are single-use (ING-04).
-      { timeoutMs: 12000, retries: 0 },
-    );
-
-    const tokenData = await tokenRes.json();
-    const accessToken = tokenData.access_token;
-    const refreshToken = tokenData.refresh_token || null;
-    const expiresIn = tokenData.expires_in || null; // seconds
-
-    if (!accessToken) {
-      console.error("Shopify token exchange failed:", {
-        status: tokenRes.status,
-        error: tokenData?.error ?? null,
-        description: tokenData?.error_description ?? null,
-      });
-      throw new Error("No access token returned");
-    }
-
-    const tokenExpiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
-
-    // Fetch shop details to get the primary custom domain
-    const shopDetailsRes = await fetch(shopifyAdminRestUrl(shop, "shop.json"), {
-      headers: { "X-Shopify-Access-Token": accessToken },
-    });
-    const shopDetails = await shopDetailsRes.json();
-
-    const shopData = shopDetails.shop || {};
-    const storeEmail: string = shopData.email || shopData.customer_email || "";
-    const customDomain = shopData.domain || null;
-    const reportedDomain = String(shopData.myshopify_domain || "").toLowerCase();
-    const myshopifyUrl = isValidShopDomain(reportedDomain) ? reportedDomain : shop;
+    const shopData = installed.identity.details;
+    const accessToken = installed.token.accessToken;
+    const storeEmail = String(shopData.email || shopData.customer_email || "");
+    const customDomain = typeof shopData.domain === "string" ? shopData.domain : null;
+    const myshopifyUrl = installed.identity.myshopifyDomain;
 
     // The Online Store theme exposes its own logo, even when the merchant has
     // not configured Shopify Brand assets. Use its original image size.
     const storeLogoUrl = await fetchShopifyStoreLogo(myshopifyUrl, customDomain);
-    const storeName: string = shopData.name || "Store";
+    const storeName: string = installed.identity.name || "Store";
 
-    // Shopify's immutable shop id is the store's identity; the domain can change.
-    const shopifyShopId = parseShopifyShopId(shopData.id);
-    if (!shopifyShopId) throw new Error("Shopify returned no shop id");
-
-    if (state.tr) {
-      // The new owner's own installation completes the approved transfer. The
-      // previous owner's stored credential is cleared: this exchange retired it.
-      await completeOwnershipTransfer(state.tr, targetUserId, shopifyShopId);
-      if (!(await disconnectShopInstallation(myshopifyUrl))) throw new Error("previous_credentials_not_cleared");
-    } else {
-      const bound = await bindShopForInstall({
-        shopifyShopId,
-        domain: myshopifyUrl,
-        actor: targetUserId,
-        selectedWorkspaceId: state.ws,
-        shopName: storeName,
-      });
-      if (isRefusal(bound.outcome)) {
-        // Only reachable if the shop changed hands between the check above and
-        // here. Nothing is stored for the refused account.
-        console.warn(`Shopify OAuth refused by workspace rules after exchange: ${bound.outcome}`);
-        return failure(connectionRefusalMessage(bound.outcome));
-      }
-      await disconnectReplacedWorkspace(targetUserId, myshopifyUrl);
-    }
-
-    // Shopify data payload — store token + refresh token + expiry
-    const shopifyData: Record<string, unknown> = {
-      shopify_store_url: myshopifyUrl,
-      shopify_custom_domain: customDomain,
-      shopify_access_token: accessToken,
-      shop_domain: myshopifyUrl,
-      access_token: accessToken,
-      shopify_refresh_token: refreshToken,
-      shopify_token_expires_at: tokenExpiresAt,
-      shopify_scopes: tokenData.scope,
-    };
-
-    // Populate new schema columns if they exist (backward compatibility)
     const { detectColumns, handleFreeCreditOnInstall } = await import("@/lib/billing-db");
     const cols = await detectColumns();
-    if (cols.hasShopDomain) shopifyData.shop_domain = myshopifyUrl;
-    if (cols.hasAccessToken) shopifyData.access_token = accessToken;
-    if (cols.hasRefreshToken) shopifyData.refresh_token = refreshToken;
-    if (cols.hasTokenExpiresAt) shopifyData.token_expires_at = tokenExpiresAt;
-
-    await upsertUserIntegration(targetUserId, shopifyData);
 
     // Give 1 free credit on install if free_credit_used is false
     const userIntegration = await getUserIntegration(targetUserId);
@@ -336,20 +385,23 @@ export async function GET(request: Request) {
       console.warn("Webhook registration warning:", whErr instanceof Error ? whErr.message : whErr);
     }
 
-    // SEC-09: revoke stored access as soon as the app is removed.
-    try {
-      await fetch(shopifyAdminRestUrl(shop, "webhooks.json"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": accessToken,
-        },
-        body: JSON.stringify({
-          webhook: { topic: "app/uninstalled", address: webhookUrl, format: "json" },
-        }),
-      });
-    } catch (whErr) {
-      console.warn("Uninstall webhook registration warning:", whErr instanceof Error ? whErr.message : whErr);
+    // SEC-09: revoke stored access as soon as the app is removed. shop/update
+    // lets a myshopify domain change be followed by shop id (task 3.1).
+    for (const topic of ["app/uninstalled", "shop/update"]) {
+      try {
+        await fetch(shopifyAdminRestUrl(shop, "webhooks.json"), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
+          },
+          body: JSON.stringify({
+            webhook: { topic, address: webhookUrl, format: "json" },
+          }),
+        });
+      } catch (whErr) {
+        console.warn(`${topic} webhook registration warning:`, whErr instanceof Error ? whErr.message : whErr);
+      }
     }
 
     // Onboarding: skip the audit for completed merchants, paid-plan intents,

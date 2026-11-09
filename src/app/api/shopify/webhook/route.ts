@@ -8,7 +8,7 @@ import {
   uninstallClearsCredentials,
   webhookShopDomain,
 } from "@/modules/workspaces/lifecycle";
-import { beginUninstall, shopOperationsAllowed } from "@/modules/workspaces/repository";
+import { beginUninstall, recordShopUpdate, shopOperationsAllowed } from "@/modules/workspaces/repository";
 import { createHash } from "crypto";
 import { after } from "next/server";
 
@@ -189,6 +189,25 @@ async function handleUninstall(request: Request, headerDomain: string, payload: 
   }
 }
 
+/**
+ * shop/update: keeps the shop's myshopify domain current, by Shopify's shop
+ * id, so the pre-exchange ownership check still finds the owner of a renamed
+ * shop. Recorded before answering; a failure returns 500 and Shopify retries.
+ */
+async function handleShopUpdate(payload: ShopifyOrderPayload & { myshopify_domain?: string; name?: string }): Promise<Response> {
+  const shopifyShopId = parseShopifyShopId(payload.id);
+  const domain = webhookShopDomain({ myshopify_domain: payload.myshopify_domain }, null);
+  if (!shopifyShopId || !domain) return Response.json({ received: true }, { status: 200 });
+  try {
+    await recordShopUpdate(shopifyShopId, domain, typeof payload.name === "string" ? payload.name : null);
+    return Response.json({ received: true }, { status: 200 });
+  } catch (err) {
+    console.error("shop/update webhook failed:", err instanceof Error ? err.message : "unknown");
+    captureBackgroundFailure("shopify-shop-update", err);
+    return new Response("Shop update could not be recorded", { status: 500 });
+  }
+}
+
 /** Runs after the response is sent, so Shopify gets its 200 immediately. */
 async function processWebhook(shopDomain: string, topic: string | null, payload: ShopifyOrderPayload) {
   // A disconnected, uninstalled or deleting workspace starts no new work.
@@ -272,6 +291,7 @@ export async function POST(request: Request) {
   }
 
   if (topicHeader === "app/uninstalled") return handleUninstall(request, shopDomain, payload, rawBody);
+  if (topicHeader === "shop/update") return handleShopUpdate(payload);
 
   // Repeat delivery of this exact webhook: acknowledge and do nothing.
   const webhookId = request.headers.get("X-Shopify-Webhook-Id");

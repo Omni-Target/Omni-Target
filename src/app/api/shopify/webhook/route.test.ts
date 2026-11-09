@@ -63,12 +63,16 @@ const h = vi.hoisted(() => {
   };
   return {
     state, from, verify: vi.fn(), sync: vi.fn(), revoke: vi.fn(), capture: vi.fn(),
-    beginUninstall: vi.fn(), operationsAllowed: vi.fn(),
+    beginUninstall: vi.fn(), operationsAllowed: vi.fn(), recordShopUpdate: vi.fn(),
   };
 });
 
 vi.mock("@/lib/observability/capture", () => ({ captureBackgroundFailure: h.capture }));
-vi.mock("@/modules/workspaces/repository", () => ({ beginUninstall: h.beginUninstall, shopOperationsAllowed: h.operationsAllowed }));
+vi.mock("@/modules/workspaces/repository", () => ({
+  beginUninstall: h.beginUninstall,
+  shopOperationsAllowed: h.operationsAllowed,
+  recordShopUpdate: h.recordShopUpdate,
+}));
 
 vi.mock("@/lib/db", () => ({ supabaseAdmin: { from: h.from }, disconnectShopInstallation: h.revoke }));
 vi.mock("@/lib/verify-shopify-hmac", () => ({ verifyShopifyHmac: h.verify }));
@@ -116,6 +120,7 @@ beforeEach(() => {
   h.revoke.mockReset().mockResolvedValue(true);
   h.capture.mockReset();
   h.beginUninstall.mockReset().mockResolvedValue({ outcome: "pending_deletion" });
+  h.recordShopUpdate.mockReset().mockResolvedValue({ outcome: "unchanged" });
   h.operationsAllowed.mockReset().mockResolvedValue(true);
   fetchMock.mockReset().mockResolvedValue(new Response(JSON.stringify({ events_received: 1 }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
@@ -178,6 +183,21 @@ describe("app/uninstalled lifecycle (Phase 1 task 3, SEC-09)", () => {
   it("does not report a successful uninstall", async () => {
     await deliver({ id: 1 }, "app/uninstalled");
     expect(h.capture).not.toHaveBeenCalled();
+  });
+});
+
+describe("shop/update (Phase 1 task 3.1)", () => {
+  it("records a domain change by shop id from the signed body before answering", async () => {
+    const response = await deliver({ id: 548380009, myshopify_domain: "Renamed.myshopify.com", name: "Renamed" }, "shop/update");
+    expect(response.status).toBe(200);
+    expect(h.recordShopUpdate).toHaveBeenCalledWith(548380009, "renamed.myshopify.com", "Renamed");
+    expect(h.state.afterTasks).toHaveLength(0);
+  });
+
+  it("answers 500 so Shopify retries when it cannot be recorded", async () => {
+    h.recordShopUpdate.mockRejectedValue(new Error("db down"));
+    expect((await deliver({ id: 1, myshopify_domain: "s.myshopify.com" }, "shop/update")).status).toBe(500);
+    expect(h.capture).toHaveBeenCalledWith("shopify-shop-update", expect.any(Error));
   });
 });
 

@@ -114,22 +114,47 @@ async function call<T>(fn: string, args: Record<string, unknown>): Promise<T> {
   return data as T;
 }
 
-// ── Connection ──────────────────────────────────────────────────────────────
+// ── Connection, always under the shop's install lease (0019) ───────────────
 
-/** Read-only check, by domain, before any OAuth code is exchanged. */
-export async function preflightShopConnection(domain: string, actor: string): Promise<ConnectOutcome> {
-  const result = await call<{ outcome: ConnectOutcome }>("shop_connection_preflight", { p_domain: domain, p_actor: actor });
+const installLeaseKey = (domain: string) => `install:${domain}`;
+
+/** A holder id, or null while another installation for this shop is in progress. */
+export const acquireInstallLease = (domain: string, actor: string, ttlSeconds: number) =>
+  call<string | null>("acquire_shop_lease", {
+    p_key: installLeaseKey(domain),
+    p_purpose: "install",
+    p_actor: actor,
+    p_ttl_seconds: ttlSeconds,
+  });
+
+export async function releaseInstallLease(domain: string, holder: string): Promise<void> {
+  await call<boolean>("release_shop_lease", { p_key: installLeaseKey(domain), p_holder: holder });
+}
+
+export const installLeaseHeld = (domain: string, holder: string) =>
+  call<boolean>("shop_lease_held", { p_key: installLeaseKey(domain), p_holder: holder });
+
+/** Ownership, or an approved transfer, decided while holding the lease and before any code exchange. */
+export async function connectCheckUnderLease(domain: string, holder: string, actor: string, transferId: string | null) {
+  const result = await call<{ outcome: ConnectOutcome | "rejected_lease_lost" | "rejected_transfer_not_ready" }>(
+    "connect_check_under_lease",
+    { p_lease_domain: domain, p_holder: holder, p_actor: actor, p_transfer: transferId },
+  );
   return result.outcome;
 }
 
-export function bindShopForInstall(input: {
+export function bindShopUnderLease(input: {
+  leaseDomain: string;
+  holder: string;
   shopifyShopId: number;
   domain: string;
   actor: string;
   selectedWorkspaceId: string | null;
   shopName: string | null;
-}): Promise<BindResult> {
-  return call<BindResult>("bind_shop_for_install", {
+}): Promise<BindResult | { outcome: "rejected_lease_lost" }> {
+  return call("bind_shop_under_lease", {
+    p_lease_domain: input.leaseDomain,
+    p_holder: input.holder,
     p_shopify_shop_id: input.shopifyShopId,
     p_domain: input.domain,
     p_actor: input.actor,
@@ -137,6 +162,23 @@ export function bindShopForInstall(input: {
     p_shop_name: input.shopName,
   });
 }
+
+export const completeTransferUnderLease = (input: { leaseDomain: string; holder: string; transferId: string; requester: string; shopifyShopId: number }) =>
+  call<{ outcome: "completed" | "rejected_lease_lost"; workspace_id?: string; previous_workspace_id?: string }>("complete_transfer_under_lease", {
+    p_lease_domain: input.leaseDomain,
+    p_holder: input.holder,
+    p_transfer: input.transferId,
+    p_requester: input.requester,
+    p_shopify_shop_id: input.shopifyShopId,
+  });
+
+/** shop/update: follows a domain change by Shopify's shop id. */
+export const recordShopUpdate = (shopifyShopId: number, domain: string, name: string | null) =>
+  call<{ outcome: "domain_updated" | "unchanged" | "unknown_shop" | "conflict" | "ignored" }>("record_shop_update", {
+    p_shopify_shop_id: shopifyShopId,
+    p_domain: domain,
+    p_name: name,
+  });
 
 /** The actor's workspace that currently holds this shop and is active, if any. */
 export async function activeWorkspaceForShop(domain: string, actor: string): Promise<string | null> {
@@ -233,13 +275,6 @@ export const verifyOwnershipTransfer = (transferId: string, requester: string, d
 
 export const approveOwnershipTransfer = (transferId: string, approver: string) =>
   call<{ outcome: "approved" }>("approve_ownership_transfer", { p_transfer: transferId, p_approver: approver });
-
-export const completeOwnershipTransfer = (transferId: string, requester: string, shopifyShopId: number) =>
-  call<{ outcome: "completed"; workspace_id: string; previous_workspace_id: string }>("complete_ownership_transfer", {
-    p_transfer: transferId,
-    p_requester: requester,
-    p_shopify_shop_id: shopifyShopId,
-  });
 
 export const cancelOwnershipTransfer = (transferId: string, actor: string) =>
   call<{ outcome: string }>("cancel_ownership_transfer", { p_transfer: transferId, p_actor: actor });

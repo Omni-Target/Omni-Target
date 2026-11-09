@@ -14,7 +14,7 @@ export const runtime = "nodejs";
  * scheduled. Reports only unless called with ?apply=true, and never removes a
  * subscription. See scripts/ops/runbooks/webhook-rollout.md.
  */
-const REQUIRED_TOPICS = ["orders/paid", "app/uninstalled"];
+const REQUIRED_TOPICS = ["orders/paid", "app/uninstalled", "shop/update"];
 const PAGE_SIZE = 25;
 const SHOPIFY_TIMEOUT_MS = 8_000;
 

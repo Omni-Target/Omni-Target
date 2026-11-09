@@ -24,7 +24,7 @@ Implements `architecture/decisions/0001-one-shop-one-workspace.md`. Built and te
 | `ownership_transfers` | `shop_id`, `from_workspace_id`, `to_workspace_id`, `requested_by_clerk_user_id`, `reason`, `status`, `requested_at`, `shopify_verified_at`, `approved_at`, `approved_by_clerk_user_id`, `completed_at`, `closed_at`, `expires_at` | `status` in `requested`, `verified`, `approved`, `completed`, `cancelled`, `expired`. One open transfer per shop. `to_workspace_id` stays null until completion creates the workspace, unless the requester named an empty one. Expires after 7 days |
 | `legacy_shop_claims` | `legacy_source`, `legacy_row_id`, `clerk_user_id`, `claimed_domain`, `workspace_id`, `status`, `shop_id`, `confirmed_at`, `reviewed_by`, `review_note` | Unique (`legacy_source`, `legacy_row_id`). `status` in `provisional`, `contested`, `confirmed`, `unresolved`, `rejected`; `shop_id` set exactly when `confirmed` |
 
-`campaigns.workspace_id` is added, nullable. The other tenant tables get theirs in 0022.
+`campaigns.workspace_id` is added, nullable. The other tenant tables get theirs in 0023.
 
 A shop row keeps only its ID and domain after deletion, as the identity record that financial history refers to.
 
@@ -50,13 +50,28 @@ Each is one SQL function and one transaction. Installation and transfer completi
 | `workspace_for_actor`, `list_workspaces`, `workspace_credit_balance`, `campaign_for_actor` | Reads for an authenticated actor. Another user's workspace, or one being deleted, raises `workspace_access_denied`. A campaign is visible only to its creator, in its own workspace |
 | `workspace_can_operate(workspace)`, `shop_operations_allowed(domain)` | True only for an `active` workspace that holds its binding and has no open deletion. Every Shopify token is issued through this check, so disconnected, uninstalled and deleting workspaces start no sync or webhook work. A shop not yet modelled keeps legacy behaviour |
 
+### Installation under a shop lease (migration 0019, task 3.1)
+
+Shopify keeps one current offline token per app and store, and exchanging an OAuth code retires the earlier ones. The callback therefore serialises each installation on `shop_leases`:
+
+1. Validate the callback (HMAC, state, shop domain).
+2. Take the `install:<myshopify domain>` lease (`acquire_shop_lease`, 60 seconds). The domain is the only shop identifier available before the exchange. While another installation holds it, the callback waits briefly, then asks the merchant to retry.
+3. Decide under the lease, before any exchange (`connect_check_under_lease`): ownership for a connection, or an approved, unexpired transfer for a completion. A refused account never reaches the exchange.
+4. Exchange the code and read Shopify's shop id. No database transaction is open meanwhile.
+5. Commit with `bind_shop_under_lease` or `complete_transfer_under_lease`. Each locks the lease row in the same transaction and refuses (`rejected_lease_lost`) when it no longer names this callback.
+6. Store the credential only if the lease is still held, then release it. Task 4 moves the credential write into step 5's transaction.
+
+A lease left by a crashed callback is taken over once expired. The application role can no longer call `bind_shop_for_install` or `complete_ownership_transfer` directly, so no path skips the lease.
+
+A merchant can change the myshopify domain once. `shop/update` webhooks (`record_shop_update`) follow such a change by shop id, so step 3 keeps finding the owner of a renamed shop. Until that webhook arrives, a renamed shop's new domain is unknown to step 3. The same holds until the owner's next connection, which also records it by shop id.
+
 Shop data deletion, workspace closure and Clerk identity deletion stay separate. Deleting a workspace never deletes the owner's Clerk identity, their other workspaces or anyone else's data, and unused credits are left untouched pending the open policy decision.
 
 ### Transitional behaviour until tasks 4 to 6
 
 - `user_integrations` holds one Shopify credential per Clerk user. Connecting a second store replaces it, so the previous store's workspace is disconnected (binding, data and credits kept; reconnecting restores it). Task 4 moves credentials to `shop_credentials`, after which an account can keep several stores connected.
 - Balances still come from `user_integrations`. `credit_accounts` starts at zero until the ledger and opening balances of task 5.
-- New campaigns are not yet attributed to a workspace (0022). Deletion removes attributed campaigns and, through the legacy redaction, unattributed ones for the shop; a campaign attributed to another workspace is never touched.
+- New campaigns are not yet attributed to a workspace (0023). Deletion removes attributed campaigns and, through the legacy redaction, unattributed ones for the shop; a campaign attributed to another workspace is never touched.
 - The legacy redaction still clears generation receipts and Meta events per Clerk user rather than per workspace.
 
 ## Credentials
@@ -123,7 +138,7 @@ Run as a dry run first, which writes a report. Then it is applied per account, i
 5. **Purchases.** Known claimed purchases are recorded in `provider_purchases` against their existing account. A new workspace never inherits an older purchase.
 6. **Orphans**, such as payments or usage with no account, are recorded in `legacy_orphans` and not attached anywhere.
 
-Mapping tables: `legacy_shop_claims` (0018), and `legacy_account_map`, `credit_migration_review`, `legacy_orphans` (0021).
+Mapping tables: `legacy_shop_claims` (0018), and `legacy_account_map`, `credit_migration_review`, `legacy_orphans` (0022).
 
 ## Migration sequence
 
@@ -132,14 +147,17 @@ Historical files `0001` to `0017` are kept unchanged. A schema baseline taken at
 | Migration | Contents |
 |---|---|
 | `0018_workspaces_and_shop_bindings` | Workspaces, credit accounts, shops, bindings, events, lifecycle events, compliance requests, deletions, transfers, legacy claims, `campaigns.workspace_id`, and their functions (implemented) |
-| `0019_encrypted_credentials` | Shop and Meta credentials, refresh locks |
-| `0020_credit_ledger` | Accounts, ledger, entitlements, intents, provider purchases, sync state, canonical functions |
-| `0021_legacy_mapping` | Mapping and review tables |
-| `0022_workspace_columns` | `workspace_id` on tenant tables, with indexes |
-| `0023_commerce_model` | Products, variants, inventory, locations, orders, line items, minimal customers, returns, metafields, metaobject definitions and metaobjects, shop settings and access |
-| `0024_sync_inbox_metrics` | Sync runs and checkpoints, webhook inbox, metrics |
-| `0025_capacity_snapshots` | Daily size snapshots |
-| `0026_brief_evidence_archive` | Archive tracking for trimmed briefs |
+| `0019_shop_leases` | Per-shop install and refresh leases, lease-guarded install functions, `record_shop_update` (task 3.1, implemented) |
+| `0020_encrypted_credentials` | Shop and Meta credentials, refresh coordination |
+| `0021_credit_ledger` | Accounts, ledger, entitlements, intents, provider purchases, sync state, canonical functions |
+| `0022_legacy_mapping` | Mapping and review tables |
+| `0023_workspace_columns` | `workspace_id` on tenant tables, with indexes |
+| `0024_commerce_model` | Products, variants, inventory, locations, orders, line items, minimal customers, returns, metafields, metaobject definitions and metaobjects, shop settings and access |
+| `0025_sync_inbox_metrics` | Sync runs and checkpoints, webhook inbox, metrics |
+| `0026_capacity_snapshots` | Daily size snapshots |
+| `0027_brief_evidence_archive` | Archive tracking for trimmed briefs |
+
+Task 3.1 took `0019`, so every later migration moved up by one.
 
 Every migration has a down script, runs against a database that already holds data, and changes no existing rows. Data moves only through the dry-run-first migration scripts.
 

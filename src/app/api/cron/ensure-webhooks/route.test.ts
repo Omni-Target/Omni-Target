@@ -52,7 +52,7 @@ describe("ensure-webhooks rollout", () => {
   });
 
   it("reports missing topics without creating anything by default", async () => {
-    shopifyHas([{ topic: "orders/paid", address: ADDRESS }]);
+    shopifyHas([{ topic: "orders/paid", address: ADDRESS }, { topic: "shop/update", address: ADDRESS }]);
     const body = await (await call()).json();
     expect(body.dryRun).toBe(true);
     expect(body.results[0]).toMatchObject({ status: "missing", missing: ["app/uninstalled"], created: [] });
@@ -60,7 +60,7 @@ describe("ensure-webhooks rollout", () => {
   });
 
   it("creates only the missing topics when applying", async () => {
-    shopifyHas([{ topic: "orders/paid", address: ADDRESS }]);
+    shopifyHas([{ topic: "orders/paid", address: ADDRESS }, { topic: "shop/update", address: ADDRESS }]);
     const body = await (await call("?apply=true")).json();
     expect(body.results[0]).toMatchObject({ status: "repaired", created: ["app/uninstalled"] });
     expect(posts()).toHaveLength(1);
@@ -69,7 +69,7 @@ describe("ensure-webhooks rollout", () => {
 
   it("leaves a complete shop alone", async () => {
     shopifyHas([
-      { topic: "orders/paid", address: ADDRESS },
+      { topic: "orders/paid", address: ADDRESS }, { topic: "shop/update", address: ADDRESS },
       { topic: "app/uninstalled", address: ADDRESS },
     ]);
     const body = await (await call("?apply=true")).json();
@@ -81,13 +81,14 @@ describe("ensure-webhooks rollout", () => {
     shopifyHas([
       { topic: "orders/paid", address: "https://old.test/hook" },
       { topic: "app/uninstalled", address: ADDRESS },
+      { topic: "shop/update", address: ADDRESS },
     ]);
     const body = await (await call()).json();
     expect(body.results[0].missing).toEqual(["orders/paid"]);
   });
 
   it("does not claim success when Shopify rejects a subscription with 422", async () => {
-    shopifyHas([{ topic: "orders/paid", address: ADDRESS }], 422);
+    shopifyHas([{ topic: "orders/paid", address: ADDRESS }, { topic: "shop/update", address: ADDRESS }], 422);
     const body = await (await call("?apply=true")).json();
     expect(body.results[0]).toMatchObject({ status: "partial", created: [], reason: "create_422" });
   });
@@ -97,7 +98,7 @@ describe("ensure-webhooks rollout", () => {
     fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
       if (init?.method === "POST") return new Response("{}", { status: 422 });
       lists += 1;
-      const hooks = [{ topic: "orders/paid", address: ADDRESS }];
+      const hooks = [{ topic: "orders/paid", address: ADDRESS }, { topic: "shop/update", address: ADDRESS }];
       if (lists > 1) hooks.push({ topic: "app/uninstalled", address: ADDRESS });
       return new Response(JSON.stringify({ webhooks: hooks }), { status: 200 });
     });

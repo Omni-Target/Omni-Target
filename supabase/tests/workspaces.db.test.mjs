@@ -1,7 +1,10 @@
 /**
  * Real Postgres tests for workspaces and shop bindings (Phase 1, task 3).
- * Every workspace function is called as service_role, the role the app uses,
- * against a throwaway database with synthetic shops and users only.
+ * Workspace functions are called as service_role, the role the app uses,
+ * against a throwaway database with synthetic shops and users only. The two
+ * unguarded install functions the app may no longer call directly since 0019
+ * (bind_shop_for_install, complete_ownership_transfer) are tested as the owner;
+ * the app reaches them only under a lease (see src/modules/workspaces/install.db.test.ts).
  *
  *   TEST_DATABASE_URL=postgresql://...@127.0.0.1:5432/postgres pnpm test:db
  */
@@ -36,9 +39,15 @@ async function asService(sql, params) {
   }
 }
 
+const invocation = (fn, args) => `select public.${fn}(${args.map((_, i) => `$${i + 1}`).join(", ")}) as result`;
+
 async function call(fn, ...args) {
-  const [row] = await asService(`select public.${fn}(${args.map((_, i) => `$${i + 1}`).join(", ")}) as result`, args);
+  const [row] = await asService(invocation(fn, args), args);
   return row.result;
+}
+
+async function asOwner(fn, ...args) {
+  return (await q(invocation(fn, args), args))[0].result;
 }
 
 let counter = 0;
@@ -49,10 +58,10 @@ const shopId = () => String(Math.floor(Math.random() * 9e12) + 1e12);
 const dbNow = async () => (await q("select clock_timestamp()::text as t"))[0].t;
 
 async function install({ actor = user(), id = shopId(), shop = domain(), selected = null } = {}) {
-  const result = await call("bind_shop_for_install", id, shop, actor, selected, "Test shop");
+  const result = await asOwner("bind_shop_for_install", id, shop, actor, selected, "Test shop");
   return { actor, id, shop, result, workspace: result.workspace_id };
 }
-const bind = (s, actor) => call("bind_shop_for_install", s.id, s.shop, actor, null, null);
+const bind = (s, actor) => asOwner("bind_shop_for_install", s.id, s.shop, actor, null, null);
 const uninstall = async (s, { key = randomUUID(), at } = {}) => call("begin_uninstall", s.id, s.shop, key, at ?? (await dbNow()));
 const redact = async (s, { key = randomUUID(), at } = {}) => call("record_shop_redact", s.id, s.shop, key, at ?? (await dbNow()));
 
@@ -138,11 +147,11 @@ describe("provisioning", () => {
   it("follows a domain change by Shopify ID and refuses a domain held by another shop", async () => {
     const s = await install();
     const renamed = domain();
-    expect((await call("bind_shop_for_install", s.id, renamed, s.actor, null, null)).outcome).toBe("already_bound");
+    expect((await asOwner("bind_shop_for_install", s.id, renamed, s.actor, null, null)).outcome).toBe("already_bound");
     const [shop] = await q("select myshopify_domain, domain_changed_at from public.shops where shopify_shop_id = $1", [s.id]);
     expect(shop.myshopify_domain).toBe(renamed);
     expect(shop.domain_changed_at).not.toBeNull();
-    expect((await call("bind_shop_for_install", shopId(), renamed, s.actor, null, null)).outcome).toBe("rejected_identity_conflict");
+    expect((await asOwner("bind_shop_for_install", shopId(), renamed, s.actor, null, null)).outcome).toBe("rejected_identity_conflict");
   });
 });
 
@@ -207,11 +216,11 @@ describe("ownership transfer", () => {
   it("cannot complete without Shopify verification and the current owner's approval", async () => {
     const { s, requester, transfer } = await requested();
     await expect(call("approve_ownership_transfer", transfer, s.actor)).rejects.toThrow("transfer_not_approvable");
-    await expect(call("complete_ownership_transfer", transfer, requester, s.id)).rejects.toThrow("transfer_not_approved");
+    await expect(asOwner("complete_ownership_transfer", transfer, requester, s.id)).rejects.toThrow("transfer_not_approved");
     await expect(call("verify_ownership_transfer", transfer, requester, domain())).rejects.toThrow("transfer_shop_mismatch");
     await expect(call("verify_ownership_transfer", transfer, user(), s.shop)).rejects.toThrow("transfer_access_denied");
     await call("verify_ownership_transfer", transfer, requester, s.shop);
-    await expect(call("complete_ownership_transfer", transfer, requester, s.id)).rejects.toThrow("transfer_not_approved");
+    await expect(asOwner("complete_ownership_transfer", transfer, requester, s.id)).rejects.toThrow("transfer_not_approved");
     await expect(call("approve_ownership_transfer", transfer, requester)).rejects.toThrow("transfer_access_denied");
     await expect(call("approve_ownership_transfer", transfer, user())).rejects.toThrow("transfer_access_denied");
     expect((await currentBinding(s.shop)).workspace_id).toBe(s.workspace);
@@ -223,7 +232,7 @@ describe("ownership transfer", () => {
     const lamp = await campaign(s.actor, s.workspace);
     await call("verify_ownership_transfer", transfer, requester, s.shop);
     await call("approve_ownership_transfer", transfer, s.actor);
-    const done = await call("complete_ownership_transfer", transfer, requester, s.id);
+    const done = await asOwner("complete_ownership_transfer", transfer, requester, s.id);
     expect(done).toMatchObject({ outcome: "completed", previous_workspace_id: s.workspace });
 
     expect(await currentBinding(s.shop)).toMatchObject({ workspace_id: done.workspace_id, bound_by_clerk_user_id: requester, transfer_id: transfer });
@@ -467,8 +476,8 @@ describe("legacy ownership claims", () => {
     for (const claimed of [null, "", "not a shop", "shop.example.com"]) {
       expect((await register(user(), claimed)).status, String(claimed)).toBe("unresolved");
     }
-    expect(await call("bind_shop_for_install", null, domain(), user(), null, null)).toEqual({ outcome: "rejected_invalid_identity" });
-    expect(await call("bind_shop_for_install", shopId(), "shop.example.com", user(), null, null)).toEqual({ outcome: "rejected_invalid_identity" });
+    expect(await asOwner("bind_shop_for_install", null, domain(), user(), null, null)).toEqual({ outcome: "rejected_invalid_identity" });
+    expect(await asOwner("bind_shop_for_install", shopId(), "shop.example.com", user(), null, null)).toEqual({ outcome: "rejected_invalid_identity" });
     expect(await call("shop_connection_preflight", "shop.example.com", user())).toEqual({ outcome: "rejected_invalid_identity" });
   });
 
@@ -496,7 +505,7 @@ describe("tenant isolation and access", () => {
   });
 
   it("gives client roles nothing, and the application role reads plus the workspace functions only", async () => {
-    const tables = ["workspaces", "credit_accounts", "shops", "shop_bindings", "workspace_events", "shop_lifecycle_events",
+    const tables = ["workspaces", "credit_accounts", "shops", "shop_bindings", "workspace_events", "shop_lifecycle_events", "shop_leases",
       "compliance_requests", "workspace_deletions", "ownership_transfers", "legacy_shop_claims"];
     for (const table of tables) {
       const [row] = await q(
@@ -509,10 +518,16 @@ describe("tenant isolation and access", () => {
     const privilege = async (fn) => (await q(
       `select has_function_privilege('anon', $1, 'execute') as anon, has_function_privilege('authenticated', $1, 'execute') as authed,
               has_function_privilege('service_role', $1, 'execute') as service`, [`public.${fn}`]))[0];
-    for (const fn of ["log_workspace_event(uuid,uuid,text,text,text,timestamptz,jsonb)", "find_shop(bigint,text)", "shop_has_open_redaction(bigint,text)"]) {
+    for (const fn of [
+      "log_workspace_event(uuid,uuid,text,text,text,timestamptz,jsonb)", "find_shop(bigint,text)", "shop_has_open_redaction(bigint,text)",
+      "bind_shop_for_install(bigint,text,text,uuid,text)", "complete_ownership_transfer(uuid,text,bigint)", "hold_shop_lease(text,uuid)",
+    ]) {
       expect(await privilege(fn), fn).toEqual({ anon: false, authed: false, service: false });
     }
-    for (const fn of ["bind_shop_for_install(bigint,text,text,uuid,text)", "begin_uninstall(bigint,text,text,timestamptz)", "workspace_for_actor(uuid,text)"]) {
+    for (const fn of [
+      "bind_shop_under_lease(text,uuid,bigint,text,text,uuid,text)", "acquire_shop_lease(text,text,text,integer)",
+      "begin_uninstall(bigint,text,text,timestamptz)", "workspace_for_actor(uuid,text)",
+    ]) {
       expect(await privilege(fn), fn).toEqual({ anon: false, authed: false, service: true });
     }
   });
