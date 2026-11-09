@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { rpc, from } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn() }));
-vi.mock("@supabase/supabase-js", () => ({ createClient: () => ({ rpc, from }) }));
+vi.mock("@/platform/supabase", () => ({ supabaseAdmin: { rpc, from } }));
 
 import { commitBriefGeneration, getGenerationReceipt, getGenerationReceiptById, isBriefRegenerationCommitReady, logApiUsage, saveRecoveredCreativeHooks } from "./db";
 

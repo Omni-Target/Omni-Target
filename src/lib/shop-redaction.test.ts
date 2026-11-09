@@ -17,8 +17,8 @@ const h = vi.hoisted(() => {
   });
   return { state, from };
 });
-vi.mock("@supabase/supabase-js", () => ({
-  createClient: () => ({ rpc: h.state.rpc, from: h.from }),
+vi.mock("@/platform/supabase", () => ({
+  supabaseAdmin: { rpc: h.state.rpc, from: h.from },
 }));
 
 import { deleteUserData, disconnectShopInstallation, redactShopData } from "./db";

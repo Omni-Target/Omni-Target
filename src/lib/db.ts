@@ -1,11 +1,10 @@
-import { createClient } from "@supabase/supabase-js";
+import "server-only";
+import { supabaseAdmin } from "@/platform/supabase";
 import type { UserIntegration } from "@/lib/types/integration";
 
-// Supabase client should only be instantiated inside /lib/db.ts and nowhere else in the codebase.
-export const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// The client lives in src/platform/supabase.ts, behind server-only and a
+// validated environment. Re-exported so existing call sites are unchanged.
+export { supabaseAdmin };
 
 /**
  * Get user integration record by Clerk User ID.

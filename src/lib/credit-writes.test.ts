@@ -25,8 +25,8 @@ const supabase = vi.hoisted(() => {
   return { state, builder };
 });
 
-vi.mock("@supabase/supabase-js", () => ({
-  createClient: () => ({ rpc: supabase.state.rpc, from: supabase.builder }),
+vi.mock("@/platform/supabase", () => ({
+  supabaseAdmin: { rpc: supabase.state.rpc, from: supabase.builder },
 }));
 vi.mock("./shopify-token", () => ({ getValidShopifyToken: vi.fn() }));
 
