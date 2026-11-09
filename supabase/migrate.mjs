@@ -103,7 +103,8 @@ async function withClient(fn) {
   }
   const client = new pg.Client({
     connectionString,
-    ssl: { rejectUnauthorized: false },
+    // Local and CI databases have no TLS; hosted ones do.
+    ssl: /@(127\.0\.0\.1|localhost)[:/]/.test(connectionString) ? false : { rejectUnauthorized: false },
     connectionTimeoutMillis: 10_000,
   });
   await client.connect();
@@ -262,7 +263,9 @@ function create(name) {
   console.log(`Created supabase/migrations/${seq}_${slug}.sql`);
 }
 
-loadEnvLocal();
+// A connection passed explicitly always wins: .env.local is read only when none
+// is set, so a run aimed at a local or CI database can never fall back to it.
+if (!getConnectionString()) loadEnvLocal();
 const [cmd, ...args] = process.argv.slice(2);
 
 switch (cmd) {

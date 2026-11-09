@@ -3,6 +3,18 @@
 Versioned, ordered SQL migrations applied by [`supabase/migrate.mjs`](../migrate.mjs)
 — a small migrate-mongo-style runner for Postgres/Supabase.
 
+## Fresh databases
+
+An empty database (CI, or a local throwaway Postgres) is built from the schema baseline at migration 0017 plus every later migration:
+
+```bash
+DATABASE_URL=postgresql://... node supabase/provision.mjs
+```
+
+See [`supabase/baseline/README.md`](../baseline/README.md). Existing databases, including staging, keep using `pnpm migrate`.
+
+A connection passed in the environment always takes precedence. `.env.local` is read only when none is set.
+
 ## Setup (one-time)
 
 The Supabase **service-role key cannot run DDL**, so the runner connects to

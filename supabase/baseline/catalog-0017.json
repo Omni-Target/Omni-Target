@@ -1,0 +1,2006 @@
+{
+  "server_version_major": 17,
+  "tables": [
+    {
+      "name": "api_usage_log",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "brief_generation_receipts",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "campaign_brief_versions",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "campaigns",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "capi_events",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "credit_adjustments",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "credit_usage",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "email_log",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "exchange_rate_cache",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "payments",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "processed_payments",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "rate_limits",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "schema_migrations",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "security_lockdown_0012_state",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "shopify_refresh_locks",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "user_integrations",
+      "rls": true,
+      "force_rls": false
+    },
+    {
+      "name": "webhook_deliveries",
+      "rls": true,
+      "force_rls": false
+    }
+  ],
+  "columns": [
+    {
+      "t": "api_usage_log",
+      "c": "id",
+      "type": "uuid",
+      "udt": "uuid",
+      "nullable": "NO",
+      "def": "gen_random_uuid()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "api_usage_log",
+      "c": "user_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "api_usage_log",
+      "c": "feature",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "api_usage_log",
+      "c": "input_tokens",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "api_usage_log",
+      "c": "output_tokens",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "api_usage_log",
+      "c": "total_tokens",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "api_usage_log",
+      "c": "created_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "api_usage_log",
+      "c": "model",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "api_usage_log",
+      "c": "cache_creation_input_tokens",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "api_usage_log",
+      "c": "cache_read_input_tokens",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "brief_generation_receipts",
+      "c": "clerk_user_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "brief_generation_receipts",
+      "c": "request_id",
+      "type": "uuid",
+      "udt": "uuid",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "brief_generation_receipts",
+      "c": "request_hash",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "brief_generation_receipts",
+      "c": "response",
+      "type": "jsonb",
+      "udt": "jsonb",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "brief_generation_receipts",
+      "c": "created_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "NO",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "c": "id",
+      "type": "uuid",
+      "udt": "uuid",
+      "nullable": "NO",
+      "def": "gen_random_uuid()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "c": "campaign_id",
+      "type": "uuid",
+      "udt": "uuid",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "c": "clerk_user_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "c": "attempt_number",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "NO",
+      "def": "1",
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "c": "headline",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "c": "primary_text",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "c": "description",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "c": "cta",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "c": "copywriter_note",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "c": "is_selected",
+      "type": "boolean",
+      "udt": "bool",
+      "nullable": "NO",
+      "def": "false",
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "c": "created_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "c": "brief_data",
+      "type": "jsonb",
+      "udt": "jsonb",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "id",
+      "type": "uuid",
+      "udt": "uuid",
+      "nullable": "NO",
+      "def": "gen_random_uuid()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "clerk_user_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "brand_name",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "product_name",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "product_description",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "target_audience",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "campaign_goal",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "tone_preference",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "platform",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "media_url",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "headline",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "primary_text",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "description",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "cta",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "copywriter_note",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "meta_campaign_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "meta_adset_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "meta_ad_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "meta_creative_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "status",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": "'draft'::text",
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "brief_data",
+      "type": "jsonb",
+      "udt": "jsonb",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "targeting_data",
+      "type": "jsonb",
+      "udt": "jsonb",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "store_insights",
+      "type": "jsonb",
+      "udt": "jsonb",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "launched_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "created_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "updated_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "campaigns",
+      "c": "product_price",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "capi_events",
+      "c": "id",
+      "type": "uuid",
+      "udt": "uuid",
+      "nullable": "NO",
+      "def": "gen_random_uuid()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "capi_events",
+      "c": "clerk_user_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "capi_events",
+      "c": "shopify_order_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "capi_events",
+      "c": "order_value",
+      "type": "numeric",
+      "udt": "numeric",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "capi_events",
+      "c": "currency",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": "'NGN'::text",
+      "generated": "NEVER"
+    },
+    {
+      "t": "capi_events",
+      "c": "event_sent_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "capi_events",
+      "c": "meta_response",
+      "type": "jsonb",
+      "udt": "jsonb",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "capi_events",
+      "c": "status",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": "'sent'::text",
+      "generated": "NEVER"
+    },
+    {
+      "t": "capi_events",
+      "c": "shop_domain",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "capi_events",
+      "c": "event_type",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": "'Purchase'::text",
+      "generated": "NEVER"
+    },
+    {
+      "t": "credit_adjustments",
+      "c": "idempotency_key",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "credit_adjustments",
+      "c": "clerk_user_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "credit_adjustments",
+      "c": "delta",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "credit_adjustments",
+      "c": "reason",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "credit_adjustments",
+      "c": "evidence",
+      "type": "jsonb",
+      "udt": "jsonb",
+      "nullable": "NO",
+      "def": "'{}'::jsonb",
+      "generated": "NEVER"
+    },
+    {
+      "t": "credit_adjustments",
+      "c": "balance_before",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "credit_adjustments",
+      "c": "balance_after",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "credit_adjustments",
+      "c": "applied_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "NO",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "credit_usage",
+      "c": "id",
+      "type": "uuid",
+      "udt": "uuid",
+      "nullable": "NO",
+      "def": "gen_random_uuid()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "credit_usage",
+      "c": "clerk_user_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "credit_usage",
+      "c": "credits_used",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "NO",
+      "def": "1",
+      "generated": "NEVER"
+    },
+    {
+      "t": "credit_usage",
+      "c": "action",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "credit_usage",
+      "c": "created_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "email_log",
+      "c": "id",
+      "type": "uuid",
+      "udt": "uuid",
+      "nullable": "NO",
+      "def": "gen_random_uuid()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "email_log",
+      "c": "user_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "email_log",
+      "c": "template",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "email_log",
+      "c": "sent_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "exchange_rate_cache",
+      "c": "id",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "NO",
+      "def": "1",
+      "generated": "NEVER"
+    },
+    {
+      "t": "exchange_rate_cache",
+      "c": "rates",
+      "type": "jsonb",
+      "udt": "jsonb",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "exchange_rate_cache",
+      "c": "fetched_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "payments",
+      "c": "id",
+      "type": "uuid",
+      "udt": "uuid",
+      "nullable": "NO",
+      "def": "gen_random_uuid()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "payments",
+      "c": "clerk_user_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "payments",
+      "c": "provider",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "payments",
+      "c": "pack",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "payments",
+      "c": "amount_ngn",
+      "type": "numeric",
+      "udt": "numeric",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "payments",
+      "c": "amount_usd",
+      "type": "numeric",
+      "udt": "numeric",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "payments",
+      "c": "currency",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": "'NGN'::text",
+      "generated": "NEVER"
+    },
+    {
+      "t": "payments",
+      "c": "credits_granted",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "YES",
+      "def": "0",
+      "generated": "NEVER"
+    },
+    {
+      "t": "payments",
+      "c": "unlimited_days",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "YES",
+      "def": "0",
+      "generated": "NEVER"
+    },
+    {
+      "t": "payments",
+      "c": "status",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": "'pending'::text",
+      "generated": "NEVER"
+    },
+    {
+      "t": "payments",
+      "c": "provider_reference",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "payments",
+      "c": "created_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "payments",
+      "c": "updated_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "processed_payments",
+      "c": "payment_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "processed_payments",
+      "c": "processed_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "NO",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "rate_limits",
+      "c": "key",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "rate_limits",
+      "c": "count",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "NO",
+      "def": "0",
+      "generated": "NEVER"
+    },
+    {
+      "t": "rate_limits",
+      "c": "window_start",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "NO",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "schema_migrations",
+      "c": "id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "schema_migrations",
+      "c": "applied_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "NO",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "security_lockdown_0012_state",
+      "c": "object_type",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "security_lockdown_0012_state",
+      "c": "object_name",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "security_lockdown_0012_state",
+      "c": "role_name",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "security_lockdown_0012_state",
+      "c": "privileges",
+      "type": "ARRAY",
+      "udt": "_text",
+      "nullable": "NO",
+      "def": "'{}'::text[]",
+      "generated": "NEVER"
+    },
+    {
+      "t": "security_lockdown_0012_state",
+      "c": "rls_enabled_before",
+      "type": "boolean",
+      "udt": "bool",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "security_lockdown_0012_state",
+      "c": "recorded_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "NO",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "shopify_refresh_locks",
+      "c": "user_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "shopify_refresh_locks",
+      "c": "locked_until",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "id",
+      "type": "uuid",
+      "udt": "uuid",
+      "nullable": "NO",
+      "def": "gen_random_uuid()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "clerk_user_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "shopify_store_url",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "shopify_access_token",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "shopify_webhook_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "shopify_custom_domain",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "shop_domain",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "access_token",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "shopify_refresh_token",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "shopify_token_expires_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "shopify_scopes",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "refresh_token",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "token_expires_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "meta_access_token",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "meta_ad_account_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "meta_pixel_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "meta_business_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "meta_connected_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "meta_page_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "meta_page_name",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "meta_ad_accounts",
+      "type": "jsonb",
+      "udt": "jsonb",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "meta_selected_account_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "meta_pages",
+      "type": "jsonb",
+      "udt": "jsonb",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "meta_page_access_token",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "pixel_health",
+      "type": "text",
+      "udt": "text",
+      "nullable": "YES",
+      "def": "'unknown'::text",
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "pixel_installed_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "store_snapshot",
+      "type": "jsonb",
+      "udt": "jsonb",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "store_snapshot_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "credits",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "YES",
+      "def": "0",
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "credits_balance",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "YES",
+      "def": "0",
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "credits_total_purchased",
+      "type": "integer",
+      "udt": "int4",
+      "nullable": "YES",
+      "def": "0",
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "credits_unlimited_until",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "free_credit_used",
+      "type": "boolean",
+      "udt": "bool",
+      "nullable": "YES",
+      "def": "false",
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "created_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "updated_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": "now()",
+      "generated": "NEVER"
+    },
+    {
+      "t": "user_integrations",
+      "c": "shopify_uninstalled_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "YES",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "webhook_deliveries",
+      "c": "shop_domain",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "webhook_deliveries",
+      "c": "webhook_id",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "webhook_deliveries",
+      "c": "topic",
+      "type": "text",
+      "udt": "text",
+      "nullable": "NO",
+      "def": null,
+      "generated": "NEVER"
+    },
+    {
+      "t": "webhook_deliveries",
+      "c": "received_at",
+      "type": "timestamp with time zone",
+      "udt": "timestamptz",
+      "nullable": "NO",
+      "def": "now()",
+      "generated": "NEVER"
+    }
+  ],
+  "constraints": [
+    {
+      "t": "api_usage_log",
+      "name": "api_usage_log_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (id)"
+    },
+    {
+      "t": "brief_generation_receipts",
+      "name": "brief_generation_receipts_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (clerk_user_id, request_id)"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "name": "campaign_brief_versions_campaign_id_fkey",
+      "type": "f",
+      "def": "FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "name": "campaign_brief_versions_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (id)"
+    },
+    {
+      "t": "campaigns",
+      "name": "campaigns_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (id)"
+    },
+    {
+      "t": "capi_events",
+      "name": "capi_events_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (id)"
+    },
+    {
+      "t": "credit_adjustments",
+      "name": "credit_adjustments_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (idempotency_key)"
+    },
+    {
+      "t": "credit_usage",
+      "name": "credit_usage_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (id)"
+    },
+    {
+      "t": "email_log",
+      "name": "email_log_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (id)"
+    },
+    {
+      "t": "exchange_rate_cache",
+      "name": "exchange_rate_cache_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (id)"
+    },
+    {
+      "t": "exchange_rate_cache",
+      "name": "one_row",
+      "type": "c",
+      "def": "CHECK ((id = 1))"
+    },
+    {
+      "t": "payments",
+      "name": "payments_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (id)"
+    },
+    {
+      "t": "processed_payments",
+      "name": "processed_payments_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (payment_id)"
+    },
+    {
+      "t": "rate_limits",
+      "name": "rate_limits_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (key)"
+    },
+    {
+      "t": "schema_migrations",
+      "name": "schema_migrations_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (id)"
+    },
+    {
+      "t": "security_lockdown_0012_state",
+      "name": "security_lockdown_0012_state_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (object_type, object_name, role_name)"
+    },
+    {
+      "t": "shopify_refresh_locks",
+      "name": "shopify_refresh_locks_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (user_id)"
+    },
+    {
+      "t": "user_integrations",
+      "name": "user_integrations_clerk_user_id_key",
+      "type": "u",
+      "def": "UNIQUE (clerk_user_id)"
+    },
+    {
+      "t": "user_integrations",
+      "name": "user_integrations_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (id)"
+    },
+    {
+      "t": "webhook_deliveries",
+      "name": "webhook_deliveries_pkey",
+      "type": "p",
+      "def": "PRIMARY KEY (shop_domain, webhook_id)"
+    }
+  ],
+  "indexes": [
+    {
+      "t": "api_usage_log",
+      "name": "api_usage_log_pkey",
+      "def": "CREATE UNIQUE INDEX api_usage_log_pkey ON public.api_usage_log USING btree (id)"
+    },
+    {
+      "t": "brief_generation_receipts",
+      "name": "brief_generation_receipts_pkey",
+      "def": "CREATE UNIQUE INDEX brief_generation_receipts_pkey ON public.brief_generation_receipts USING btree (clerk_user_id, request_id)"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "name": "campaign_brief_versions_pkey",
+      "def": "CREATE UNIQUE INDEX campaign_brief_versions_pkey ON public.campaign_brief_versions USING btree (id)"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "name": "idx_cbv_campaign_id",
+      "def": "CREATE INDEX idx_cbv_campaign_id ON public.campaign_brief_versions USING btree (campaign_id)"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "name": "idx_cbv_user_created",
+      "def": "CREATE INDEX idx_cbv_user_created ON public.campaign_brief_versions USING btree (clerk_user_id, created_at DESC)"
+    },
+    {
+      "t": "campaigns",
+      "name": "campaigns_pkey",
+      "def": "CREATE UNIQUE INDEX campaigns_pkey ON public.campaigns USING btree (id)"
+    },
+    {
+      "t": "campaigns",
+      "name": "idx_campaigns_user_created",
+      "def": "CREATE INDEX idx_campaigns_user_created ON public.campaigns USING btree (clerk_user_id, created_at DESC)"
+    },
+    {
+      "t": "campaigns",
+      "name": "idx_campaigns_user_status",
+      "def": "CREATE INDEX idx_campaigns_user_status ON public.campaigns USING btree (clerk_user_id, status)"
+    },
+    {
+      "t": "capi_events",
+      "name": "capi_events_business_key",
+      "def": "CREATE UNIQUE INDEX capi_events_business_key ON public.capi_events USING btree (shop_domain, shopify_order_id, event_type)"
+    },
+    {
+      "t": "capi_events",
+      "name": "capi_events_pkey",
+      "def": "CREATE UNIQUE INDEX capi_events_pkey ON public.capi_events USING btree (id)"
+    },
+    {
+      "t": "credit_adjustments",
+      "name": "credit_adjustments_pkey",
+      "def": "CREATE UNIQUE INDEX credit_adjustments_pkey ON public.credit_adjustments USING btree (idempotency_key)"
+    },
+    {
+      "t": "credit_adjustments",
+      "name": "credit_adjustments_user_idx",
+      "def": "CREATE INDEX credit_adjustments_user_idx ON public.credit_adjustments USING btree (clerk_user_id)"
+    },
+    {
+      "t": "credit_usage",
+      "name": "credit_usage_pkey",
+      "def": "CREATE UNIQUE INDEX credit_usage_pkey ON public.credit_usage USING btree (id)"
+    },
+    {
+      "t": "email_log",
+      "name": "email_log_pkey",
+      "def": "CREATE UNIQUE INDEX email_log_pkey ON public.email_log USING btree (id)"
+    },
+    {
+      "t": "email_log",
+      "name": "idx_email_log_user_template",
+      "def": "CREATE INDEX idx_email_log_user_template ON public.email_log USING btree (user_id, template)"
+    },
+    {
+      "t": "exchange_rate_cache",
+      "name": "exchange_rate_cache_pkey",
+      "def": "CREATE UNIQUE INDEX exchange_rate_cache_pkey ON public.exchange_rate_cache USING btree (id)"
+    },
+    {
+      "t": "payments",
+      "name": "payments_pkey",
+      "def": "CREATE UNIQUE INDEX payments_pkey ON public.payments USING btree (id)"
+    },
+    {
+      "t": "processed_payments",
+      "name": "processed_payments_pkey",
+      "def": "CREATE UNIQUE INDEX processed_payments_pkey ON public.processed_payments USING btree (payment_id)"
+    },
+    {
+      "t": "rate_limits",
+      "name": "rate_limits_pkey",
+      "def": "CREATE UNIQUE INDEX rate_limits_pkey ON public.rate_limits USING btree (key)"
+    },
+    {
+      "t": "schema_migrations",
+      "name": "schema_migrations_pkey",
+      "def": "CREATE UNIQUE INDEX schema_migrations_pkey ON public.schema_migrations USING btree (id)"
+    },
+    {
+      "t": "security_lockdown_0012_state",
+      "name": "security_lockdown_0012_state_pkey",
+      "def": "CREATE UNIQUE INDEX security_lockdown_0012_state_pkey ON public.security_lockdown_0012_state USING btree (object_type, object_name, role_name)"
+    },
+    {
+      "t": "shopify_refresh_locks",
+      "name": "shopify_refresh_locks_pkey",
+      "def": "CREATE UNIQUE INDEX shopify_refresh_locks_pkey ON public.shopify_refresh_locks USING btree (user_id)"
+    },
+    {
+      "t": "user_integrations",
+      "name": "idx_user_integrations_shop_domain",
+      "def": "CREATE INDEX idx_user_integrations_shop_domain ON public.user_integrations USING btree (shop_domain)"
+    },
+    {
+      "t": "user_integrations",
+      "name": "idx_user_integrations_shopify_store_url",
+      "def": "CREATE INDEX idx_user_integrations_shopify_store_url ON public.user_integrations USING btree (shopify_store_url)"
+    },
+    {
+      "t": "user_integrations",
+      "name": "idx_user_integrations_token_expires_at",
+      "def": "CREATE INDEX idx_user_integrations_token_expires_at ON public.user_integrations USING btree (token_expires_at)"
+    },
+    {
+      "t": "user_integrations",
+      "name": "user_integrations_clerk_user_id_key",
+      "def": "CREATE UNIQUE INDEX user_integrations_clerk_user_id_key ON public.user_integrations USING btree (clerk_user_id)"
+    },
+    {
+      "t": "user_integrations",
+      "name": "user_integrations_pkey",
+      "def": "CREATE UNIQUE INDEX user_integrations_pkey ON public.user_integrations USING btree (id)"
+    },
+    {
+      "t": "webhook_deliveries",
+      "name": "webhook_deliveries_pkey",
+      "def": "CREATE UNIQUE INDEX webhook_deliveries_pkey ON public.webhook_deliveries USING btree (shop_domain, webhook_id)"
+    },
+    {
+      "t": "webhook_deliveries",
+      "name": "webhook_deliveries_received_at_idx",
+      "def": "CREATE INDEX webhook_deliveries_received_at_idx ON public.webhook_deliveries USING btree (received_at)"
+    }
+  ],
+  "functions": [
+    {
+      "signature": "acquire_refresh_lock(p_user_id text, p_ttl_seconds integer)",
+      "returns": "boolean",
+      "language": "plpgsql",
+      "security_definer": false,
+      "config": "",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "c245171ade40a28a"
+    },
+    {
+      "signature": "add_user_credits(p_user_id text, p_credits integer, p_purchased integer)",
+      "returns": "integer",
+      "language": "plpgsql",
+      "security_definer": false,
+      "config": "search_path=public",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "87a5444b1a8d4b63"
+    },
+    {
+      "signature": "apply_credit_adjustment(p_idempotency_key text, p_user_id text, p_delta integer, p_reason text, p_evidence jsonb)",
+      "returns": "text",
+      "language": "plpgsql",
+      "security_definer": false,
+      "config": "search_path=public",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "de87ba87b0993f42"
+    },
+    {
+      "signature": "check_rate_limit(p_key text, p_limit integer, p_window_seconds integer)",
+      "returns": "boolean",
+      "language": "plpgsql",
+      "security_definer": false,
+      "config": "",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "911ae6ac2291342f"
+    },
+    {
+      "signature": "commit_brief_generation(p_user_id text, p_request_id uuid, p_request_hash text, p_campaign_id uuid, p_campaign jsonb, p_copy jsonb, p_context jsonb, p_response jsonb)",
+      "returns": "jsonb",
+      "language": "plpgsql",
+      "security_definer": false,
+      "config": "search_path=public",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "4548d203ebaf4858"
+    },
+    {
+      "signature": "delete_user_data(p_user_id text)",
+      "returns": "void",
+      "language": "plpgsql",
+      "security_definer": false,
+      "config": "search_path=public",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "13547a11b1395b35"
+    },
+    {
+      "signature": "disconnect_shop_installation(p_shop text)",
+      "returns": "integer",
+      "language": "plpgsql",
+      "security_definer": false,
+      "config": "search_path=public",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "61ff60b20c918de1"
+    },
+    {
+      "signature": "finalize_brief_version(p_user_id text, p_campaign_id uuid, p_version_id uuid, p_context jsonb, p_copy jsonb, p_status text)",
+      "returns": "void",
+      "language": "plpgsql",
+      "security_definer": false,
+      "config": "search_path=public",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "90fa3482b78d72a3"
+    },
+    {
+      "signature": "grant_free_credit(p_user_id text)",
+      "returns": "boolean",
+      "language": "plpgsql",
+      "security_definer": false,
+      "config": "search_path=public",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "699289e6d0640c17"
+    },
+    {
+      "signature": "increment_credits(p_user_id text, p_credits integer, p_total integer)",
+      "returns": "void",
+      "language": "plpgsql",
+      "security_definer": false,
+      "config": "search_path=public",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "eb65f877d8e07392"
+    },
+    {
+      "signature": "keepalive_ping()",
+      "returns": "integer",
+      "language": "sql",
+      "security_definer": false,
+      "config": "search_path=\"\"",
+      "execute_roles": "anon,service_role",
+      "public_execute": false,
+      "body_sha": "822ae07d4783158b"
+    },
+    {
+      "signature": "normalize_shop_host(p_value text)",
+      "returns": "text",
+      "language": "sql",
+      "security_definer": false,
+      "config": "search_path=public",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "be621394c39f27e6"
+    },
+    {
+      "signature": "redact_shop_data(p_shop text)",
+      "returns": "integer",
+      "language": "plpgsql",
+      "security_definer": false,
+      "config": "search_path=public",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "c9f828507191eedf"
+    },
+    {
+      "signature": "release_refresh_lock(p_user_id text)",
+      "returns": "void",
+      "language": "sql",
+      "security_definer": false,
+      "config": "",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "00bc39879f93c550"
+    },
+    {
+      "signature": "update_updated_at_column()",
+      "returns": "trigger",
+      "language": "plpgsql",
+      "security_definer": false,
+      "config": "",
+      "execute_roles": "service_role",
+      "public_execute": false,
+      "body_sha": "d9ffaab7864a669a"
+    }
+  ],
+  "triggers": [
+    {
+      "t": "campaigns",
+      "name": "update_campaigns_updated_at",
+      "def": "CREATE TRIGGER update_campaigns_updated_at BEFORE UPDATE ON public.campaigns FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()"
+    },
+    {
+      "t": "payments",
+      "name": "update_payments_updated_at",
+      "def": "CREATE TRIGGER update_payments_updated_at BEFORE UPDATE ON public.payments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()"
+    },
+    {
+      "t": "user_integrations",
+      "name": "update_user_integrations_updated_at",
+      "def": "CREATE TRIGGER update_user_integrations_updated_at BEFORE UPDATE ON public.user_integrations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()"
+    }
+  ],
+  "policies": [],
+  "sequences": [],
+  "grants": [
+    {
+      "t": "api_usage_log",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "brief_generation_receipts",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "campaign_brief_versions",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "campaigns",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "capi_events",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "credit_adjustments",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "credit_usage",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "email_log",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "exchange_rate_cache",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "payments",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "processed_payments",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "rate_limits",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "schema_migrations",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "security_lockdown_0012_state",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "shopify_refresh_locks",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "user_integrations",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    },
+    {
+      "t": "webhook_deliveries",
+      "grantee": "service_role",
+      "privileges": "DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+    }
+  ],
+  "migrations": [
+    "0001_payment_integrity",
+    "0002_rate_limits",
+    "0003_shopify_refresh_lock",
+    "0004_rls_internal_tables",
+    "0005_lock_function_execute",
+    "0006_email_log_and_exchange_rate_cache",
+    "0007_campaign_brief_versions",
+    "0008_campaign_product_price",
+    "0009_brief_integrity",
+    "0010_fix_commit_brief_ambiguity",
+    "0011_track_anthropic_cache_usage",
+    "0012_rls_lockdown",
+    "0013_finalize_budget_plan_selection",
+    "0014_atomic_credit_grants",
+    "0015_capi_event_once_per_order",
+    "0016_shop_redaction_and_account_deletion",
+    "0017_credit_adjustments"
+  ]
+}

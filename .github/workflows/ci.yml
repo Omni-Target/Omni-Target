@@ -45,3 +45,39 @@ jobs:
         run: pnpm test
       - name: Build
         run: pnpm build
+
+  database:
+    name: Database
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:ci-only@127.0.0.1:5432/postgres
+      TEST_DATABASE_URL: postgresql://postgres:ci-only@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build a fresh database from the 0017 baseline
+        run: node supabase/provision.mjs --baseline-only
+      - name: Compare with the staging schema at 0017
+        run: node supabase/schema-catalog.mjs --compare supabase/baseline/catalog-0017.json
+      - name: Apply later migrations
+        run: node supabase/migrate.mjs up
+      - name: Database tests
+        run: pnpm test:db

@@ -13,7 +13,8 @@
     "migrate:status": "node supabase/migrate.mjs status",
     "migrate:down": "node supabase/migrate.mjs down",
     "migrate:create": "node supabase/migrate.mjs create",
-    "shopify:dev": "shopify app dev"
+    "shopify:dev": "shopify app dev",
+    "test:db": "vitest run --config vitest.db.config.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
