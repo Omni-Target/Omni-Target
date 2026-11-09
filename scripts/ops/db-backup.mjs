@@ -8,12 +8,11 @@
  *   restore-test  download newest -> decrypt -> restore into a throwaway
  *                 database -> compare row counts with the manifest
  *
- * Common: CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
+ * Common: R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
  * BACKUP_R2_BUCKET, BACKUP_PREFIX.
  * backup: BACKUP_DATABASE_URL (read-only role), BACKUP_AGE_RECIPIENT.
  * restore-test: BACKUP_AGE_IDENTITY_FILE, RESTORE_DATABASE_URL.
- * Needs pg_dump, pg_restore and age on PATH. BACKUP_S3_TEST_ENDPOINT points
- * the script at a local S3-compatible store for testing.
+ * Needs pg_dump, pg_restore and age on PATH.
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -45,11 +44,12 @@ const redact = (text) => String(text).replace(/postgres(ql)?:\/\/\S+/g, "[redact
 const isLocalHost = (host) => host === "127.0.0.1" || host === "localhost";
 
 function s3() {
-  const testEndpoint = process.env.BACKUP_S3_TEST_ENDPOINT;
+  const endpoint = new URL(required("R2_ENDPOINT"));
   return new S3Client({
     region: "auto",
-    endpoint: testEndpoint || `https://${required("CLOUDFLARE_ACCOUNT_ID")}.r2.cloudflarestorage.com`,
-    forcePathStyle: Boolean(testEndpoint),
+    endpoint: endpoint.origin,
+    // A local S3-compatible store used for testing has no per-bucket hostnames.
+    forcePathStyle: isLocalHost(endpoint.hostname),
     credentials: { accessKeyId: required("R2_ACCESS_KEY_ID"), secretAccessKey: required("R2_SECRET_ACCESS_KEY") },
     requestChecksumCalculation: "WHEN_REQUIRED",
     responseChecksumValidation: "WHEN_REQUIRED",

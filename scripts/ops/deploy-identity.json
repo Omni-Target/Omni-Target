@@ -1,8 +1,6 @@
 {
   "github_repo": "Omni-Target/Omni-Target",
-  "github_account": null,
-  "commit_email": null,
-  "vercel_account": null,
-  "vercel_team_id": null,
-  "vercel_project_id": null
+  "commit_email": "moses@omnitarget.co",
+  "vercel_team_id": "team_ZKIm0Jy6jpVhWSdYVeQ3XS9L",
+  "vercel_project_id": "prj_FYKofHREy5fZv61dcywrmW42Y5SD"
 }

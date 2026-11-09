@@ -70,14 +70,14 @@ it leaks. Confirm the token can delete objects before relying on `prune`.
 Environment `backup-staging`:
 
 - Variables: `BACKUP_R2_BUCKET`, `BACKUP_PREFIX`, `BACKUP_AGE_RECIPIENT`
-- Secrets: `CLOUDFLARE_ACCOUNT_ID`, `BACKUP_DATABASE_URL`,
+- Secrets: `R2_ENDPOINT`, `BACKUP_DATABASE_URL`,
   `BACKUP_R2_ACCESS_KEY_ID`, `BACKUP_R2_SECRET_ACCESS_KEY`,
   `BACKUP_R2_READ_ACCESS_KEY_ID`, `BACKUP_R2_READ_SECRET_ACCESS_KEY`
 
 Environment `backup-restore`:
 
 - Variables: `BACKUP_R2_BUCKET`, `BACKUP_PREFIX`
-- Secrets: `CLOUDFLARE_ACCOUNT_ID`, `BACKUP_R2_READ_ACCESS_KEY_ID`,
+- Secrets: `R2_ENDPOINT`, `BACKUP_R2_READ_ACCESS_KEY_ID`,
   `BACKUP_R2_READ_SECRET_ACCESS_KEY`, `BACKUP_AGE_RESTORE_IDENTITY`
 
 ## Restoring
@@ -89,9 +89,9 @@ identified.
 1. Choose the backup and download `omnitarget.dump.age` and its manifest:
 
    ```sh
-   aws s3 cp --endpoint-url "https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com" \
+   aws s3 cp --endpoint-url "$R2_ENDPOINT" \
      "s3://$BUCKET/$PREFIX/daily/$DATE/omnitarget.dump.age" .
-   aws s3 cp --endpoint-url "https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com" \
+   aws s3 cp --endpoint-url "$R2_ENDPOINT" \
      "s3://$BUCKET/$PREFIX/daily/$DATE/omnitarget.manifest.json" .
    ```
 

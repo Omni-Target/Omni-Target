@@ -61,8 +61,15 @@ for (const email of new Set((git("log", `origin/${BRANCH_FOR_TARGET[target]}..HE
   check("Unpushed commit email", email, expected.commit_email);
 }
 
-check("GitHub account", capture("gh", ["api", "user", "--jq", ".login"]), expected.github_account);
-check("Vercel account", capture("vercel", ["whoami"])?.split("\n").at(-1) ?? null, expected.vercel_account);
+function checkAllowed(name, actual) {
+  const problem = actual === null ? "could not be determined" : FORBIDDEN.test(actual) ? "belongs to a different project" : null;
+  results.push({ name, actual, problem });
+}
+
+// The repository belongs to an organization, so access identifies the login.
+checkAllowed("GitHub login", capture("gh", ["api", "user", "--jq", ".login"]));
+check("GitHub push access", capture("gh", ["api", `repos/${expected.github_repo}`, "--jq", ".permissions.push"]), "true");
+checkAllowed("Vercel login", capture("vercel", ["whoami"])?.split("\n").at(-1) ?? null);
 
 const project = existsSync(".vercel/project.json") ? JSON.parse(readFileSync(".vercel/project.json", "utf8")) : {};
 check("Vercel team", project.orgId ?? null, expected.vercel_team_id);
