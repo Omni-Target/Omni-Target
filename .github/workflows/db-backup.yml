@@ -1,0 +1,127 @@
+name: Database backup
+
+# S2.3 (DATA-04): nightly encrypted pg_dump to R2, verified after every upload,
+# with a weekly restore into a throwaway Postgres.
+#
+# An interim Free-plan safeguard, not point-in-time recovery. Runs against
+# staging only. Production needs its own bucket, role, keys and approval.
+# Scheduled runs start only once this file is on the default branch.
+# This repository is public, so the script logs aggregates only.
+# See scripts/ops/runbooks/backups.md.
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+    - cron: '47 3 * * 0'
+  push:
+    branches: [staging]
+    paths:
+      - .github/workflows/db-backup.yml
+      - scripts/ops/db-backup.mjs
+  workflow_dispatch:
+    inputs:
+      restore_test:
+        description: Also run the restore test
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+env:
+  BACKUP_R2_BUCKET: ${{ vars.BACKUP_R2_BUCKET }}
+  BACKUP_PREFIX: ${{ vars.BACKUP_PREFIX }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  backup:
+    if: github.event.schedule != '47 3 * * 0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: backup-staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: yarn
+      - name: Install PostgreSQL 17 client and age
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -q
+          sudo apt-get install -yq postgresql-client-17 age
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+      - run: yarn install --frozen-lockfile
+      - name: Back up
+        run: node scripts/ops/db-backup.mjs backup
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          BACKUP_AGE_RECIPIENT: ${{ vars.BACKUP_AGE_RECIPIENT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_SECRET_ACCESS_KEY }}
+      - name: Verify the upload with the read-only credential
+        run: node scripts/ops/db-backup.mjs verify
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_READ_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_READ_SECRET_ACCESS_KEY }}
+      - name: Apply retention
+        run: node scripts/ops/db-backup.mjs prune
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_SECRET_ACCESS_KEY }}
+
+  restore-test:
+    if: github.event.schedule == '47 3 * * 0' || inputs.restore_test
+    needs: []
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: backup-restore
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: restore-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: yarn
+      - name: Install PostgreSQL 17 client and age
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -q
+          sudo apt-get install -yq postgresql-client-17 age
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+      - run: yarn install --frozen-lockfile
+      - name: Write the restore-test key
+        run: |
+          umask 077
+          printf '%s\n' "$BACKUP_AGE_RESTORE_IDENTITY" > "$RUNNER_TEMP/restore.key"
+        env:
+          BACKUP_AGE_RESTORE_IDENTITY: ${{ secrets.BACKUP_AGE_RESTORE_IDENTITY }}
+      - name: Restore and compare
+        run: node scripts/ops/db-backup.mjs restore-test
+        env:
+          BACKUP_AGE_IDENTITY_FILE: ${{ runner.temp }}/restore.key
+          RESTORE_DATABASE_URL: postgresql://postgres:restore-test-only@127.0.0.1:5432/postgres
+          R2_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_READ_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_READ_SECRET_ACCESS_KEY }}
+      - name: Remove the restore-test key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/restore.key"
