@@ -28,9 +28,6 @@ function AuditContent() {
 
   useEffect(() => {
     let isCancelled = false;
-    setScanning(true);
-    setAuditError("");
-    setCurrentStep(0);
 
     // 1. Run audit computation (which populates store_snapshot if missing),
     // then warm /api/store/data cache afterwards so we don't fire two competing
@@ -141,7 +138,12 @@ function AuditContent() {
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
             <Button
               variant="outline"
-              onClick={() => setRetryCount((c) => c + 1)}
+              onClick={() => {
+                setScanning(true);
+                setAuditError("");
+                setCurrentStep(0);
+                setRetryCount((c) => c + 1);
+              }}
               disabled={completing}
             >
               Try again
