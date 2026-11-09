@@ -22,11 +22,12 @@ const row = (id: string, shop = SHOP) => ({ clerk_user_id: id, shop_domain: shop
 const posts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
 
 function shopifyHas(hooks: { topic: string; address: string }[], postStatus = 201) {
-  fetchMock.mockImplementation(async (_url: string, init?: RequestInit) =>
-    init?.method === "POST"
-      ? new Response("{}", { status: postStatus })
-      : new Response(JSON.stringify({ webhooks: hooks }), { status: 200 }),
-  );
+  const current = [...hooks];
+  fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+    if (init?.method !== "POST") return new Response(JSON.stringify({ webhooks: current }), { status: 200 });
+    if (postStatus < 300) current.push(JSON.parse(init.body as string).webhook);
+    return new Response("{}", { status: postStatus });
+  });
 }
 
 beforeEach(() => {
@@ -85,16 +86,42 @@ describe("ensure-webhooks rollout", () => {
     expect(body.results[0].missing).toEqual(["orders/paid"]);
   });
 
-  it("treats Shopify's already-exists response as success", async () => {
+  it("does not claim success when Shopify rejects a subscription with 422", async () => {
     shopifyHas([{ topic: "orders/paid", address: ADDRESS }], 422);
     const body = await (await call("?apply=true")).json();
-    expect(body.results[0].status).toBe("repaired");
+    expect(body.results[0]).toMatchObject({ status: "partial", created: [], reason: "create_422" });
+  });
+
+  it("accepts a 422 when the subscription is listed afterwards", async () => {
+    let lists = 0;
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") return new Response("{}", { status: 422 });
+      lists += 1;
+      const hooks = [{ topic: "orders/paid", address: ADDRESS }];
+      if (lists > 1) hooks.push({ topic: "app/uninstalled", address: ADDRESS });
+      return new Response(JSON.stringify({ webhooks: hooks }), { status: 200 });
+    });
+    const body = await (await call("?apply=true")).json();
+    expect(body.results[0]).toMatchObject({ status: "repaired", created: ["app/uninstalled"] });
   });
 
   it("reports a partial repair when Shopify refuses a topic", async () => {
     shopifyHas([], 500);
     const body = await (await call("?apply=true")).json();
-    expect(body.results[0]).toMatchObject({ status: "partial", created: [] });
+    expect(body.results[0]).toMatchObject({ status: "partial", created: [], reason: "create_500" });
+  });
+
+  it("reports a failure when the follow-up listing fails", async () => {
+    let lists = 0;
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") return new Response("{}", { status: 201 });
+      lists += 1;
+      return lists === 1
+        ? new Response(JSON.stringify({ webhooks: [] }), { status: 200 })
+        : new Response("{}", { status: 503 });
+    });
+    const body = await (await call("?apply=true")).json();
+    expect(body.results[0]).toMatchObject({ status: "failed", created: [], reason: "list_503" });
   });
 
   it("skips a shop with no usable token and calls Shopify zero times", async () => {

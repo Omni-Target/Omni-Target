@@ -26,8 +26,8 @@ what a shop is subscribed to.
 |---|---|
 | `complete` | Both topics exist at this deployment's address |
 | `missing` | Dry run: the listed topics would be created |
-| `repaired` | All missing topics were created |
-| `partial` | Shopify refused at least one topic; run again |
+| `repaired` | All missing topics now appear in Shopify's own list |
+| `partial` | At least one topic is still absent after creating (`reason` has Shopify's status) |
 | `skipped` | No usable token (`reason` says why) |
 | `failed` | Shopify or the database could not be reached |
 

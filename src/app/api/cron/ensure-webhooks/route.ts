@@ -41,6 +41,16 @@ async function usableToken(userIds: string[]): Promise<{ token?: string; reason?
   return { reason };
 }
 
+async function subscribedTopics(shop: string, headers: Record<string, string>, address: string) {
+  const listed = await fetch(shopifyAdminRestUrl(shop, "webhooks.json?limit=250"), {
+    headers,
+    signal: AbortSignal.timeout(SHOPIFY_TIMEOUT_MS),
+  });
+  if (!listed.ok) return { failure: `list_${listed.status}` };
+  const { webhooks = [] } = (await listed.json()) as { webhooks?: { topic: string; address: string }[] };
+  return { topics: new Set(webhooks.filter((hook) => hook.address === address).map((hook) => hook.topic)) };
+}
+
 async function reconcileShop(shop: string, userIds: string[], address: string, apply: boolean): Promise<ShopOutcome> {
   const outcome = (status: ShopOutcome["status"], missing: string[] = [], created: string[] = [], reason?: string): ShopOutcome => ({
     shop: maskShop(shop),
@@ -55,19 +65,13 @@ async function reconcileShop(shop: string, userIds: string[], address: string, a
     if (!token) return outcome("skipped", [], [], reason);
 
     const headers = { "Content-Type": "application/json", "X-Shopify-Access-Token": token };
-    const listed = await fetch(shopifyAdminRestUrl(shop, "webhooks.json?limit=250"), {
-      headers,
-      signal: AbortSignal.timeout(SHOPIFY_TIMEOUT_MS),
-    });
-    if (!listed.ok) return outcome("failed", [], [], `list_${listed.status}`);
-
-    const { webhooks = [] } = (await listed.json()) as { webhooks?: { topic: string; address: string }[] };
-    const present = new Set(webhooks.filter((hook) => hook.address === address).map((hook) => hook.topic));
-    const missing = REQUIRED_TOPICS.filter((topic) => !present.has(topic));
+    const before = await subscribedTopics(shop, headers, address);
+    if (!before.topics) return outcome("failed", [], [], before.failure);
+    const missing = REQUIRED_TOPICS.filter((topic) => !before.topics.has(topic));
     if (missing.length === 0) return outcome("complete");
     if (!apply) return outcome("missing", missing);
 
-    const created: string[] = [];
+    let rejection: string | undefined;
     for (const topic of missing) {
       const response = await fetch(shopifyAdminRestUrl(shop, "webhooks.json"), {
         method: "POST",
@@ -75,10 +79,17 @@ async function reconcileShop(shop: string, userIds: string[], address: string, a
         body: JSON.stringify({ webhook: { topic, address, format: "json" } }),
         signal: AbortSignal.timeout(SHOPIFY_TIMEOUT_MS),
       });
-      // 422 means this topic and address already exist.
-      if (response.ok || response.status === 422) created.push(topic);
+      if (!response.ok) rejection = `create_${response.status}`;
     }
-    return outcome(created.length === missing.length ? "repaired" : "partial", missing, created);
+
+    // Shopify answers 422 both for "already exists" and for an invalid address,
+    // so only what it lists afterwards counts as created.
+    const after = await subscribedTopics(shop, headers, address);
+    if (!after.topics) return outcome("failed", missing, [], after.failure);
+    const created = missing.filter((topic) => after.topics.has(topic));
+    return created.length === missing.length
+      ? outcome("repaired", missing, created)
+      : outcome("partial", missing, created, rejection);
   } catch (error) {
     captureBackgroundFailure("ensure-webhooks", error);
     return outcome("failed", [], [], "request_error");
