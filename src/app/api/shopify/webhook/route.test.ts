@@ -61,8 +61,10 @@ const h = vi.hoisted(() => {
       }),
     };
   };
-  return { state, from, verify: vi.fn(), sync: vi.fn(), revoke: vi.fn() };
+  return { state, from, verify: vi.fn(), sync: vi.fn(), revoke: vi.fn(), capture: vi.fn() };
 });
+
+vi.mock("@/lib/observability/capture", () => ({ captureBackgroundFailure: h.capture }));
 
 vi.mock("@/lib/db", () => ({ supabaseAdmin: { from: h.from }, disconnectShopInstallation: h.revoke }));
 vi.mock("@/lib/verify-shopify-hmac", () => ({ verifyShopifyHmac: h.verify }));
@@ -107,9 +109,34 @@ beforeEach(() => {
   });
   h.verify.mockReset().mockResolvedValue(true);
   h.sync.mockReset();
+  h.revoke.mockReset().mockResolvedValue(true);
+  h.capture.mockReset();
   fetchMock.mockReset().mockResolvedValue(new Response(JSON.stringify({ events_received: 1 }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   vi.stubEnv("SHOPIFY_WEBHOOK_SECRET", "secret");
+});
+
+describe("background failure reporting (OPS-02)", () => {
+  it("reports an uninstall whose credentials could not be cleared", async () => {
+    h.revoke.mockResolvedValue(false);
+    const response = await deliver({ id: 1 }, "app/uninstalled");
+    expect(response.status).toBe(200);
+    await flush();
+    expect(h.capture).toHaveBeenCalledWith("shopify-webhook", expect.objectContaining({ message: "uninstall_disconnect_failed" }));
+  });
+
+  it("does not report a successful uninstall", async () => {
+    await deliver({ id: 1 }, "app/uninstalled");
+    await flush();
+    expect(h.capture).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed Meta send", async () => {
+    fetchMock.mockRejectedValue(new Error("network"));
+    await deliver(order);
+    await flush();
+    expect(h.capture).toHaveBeenCalledWith("meta-capi-send", expect.any(Error));
+  });
 });
 
 describe("Shopify order webhook (ING-05)", () => {

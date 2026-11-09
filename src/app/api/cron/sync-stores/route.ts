@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin, updateUserIntegration } from "@/lib/db";
 import { getValidShopifyToken } from "@/lib/shopify-token";
 import { fetchShopifyStoreData } from "@/lib/connectors/shopify";
+import { captureBackgroundFailure } from "@/lib/observability/capture";
 
 export const maxDuration = 60; // 60 seconds
 export const runtime = "nodejs";
@@ -76,6 +77,7 @@ export async function GET(request: Request) {
           `[Cron:sync-stores] Sync failed for user ${userId}:`,
           storeErr
         );
+        captureBackgroundFailure("cron-sync-store", storeErr);
         skippedCount++;
       }
     }
@@ -88,6 +90,7 @@ export async function GET(request: Request) {
     });
   } catch (err) {
     console.error("[Cron:sync-stores] Fatal error:", err);
+    captureBackgroundFailure("cron-sync-stores", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal error" },
       { status: 500 }

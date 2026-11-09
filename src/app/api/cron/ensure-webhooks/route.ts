@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/db";
+import { captureBackgroundFailure } from "@/lib/observability/capture";
 import { shopifyAdminRestUrl } from "@/lib/shopify-config";
 import { safeEqual } from "@/lib/shopify-oauth";
 import { getValidShopifyToken } from "@/lib/shopify-token";
@@ -78,7 +79,8 @@ async function reconcileShop(shop: string, userIds: string[], address: string, a
       if (response.ok || response.status === 422) created.push(topic);
     }
     return outcome(created.length === missing.length ? "repaired" : "partial", missing, created);
-  } catch {
+  } catch (error) {
+    captureBackgroundFailure("ensure-webhooks", error);
     return outcome("failed", [], [], "request_error");
   }
 }

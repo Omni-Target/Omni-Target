@@ -12,8 +12,14 @@ type SentryOptions = NonNullable<Parameters<typeof Sentry.init>[0]>;
  */
 export const sharedSentryOptions = {
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
-  environment: process.env.NEXT_PUBLIC_VERCEL_ENV || process.env.VERCEL_ENV || process.env.NODE_ENV,
-  tracesSampleRate: process.env.NODE_ENV === "development" ? 1.0 : 0.1,
+  // Set NEXT_PUBLIC_SENTRY_ENVIRONMENT=staging on the staging deployment: Vercel
+  // labels it "preview", which would mix it with every other preview build.
+  environment:
+    process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT ||
+    process.env.NEXT_PUBLIC_VERCEL_ENV ||
+    process.env.VERCEL_ENV ||
+    process.env.NODE_ENV,
+  tracesSampleRate: process.env.NODE_ENV === "development" ? 0 : 0.05,
   dataCollection: {
     userInfo: false,
     cookies: false,

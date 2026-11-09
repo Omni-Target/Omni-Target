@@ -1,5 +1,6 @@
 import { verifyShopifyHmac } from "@/lib/verify-shopify-hmac";
 import { disconnectShopInstallation, supabaseAdmin } from "@/lib/db";
+import { captureBackgroundFailure } from "@/lib/observability/capture";
 import { createHash } from "crypto";
 import { after } from "next/server";
 
@@ -142,6 +143,7 @@ async function forwardPurchaseToMeta(shopDomain: string, integration: WebhookInt
     status = metaRes.ok ? "sent" : "failed";
   } catch (err) {
     console.error("Meta CAPI send failed:", err instanceof Error ? err.name : "unknown");
+    captureBackgroundFailure("meta-capi-send", err);
   }
 
   const { error } = await supabaseAdmin
@@ -155,7 +157,8 @@ async function forwardPurchaseToMeta(shopDomain: string, integration: WebhookInt
 async function processWebhook(shopDomain: string, topic: string | null, payload: ShopifyOrderPayload) {
   if (topic === "app/uninstalled") {
     // SEC-09: operational disconnect. Stored data waits for shop/redact (48h).
-    await disconnectShopInstallation(shopDomain);
+    // Shopify already has its 200 and will not retry, so a failure must surface.
+    if (!(await disconnectShopInstallation(shopDomain))) throw new Error("uninstall_disconnect_failed");
     return;
   }
 
@@ -241,9 +244,10 @@ export async function POST(request: Request) {
 
   // 3. Acknowledge immediately; the work runs after the response is sent.
   after(() =>
-    processWebhook(shopDomain, topicHeader, payload).catch((err) =>
-      console.error("Webhook processing failed:", err instanceof Error ? err.message : "unknown"),
-    ),
+    processWebhook(shopDomain, topicHeader, payload).catch((err) => {
+      console.error("Webhook processing failed:", err instanceof Error ? err.message : "unknown");
+      captureBackgroundFailure("shopify-webhook", err);
+    }),
   );
 
   return Response.json({ received: true }, { status: 200 });

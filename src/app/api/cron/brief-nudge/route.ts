@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/db';
 import { sendEmail } from '@/lib/email';
 import { briefNudgeEmailHtml } from '@/emails/brief-nudge';
 import { clerkClient } from '@clerk/nextjs/server';
+import { captureBackgroundFailure } from '@/lib/observability/capture';
 
 export const maxDuration = 60; // 60 seconds
 
@@ -64,6 +65,7 @@ export async function GET(request: Request) {
           }
         } catch (emailErr) {
           console.error(`Failed to send brief nudge to user ${userId}:`, emailErr);
+          captureBackgroundFailure('cron-brief-nudge-email', emailErr);
         }
       }
     }
@@ -71,6 +73,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: true, processed: integrations.length, sent: sentCount });
   } catch (err) {
     console.error('Cron job error:', err);
+    captureBackgroundFailure('cron-brief-nudge', err);
     const message = err instanceof Error ? err.message : "Internal error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
