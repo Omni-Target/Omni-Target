@@ -30,7 +30,7 @@ Each is a SQL function, and each is one transaction.
 | `bind_shop_for_install(shopify_shop_id, domain, actor, selected_workspace)` | No binding: binds to the actor's empty selected workspace, or a new one. Owner's own binding: restores it. Another owner's binding or `deletion_processing`: rejected and logged. Repeated calls give the same result |
 | `disconnect_workspace(workspace, actor)` | Clears the credential, sets `disconnected`, keeps the binding |
 | `begin_uninstall(shopify_shop_id)` | Sets `pending_deletion`, clears the credential, cancels sync runs, keeps the binding |
-| `process_shop_redact(shopify_shop_id)` | `pending_deletion`: moves to `deletion_processing`, redacts, then `deleted` and releases the binding. A workspace restored since the uninstall is left alone and the event is recorded for review |
+| `process_shop_redact(shopify_shop_id)` | Records receipt time and the 30-day deadline first. `pending_deletion`: moves to `deletion_processing`, redacts, then `deleted` and releases the binding. A workspace restored since the uninstall is not redacted automatically; the request stays open as a compliance item until resolved explicitly, and is never discarded |
 | `complete_ownership_transfer(transfer)` | Releases the old binding as `ownership_transferred` and binds the new owner's workspace. Credits and campaigns stay put |
 
 Background work checks `workspace_can_operate(workspace, shop)` before every step: the workspace is `active` and still holds the binding.
@@ -71,7 +71,9 @@ Background work checks `workspace_can_operate(workspace, shop)` before every ste
 
 `grant_purchase` wraps it to also update the purchase and intent. `commit_brief_generation` debits through it. The old functions delegate to it during the transition, and the JavaScript fallbacks that write balances directly are removed.
 
-**Reconciliation** pages through Shopify purchases with a stored cursor. Attribution comes from the purchase intent, then from the binding that covered the purchase date, and otherwise the purchase is recorded as unattributed for review.
+**Reconciliation** pages through Shopify purchases with a stored cursor. Attribution comes from the purchase intent, which every new purchase has. A legacy purchase can use a historical binding only when the binding is verified, its start and end times are reliable, and the purchase time falls unambiguously inside it. Otherwise it is recorded as unattributed for review.
+
+**Compliance requests** are stored in `compliance_requests` (shop, topic, Shopify request ID, received at, deadline, status, resolution). This separates uninstall, reinstall and webhook timestamps and keeps every received request until it is resolved.
 
 **Subscriptions** are granted once per billing period, keyed by subscription ID and period start, never once per subscription ID.
 

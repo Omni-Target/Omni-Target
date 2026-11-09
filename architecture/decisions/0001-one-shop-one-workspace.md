@@ -15,6 +15,7 @@ Today each Omnitarget account has one `user_integrations` row, and nothing stops
 - A **shop** is identified by Shopify's immutable shop ID. Its `myshopify.com` domain is a unique attribute that can change.
 - A **workspace** is the Omnitarget account that owns data: credits, campaigns, billing history and integrations.
 - A workspace has exactly one owner, a verified Clerk user. One Clerk user may own several workspaces, which never share balances, campaigns or credentials.
+- Deleting a workspace never deletes its owner's Clerk user. Uninstalling one store affects only that store's workspace; the owner's login and other workspaces are untouched.
 
 ### Ownership
 
@@ -49,8 +50,10 @@ Workspace states: `active`, `disconnected`, `pending_deletion`, `deletion_proces
 
 - **`app/uninstalled`:** synchronisation and new shop operations stop, background work is cancelled, the Shopify credential is cleared and the workspace becomes `pending_deletion`. The binding is kept.
 - **Reinstall before deletion completes:** the shop ID finds the original workspace, which is restored. No duplicate workspace, balance or purchase transfer.
-- **`shop/redact`:** Shopify sends it about 48 hours after uninstall, with 30 days to complete. The workspace moves to `deletion_processing`, Shopify-derived data is deleted or anonymised, then the workspace becomes `deleted` and the binding is released.
-- **`shop/redact` arriving after a reinstall:** Shopify's documentation does not say whether a reinstall cancels it. A restored workspace is not redacted. The event is recorded for review instead.
+- **`shop/redact`:** Shopify sends it 48 hours after uninstall. It does not send it if the merchant reinstalls before it is triggered. Once any compliance webhook is received, its action must be completed within 30 days. On receipt, the workspace moves to `deletion_processing`, Shopify-derived data is deleted or anonymised, then the workspace becomes `deleted` and the binding is released.
+- **Recovery window:** 48 hours by default, matching Shopify's timing.
+- **Timestamps:** uninstall, reinstall and every compliance webhook's receipt are recorded separately.
+- **A received request is never silently discarded.** A reinstall is not assumed to cancel a redaction request already issued or received. If one arrives for a workspace that was restored in the meantime, it is recorded as an open compliance item with its 30-day deadline and resolved explicitly, never skipped. This lifecycle is tested on the Shopify development store.
 
 Uninstall and `shop/redact` are separate events and are never treated as the same thing.
 
@@ -58,7 +61,9 @@ Uninstall and `shop/redact` are separate events and are never treated as the sam
 
 A transfer is requested by a verified Clerk user. That user proves control of the store by completing Shopify OAuth for that shop, and the current owner approves.
 
-On completion, the old binding is released with reason `ownership_transferred` and the shop is bound to the new owner's workspace. Credits and private campaigns stay with the old workspace.
+On completion, the old binding is released with reason `ownership_transferred` and the shop is bound to the new owner's workspace.
+
+Credits, private campaigns, generated content and workspace-specific financial history stay with the original workspace. The new workspace establishes its own authorisation and synchronises its own shop data. Nothing private moves implicitly.
 
 Completing OAuth alone never transfers ownership.
 
@@ -67,7 +72,8 @@ Completing OAuth alone never transfers ownership.
 - Credits belong to a workspace. There are no shared shop wallets.
 - Every change goes through one transactional operation that writes an append-only, idempotent ledger and the balance together. Each entry records the workspace, actor or purchaser, shop context, provider, exact external reference and idempotency key.
 - A purchase belongs to the workspace that started it. Billing creation records the purchaser and workspace against the charge.
-- Reconciliation uses that record. Without one, a purchase is attributed to the workspace whose binding covered the purchase date. Otherwise it stays **unattributed** for review.
+- Reconciliation uses that record. Every new purchase has one.
+- A legacy purchase without that record may be attributed through a historical binding only if the binding is verified, its start and end times are reliable, and the purchase time is reliable and falls unambiguously within that interval. Otherwise it stays **unattributed** for review.
 - A purchase is never credited to whichever account has a working token or loads a page, and historical purchases never move to a newly provisioned workspace.
 - Unlimited access is an entitlement, kept separate from the balance.
 
@@ -81,5 +87,5 @@ Completing OAuth alone never transfers ownership.
 
 1. **Unused paid credits** when a workspace is permanently deleted: forfeit, refund on request, or keep claimable for a set period. Until decided, they are kept unchanged in the ledger and the decision is isolated in one place.
 2. **Transfer when the current owner cannot approve.** For example, a waiting period plus confirmation through the store's registered owner email, combined with OAuth proof.
-3. **Recovery window.** It currently runs until `shop/redact` arrives. Confirm whether Omnitarget should add its own longer or shorter window.
-4. **`shop/redact` after a reinstall.** Verify Shopify's actual behaviour on the test store, then confirm the handling above.
+
+Settled on 2026-11-09: the recovery window is 48 hours by default, and a received compliance request is never discarded. Still to verify on the development store: uninstall, reinstall and redaction timing.
