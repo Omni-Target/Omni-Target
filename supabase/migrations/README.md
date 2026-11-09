@@ -82,6 +82,12 @@ migrations:
 - Never grant anything to `anon`/`authenticated`. The single exception is
   `public.keepalive_ping()` (temporary, until nightly backups replace the
   keep-alive workflow).
+- From 0018, tables whose rules matter (workspaces, bindings, lifecycle and
+  compliance records) give `service_role` `SELECT` only. Changes go through
+  `security definer` functions with `set search_path = public, pg_temp`,
+  granted to `service_role`; internal helpers are revoked from it too, since
+  default privileges would otherwise grant them. Test new functions as
+  `service_role` (see `supabase/tests/workspaces.db.test.mjs`).
 
 Verify any environment (read-only, exits non-zero on a violation):
 

@@ -53,7 +53,7 @@ Workspace states: `active`, `disconnected`, `pending_deletion`, `deletion_proces
 - **`shop/redact`:** Shopify sends it 48 hours after uninstall. It does not send it if the merchant reinstalls before it is triggered. Once any compliance webhook is received, its action must be completed within 30 days. On receipt, the workspace moves to `deletion_processing`, Shopify-derived data is deleted or anonymised, then the workspace becomes `deleted` and the binding is released.
 - **Recovery window:** 48 hours by default, matching Shopify's timing.
 - **Timestamps:** uninstall, reinstall and every compliance webhook's receipt are recorded separately.
-- **A received request is never silently discarded.** A reinstall is not assumed to cancel a redaction request already issued or received. If one arrives for a workspace that was restored in the meantime, it is recorded as an open compliance item with its 30-day deadline and resolved explicitly, never skipped. This lifecycle is tested on the Shopify development store.
+- **A received request is never silently discarded.** A reinstall is not assumed to cancel a redaction request already issued or received. If one arrives for a workspace that was restored in the meantime, it is recorded with its 30-day deadline and as a redaction after reinstall, reconnection is refused, and the deletion workflow completes and verifies the deletion. Only then can the merchant's next installation provision a new workspace. This lifecycle is to be confirmed on the Shopify development store.
 
 Uninstall and `shop/redact` are separate events and are never treated as the same thing.
 
@@ -87,5 +87,6 @@ Completing OAuth alone never transfers ownership.
 
 1. **Unused paid credits** when a workspace is permanently deleted: forfeit, refund on request, or keep claimable for a set period. Until decided, they are kept unchanged in the ledger and the decision is isolated in one place.
 2. **Transfer when the current owner cannot approve.** For example, a waiting period plus confirmation through the store's registered owner email, combined with OAuth proof.
+3. **Clerk account deletion while the account owns workspaces.** Today account deletion removes the user's legacy data but leaves their workspaces and bindings, so a still-installed store stays bound to an owner who no longer exists until Shopify sends `shop/redact` or item 2 provides a path. Options: close the user's workspaces as part of account deletion, or refuse account deletion while a workspace holds an installed store.
 
 Settled on 2026-11-09: the recovery window is 48 hours by default, and a received compliance request is never discarded. Still to verify on the development store: uninstall, reinstall and redaction timing.

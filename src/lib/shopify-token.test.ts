@@ -7,6 +7,9 @@ const db = vi.hoisted(() => ({
   rpc: vi.fn(),
 }));
 
+const operations = vi.hoisted(() => ({ allowed: vi.fn(async () => true) }));
+vi.mock("@/modules/workspaces/repository", () => ({ shopOperationsAllowed: operations.allowed }));
+
 vi.mock("./db", () => ({
   getUserIntegration: db.getUserIntegration,
   updateUserIntegration: db.updateUserIntegration,
@@ -36,6 +39,7 @@ let lockHeld = false;
 
 beforeEach(() => {
   lockHeld = false;
+  operations.allowed.mockReset().mockResolvedValue(true);
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -175,5 +179,20 @@ describe("failure outcomes", () => {
     fetchMock.mockResolvedValueOnce(new Response('{"refresh_token":"leak-me"}', { status: 500 }));
     await getValidShopifyToken("u1");
     expect(JSON.stringify(error.mock.calls)).not.toMatch(/leak-me|old-refresh|old-access/);
+  });
+});
+
+describe("workspace lifecycle (Phase 1 task 3)", () => {
+  it("hands out no token, and never refreshes, for a disconnected, uninstalled or deleting workspace", async () => {
+    operations.allowed.mockResolvedValue(false);
+    await expect(getValidShopifyToken("u1")).resolves.toEqual({ status: "not_connected" });
+    expect(operations.allowed).toHaveBeenCalledWith("s.myshopify.com");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("treats a failed workspace check as transient, not as permission", async () => {
+    operations.allowed.mockRejectedValue(new Error("db down"));
+    await expect(getValidShopifyToken("u1")).resolves.toEqual({ status: "temporarily_unavailable", shopUrl: "s.myshopify.com" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

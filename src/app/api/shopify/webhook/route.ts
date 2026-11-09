@@ -1,6 +1,14 @@
 import { verifyShopifyHmac } from "@/lib/verify-shopify-hmac";
 import { disconnectShopInstallation, supabaseAdmin } from "@/lib/db";
 import { captureBackgroundFailure } from "@/lib/observability/capture";
+import {
+  lifecycleEventKey,
+  parseShopifyShopId,
+  parseTriggeredAt,
+  uninstallClearsCredentials,
+  webhookShopDomain,
+} from "@/modules/workspaces/lifecycle";
+import { beginUninstall, shopOperationsAllowed } from "@/modules/workspaces/repository";
 import { createHash } from "crypto";
 import { after } from "next/server";
 
@@ -153,12 +161,39 @@ async function forwardPurchaseToMeta(shopDomain: string, integration: WebhookInt
   if (error) console.error("Failed to record CAPI result:", error.message);
 }
 
+/**
+ * app/uninstalled, answered only once recorded: a failure returns 500 so
+ * Shopify retries, and the retry is recognised by its delivery key. The
+ * workspace stops all activity and keeps its binding; stored data waits for
+ * shop/redact. Credentials are cleared unless Shopify triggered this
+ * uninstall before the merchant's latest reconnection.
+ */
+async function handleUninstall(request: Request, headerDomain: string, payload: ShopifyOrderPayload, rawBody: string): Promise<Response> {
+  const domain = webhookShopDomain(payload, headerDomain);
+  if (!domain) return new Response("Invalid shop domain", { status: 400 });
+  try {
+    const result = await beginUninstall({
+      shopifyShopId: parseShopifyShopId(payload.id),
+      domain,
+      eventKey: lifecycleEventKey({ webhookId: request.headers.get("X-Shopify-Webhook-Id"), topic: "app/uninstalled", domain, rawBody }),
+      triggeredAt: parseTriggeredAt(request.headers.get("X-Shopify-Triggered-At")),
+    });
+    if (uninstallClearsCredentials(result) && !(await disconnectShopInstallation(domain))) {
+      throw new Error("uninstall_disconnect_failed");
+    }
+    return Response.json({ received: true }, { status: 200 });
+  } catch (err) {
+    console.error("Uninstall webhook failed:", err instanceof Error ? err.message : "unknown");
+    captureBackgroundFailure("shopify-uninstall", err);
+    return new Response("Uninstall could not be recorded", { status: 500 });
+  }
+}
+
 /** Runs after the response is sent, so Shopify gets its 200 immediately. */
 async function processWebhook(shopDomain: string, topic: string | null, payload: ShopifyOrderPayload) {
-  if (topic === "app/uninstalled") {
-    // SEC-09: operational disconnect. Stored data waits for shop/redact (48h).
-    // Shopify already has its 200 and will not retry, so a failure must surface.
-    if (!(await disconnectShopInstallation(shopDomain))) throw new Error("uninstall_disconnect_failed");
+  // A disconnected, uninstalled or deleting workspace starts no new work.
+  if (!(await shopOperationsAllowed(shopDomain.toLowerCase()))) {
+    console.warn(`Webhook ${topic ?? "unknown"} ignored: the shop's workspace is not active`);
     return;
   }
 
@@ -235,6 +270,8 @@ export async function POST(request: Request) {
     console.error("Failed to parse webhook JSON payload:", err);
     return new Response("Invalid JSON", { status: 400 });
   }
+
+  if (topicHeader === "app/uninstalled") return handleUninstall(request, shopDomain, payload, rawBody);
 
   // Repeat delivery of this exact webhook: acknowledge and do nothing.
   const webhookId = request.headers.get("X-Shopify-Webhook-Id");

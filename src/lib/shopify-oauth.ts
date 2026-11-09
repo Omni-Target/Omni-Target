@@ -55,8 +55,19 @@ export interface OAuthStatePayload {
   plan: SelectedPlan;
   /** Clerk user who started the flow, or null when started signed-out. */
   uid: string | null;
+  /** Workspace the signed-in user chose for this store. The database checks it belongs to them. */
+  ws: string | null;
+  /** Ownership transfer this flow verifies or completes. The database checks it is theirs. */
+  tr: string | null;
   /** Expiry, epoch milliseconds. */
   exp: number;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A well-formed UUID, lower-cased, or null. */
+export function uuidOrNull(value: unknown): string | null {
+  return typeof value === "string" && UUID_RE.test(value) ? value.toLowerCase() : null;
 }
 
 export interface PendingInstallPayload {
@@ -180,17 +191,28 @@ function verify(token: string | null | undefined, purpose: string): Record<strin
 }
 
 export function createOAuthState(
-  input: { shop: string; from: OAuthFrom; plan: SelectedPlan; initiatorUserId: string | null },
+  input: {
+    shop: string;
+    from: OAuthFrom;
+    plan: SelectedPlan;
+    initiatorUserId: string | null;
+    workspaceId?: string | null;
+    transferId?: string | null;
+  },
   nowMs = Date.now(),
 ): { nonce: string; cookieValue: string } {
   if (!isValidShopDomain(input.shop)) throw new Error("Invalid shop domain for OAuth state");
   const nonce = randomBytes(32).toString("hex");
+  // A workspace or transfer is only ever chosen by a signed-in user.
+  const signedIn = Boolean(input.initiatorUserId);
   const payload: OAuthStatePayload = {
     n: nonce,
     shop: input.shop,
     from: input.from,
     plan: input.plan,
     uid: input.initiatorUserId,
+    ws: signedIn ? uuidOrNull(input.workspaceId) : null,
+    tr: signedIn ? uuidOrNull(input.transferId) : null,
     exp: nowMs + OAUTH_STATE_TTL_SECONDS * 1000,
   };
   return { nonce, cookieValue: sign(payload, "shopify-oauth-state") };
@@ -209,6 +231,8 @@ export function readOAuthState(cookieValue: string | null | undefined, nowMs = D
     from: normalizeFrom(p.from as string, Boolean(p.uid)),
     plan: normalizePlan(p.plan as string),
     uid: (p.uid as string | null) ?? null,
+    ws: p.uid ? uuidOrNull(p.ws) : null,
+    tr: p.uid ? uuidOrNull(p.tr) : null,
     exp: p.exp,
   };
 }

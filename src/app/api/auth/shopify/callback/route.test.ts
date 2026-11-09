@@ -17,6 +17,24 @@ const m = vi.hoisted(() => ({
   handleFreeCreditOnInstall: vi.fn(),
   fetchWithRetry: vi.fn(),
   sendEmail: vi.fn(),
+  disconnectShopInstallation: vi.fn(),
+  preflight: vi.fn(),
+  bind: vi.fn(),
+  activeWorkspaceForShop: vi.fn(),
+  disconnectWorkspace: vi.fn(),
+  transferForRequester: vi.fn(),
+  verifyTransfer: vi.fn(),
+  completeTransfer: vi.fn(),
+}));
+
+vi.mock("@/modules/workspaces/repository", () => ({
+  preflightShopConnection: m.preflight,
+  bindShopForInstall: m.bind,
+  activeWorkspaceForShop: m.activeWorkspaceForShop,
+  disconnectWorkspace: m.disconnectWorkspace,
+  transferForRequester: m.transferForRequester,
+  verifyOwnershipTransfer: m.verifyTransfer,
+  completeOwnershipTransfer: m.completeTransfer,
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -36,6 +54,7 @@ vi.mock("@/lib/db", () => ({
   upsertUserIntegration: m.upsertUserIntegration,
   updateUserIntegration: m.updateUserIntegration,
   getUserIntegration: m.getUserIntegration,
+  disconnectShopInstallation: m.disconnectShopInstallation,
 }));
 vi.mock("@/lib/billing-db", () => ({
   detectColumns: m.detectColumns,
@@ -71,12 +90,16 @@ function signedCallback(opts: { state: string; cookie?: string; timestamp?: numb
   });
 }
 
-function stateCookie(input: { from?: "signup" | "login" | "onboarding" | "app_store"; uid?: string | null } = {}) {
+function stateCookie(
+  input: { from?: "signup" | "login" | "onboarding" | "app_store" | "dashboard"; uid?: string | null; ws?: string; tr?: string } = {},
+) {
   const { nonce, cookieValue } = createOAuthState({
     shop: SHOP,
     from: input.from ?? "signup",
     plan: "",
     initiatorUserId: input.uid ?? null,
+    workspaceId: input.ws ?? null,
+    transferId: input.tr ?? null,
   });
   return { nonce, cookie: `shopify_oauth_state=${encodeURIComponent(cookieValue)}` };
 }
@@ -105,6 +128,11 @@ beforeEach(() => {
   m.getUser.mockResolvedValue({ publicMetadata: { onboardingStep: "complete" } });
   m.createSignInToken.mockResolvedValue({ token: "ticket-123" });
   m.getUserList.mockResolvedValue({ data: [{ id: "user_victim" }] });
+  m.preflight.mockResolvedValue("allowed");
+  m.bind.mockResolvedValue({ outcome: "bound_new_workspace", workspace_id: "ws-new" });
+  m.activeWorkspaceForShop.mockResolvedValue(null);
+  m.disconnectShopInstallation.mockResolvedValue(true);
+  m.transferForRequester.mockResolvedValue(null);
   m.fetchWithRetry.mockResolvedValue(
     Response.json({ access_token: "shpat_test", refresh_token: "shprt_test", expires_in: 3600, scope: "read_products" }),
   );
@@ -113,7 +141,7 @@ beforeEach(() => {
     vi.fn(async (url: string) => {
       if (url.includes("shop.json")) {
         // The shop's contact email deliberately matches an existing account.
-        return Response.json({ shop: { email: "victim@example.com", myshopify_domain: SHOP, name: "Attacker", domain: null } });
+        return Response.json({ shop: { id: 548380009, email: "victim@example.com", myshopify_domain: SHOP, name: "Attacker", domain: null } });
       }
       if (url.includes("webhooks.json")) return Response.json({ webhook: { id: 99 } });
       throw new Error(`unexpected fetch ${url}`);
@@ -202,6 +230,98 @@ describe("Shopify OAuth callback — legitimate flows", () => {
     const res = await GET(signedCallback({ state: nonce, cookie }));
     expect(res.headers.get("location")).toContain(`${APP}/login?error=shopify_auth_failed`);
     expect(m.createSignInToken).not.toHaveBeenCalled();
+  });
+});
+
+describe("Shopify OAuth callback — workspace ownership (Phase 1 task 3)", () => {
+  const WS = "1b4e28ba-2fa1-41d2-883f-0016d3cca427";
+  const TR = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b";
+
+  it("binds the store by Shopify's shop id to the chosen workspace", async () => {
+    m.auth.mockResolvedValue({ userId: "user_a" });
+    const { nonce, cookie } = stateCookie({ from: "dashboard", uid: "user_a", ws: WS });
+    await GET(signedCallback({ state: nonce, cookie }));
+    expect(m.preflight).toHaveBeenCalledWith(SHOP, "user_a");
+    expect(m.bind).toHaveBeenCalledWith({ shopifyShopId: 548380009, domain: SHOP, actor: "user_a", selectedWorkspaceId: WS, shopName: "Attacker" });
+    expect(m.upsertUserIntegration).toHaveBeenCalledWith("user_a", expect.objectContaining({ shopify_store_url: SHOP }));
+  });
+
+  it("refuses a store owned by another account before exchanging the code", async () => {
+    m.auth.mockResolvedValue({ userId: "user_b" });
+    m.preflight.mockResolvedValue("rejected_other_owner");
+    const { nonce, cookie } = stateCookie({ from: "onboarding", uid: "user_b" });
+    const res = await GET(signedCallback({ state: nonce, cookie }));
+    expect(res.headers.get("location")).toContain("error=shopify_auth_failed");
+    expect(decodeURIComponent(res.headers.get("location") ?? "")).toContain("another Omnitarget account");
+    expect(m.fetchWithRetry).not.toHaveBeenCalled();
+    expect(m.bind).not.toHaveBeenCalled();
+    expect(m.upsertUserIntegration).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the ownership check errors", async () => {
+    m.auth.mockResolvedValue({ userId: "user_a" });
+    m.preflight.mockRejectedValue(new Error("db down"));
+    const { nonce, cookie } = stateCookie({ from: "onboarding", uid: "user_a" });
+    const res = await GET(signedCallback({ state: nonce, cookie }));
+    expect(res.headers.get("location")).toContain("error=shopify_auth_failed");
+    expect(m.fetchWithRetry).not.toHaveBeenCalled();
+  });
+
+  it("stores nothing when the binding is refused after the exchange", async () => {
+    m.auth.mockResolvedValue({ userId: "user_b" });
+    m.bind.mockResolvedValue({ outcome: "rejected_other_owner" });
+    const { nonce, cookie } = stateCookie({ from: "onboarding", uid: "user_b" });
+    const res = await GET(signedCallback({ state: nonce, cookie }));
+    expect(res.headers.get("location")).toContain("error=shopify_auth_failed");
+    expect(m.upsertUserIntegration).not.toHaveBeenCalled();
+    expect(m.handleFreeCreditOnInstall).not.toHaveBeenCalled();
+  });
+
+  it("disconnects the workspace of the store an account's credential used to belong to", async () => {
+    m.auth.mockResolvedValue({ userId: "user_a" });
+    m.getUserIntegration.mockResolvedValue({ shopify_store_url: "old-store.myshopify.com", free_credit_used: true });
+    m.activeWorkspaceForShop.mockResolvedValue("ws-old");
+    const { nonce, cookie } = stateCookie({ from: "dashboard", uid: "user_a" });
+    await GET(signedCallback({ state: nonce, cookie }));
+    expect(m.activeWorkspaceForShop).toHaveBeenCalledWith("old-store.myshopify.com", "user_a");
+    expect(m.disconnectWorkspace).toHaveBeenCalledWith("ws-old", "user_a");
+    expect(m.disconnectWorkspace.mock.invocationCallOrder[0]).toBeLessThan(m.upsertUserIntegration.mock.invocationCallOrder[0]);
+  });
+
+  it("verifies a requested transfer without exchanging the code", async () => {
+    m.auth.mockResolvedValue({ userId: "user_b" });
+    m.transferForRequester.mockResolvedValue({ status: "requested", shop_domain: SHOP });
+    const { nonce, cookie } = stateCookie({ from: "dashboard", uid: "user_b", tr: TR });
+    const res = await GET(signedCallback({ state: nonce, cookie }));
+    expect(m.transferForRequester).toHaveBeenCalledWith(TR, "user_b");
+    expect(m.verifyTransfer).toHaveBeenCalledWith(TR, "user_b", SHOP);
+    expect(res.headers.get("location")).toBe(`${APP}/dashboard?transfer=verified`);
+    expect(m.fetchWithRetry).not.toHaveBeenCalled();
+    expect(m.preflight).not.toHaveBeenCalled();
+  });
+
+  it("completes an approved transfer with the new owner's own installation", async () => {
+    m.auth.mockResolvedValue({ userId: "user_b" });
+    m.transferForRequester.mockResolvedValue({ status: "approved", shop_domain: SHOP });
+    const { nonce, cookie } = stateCookie({ from: "dashboard", uid: "user_b", tr: TR });
+    await GET(signedCallback({ state: nonce, cookie }));
+    expect(m.completeTransfer).toHaveBeenCalledWith(TR, "user_b", 548380009);
+    expect(m.bind).not.toHaveBeenCalled();
+    expect(m.disconnectShopInstallation).toHaveBeenCalledWith(SHOP);
+    expect(m.disconnectShopInstallation.mock.invocationCallOrder[0]).toBeLessThan(m.upsertUserIntegration.mock.invocationCallOrder[0]);
+    expect(m.upsertUserIntegration).toHaveBeenCalledWith("user_b", expect.objectContaining({ shopify_access_token: "shpat_test" }));
+  });
+
+  it("refuses a transfer that is not the user's, not for this store, or not yet approved", async () => {
+    m.auth.mockResolvedValue({ userId: "user_b" });
+    for (const transfer of [null, { status: "approved", shop_domain: "other.myshopify.com" }, { status: "verified", shop_domain: SHOP }]) {
+      m.transferForRequester.mockResolvedValue(transfer);
+      const { nonce, cookie } = stateCookie({ from: "dashboard", uid: "user_b", tr: TR });
+      const res = await GET(signedCallback({ state: nonce, cookie }));
+      expect(res.headers.get("location")).toContain("error=shopify_auth_failed");
+    }
+    expect(m.fetchWithRetry).not.toHaveBeenCalled();
+    expect(m.completeTransfer).not.toHaveBeenCalled();
   });
 });
 

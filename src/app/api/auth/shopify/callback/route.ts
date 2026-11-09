@@ -1,5 +1,21 @@
 import { auth } from "@clerk/nextjs/server";
-import { getUserIdsLinkedToStore, upsertUserIntegration, updateUserIntegration } from "@/lib/db";
+import {
+  disconnectShopInstallation,
+  getUserIdsLinkedToStore,
+  getUserIntegration,
+  upsertUserIntegration,
+  updateUserIntegration,
+} from "@/lib/db";
+import { connectionRefusalMessage, isRefusal, parseShopifyShopId } from "@/modules/workspaces/lifecycle";
+import {
+  activeWorkspaceForShop,
+  bindShopForInstall,
+  completeOwnershipTransfer,
+  disconnectWorkspace,
+  preflightShopConnection,
+  transferForRequester,
+  verifyOwnershipTransfer,
+} from "@/modules/workspaces/repository";
 import { fetchWithRetry } from "@/lib/http";
 import { shopifyAdminRestUrl } from "@/lib/shopify-config";
 import { fetchShopifyStoreLogo } from "@/lib/shopify-store-logo";
@@ -36,6 +52,24 @@ import {
  *      linked) shop becomes a pending install that resumes after sign-in.
  */
 const GENERIC_FAILURE = "We could not complete the Shopify connection. Please try again.";
+const TRANSFER_FAILURE = "This store transfer is not ready to complete. Check its status and try again.";
+
+const normalizeShopHost = (value: unknown) =>
+  typeof value === "string" ? value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "") || null : null;
+
+/**
+ * Until credentials move to their own table (task 4), an account stores one
+ * Shopify credential, and connecting another store replaces it. The workspace
+ * of the store being replaced is therefore disconnected: it keeps its
+ * ownership, binding and data, and reconnecting that store restores it.
+ */
+async function disconnectReplacedWorkspace(userId: string, newShop: string): Promise<void> {
+  const integration = await getUserIntegration(userId);
+  const previous = normalizeShopHost(integration?.shopify_store_url || integration?.shop_domain);
+  if (!previous || previous === newShop) return;
+  const workspaceId = await activeWorkspaceForShop(previous, userId);
+  if (workspaceId) await disconnectWorkspace(workspaceId, userId);
+}
 
 function redirectTo(url: string, cookies: string[] = []): Response {
   const response = new Response(null, {
@@ -128,6 +162,34 @@ export async function GET(request: Request) {
   const isLogin = state.from === "login";
   const hasPaidPlan = ["starter", "growth", "scale"].includes(selectedPlan);
 
+  // Workspace rules (Phase 1, task 3), applied before the code is exchanged:
+  // an exchange retires the shop's current token, so an account that may not
+  // connect this shop must never reach it.
+  try {
+    if (state.tr) {
+      if (decision.kind !== "link_to_session") return failure(TRANSFER_FAILURE);
+      const transfer = await transferForRequester(state.tr, targetUserId);
+      if (!transfer || transfer.shop_domain !== shop) return failure(TRANSFER_FAILURE);
+      if (transfer.status === "requested") {
+        // Completing Shopify's authorization for this shop proves control of
+        // it. The code is deliberately not exchanged: the current owner keeps
+        // working until they approve.
+        await verifyOwnershipTransfer(state.tr, targetUserId, shop);
+        return redirectTo(`${appBaseUrl}/dashboard?transfer=verified`, [clearState]);
+      }
+      if (transfer.status !== "approved") return failure(TRANSFER_FAILURE);
+    } else {
+      const outcome = await preflightShopConnection(shop, targetUserId);
+      if (isRefusal(outcome)) {
+        console.warn(`Shopify OAuth refused by workspace rules: ${outcome}`);
+        return failure(connectionRefusalMessage(outcome));
+      }
+    }
+  } catch (err) {
+    console.error("Workspace check failed:", err instanceof Error ? err.message : "unknown error");
+    return failure(state.tr ? TRANSFER_FAILURE : GENERIC_FAILURE);
+  }
+
   try {
     // Exchange code for an EXPIRING offline access token ("expiring": 1 returns
     // an expiring token + refresh token instead of a non-expiring token).
@@ -180,6 +242,32 @@ export async function GET(request: Request) {
     const storeLogoUrl = await fetchShopifyStoreLogo(myshopifyUrl, customDomain);
     const storeName: string = shopData.name || "Store";
 
+    // Shopify's immutable shop id is the store's identity; the domain can change.
+    const shopifyShopId = parseShopifyShopId(shopData.id);
+    if (!shopifyShopId) throw new Error("Shopify returned no shop id");
+
+    if (state.tr) {
+      // The new owner's own installation completes the approved transfer. The
+      // previous owner's stored credential is cleared: this exchange retired it.
+      await completeOwnershipTransfer(state.tr, targetUserId, shopifyShopId);
+      if (!(await disconnectShopInstallation(myshopifyUrl))) throw new Error("previous_credentials_not_cleared");
+    } else {
+      const bound = await bindShopForInstall({
+        shopifyShopId,
+        domain: myshopifyUrl,
+        actor: targetUserId,
+        selectedWorkspaceId: state.ws,
+        shopName: storeName,
+      });
+      if (isRefusal(bound.outcome)) {
+        // Only reachable if the shop changed hands between the check above and
+        // here. Nothing is stored for the refused account.
+        console.warn(`Shopify OAuth refused by workspace rules after exchange: ${bound.outcome}`);
+        return failure(connectionRefusalMessage(bound.outcome));
+      }
+      await disconnectReplacedWorkspace(targetUserId, myshopifyUrl);
+    }
+
     // Shopify data payload — store token + refresh token + expiry
     const shopifyData: Record<string, unknown> = {
       shopify_store_url: myshopifyUrl,
@@ -203,7 +291,6 @@ export async function GET(request: Request) {
     await upsertUserIntegration(targetUserId, shopifyData);
 
     // Give 1 free credit on install if free_credit_used is false
-    const { getUserIntegration } = await import("@/lib/db");
     const userIntegration = await getUserIntegration(targetUserId);
     const freeCreditUsedBefore = cols.hasFreeCreditUsed ? !!userIntegration?.free_credit_used : false;
 

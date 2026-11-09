@@ -61,10 +61,14 @@ const h = vi.hoisted(() => {
       }),
     };
   };
-  return { state, from, verify: vi.fn(), sync: vi.fn(), revoke: vi.fn(), capture: vi.fn() };
+  return {
+    state, from, verify: vi.fn(), sync: vi.fn(), revoke: vi.fn(), capture: vi.fn(),
+    beginUninstall: vi.fn(), operationsAllowed: vi.fn(),
+  };
 });
 
 vi.mock("@/lib/observability/capture", () => ({ captureBackgroundFailure: h.capture }));
+vi.mock("@/modules/workspaces/repository", () => ({ beginUninstall: h.beginUninstall, shopOperationsAllowed: h.operationsAllowed }));
 
 vi.mock("@/lib/db", () => ({ supabaseAdmin: { from: h.from }, disconnectShopInstallation: h.revoke }));
 vi.mock("@/lib/verify-shopify-hmac", () => ({ verifyShopifyHmac: h.verify }));
@@ -111,25 +115,73 @@ beforeEach(() => {
   h.sync.mockReset();
   h.revoke.mockReset().mockResolvedValue(true);
   h.capture.mockReset();
+  h.beginUninstall.mockReset().mockResolvedValue({ outcome: "pending_deletion" });
+  h.operationsAllowed.mockReset().mockResolvedValue(true);
   fetchMock.mockReset().mockResolvedValue(new Response(JSON.stringify({ events_received: 1 }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   vi.stubEnv("SHOPIFY_WEBHOOK_SECRET", "secret");
 });
 
-describe("background failure reporting (OPS-02)", () => {
-  it("reports an uninstall whose credentials could not be cleared", async () => {
-    h.revoke.mockResolvedValue(false);
-    const response = await deliver({ id: 1 }, "app/uninstalled");
+describe("app/uninstalled lifecycle (Phase 1 task 3, SEC-09)", () => {
+  it("records the uninstall with Shopify's ids and times, then clears credentials, before answering", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/shopify/webhook", {
+        method: "POST",
+        headers: {
+          "X-Shopify-Hmac-SHA256": "sig",
+          "X-Shopify-Topic": "app/uninstalled",
+          "X-Shopify-Shop-Domain": "header.myshopify.com",
+          "X-Shopify-Webhook-Id": "uninstall-1",
+          "X-Shopify-Triggered-At": "2026-11-09T18:00:27.877041743Z",
+        },
+        body: JSON.stringify({ id: 548380009, myshopify_domain: "s.myshopify.com" }),
+      }),
+    );
     expect(response.status).toBe(200);
-    await flush();
-    expect(h.capture).toHaveBeenCalledWith("shopify-webhook", expect.objectContaining({ message: "uninstall_disconnect_failed" }));
+    expect(h.beginUninstall).toHaveBeenCalledWith({
+      shopifyShopId: 548380009,
+      domain: "s.myshopify.com",
+      eventKey: "uninstall-1",
+      triggeredAt: "2026-11-09T18:00:27.877Z",
+    });
+    expect(h.revoke).toHaveBeenCalledWith("s.myshopify.com");
+    expect(h.state.afterTasks).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the newer installation's credentials when the uninstall predates a reconnection", async () => {
+    h.beginUninstall.mockResolvedValue({ outcome: "stale" });
+    expect((await deliver({ id: 1 }, "app/uninstalled")).status).toBe(200);
+    expect(h.revoke).not.toHaveBeenCalled();
+  });
+
+  it("finishes clearing credentials when Shopify retries a delivery", async () => {
+    h.beginUninstall.mockResolvedValue({ outcome: "duplicate", recorded_outcome: "pending_deletion" });
+    await deliver({ id: 1 }, "app/uninstalled");
+    expect(h.revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers 500 so Shopify retries when the uninstall cannot be recorded", async () => {
+    h.beginUninstall.mockRejectedValue(new Error("db down"));
+    expect((await deliver({ id: 1 }, "app/uninstalled")).status).toBe(500);
+    expect(h.revoke).not.toHaveBeenCalled();
+    expect(h.state.deliveries).toHaveLength(0);
+    expect(h.capture).toHaveBeenCalledWith("shopify-uninstall", expect.any(Error));
+  });
+
+  it("answers 500 and reports it when credentials could not be cleared", async () => {
+    h.revoke.mockResolvedValue(false);
+    expect((await deliver({ id: 1 }, "app/uninstalled")).status).toBe(500);
+    expect(h.capture).toHaveBeenCalledWith("shopify-uninstall", expect.objectContaining({ message: "uninstall_disconnect_failed" }));
   });
 
   it("does not report a successful uninstall", async () => {
     await deliver({ id: 1 }, "app/uninstalled");
-    await flush();
     expect(h.capture).not.toHaveBeenCalled();
   });
+});
+
+describe("background failure reporting (OPS-02)", () => {
 
   it("reports a failed Meta send", async () => {
     fetchMock.mockRejectedValue(new Error("network"));
@@ -191,12 +243,13 @@ describe("Shopify order webhook (ING-05)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("revokes credentials on app/uninstalled without touching Meta (SEC-09)", async () => {
-    h.revoke.mockReset().mockResolvedValue(true);
-    await deliver({}, "app/uninstalled");
+  it("starts no work for a shop whose workspace is disconnected, uninstalled or being deleted", async () => {
+    h.operationsAllowed.mockResolvedValue(false);
+    await deliver(order);
     await flush();
-    expect(h.revoke).toHaveBeenCalledWith("s.myshopify.com");
+    expect(h.operationsAllowed).toHaveBeenCalledWith("s.myshopify.com");
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(h.state.capi).toHaveLength(0);
     expect(h.state.staleUpdates).toHaveLength(0);
   });
 

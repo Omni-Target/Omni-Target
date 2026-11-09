@@ -13,6 +13,7 @@ import {
   readCookie,
   readPendingInstall,
   serializeCookie,
+  uuidOrNull,
 } from "@/lib/shopify-oauth";
 
 /**
@@ -125,11 +126,16 @@ export async function GET(request: Request) {
     );
   }
 
+  // A signed-in user may name the workspace to bind, or the ownership transfer
+  // this flow verifies or completes. These only select; the database decides
+  // whether this user may use them.
   const { nonce, cookieValue } = createOAuthState({
     shop,
     from,
     plan: selectedPlan,
     initiatorUserId: userId ?? null,
+    workspaceId: clearPending ? null : uuidOrNull(searchParams.get("workspace")),
+    transferId: clearPending ? null : uuidOrNull(searchParams.get("transfer")),
   });
 
   const authorize = new URL(`https://${shop}/admin/oauth/authorize`);

@@ -19,8 +19,11 @@ import pg from "pg";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASELINE = join(HERE, "baseline", "0017_schema.sql");
 const PRODUCTION_REF = "bafwrcyruaxzojwofxym";
-/** Roles a Supabase project already has; a plain Postgres needs them for the baseline's grants. */
-const PLATFORM_ROLES = ["anon", "authenticated", "service_role", "supabase_admin"];
+/**
+ * Roles a Supabase project already has; a plain Postgres needs them for the
+ * baseline's grants. service_role bypasses row-level security, as on Supabase.
+ */
+const PLATFORM_ROLES = { anon: "nologin", authenticated: "nologin", service_role: "nologin bypassrls", supabase_admin: "nologin" };
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -41,9 +44,9 @@ try {
     console.error("This database already has public.schema_migrations. Use `node supabase/migrate.mjs up` for existing databases.");
     process.exitCode = 2;
   } else {
-    for (const role of PLATFORM_ROLES) {
+    for (const [role, options] of Object.entries(PLATFORM_ROLES)) {
       await client.query(
-        `do $$ begin if not exists (select 1 from pg_roles where rolname = '${role}') then execute format('create role %I nologin', '${role}'); end if; end $$;`,
+        `do $$ begin if not exists (select 1 from pg_roles where rolname = '${role}') then execute format('create role %I ${options}', '${role}'); end if; end $$;`,
       );
     }
     await client.query("begin");

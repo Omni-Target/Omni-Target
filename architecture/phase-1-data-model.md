@@ -9,31 +9,55 @@ Implements `architecture/decisions/0001-one-shop-one-workspace.md`. Built and te
 - States use `text` with `CHECK` constraints, so they can evolve with forward-only migrations.
 - Shopify IDs are stored as `bigint`.
 
-## Ownership
+## Ownership (migration 0018, implemented)
 
 | Table | Key columns | Constraints |
 |---|---|---|
-| `workspaces` | `id`, `owner_clerk_user_id`, `status`, `deletion_requested_at`, `deletion_due_at`, `deleted_at`, `legacy_user_integration_id` | `status` in `active`, `disconnected`, `pending_deletion`, `deletion_processing`, `deleted`. `legacy_user_integration_id` unique. Index on owner for non-deleted rows |
-| `shops` | `id`, `shopify_shop_id`, `myshopify_domain`, `primary_domain`, `name`, `currency`, `country_code` | `shopify_shop_id` unique and not null. `myshopify_domain` unique, lowercase, and updateable |
-| `shop_bindings` | `id`, `shop_id`, `workspace_id`, `bound_at`, `bound_by_clerk_user_id`, `released_at`, `release_reason` | Unique `shop_id` where `released_at is null`; unique `workspace_id` where `released_at is null`. Released rows are history |
-| `workspace_events` | `workspace_id`, `shop_id`, `event`, `actor_clerk_user_id`, `source`, `details`, `at` | Append-only audit: provisioned, connected, reconnect, rejected, disconnected, uninstalled, restored, redaction, deleted, transfer events |
-| `ownership_transfers` | `id`, `shop_id`, `from_workspace_id`, `to_workspace_id`, `requested_by_clerk_user_id`, `status`, `oauth_verified_at`, `approved_at`, `completed_at` | `status` in `requested`, `verified`, `approved`, `completed`, `cancelled`, `expired`. One open transfer per shop |
+| `workspaces` | `id`, `owner_clerk_user_id`, `status`, `status_changed_at`, `last_connected_at`, `uninstalled_at`, `deletion_requested_at`, `recovery_ends_at`, `deleted_at`, `legacy_user_integration_id` | `status` in `active`, `disconnected`, `pending_deletion`, `deletion_processing`, `deleted`; `deleted_at` set exactly when `deleted`. `legacy_user_integration_id` unique. Index on owner for non-deleted rows. One Clerk user may own several |
+| `credit_accounts` | `workspace_id`, `balance`, `updated_at` | Created with each workspace by trigger. `balance >= 0`. The ledger that changes it arrives in 0020 |
+| `shops` | `id`, `shopify_shop_id`, `myshopify_domain`, `name`, `domain_changed_at` | `shopify_shop_id` unique, not null, positive. `myshopify_domain` unique and must be a lower-case `*.myshopify.com` host; it follows Shopify when the domain changes. Created only from an authenticated installation, never from a legacy domain |
+| `shop_bindings` | `shop_id`, `workspace_id`, `bound_at`, `bound_by_clerk_user_id`, `released_at`, `release_reason`, `transfer_id` | Unique `shop_id` and unique `workspace_id` where `released_at is null`. `release_reason` in `deletion_completed`, `ownership_transferred`, set exactly when released. Released rows are history and are never deleted |
+| `workspace_events` | `workspace_id`, `shop_id`, `event`, `actor_clerk_user_id`, `source`, `occurred_at`, `recorded_at`, `details` | Append-only (trigger). Events: `provisioned`, `connected`, `connect_rejected`, `reconnected`, `restored`, `disconnected`, `uninstalled`, `uninstall_stale`, `redact_received`, `redact_after_reinstall`, `deletion_started`, `deletion_verified`, `deleted`, `legacy_claim_*`, `transfer_*` |
+| `shop_lifecycle_events` | `topic`, `event_key`, `shopify_shop_id`, `shop_domain`, `triggered_at`, `received_at`, `workspace_id`, `outcome` | Unique (`topic`, `event_key`): a repeated delivery is recognised. Shopify's trigger time and our receipt time are kept apart |
+| `compliance_requests` | `lifecycle_event_id`, `topic`, `shopify_shop_id`, `shop_domain`, `workspace_id`, `received_at`, `due_at`, `status`, `resolution`, `completed_at` | One per received compliance webhook, kept after completion. `due_at` is receipt plus 30 days. `status` in `open`, `processing`, `completed` |
+| `workspace_deletions` | `workspace_id`, `compliance_request_id`, `status`, `attempts`, `last_error`, `due_at`, `verification` | One open deletion per workspace. `failed` stays open and is retried |
+| `ownership_transfers` | `shop_id`, `from_workspace_id`, `to_workspace_id`, `requested_by_clerk_user_id`, `reason`, `status`, `requested_at`, `shopify_verified_at`, `approved_at`, `approved_by_clerk_user_id`, `completed_at`, `closed_at`, `expires_at` | `status` in `requested`, `verified`, `approved`, `completed`, `cancelled`, `expired`. One open transfer per shop. `to_workspace_id` stays null until completion creates the workspace, unless the requester named an empty one. Expires after 7 days |
+| `legacy_shop_claims` | `legacy_source`, `legacy_row_id`, `clerk_user_id`, `claimed_domain`, `workspace_id`, `status`, `shop_id`, `confirmed_at`, `reviewed_by`, `review_note` | Unique (`legacy_source`, `legacy_row_id`). `status` in `provisional`, `contested`, `confirmed`, `unresolved`, `rejected`; `shop_id` set exactly when `confirmed` |
+
+`campaigns.workspace_id` is added, nullable. The other tenant tables get theirs in 0022.
 
 A shop row keeps only its ID and domain after deletion, as the identity record that financial history refers to.
 
+### Access
+
+All ten tables have RLS enabled and no grants to `anon` or `authenticated`. `service_role` may read them and nothing else. Every change goes through the functions below, which run with their owner's rights (`security definer`, `search_path = public, pg_temp`) and are the only writers. `service_role` may execute the public functions; internal helpers (`log_workspace_event`, `find_shop`, `shop_has_open_redaction`) are not granted to it. Real Postgres tests run every function as `service_role`.
+
 ### Lifecycle operations
 
-Each is a SQL function, and each is one transaction.
+Each is one SQL function and one transaction. Installation and transfer completion take a transaction-scoped advisory lock per Shopify shop ID and per domain, so concurrent callbacks serialise; the partial unique indexes are the final guard.
 
 | Operation | Effect |
 |---|---|
-| `bind_shop_for_install(shopify_shop_id, domain, actor, selected_workspace)` | No binding: binds to the actor's empty selected workspace, or a new one. Owner's own binding: restores it. Another owner's binding or `deletion_processing`: rejected and logged. Repeated calls give the same result |
-| `disconnect_workspace(workspace, actor)` | Clears the credential, sets `disconnected`, keeps the binding |
-| `begin_uninstall(shopify_shop_id)` | Sets `pending_deletion`, clears the credential, cancels sync runs, keeps the binding |
-| `process_shop_redact(shopify_shop_id)` | Records receipt time and the 30-day deadline first. `pending_deletion`: moves to `deletion_processing`, redacts, then `deleted` and releases the binding. A workspace restored since the uninstall is not redacted automatically; the request stays open as a compliance item until resolved explicitly, and is never discarded |
-| `complete_ownership_transfer(transfer)` | Releases the old binding as `ownership_transferred` and binds the new owner's workspace. Credits and campaigns stay put |
+| `shop_connection_preflight(domain, actor)` | Read-only, before the OAuth code is exchanged: refuses another owner's shop, a shop under redaction and a store under a legacy claim. A refused account therefore never exchanges a code, which would retire the owner's token |
+| `bind_shop_for_install(shopify_shop_id, domain, actor, selected_workspace, name)` | Creates or updates the shop by its ID (a changed domain is followed; a domain held by another shop ID is refused). Owner's own binding: `already_bound`, or restores a `disconnected` (`reconnected`) or `pending_deletion` (`restored`) workspace. Another owner's binding, an open redaction or `deletion_processing`: refused and logged. Unbound: a legacy claim decides who may bind; otherwise the actor's chosen workspace (theirs, active and unbound) or a new one. Idempotent |
+| `disconnect_workspace(workspace, actor)` | Owner only. Sets `disconnected` and keeps the binding; the app clears the stored credential |
+| `begin_uninstall(shopify_shop_id, domain, event_key, triggered_at)` | Records the delivery once. Sets `pending_deletion`, `uninstalled_at` (Shopify's trigger time) and `recovery_ends_at` (+48 hours), cancels open transfers, keeps the binding. An uninstall triggered before the latest reconnection is `stale` and changes nothing. A repeat returns the first delivery's outcome |
+| `record_shop_redact(shopify_shop_id, domain, event_key, triggered_at)` | Records the delivery and a compliance request due in 30 days, then moves the bound workspace to `deletion_processing` and opens a deletion. A request arriving after a reinstall is acted on, never skipped: it is logged as `redact_after_reinstall`, reconnection is refused until the deletion completes, and the merchant's next installation then starts a new workspace. A shop with no workspace keeps an open request handled by `process_unbound_shop_redact` |
+| `process_workspace_deletion(deletion)` | Redacts Shopify-derived data (`redact_shop_data`), deletes the workspace's campaigns, then verifies nothing naming the shop remains. Only a verified deletion marks the workspace `deleted`, releases the binding as `deletion_completed` and completes its compliance requests. A failure is kept as `failed` with its error and retried by `/api/cron/process-deletions` |
+| `record_customer_compliance(topic, …)` | Records `customers/redact` and `customers/data_request` once and completes them as `no_customer_data_held` |
+| `request_` / `verify_` / `approve_` / `complete_` / `cancel_ownership_transfer` | Request names the store. Verification is the requester completing Shopify's authorization for the shop, without a code exchange. Approval is by the current owner only, after verification. Completion is the requester's own installation: the old binding is released as `ownership_transferred`, the new one created. Credits, campaigns and history stay with the original workspace |
+| `register_legacy_account` / `review_legacy_claims` | See the legacy migration below |
+| `workspace_for_actor`, `list_workspaces`, `workspace_credit_balance`, `campaign_for_actor` | Reads for an authenticated actor. Another user's workspace, or one being deleted, raises `workspace_access_denied`. A campaign is visible only to its creator, in its own workspace |
+| `workspace_can_operate(workspace)`, `shop_operations_allowed(domain)` | True only for an `active` workspace that holds its binding and has no open deletion. Every Shopify token is issued through this check, so disconnected, uninstalled and deleting workspaces start no sync or webhook work. A shop not yet modelled keeps legacy behaviour |
 
-Background work checks `workspace_can_operate(workspace, shop)` before every step: the workspace is `active` and still holds the binding.
+Shop data deletion, workspace closure and Clerk identity deletion stay separate. Deleting a workspace never deletes the owner's Clerk identity, their other workspaces or anyone else's data, and unused credits are left untouched pending the open policy decision.
+
+### Transitional behaviour until tasks 4 to 6
+
+- `user_integrations` holds one Shopify credential per Clerk user. Connecting a second store replaces it, so the previous store's workspace is disconnected (binding, data and credits kept; reconnecting restores it). Task 4 moves credentials to `shop_credentials`, after which an account can keep several stores connected.
+- Balances still come from `user_integrations`. `credit_accounts` starts at zero until the ledger and opening balances of task 5.
+- New campaigns are not yet attributed to a workspace (0022). Deletion removes attributed campaigns and, through the legacy redaction, unattributed ones for the shop; a campaign attributed to another workspace is never touched.
+- The legacy redaction still clears generation receipts and Meta events per Clerk user rather than per workspace.
 
 ## Credentials
 
@@ -73,8 +97,6 @@ Background work checks `workspace_can_operate(workspace, shop)` before every ste
 
 **Reconciliation** pages through Shopify purchases with a stored cursor. Attribution comes from the purchase intent, which every new purchase has. A legacy purchase can use a historical binding only when the binding is verified, its start and end times are reliable, and the purchase time falls unambiguously inside it. Otherwise it is recorded as unattributed for review.
 
-**Compliance requests** are stored in `compliance_requests` (shop, topic, Shopify request ID, received at, deadline, status, resolution). This separates uninstall, reinstall and webhook timestamps and keeps every received request until it is resolved.
-
 **Subscriptions** are granted once per billing period, keyed by subscription ID and period start, never once per subscription ID.
 
 No transaction stays open across a Shopify or AI call.
@@ -92,15 +114,16 @@ The workspace comes from server-side context: the session user plus their select
 Run as a dry run first, which writes a report. Then it is applied per account, idempotently, recording what was migrated, skipped and why.
 
 1. **One workspace per legacy row**, owned by that row's Clerk user. Accounts are never merged. Each row's campaigns, payments and history move with it.
-2. **Shop identity.** Legacy rows store no Shopify shop ID, so no shop is bound at migration time.
-   - A store domain claimed by one legacy row becomes a `sole_claimant` reservation. Only that workspace may bind it, at its next authenticated connection, which also confirms the shop ID.
-   - A domain claimed by several rows becomes `contested`. Every connection attempt is rejected until a reviewer resolves it.
+2. **Shop identity.** Legacy rows store no Shopify shop ID, so no shop is bound at migration time and no shop row is created from a domain. `register_legacy_account(legacy_row, clerk_user, domain)` (0018) creates the row's workspace and a claim, idempotently:
+   - A domain claimed by one legacy row is `provisional`. Only that account may bind it, at its next authenticated connection, which records the shop ID and confirms the claim.
+   - A domain claimed by several rows is `contested`. Every connection attempt is refused until `review_legacy_claims` keeps one claim as provisional (still confirmed only by that account's own connection) and rejects the others, with reviewer and note.
+   - A missing or invalid domain is `unresolved` and binds nothing.
 3. **Credentials.** A credential is migrated only when its shop is bound and the credential is shown to work. Others are recorded as retired, by metadata only.
 4. **Opening balances** equal current balances, to preserve them. Each is compared with what the records explain (free grant, plus payment grants, minus usage, plus adjustments). Differences go to `credit_migration_review`. No historical transaction is invented.
 5. **Purchases.** Known claimed purchases are recorded in `provider_purchases` against their existing account. A new workspace never inherits an older purchase.
 6. **Orphans**, such as payments or usage with no account, are recorded in `legacy_orphans` and not attached anywhere.
 
-Mapping tables: `legacy_account_map`, `legacy_shop_claims`, `credit_migration_review`, `legacy_orphans`.
+Mapping tables: `legacy_shop_claims` (0018), and `legacy_account_map`, `credit_migration_review`, `legacy_orphans` (0021).
 
 ## Migration sequence
 
@@ -108,7 +131,7 @@ Historical files `0001` to `0017` are kept unchanged. A schema baseline taken at
 
 | Migration | Contents |
 |---|---|
-| `0018_workspaces_and_shop_bindings` | Workspaces, shops, bindings, events, transfers, lifecycle functions |
+| `0018_workspaces_and_shop_bindings` | Workspaces, credit accounts, shops, bindings, events, lifecycle events, compliance requests, deletions, transfers, legacy claims, `campaigns.workspace_id`, and their functions (implemented) |
 | `0019_encrypted_credentials` | Shop and Meta credentials, refresh locks |
 | `0020_credit_ledger` | Accounts, ledger, entitlements, intents, provider purchases, sync state, canonical functions |
 | `0021_legacy_mapping` | Mapping and review tables |

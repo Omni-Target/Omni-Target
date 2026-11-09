@@ -5,6 +5,7 @@ import {
   supabaseAdmin,
 } from "./db";
 import { fetchWithRetry } from "./http";
+import { shopOperationsAllowed } from "@/modules/workspaces/repository";
 
 /**
  * Result of resolving a Shopify access token for a user.
@@ -158,6 +159,17 @@ export async function getValidShopifyToken(
 
   if (!accessToken || !shopUrl) {
     return { status: "not_connected" };
+  }
+
+  // A workspace that is disconnected, uninstalled or being deleted starts no
+  // Shopify work. A failed check is treated as transient, never as permission.
+  try {
+    if (!(await shopOperationsAllowed(String(shopUrl).trim().toLowerCase()))) {
+      return { status: "not_connected" };
+    }
+  } catch (error) {
+    console.error("Workspace check failed:", error instanceof Error ? error.message : "unknown");
+    return { status: "temporarily_unavailable", shopUrl };
   }
 
   // Get expiry timestamp, prioritizing token_expires_at then shopify_token_expires_at
