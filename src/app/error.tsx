@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import * as Sentry from "@sentry/nextjs";
 import Link from "next/link";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Logo } from "@/components/shared/logo";
@@ -20,6 +21,7 @@ export default function RootError({
 }) {
   React.useEffect(() => {
     console.error("[root] route error", error);
+    Sentry.captureException(error);
   }, [error]);
 
   return (

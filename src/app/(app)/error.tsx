@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import * as Sentry from "@sentry/nextjs";
 import Link from "next/link";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { PageContainer } from "@/components/layout/page-container";
@@ -21,6 +22,7 @@ export default function AppError({
 }) {
   React.useEffect(() => {
     console.error("[app] route error", error);
+    Sentry.captureException(error);
   }, [error]);
 
   return (
