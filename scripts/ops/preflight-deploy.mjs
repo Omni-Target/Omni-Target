@@ -6,6 +6,7 @@
  *   node scripts/ops/preflight-deploy.mjs staging|production
  *
  * Expected values live in deploy-identity.json. An unset value is a failure.
+ * Set GH_CONFIG_DIR and VERCEL_GLOBAL_CONFIG to this project's logins first.
  * Reads local state only and changes nothing.
  */
 import { execFileSync } from "node:child_process";
@@ -69,7 +70,8 @@ function checkAllowed(name, actual) {
 // The repository belongs to an organization, so access identifies the login.
 checkAllowed("GitHub login", capture("gh", ["api", "user", "--jq", ".login"]));
 check("GitHub push access", capture("gh", ["api", `repos/${expected.github_repo}`, "--jq", ".permissions.push"]), "true");
-checkAllowed("Vercel login", capture("vercel", ["whoami"])?.split("\n").at(-1) ?? null);
+const vercelConfig = process.env.VERCEL_GLOBAL_CONFIG ? ["--global-config", process.env.VERCEL_GLOBAL_CONFIG] : [];
+checkAllowed("Vercel login", capture("vercel", [...vercelConfig, "whoami"])?.split("\n").at(-1) ?? null);
 
 const project = existsSync(".vercel/project.json") ? JSON.parse(readFileSync(".vercel/project.json", "utf8")) : {};
 check("Vercel team", project.orgId ?? null, expected.vercel_team_id);
