@@ -21,19 +21,19 @@ also accepted.
 ## Commands
 
 ```bash
-yarn migrate              # apply all pending migrations
-yarn migrate --only 0013  # apply exactly one pending migration (id or NNNN prefix)
-yarn migrate:status       # show applied / pending
-yarn migrate:down         # roll back the last applied migration
-yarn migrate:down --only 0012   # roll back one specific applied migration
-yarn migrate:create "add widgets table"   # scaffold the next NNNN_*.sql file
+pnpm migrate              # apply all pending migrations
+pnpm migrate --only 0013  # apply exactly one pending migration (id or NNNN prefix)
+pnpm migrate:status       # show applied / pending
+pnpm migrate:down         # roll back the last applied migration
+pnpm migrate:down --only 0012   # roll back one specific applied migration
+pnpm migrate:create "add widgets table"   # scaffold the next NNNN_*.sql file
 ```
 
 ## How it works
 
 - Migrations are `NNNN_name.sql` files, applied in filename order.
 - Applied migrations are tracked in `public.schema_migrations` (created
-  automatically), so each runs **exactly once** — re-running `yarn migrate` is
+  automatically), so each runs **exactly once** — re-running `pnpm migrate` is
   safe.
 - Each migration runs inside its **own transaction**: on error it is rolled back
   and the run stops, leaving the database consistent.
@@ -43,7 +43,7 @@ yarn migrate:create "add widgets table"   # scaffold the next NNNN_*.sql file
 
 ## Rollbacks
 
-`yarn migrate:down` runs an optional companion file `NNNN_name.down.sql` for the
+`pnpm migrate:down` runs an optional companion file `NNNN_name.down.sql` for the
 most recently applied migration, then removes its tracking row. If no `.down.sql`
 exists, it refuses rather than guessing. Write down scripts only where a safe
 reversal exists (dropping tables in production loses data).
@@ -86,10 +86,10 @@ node scripts/ops/assert-rls-lockdown.mjs --env-file .env.local
    exists *before* applying 0012. The new workflow works both before 0012
    (table-ping fallback) and after it (`keepalive_ping`).
 2. Run the assert script (expected: violations listed), then
-   `yarn migrate --only 0012`, then the assert script again (expected: PASS).
+   `pnpm migrate --only 0012`, then the assert script again (expected: PASS).
 3. Smoke-test the app: it uses only the service-role key, so behaviour must be
    unchanged.
-4. Rollback: `yarn migrate:down --only 0012` restores the recorded client-role
+4. Rollback: `pnpm migrate:down --only 0012` restores the recorded client-role
    grants (RLS stays enabled; see the down script).
 
 0012 is independent of every other migration: `--only` lets it be applied or

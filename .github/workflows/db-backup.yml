@@ -35,7 +35,7 @@ concurrency:
 env:
   BACKUP_R2_BUCKET: ${{ vars.BACKUP_R2_BUCKET }}
   BACKUP_PREFIX: ${{ vars.BACKUP_PREFIX }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
 
 jobs:
   backup:
@@ -45,10 +45,11 @@ jobs:
     environment: backup-staging
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: yarn
+          cache: pnpm
       - name: Install PostgreSQL 17 client and age
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -57,7 +58,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -yq postgresql-client-17 age
           echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
-      - run: yarn install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - name: Back up
         run: node scripts/ops/db-backup.mjs backup
         env:
@@ -96,10 +97,11 @@ jobs:
           --health-retries 20
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: yarn
+          cache: pnpm
       - name: Install PostgreSQL 17 client and age
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -108,7 +110,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -yq postgresql-client-17 age
           echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
-      - run: yarn install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - name: Write the restore-test key
         run: |
           umask 077
