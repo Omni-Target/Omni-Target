@@ -73,7 +73,15 @@ check("GitHub push access", capture("gh", ["api", `repos/${expected.github_repo}
 const vercelConfig = process.env.VERCEL_GLOBAL_CONFIG ? ["--global-config", process.env.VERCEL_GLOBAL_CONFIG] : [];
 checkAllowed("Vercel login", capture("vercel", [...vercelConfig, "whoami"])?.split("\n").at(-1) ?? null);
 
-const project = existsSync(".vercel/project.json") ? JSON.parse(readFileSync(".vercel/project.json", "utf8")) : {};
+function vercelLink() {
+  if (existsSync(".vercel/project.json")) return JSON.parse(readFileSync(".vercel/project.json", "utf8"));
+  if (!existsSync(".vercel/repo.json")) return {};
+  // Newer CLI versions keep the link here, with one entry per directory.
+  const entry = JSON.parse(readFileSync(".vercel/repo.json", "utf8")).projects?.find((item) => item.directory === ".");
+  return entry ? { orgId: entry.orgId, projectId: entry.id } : {};
+}
+
+const project = vercelLink();
 check("Vercel team", project.orgId ?? null, expected.vercel_team_id);
 check("Vercel project", project.projectId ?? null, expected.vercel_project_id);
 check("Deployment branch", git("branch", "--show-current"), BRANCH_FOR_TARGET[target]);
