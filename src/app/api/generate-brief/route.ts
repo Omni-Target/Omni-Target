@@ -27,6 +27,7 @@ import {
   STRUCTURED_HOOK_THINKING,
 } from "@/lib/insights-engine";
 import { resolveVerifiedMetaInterests } from "@/lib/meta-interest-resolver";
+import { getMetaAccessForUser } from "@/modules/credentials/meta";
 import { retiredEndpointResponse } from "@/lib/api/retired-endpoint";
 
 export const runtime = "nodejs";
@@ -459,7 +460,7 @@ Generate a high-converting Advantage+ campaign brief for "${targetTitle}" follow
       gender: profile.demographics?.gender || "All",
       productPrice: Number(targetProductCtx.price) || undefined,
       storeAov: Math.round(storeSnapshot.orders?.average_order_value || 0) || undefined,
-      accessToken: integration?.meta_access_token,
+      accessToken: (await getMetaAccessForUser(userId))?.userToken,
     });
 
     return respond(profile, generationStatus);

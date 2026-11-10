@@ -4,6 +4,8 @@ import { upsertUserIntegration } from "@/lib/db";
 import { META_OAUTH_STATE_COOKIE, META_REDIRECT_URI, isMatchingOAuthState } from "@/lib/meta-oauth";
 import { fetchWithRetry } from "@/lib/http";
 import type { MetaAdAccount } from "@/lib/types/meta";
+import { storeMetaConnection } from "@/modules/credentials/meta";
+import { currentWorkspaceFor } from "@/modules/workspaces/current";
 
 /**
  * Meta (Facebook Login) OAuth callback.
@@ -105,24 +107,28 @@ export async function GET(request: NextRequest) {
     const firstPixel = activeAccount?.adspixels?.data?.[0];
 
     const allPages = pagesData.data || [];
-    const firstPage = allPages[0];
 
-    // Meta data payload — store only writable accounts
-    const metaData = {
-      meta_access_token: accessToken,
-      meta_ad_accounts: writableAccounts,
-      meta_ad_account_id: activeAccount?.id || null,
-      meta_selected_account_id: activeAccount?.id || null,
-      meta_pixel_id: firstPixel?.id || null,
-      meta_pages: allPages,
-      meta_page_id: firstPage?.id || null,
-      meta_page_name: firstPage?.name || null,
-      meta_page_access_token: firstPage?.access_token || null,
+    // Meta belongs to the workspace the user is working in (task 4). Tokens are
+    // encrypted for that workspace; listings are stored without page tokens.
+    const workspace = await currentWorkspaceFor(userId);
+    if (!workspace || workspace.status === "deletion_processing" || workspace.status === "deleted") {
+      return finish(request, "/settings?meta=no_workspace");
+    }
+    await storeMetaConnection(workspace.workspace_id, userId, {
+      userToken: accessToken,
+      userTokenExpiresIn: typeof tokenData.expires_in === "number" ? tokenData.expires_in : null,
+      adAccounts: writableAccounts as unknown as Array<Record<string, unknown>>,
+      pages: allPages,
+      adAccountId: activeAccount?.id || null,
+      pixelId: firstPixel?.id || null,
+      businessId: null,
+    });
+
+    // Non-secret hints the legacy settings view still reads. No token is written.
+    await upsertUserIntegration(userId, {
       meta_connected_at: new Date().toISOString(),
       pixel_health: firstPixel ? "unknown" : "none",
-    };
-
-    await upsertUserIntegration(userId, metaData);
+    });
 
     return finish(request, "/settings?meta=connected");
   } catch (err) {

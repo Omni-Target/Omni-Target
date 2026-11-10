@@ -63,15 +63,18 @@ const h = vi.hoisted(() => {
   };
   return {
     state, from, verify: vi.fn(), sync: vi.fn(), revoke: vi.fn(), capture: vi.fn(),
-    beginUninstall: vi.fn(), operationsAllowed: vi.fn(), recordShopUpdate: vi.fn(),
+    beginUninstall: vi.fn(), operationsAllowed: vi.fn(), recordShopUpdate: vi.fn(), shopOwner: vi.fn(), meta: vi.fn(),
   };
 });
+
+vi.mock("@/modules/credentials/meta", () => ({ getMetaAccessForShop: h.meta }));
 
 vi.mock("@/lib/observability/capture", () => ({ captureBackgroundFailure: h.capture }));
 vi.mock("@/modules/workspaces/repository", () => ({
   beginUninstall: h.beginUninstall,
   shopOperationsAllowed: h.operationsAllowed,
   recordShopUpdate: h.recordShopUpdate,
+  shopOwner: h.shopOwner,
 }));
 
 vi.mock("@/lib/db", () => ({ supabaseAdmin: { from: h.from }, disconnectShopInstallation: h.revoke }));
@@ -121,6 +124,8 @@ beforeEach(() => {
   h.capture.mockReset();
   h.beginUninstall.mockReset().mockResolvedValue({ outcome: "pending_deletion" });
   h.recordShopUpdate.mockReset().mockResolvedValue({ outcome: "unchanged" });
+  h.shopOwner.mockReset().mockResolvedValue("u1");
+  h.meta.mockReset().mockResolvedValue({ owner: "u1", userToken: "meta-token", pixelId: "pixel", workspaceId: "ws-1" });
   h.operationsAllowed.mockReset().mockResolvedValue(true);
   fetchMock.mockReset().mockResolvedValue(new Response(JSON.stringify({ events_received: 1 }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
@@ -243,21 +248,35 @@ describe("Shopify order webhook (ING-05)", () => {
     expect(h.state.staleUpdates).toHaveLength(1);
   });
 
-  it("uses the newest row when a shop has duplicate integrations", async () => {
+  it("uses the shop's owner and its own workspace's Meta credential (task 4)", async () => {
+    h.shopOwner.mockResolvedValue("owner-1");
+    h.meta.mockResolvedValue({ owner: "owner-1", userToken: "workspace-meta-token", pixelId: "px-ws", workspaceId: "ws-1" });
+    await deliver(order);
+    await flush();
+    expect(h.meta).toHaveBeenCalledWith("s.myshopify.com");
+    expect(h.state.orderedByUpdatedAt).toBe(false);
+    expect(h.state.capi[0].clerk_user_id).toBe("owner-1");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/px-ws/events");
+    expect(JSON.parse(init.body).access_token).toBe("workspace-meta-token");
+  });
+
+  it("falls back to the newest legacy row only for a shop not yet modelled", async () => {
+    h.shopOwner.mockResolvedValue(null);
     h.state.integrations.push({ clerk_user_id: "u2" });
     await deliver(order);
     await flush();
     expect(h.state.orderedByUpdatedAt).toBe(true);
-    expect(h.state.capi[0].clerk_user_id).toBe("u1");
+    expect(h.state.staleUpdates).toHaveLength(1);
   });
 
-  it("skips Meta when the store has not connected it, and for other topics", async () => {
-    h.state.integrations = [{ clerk_user_id: "u1" }];
+  it("skips Meta when the shop's workspace has not connected it, and for other topics", async () => {
+    h.meta.mockResolvedValue(null);
     await deliver(order);
     await flush();
     expect(fetchMock).not.toHaveBeenCalled();
 
-    h.state.integrations = [{ clerk_user_id: "u1", meta_access_token: "t", meta_pixel_id: "p" }];
+    h.meta.mockResolvedValue({ owner: "u1", userToken: "t", pixelId: "p", workspaceId: "ws-1" });
     await deliver(order, "products/update");
     await flush();
     expect(fetchMock).not.toHaveBeenCalled();

@@ -8,7 +8,7 @@ import {
   releasePayment,
   createPayment,
 } from "./db";
-import { getValidShopifyToken } from "./shopify-token";
+import { getShopifyTokenForShop, getValidShopifyToken } from "./shopify-token";
 import { shopifyAdminGraphqlUrl } from "./shopify-config";
 import { isCreditableCharge, planForShopifyCharge, type ShopifyChargeKind } from "./shopify-billing-plans";
 import type { UserIntegration } from "@/lib/types/integration";
@@ -32,8 +32,8 @@ export async function detectColumns(): Promise<DBColumns> {
 export async function getIntegrationByShop(shop: string) {
   const cols = await detectColumns();
   const selectQuery = [
+    "clerk_user_id",
     cols.hasShopDomain ? "shop_domain" : "shopify_store_url",
-    cols.hasAccessToken ? "access_token" : "shopify_access_token",
     cols.hasCredits ? "credits" : "credits_balance",
     cols.hasFreeCreditUsed ? "free_credit_used" : null,
   ]
@@ -51,13 +51,12 @@ export async function getIntegrationByShop(shop: string) {
     if (!data) return null;
   }
 
+  // Tokens come only from the shop's encrypted credential (task 4).
   const mapped = mapIntegrationData(data, cols);
-  if (data.clerk_user_id) {
-    const tokenRes = await getValidShopifyToken(data.clerk_user_id);
-    if (tokenRes.status === "ok") {
-      mapped.access_token = tokenRes.accessToken;
-      mapped.shop_domain = tokenRes.shopUrl;
-    }
+  const tokenRes = await getShopifyTokenForShop(shop);
+  if (tokenRes.status === "ok") {
+    mapped.access_token = tokenRes.accessToken;
+    mapped.shop_domain = tokenRes.shopUrl;
   }
   return mapped;
 }
@@ -89,7 +88,8 @@ function mapIntegrationData(data: UserIntegration, cols: DBColumns) {
   return {
     clerk_user_id: data.clerk_user_id,
     shop_domain: cols.hasShopDomain ? data.shop_domain : data.shopify_store_url,
-    access_token: cols.hasAccessToken ? data.access_token : data.shopify_access_token,
+    // Never the legacy plaintext column: set only from the credential service.
+    access_token: null as string | null,
     credits: cols.hasCredits ? data.credits : data.credits_balance,
     free_credit_used: cols.hasFreeCreditUsed ? data.free_credit_used : false,
   };

@@ -16,6 +16,7 @@ import {
 import type { MetaRecommendations } from "@/lib/insights-engine";
 import { TargetingGenerationError, assertUsableRecommendations } from "@/lib/campaigns/generation-guard";
 import { resolveVerifiedMetaInterests } from "@/lib/meta-interest-resolver";
+import { getMetaAccessForUser } from "@/modules/credentials/meta";
 import { reusableRecommendationsFromVersions } from "@/lib/campaigns/reuse-insights";
 import { canonicalRegenerationProduct } from "@/lib/campaigns/regeneration-product";
 import type { StoreProduct } from "@/lib/store-data";
@@ -899,7 +900,8 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
           "All",
         productPrice: parsedPrice,
         storeAov: storeAov || undefined,
-        accessToken: integration?.meta_access_token,
+        // The current workspace's own Meta credential (task 4), never another workspace's.
+        accessToken: (await getMetaAccessForUser(userId!))?.userToken,
       });
       if (recommendations.targeting) {
         recommendations.targeting.interests = verifiedInterests;

@@ -8,9 +8,18 @@
  *
  *   TEST_DATABASE_URL=postgresql://...@127.0.0.1:5432/postgres pnpm test:db
  */
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
+import { generateCredentialKey, resetCredentialKeyringForTests } from "@/platform/credentials/crypto";
+import { sealShopCredential } from "@/modules/credentials/shopify";
 import { installUnderLease, type InstallPorts, type InstallResult } from "./install";
+
+// Since task 4 the commit stores the encrypted credential with the binding.
+beforeAll(() => {
+  process.env.APP_ENCRYPTION_KEY = generateCredentialKey();
+  process.env.APP_ENCRYPTION_KEY_VERSION = "1";
+  resetCredentialKeyringForTests();
+});
 
 const url = process.env.TEST_DATABASE_URL;
 if (!url) throw new Error("TEST_DATABASE_URL is required. Provision a throwaway database with supabase/provision.mjs first.");
@@ -93,8 +102,8 @@ function ports(shopify: SimulatedShopify, store: Store, overrides: Partial<Insta
     exchangeCode: (shop, code) => shopify.exchange(shop, code),
     fetchShop: async (shop) => shopify.identity(shop),
     commit: (input) =>
-      asService("bind_shop_under_lease", input.shop, input.holder, input.identity.id, input.identity.myshopifyDomain,
-        input.actor, input.selectedWorkspaceId, input.identity.name),
+      asService("commit_shop_install_under_lease", input.shop, input.holder, input.identity.id, input.identity.myshopifyDomain,
+        input.actor, input.selectedWorkspaceId, input.identity.name, input.transferId, sealShopCredential(input.identity.id, input.token)),
     persist: async (input) => {
       store.set(input.identity.myshopifyDomain, { actor: input.actor, token: input.token.accessToken });
     },
@@ -256,7 +265,8 @@ describe("lease primitives", () => {
     const shop = domain();
     const nobody = "00000000-0000-4000-8000-000000000000";
     expect((await asService<{ outcome: string }>("connect_check_under_lease", shop, nobody, user(), null)).outcome).toBe("rejected_lease_lost");
-    expect((await asService<{ outcome: string }>("bind_shop_under_lease", shop, nobody, shopId(), shop, user(), null, null)).outcome)
+    const credential = sealShopCredential(1, { accessToken: "shpat_x", refreshToken: null, expiresIn: 3600, scope: null });
+    expect((await asService<{ outcome: string }>("commit_shop_install_under_lease", shop, nobody, shopId(), shop, user(), null, null, null, credential)).outcome)
       .toBe("rejected_lease_lost");
   });
 });

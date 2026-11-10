@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { getUserIntegration, updateUserIntegration } from "@/lib/db";
 import { requireUser } from "@/lib/api/require-user";
 import { apiError, apiOk, apiServerError } from "@/lib/api/response";
+import { selectMetaAdAccount } from "@/modules/credentials/meta";
+import { currentWorkspaceFor } from "@/modules/workspaces/current";
 
 const BodySchema = z.object({
   adAccountId: z.string().min(1).max(200),
@@ -26,26 +27,16 @@ export async function POST(request: Request) {
   const { adAccountId } = parsed.data;
 
   try {
-    // Ownership check: the requested ad account must belong to this user's
-    // connected Meta accounts. Prevents IDOR via a guessed/forged account id.
-    const integration = await getUserIntegration(userId);
-    const accounts: Array<{ id?: string }> = Array.isArray(
-      integration?.meta_ad_accounts
-    )
-      ? integration.meta_ad_accounts
-      : [];
-
-    if (!accounts.some((account) => account?.id === adAccountId)) {
-      return apiError("Ad account not found for this user", 403);
-    }
-
-    await updateUserIntegration(userId, {
-      meta_selected_account_id: adAccountId,
-      meta_ad_account_id: adAccountId,
-    });
-
+    // Ownership check, in the database: the account must be one of this
+    // workspace's connected Meta ad accounts. Prevents IDOR via a guessed id.
+    const workspace = await currentWorkspaceFor(userId);
+    if (!workspace) return apiError("Ad account not found for this user", 403);
+    await selectMetaAdAccount(workspace.workspace_id, userId, adAccountId);
     return apiOk({ success: true });
   } catch (error) {
+    if (error instanceof Error && /meta_asset_not_found|workspace_access_denied/.test(error.message)) {
+      return apiError("Ad account not found for this user", 403);
+    }
     return apiServerError("select-ad-account", error);
   }
 }

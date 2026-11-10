@@ -1,4 +1,5 @@
-import { getUserIntegration, getUserCampaigns } from "@/lib/db";
+import { getUserCampaigns } from "@/lib/db";
+import { getMetaAccessForUser } from "@/modules/credentials/meta";
 import { getUsdRate } from "@/lib/exchange-rates";
 import { fetchWithRetry } from "@/lib/http";
 import { requireUser } from "@/lib/api/require-user";
@@ -22,19 +23,17 @@ export async function GET(request: Request) {
   if (!authResult.ok) return authResult.response;
   const { userId } = authResult;
 
-  const integration = await getUserIntegration(userId);
+  // The current workspace's own Meta credential (task 4).
+  const meta = await getMetaAccessForUser(userId);
 
-  if (!integration?.meta_access_token) {
+  if (!meta) {
     return Response.json({
       connected: false,
       message: "Meta account not connected",
     });
   }
 
-  const {
-    meta_access_token: accessToken,
-    meta_ad_account_id: adAccountId,
-  } = integration;
+  const { userToken: accessToken, adAccountId } = meta;
 
   // Last 30 days
   const thirtyDaysAgo = new Date();

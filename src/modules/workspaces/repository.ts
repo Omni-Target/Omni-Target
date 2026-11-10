@@ -143,7 +143,12 @@ export async function connectCheckUnderLease(domain: string, holder: string, act
   return result.outcome;
 }
 
-export function bindShopUnderLease(input: {
+/**
+ * Binds the shop (or completes an approved transfer) and stores its encrypted
+ * credential in one transaction that proves the install lease is still held
+ * (migration 0020). Nothing is stored for a refused or stale callback.
+ */
+export function commitShopInstallUnderLease(input: {
   leaseDomain: string;
   holder: string;
   shopifyShopId: number;
@@ -151,8 +156,10 @@ export function bindShopUnderLease(input: {
   actor: string;
   selectedWorkspaceId: string | null;
   shopName: string | null;
-}): Promise<BindResult | { outcome: "rejected_lease_lost" }> {
-  return call("bind_shop_under_lease", {
+  transferId: string | null;
+  credential: unknown;
+}): Promise<BindResult | { outcome: "completed" | "rejected_lease_lost"; workspace_id?: string; previous_workspace_id?: string }> {
+  return call("commit_shop_install_under_lease", {
     p_lease_domain: input.leaseDomain,
     p_holder: input.holder,
     p_shopify_shop_id: input.shopifyShopId,
@@ -160,17 +167,13 @@ export function bindShopUnderLease(input: {
     p_actor: input.actor,
     p_selected_workspace: input.selectedWorkspaceId,
     p_shop_name: input.shopName,
+    p_transfer: input.transferId,
+    p_credential: input.credential,
   });
 }
 
-export const completeTransferUnderLease = (input: { leaseDomain: string; holder: string; transferId: string; requester: string; shopifyShopId: number }) =>
-  call<{ outcome: "completed" | "rejected_lease_lost"; workspace_id?: string; previous_workspace_id?: string }>("complete_transfer_under_lease", {
-    p_lease_domain: input.leaseDomain,
-    p_holder: input.holder,
-    p_transfer: input.transferId,
-    p_requester: input.requester,
-    p_shopify_shop_id: input.shopifyShopId,
-  });
+/** The account that currently owns a shop, or null when it is not bound. */
+export const shopOwner = (domain: string) => call<string | null>("shop_owner", { p_domain: domain });
 
 /** shop/update: follows a domain change by Shopify's shop id. */
 export const recordShopUpdate = (shopifyShopId: number, domain: string, name: string | null) =>

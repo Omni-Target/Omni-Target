@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ShoppingBag, Database, LogOut, ShieldAlert } from "lucide-react";
 import { getUserIntegration } from "@/lib/db";
+import { hasConnectedShop } from "@/modules/workspaces/current";
 import { PageContainer } from "@/components/layout/page-container";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -29,8 +30,7 @@ export default async function SettingsPage() {
 
   const integration = await getUserIntegration(userId);
 
-  const shopifyConnected =
-    !!integration?.shopify_access_token || !!integration?.shopify_store_url;
+  const shopifyConnected = await hasConnectedShop(userId);
   const storeDomain =
     integration?.shopify_custom_domain ||
     integration?.shopify_store_url ||

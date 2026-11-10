@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { getUserIntegration, updateUserIntegration } from "@/lib/db";
 import { requireUser } from "@/lib/api/require-user";
 import { apiError, apiOk, apiServerError } from "@/lib/api/response";
+import { selectMetaPage } from "@/modules/credentials/meta";
+import { currentWorkspaceFor } from "@/modules/workspaces/current";
 
 const BodySchema = z.object({
   meta_page_id: z.string().min(1).max(200),
@@ -29,28 +30,17 @@ export async function POST(request: Request) {
   const { meta_page_id } = parsed.data;
 
   try {
-    // Ownership check: the requested page must belong to this user's connected
-    // Meta pages. The display name is taken from the stored record, not the
-    // request body, so it cannot be spoofed.
-    const integration = await getUserIntegration(userId);
-    const pages: Array<{ id?: string; name?: string }> = Array.isArray(
-      integration?.meta_pages
-    )
-      ? integration.meta_pages
-      : [];
-
-    const page = pages.find((candidate) => candidate?.id === meta_page_id);
-    if (!page) {
-      return apiError("Page not found for this user", 403);
-    }
-
-    await updateUserIntegration(userId, {
-      meta_page_id: page.id,
-      meta_page_name: page.name ?? null,
-    });
-
+    // Ownership check, in the database: the page must be one of this
+    // workspace's connected Meta pages. Its token is fetched fresh from Meta
+    // and stored encrypted for this workspace only.
+    const workspace = await currentWorkspaceFor(userId);
+    if (!workspace) return apiError("Page not found for this user", 403);
+    await selectMetaPage(workspace.workspace_id, userId, meta_page_id);
     return apiOk({ success: true });
   } catch (error) {
+    if (error instanceof Error && /meta_asset_not_found|workspace_access_denied/.test(error.message)) {
+      return apiError("Page not found for this user", 403);
+    }
     return apiServerError("select-page", error);
   }
 }

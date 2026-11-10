@@ -17,17 +17,18 @@ import {
 import { connectionRefusalMessage, parseShopifyShopId } from "@/modules/workspaces/lifecycle";
 import {
   acquireInstallLease,
-  activeWorkspaceForShop,
-  bindShopUnderLease,
-  completeTransferUnderLease,
+  commitShopInstallUnderLease,
   connectCheckUnderLease,
-  disconnectWorkspace,
   installLeaseHeld,
   releaseInstallLease,
+  shopOwner,
   transferForRequester,
   verifyOwnershipTransfer,
   type BindOutcome,
 } from "@/modules/workspaces/repository";
+import { sealShopCredential } from "@/modules/credentials/shopify";
+import { workspaceCookie } from "@/modules/workspaces/current";
+import { createLogger } from "@/platform/logger";
 import { fetchWithRetry } from "@/lib/http";
 import { shopifyAdminRestUrl } from "@/lib/shopify-config";
 import { fetchShopifyStoreLogo } from "@/lib/shopify-store-logo";
@@ -115,52 +116,25 @@ async function fetchShopIdentity(shop: string, accessToken: string): Promise<Sho
   };
 }
 
+const log = createLogger({ module: "shopify-oauth-callback" });
+
 /**
- * Stores the new credential after the binding committed, still under the
- * lease. Legacy plaintext storage until task 4 moves it into the commit.
+ * Records the store on the account's legacy row: its domains and scopes only,
+ * for the parts of the app that still read them (store snapshot, onboarding).
+ * The credential itself is encrypted and committed with the binding (task 4);
+ * no token is written here. After a transfer, the previous owner's legacy
+ * tokens are cleared: the new owner's exchange retired them at Shopify.
  */
-async function persistLegacyCredential(input: CommitInput): Promise<void> {
+async function recordStoreOnAccount(input: CommitInput): Promise<void> {
   const domain = input.identity.myshopifyDomain;
-  if (input.transferId) {
-    // The new owner's exchange retired the previous owner's tokens.
-    if (!(await disconnectShopInstallation(domain))) throw new Error("previous_credentials_not_cleared");
-  } else {
-    await disconnectReplacedWorkspace(input.actor, domain);
-  }
-  const { token } = input;
-  const expiresAt = token.expiresIn ? new Date(Date.now() + token.expiresIn * 1000).toISOString() : null;
-  const data: Record<string, unknown> = {
+  if (input.transferId && !(await disconnectShopInstallation(domain))) throw new Error("previous_credentials_not_cleared");
+  await upsertUserIntegration(input.actor, {
     shopify_store_url: domain,
-    shopify_custom_domain: typeof input.identity.details.domain === "string" ? input.identity.details.domain : null,
-    shopify_access_token: token.accessToken,
     shop_domain: domain,
-    access_token: token.accessToken,
-    shopify_refresh_token: token.refreshToken,
-    shopify_token_expires_at: expiresAt,
-    shopify_scopes: token.scope,
-  };
-  const { detectColumns } = await import("@/lib/billing-db");
-  const cols = await detectColumns();
-  if (cols.hasRefreshToken) data.refresh_token = token.refreshToken;
-  if (cols.hasTokenExpiresAt) data.token_expires_at = expiresAt;
-  await upsertUserIntegration(input.actor, data);
-}
-
-const normalizeShopHost = (value: unknown) =>
-  typeof value === "string" ? value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "") || null : null;
-
-/**
- * Until credentials move to their own table (task 4), an account stores one
- * Shopify credential, and connecting another store replaces it. The workspace
- * of the store being replaced is therefore disconnected: it keeps its
- * ownership, binding and data, and reconnecting that store restores it.
- */
-async function disconnectReplacedWorkspace(userId: string, newShop: string): Promise<void> {
-  const integration = await getUserIntegration(userId);
-  const previous = normalizeShopHost(integration?.shopify_store_url || integration?.shop_domain);
-  if (!previous || previous === newShop) return;
-  const workspaceId = await activeWorkspaceForShop(previous, userId);
-  if (workspaceId) await disconnectWorkspace(workspaceId, userId);
+    shopify_custom_domain: typeof input.identity.details.domain === "string" ? input.identity.details.domain : null,
+    shopify_scopes: input.token.scope,
+    shopify_uninstalled_at: null,
+  });
 }
 
 function redirectTo(url: string, cookies: string[] = []): Response {
@@ -213,7 +187,9 @@ export async function GET(request: Request) {
   let linkedUserIds: string[] = [];
   if (!sessionUserId && statePayload && statePayload.shop === shop) {
     try {
-      linkedUserIds = await getUserIdsLinkedToStore(shop);
+      // The shop's owner when it is bound; legacy links only for a shop not yet modelled.
+      const owner = await shopOwner(shop);
+      linkedUserIds = owner ? [owner] : await getUserIdsLinkedToStore(shop);
     } catch (lookupErr) {
       console.error("Shopify OAuth: store link lookup failed:", lookupErr instanceof Error ? lookupErr.message : lookupErr);
       return failure(GENERIC_FAILURE);
@@ -288,36 +264,31 @@ export async function GET(request: Request) {
         check: connectCheckUnderLease,
         exchangeCode: exchangeShopifyCode,
         fetchShop: fetchShopIdentity,
+        // Binding and encrypted credential commit together, under the lease (0020).
         commit: (input) =>
-          input.transferId
-            ? completeTransferUnderLease({
-                leaseDomain: input.shop,
-                holder: input.holder,
-                transferId: input.transferId,
-                requester: input.actor,
-                shopifyShopId: input.identity.id,
-              })
-            : bindShopUnderLease({
-                leaseDomain: input.shop,
-                holder: input.holder,
-                shopifyShopId: input.identity.id,
-                domain: input.identity.myshopifyDomain,
-                actor: input.actor,
-                selectedWorkspaceId: input.selectedWorkspaceId,
-                shopName: input.identity.name,
-              }),
-        persist: persistLegacyCredential,
+          commitShopInstallUnderLease({
+            leaseDomain: input.shop,
+            holder: input.holder,
+            shopifyShopId: input.identity.id,
+            domain: input.identity.myshopifyDomain,
+            actor: input.actor,
+            selectedWorkspaceId: input.selectedWorkspaceId,
+            shopName: input.identity.name,
+            transferId: input.transferId,
+            credential: sealShopCredential(input.identity.id, input.token),
+          }),
+        persist: recordStoreOnAccount,
         sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       },
     );
   } catch (err) {
-    console.error("Shopify OAuth error:", err instanceof Error ? err.message : "unknown error");
+    log.error("Shopify installation failed", { shop }, err);
     return failure(state.tr ? TRANSFER_FAILURE : GENERIC_FAILURE);
   }
 
   if (installed.kind !== "connected") {
     const outcome = installed.kind === "refused" ? installed.outcome : installed.kind;
-    console.warn(`Shopify OAuth ended without connecting: ${outcome}`);
+    log.warn("Shopify installation ended without connecting", { shop, outcome });
     if (installed.kind === "busy") return failure(BUSY_FAILURE);
     if (installed.kind === "lease_lost") return failure(GENERIC_FAILURE);
     if (installed.outcome === "rejected_transfer_not_ready") return failure(TRANSFER_FAILURE);
@@ -433,6 +404,8 @@ export async function GET(request: Request) {
     destination = safeInternalPath(destination);
 
     const cookies = [clearState];
+    // The workspace just connected becomes the browser's current workspace.
+    if (installed.result.workspace_id) cookies.push(workspaceCookie(installed.result.workspace_id));
     if (selectedPlan) {
       cookies.push(`selected_plan=${selectedPlan}; Secure; SameSite=Lax; Max-Age=3600; Path=/`);
     }

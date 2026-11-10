@@ -38,12 +38,7 @@ export async function getOnboardingStep(
   try {
     const { getUserIntegration } = await import("@/lib/db");
     const integration = await getUserIntegration(userId);
-    if (
-      integration?.shopify_store_url ||
-      integration?.shop_domain ||
-      integration?.shopify_access_token ||
-      integration?.access_token
-    ) {
+    if (integration?.shopify_store_url || integration?.shop_domain) {
       const storeUrl =
         integration.shopify_store_url ||
         integration.shop_domain ||

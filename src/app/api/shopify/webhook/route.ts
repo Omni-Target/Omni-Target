@@ -8,7 +8,8 @@ import {
   uninstallClearsCredentials,
   webhookShopDomain,
 } from "@/modules/workspaces/lifecycle";
-import { beginUninstall, recordShopUpdate, shopOperationsAllowed } from "@/modules/workspaces/repository";
+import { beginUninstall, recordShopUpdate, shopOperationsAllowed, shopOwner } from "@/modules/workspaces/repository";
+import { getMetaAccessForShop } from "@/modules/credentials/meta";
 import { createHash } from "crypto";
 import { after } from "next/server";
 
@@ -216,25 +217,33 @@ async function processWebhook(shopDomain: string, topic: string | null, payload:
     return;
   }
 
-  // Newest row first: duplicate rows for one shop must not drop the webhook.
-  const { data, error } = await supabaseAdmin
-    .from("user_integrations")
-    .select("clerk_user_id, meta_access_token, meta_pixel_id")
-    .or(`shopify_store_url.eq.${shopDomain},shop_domain.eq.${shopDomain}`)
-    .order("updated_at", { ascending: false })
-    .limit(1);
-  if (error) {
-    console.error("Error looking up integration for webhook:", error.message);
-    return;
+  // The shop's owner; a shop not yet modelled falls back to its newest legacy row.
+  const domain = shopDomain.toLowerCase();
+  let owner = await shopOwner(domain);
+  if (!owner) {
+    const { data, error } = await supabaseAdmin
+      .from("user_integrations")
+      .select("clerk_user_id")
+      .or(`shopify_store_url.eq.${domain},shop_domain.eq.${domain}`)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (error) {
+      console.error("Error looking up integration for webhook:", error.message);
+      return;
+    }
+    owner = (data as { clerk_user_id: string }[] | null)?.[0]?.clerk_user_id ?? null;
   }
-  const integration = (data as WebhookIntegration[] | null)?.[0];
-  if (!integration) {
-    console.warn(`No integration found matching shop domain: ${shopDomain}`);
+  if (!owner) {
+    console.warn("No account found for this shop's webhook");
     return;
   }
 
   if (topic === "orders/paid") {
-    await forwardPurchaseToMeta(shopDomain, integration, payload);
+    // Meta belongs to the shop's own workspace; its credential is decrypted only here.
+    const meta = await getMetaAccessForShop(domain);
+    if (meta) {
+      await forwardPurchaseToMeta(domain, { clerk_user_id: meta.owner, meta_access_token: meta.userToken, meta_pixel_id: meta.pixelId }, payload);
+    }
   }
 
   // ING-05: the next visit refreshes the store. A full sync per order was
@@ -242,7 +251,7 @@ async function processWebhook(shopDomain: string, topic: string | null, payload:
   const { error: staleError } = await supabaseAdmin
     .from("user_integrations")
     .update({ store_snapshot_at: null })
-    .eq("clerk_user_id", integration.clerk_user_id)
+    .eq("clerk_user_id", owner)
     .lt("store_snapshot_at", new Date(Date.now() - STALE_MARK_MIN_AGE_MS).toISOString());
   if (staleError) console.error("Failed to mark snapshot stale:", staleError.message);
 }

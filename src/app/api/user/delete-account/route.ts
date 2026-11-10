@@ -1,5 +1,6 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { deleteUserData, getUserIntegration } from "@/lib/db";
+import { deleteUserData } from "@/lib/db";
+import { metaUserTokensForOwner } from "@/modules/credentials/meta";
 
 export async function DELETE() {
   const { userId } = await auth();
@@ -13,11 +14,10 @@ export async function DELETE() {
   try {
     // Delete all user data from database layer
     // Best effort: stored tokens are deleted below whether or not Meta answers.
-    // Only this user's own connection is revoked, never a shared shop's.
-    const integration = await getUserIntegration(userId);
-    if (integration?.meta_access_token) {
+    // Each of this user's own workspaces' Meta grants is revoked; no one else's.
+    for (const { userToken } of await metaUserTokensForOwner(userId).catch(() => [])) {
       await fetch(
-        `https://graph.facebook.com/v19.0/me/permissions?access_token=${encodeURIComponent(integration.meta_access_token)}`,
+        `https://graph.facebook.com/v19.0/me/permissions?access_token=${encodeURIComponent(userToken)}`,
         { method: "DELETE", signal: AbortSignal.timeout(5000) },
       ).catch(() => {});
     }

@@ -525,7 +525,7 @@ describe("tenant isolation and access", () => {
       expect(await privilege(fn), fn).toEqual({ anon: false, authed: false, service: false });
     }
     for (const fn of [
-      "bind_shop_under_lease(text,uuid,bigint,text,text,uuid,text)", "acquire_shop_lease(text,text,text,integer)",
+      "commit_shop_install_under_lease(text,uuid,bigint,text,text,uuid,text,uuid,jsonb)", "acquire_shop_lease(text,text,text,integer)",
       "begin_uninstall(bigint,text,text,timestamptz)", "workspace_for_actor(uuid,text)",
     ]) {
       expect(await privilege(fn), fn).toEqual({ anon: false, authed: false, service: true });

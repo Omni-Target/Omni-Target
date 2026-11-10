@@ -6,9 +6,13 @@ const m = vi.hoisted(() => ({
   upsertUserIntegration: vi.fn(),
   fetchWithRetry: vi.fn(),
   fetch: vi.fn(),
+  storeMetaConnection: vi.fn(),
+  currentWorkspaceFor: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: m.auth }));
+vi.mock("@/modules/credentials/meta", () => ({ storeMetaConnection: m.storeMetaConnection }));
+vi.mock("@/modules/workspaces/current", () => ({ currentWorkspaceFor: m.currentWorkspaceFor }));
 vi.mock("@/lib/db", () => ({ upsertUserIntegration: m.upsertUserIntegration }));
 vi.mock("@/lib/http", () => ({ fetchWithRetry: m.fetchWithRetry }));
 
@@ -34,6 +38,7 @@ beforeEach(() => {
   process.env.META_APP_SECRET = "meta-secret";
   for (const fn of Object.values(m)) fn.mockReset();
   m.auth.mockResolvedValue({ userId: "user_victim" });
+  m.currentWorkspaceFor.mockResolvedValue({ workspace_id: "ws-current", status: "active", shop_domain: "s.myshopify.com" });
   m.fetch.mockResolvedValue(Response.json({ access_token: "EAAB-attacker-token" }));
   m.fetchWithRetry.mockImplementation(async (url: string) =>
     url.includes("adaccounts")
@@ -70,15 +75,29 @@ describe("Meta OAuth callback — SEC-04 CSRF", () => {
     expect(m.upsertUserIntegration).not.toHaveBeenCalled();
   });
 
-  it("links Meta to the session user when the state matches, and clears the state cookie", async () => {
+  it("links Meta to the session user's current workspace when the state matches, and clears the state cookie", async () => {
     const res = await callback(callbackRequest({ code: "own-code", state: NONCE }, `meta_oauth_state=${NONCE}`));
     expect(res.headers.get("location")).toContain("/settings?meta=connected");
-    expect(m.upsertUserIntegration).toHaveBeenCalledWith(
+    expect(m.currentWorkspaceFor).toHaveBeenCalledWith("user_victim");
+    expect(m.storeMetaConnection).toHaveBeenCalledWith(
+      "ws-current",
       "user_victim",
-      expect.objectContaining({ meta_access_token: "EAAB-attacker-token", meta_pixel_id: "px_attacker" }),
+      expect.objectContaining({ userToken: "EAAB-attacker-token", pixelId: "px_attacker", adAccountId: "act_1" }),
     );
+    // The legacy row receives non-secret hints only (task 4).
+    const legacy = m.upsertUserIntegration.mock.calls[0][1] as Record<string, unknown>;
+    expect(JSON.stringify(legacy)).not.toContain("EAAB-attacker-token");
+    expect(Object.keys(legacy).sort()).toEqual(["meta_connected_at", "pixel_health"]);
     const cleared = setCookies(res).find((c) => c.startsWith("meta_oauth_state="));
     expect(cleared).toMatch(/Max-Age=0|Expires=Thu, 01 Jan 1970/i);
+  });
+
+  it("stores nothing when the user has no workspace to connect Meta to", async () => {
+    m.currentWorkspaceFor.mockResolvedValue(null);
+    const res = await callback(callbackRequest({ code: "own-code", state: NONCE }, `meta_oauth_state=${NONCE}`));
+    expect(res.headers.get("location")).toContain("/settings?meta=no_workspace");
+    expect(m.storeMetaConnection).not.toHaveBeenCalled();
+    expect(m.upsertUserIntegration).not.toHaveBeenCalled();
   });
 
   it("handles a user denial without exchanging anything", async () => {

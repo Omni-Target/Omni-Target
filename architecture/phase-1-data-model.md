@@ -59,7 +59,7 @@ Shopify keeps one current offline token per app and store, and exchanging an OAu
 3. Decide under the lease, before any exchange (`connect_check_under_lease`): ownership for a connection, or an approved, unexpired transfer for a completion. A refused account never reaches the exchange.
 4. Exchange the code and read Shopify's shop id. No database transaction is open meanwhile.
 5. Commit with `bind_shop_under_lease` or `complete_transfer_under_lease`. Each locks the lease row in the same transaction and refuses (`rejected_lease_lost`) when it no longer names this callback.
-6. Store the credential only if the lease is still held, then release it. Task 4 moves the credential write into step 5's transaction.
+6. Since task 4 the encrypted credential is written in step 5's transaction (`commit_shop_install_under_lease`); afterwards only non-secret store details are recorded, while the lease is still held, and the lease is released.
 
 A lease left by a crashed callback is taken over once expired. The application role can no longer call `bind_shop_for_install` or `complete_ownership_transfer` directly, so no path skips the lease.
 
@@ -69,24 +69,33 @@ Shop data deletion, workspace closure and Clerk identity deletion stay separate.
 
 ### Transitional behaviour until tasks 4 to 6
 
-- `user_integrations` holds one Shopify credential per Clerk user. Connecting a second store replaces it, so the previous store's workspace is disconnected (binding, data and credits kept; reconnecting restores it). Task 4 moves credentials to `shop_credentials`, after which an account can keep several stores connected.
+- Since task 4, each shop has its own encrypted credential, so an account keeps several stores connected independently. The legacy store snapshot is still one per Clerk user and follows the user's current workspace until snapshots move per shop.
 - Balances still come from `user_integrations`. `credit_accounts` starts at zero until the ledger and opening balances of task 5.
 - New campaigns are not yet attributed to a workspace (0023). Deletion removes attributed campaigns and, through the legacy redaction, unattributed ones for the shop; a campaign attributed to another workspace is never touched.
 - The legacy redaction still clears generation receipts and Meta events per Clerk user rather than per workspace.
 
-## Credentials
+## Credentials (migration 0020, implemented)
 
 | Table | Key columns | Constraints |
 |---|---|---|
-| `shop_credentials` | `shop_id`, `kind` (`access` or `refresh`), `ciphertext`, `iv`, `auth_tag`, `key_version`, `expires_at`, `scopes` | Primary key (`shop_id`, `kind`). One current credential per shop |
-| `shop_refresh_locks` | `shop_id`, `holder`, `locked_until` | Replaces the per-user refresh lock |
-| `workspace_meta_connections` | `workspace_id`, ad account, pixel, business and page IDs, `connected_at` | One per workspace |
-| `workspace_meta_credentials` | `workspace_id`, `kind` (`user` or `page`), encrypted fields as above | Primary key (`workspace_id`, `kind`) |
+| `shop_credentials` | `shop_id`, `workspace_id`, `key_version`, access `ciphertext`/`nonce`/`tag`, refresh `ciphertext`/`nonce`/`tag`, `access_expires_at`, `refresh_expires_at`, `scopes`, `status`, `version`, `last_error` | Primary key `shop_id`: one current credential per shop, access and refresh sealed together. Nonce 12 bytes, tag 16. `status` in `active`, `refresh_failed`. `version` increases on every write |
+| `shop_leases` (0019) | `lease_key` `refresh:<shop>` | One refresh in flight per shop, held by a holder id; replaces the per-user refresh lock |
+| `workspace_meta_credentials` | `workspace_id`, `kind` (`user` or `page`), `subject_id` (page id), sealed fields, `key_version`, `version` | Primary key (`workspace_id`, `kind`) |
+| `workspace_meta_connections` | `workspace_id`, ad accounts and pages (listings), selected ad account, pixel, page | One per workspace. A check refuses any listing containing `access_token` |
 
-- **Encryption:** AES-256-GCM, a fresh 12-byte nonce per write, the authentication tag stored with it, and the key version recorded.
-- **Additional authenticated data** binds each ciphertext to its row, for example `shop_credentials:<shop_id>:refresh`, so a value copied elsewhere fails to decrypt.
-- **Keys** come from `APP_ENCRYPTION_KEY` and `APP_ENCRYPTION_KEY_VERSION`, with older keys kept only for decryption.
-- **Token values never go into history.** Issue, refresh and clear events are recorded in `workspace_events` as metadata only.
+- **Encryption:** one server-only service (`src/platform/credentials/crypto.ts`). AES-256-GCM, a fresh 96-bit nonce per encryption, a 128-bit tag, the key version recorded with the value. The database never sees a key and cannot decrypt.
+- **Additional authenticated data** binds each value to its purpose and owner: `omnitarget/credential/v1/shopify/<Shopify shop id>/<access|refresh>` and `omnitarget/credential/v1/meta/<workspace id>/<user|page>`. A ciphertext moved to another shop, workspace or kind fails to decrypt (tested against the database).
+- **Keys:** `APP_ENCRYPTION_KEY`, `APP_ENCRYPTION_KEY_VERSION`, and `APP_ENCRYPTION_PREVIOUS_KEYS` for decryption during a rotation. A credential read under an older key is re-encrypted under the current one; `/api/cron/reseal-credentials` sweeps the rest. See `scripts/ops/runbooks/credential-keys.md`.
+- **Writes:** an installation's credential is stored in the same transaction as its binding, under the install lease (`commit_shop_install_under_lease`); the application role can no longer bind without it. A refresh stores only while holding the shop's refresh lease and only over the version it refreshed (`store_refreshed_shop_credential`). Re-encryption is version-checked the same way.
+- **Reads:** only through `shop_credential_for_workspace` (owner, active, bound, no deletion running), `shop_credential_for_shop` (system work, same lifecycle rules), `meta_access_for_workspace` (owner, active) and `meta_access_for_shop` (the shop's own workspace). The application role cannot select the credential tables.
+- **Lifecycle:** a workspace leaving `active` (disconnect, uninstall, deletion) loses its Shopify credential, by trigger, in the same transaction. A workspace entering deletion also loses its Meta credentials. Only the workspace's own rows are touched, so after a transfer the new owner's credential is never affected by the old workspace.
+- **Refresh failures:** a definitively rejected refresh token marks the credential `refresh_failed` (reconnect needed); a transient failure keeps the credential and keeps using a still-valid access token. Nothing is deleted.
+- **Meta:** belongs to the workspace the user is working in (validated cookie preference, else the most recently connected active workspace). Page lists are stored without tokens; the selected page's token is fetched from Meta with the workspace's own user token and stored encrypted.
+- **Token values never go into history or logs.** Issue, refresh, clear and failure events are metadata only.
+
+### Legacy plaintext columns
+
+New connections write no token to `user_integrations`; only the store's domains and scopes, and Meta's non-secret hints (`meta_connected_at`, `pixel_health`). No code reads the legacy token columns any more. They are neither cleared nor dropped here: existing plaintext is removed only after the scheduled backup and restore gate, as part of the legacy migration (task 6) and the contract step. Staging held no legacy credentials when task 4 was implemented (verified: 0 rows), so there was nothing to backfill; production's legacy tokens are migrated with the legacy shops in task 6.
 
 ## Credits
 
@@ -148,7 +157,7 @@ Historical files `0001` to `0017` are kept unchanged. A schema baseline taken at
 |---|---|
 | `0018_workspaces_and_shop_bindings` | Workspaces, credit accounts, shops, bindings, events, lifecycle events, compliance requests, deletions, transfers, legacy claims, `campaigns.workspace_id`, and their functions (implemented) |
 | `0019_shop_leases` | Per-shop install and refresh leases, lease-guarded install functions, `record_shop_update` (task 3.1, implemented) |
-| `0020_encrypted_credentials` | Shop and Meta credentials, refresh coordination |
+| `0020_encrypted_credentials` | Encrypted shop and Meta credentials, credential-carrying install commit, lifecycle clearing, refresh and re-encryption with version checks (task 4, implemented) |
 | `0021_credit_ledger` | Accounts, ledger, entitlements, intents, provider purchases, sync state, canonical functions |
 | `0022_legacy_mapping` | Mapping and review tables |
 | `0023_workspace_columns` | `workspace_id` on tenant tables, with indexes |

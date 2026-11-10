@@ -14,8 +14,9 @@ export async function GET() {
   }
 
   const integration = await getUserIntegration(userId!);
+  const { hasConnectedShop } = await import("@/modules/workspaces/current");
 
-  if (!integration?.shopify_access_token) {
+  if (!(await hasConnectedShop(userId))) {
     return Response.json({
       score: 0,
       status: "not_connected",
@@ -26,7 +27,7 @@ export async function GET() {
     });
   }
 
-  let snapshot = integration.store_snapshot;
+  let snapshot = integration?.store_snapshot;
 
   if (!snapshot) {
     try {
