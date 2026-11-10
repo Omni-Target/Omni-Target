@@ -3,10 +3,34 @@ import { getUserIntegration, updateUserIntegration } from "@/lib/db";
 import { fetchShopifyStoreData } from "@/lib/connectors/shopify";
 import { getValidShopifyToken } from "@/lib/shopify-token";
 import { getMissingShopifyScopes } from "@/lib/shopify-config";
+import { createLogger } from "@/platform/logger";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 // Requires Vercel Pro — falls back to 10s on free tier
+
+const log = createLogger({ module: "store-data" });
+
+/**
+ * Cache headers (fix 8.2). A forced sync is never stored by the browser, so a
+ * refresh the merchant explicitly asked for is never answered from an earlier
+ * copy. An ordinary snapshot may be stored but must be revalidated on every
+ * use, so it can never outlive a forced refresh; reuse comes from the hot
+ * server cache below. Neither is cached by the CDN (the data is per user).
+ */
+const FORCED_SYNC_HEADERS = {
+  "Cache-Control": "private, no-store, max-age=0",
+  "CDN-Cache-Control": "no-store",
+  "Vercel-CDN-Cache-Control": "no-store",
+} as const;
+const SNAPSHOT_HEADERS = {
+  "Cache-Control": "private, no-cache",
+  "CDN-Cache-Control": "no-store",
+  "Vercel-CDN-Cache-Control": "no-store",
+} as const;
+
+const respond = (body: unknown, force: boolean, status = 200) =>
+  Response.json(body, { status, headers: force ? FORCED_SYNC_HEADERS : SNAPSHOT_HEADERS });
 
 interface CacheEntry {
   data: Record<string, unknown>;
@@ -19,16 +43,13 @@ const CACHE_TTL_MS = 600_000; // 10 minutes hot memory TTL
 const SNAPSHOT_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
 
 export async function GET(request: Request) {
-  const { userId } = await auth();
-  if (!userId) {
-    return Response.json(
-      { error: "Unauthorized" },
-      { status: 401 }
-    );
-  }
-
   const url = new URL(request.url);
   const force = url.searchParams.get("force") === "true";
+
+  const { userId } = await auth();
+  if (!userId) {
+    return respond({ error: "Unauthorized" }, force, 401);
+  }
 
   // 1. Hot in-memory cache check (0.1ms response time, zero database queries)
   if (!force) {
@@ -40,16 +61,12 @@ export async function GET(request: Request) {
       const cachedNeedsReauth = (cached.data as { needsShopifyReauthorization?: boolean; needsReauthForOrders?: boolean }).needsShopifyReauthorization ||
         (cached.data as { needsReauthForOrders?: boolean }).needsReauthForOrders;
       if (cachedAge < SNAPSHOT_MAX_AGE_MS && cachedSchemaVersion === 9 && !cachedNeedsReauth) {
-        return Response.json(cached.data, {
-          headers: {
-            "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
-          },
-        });
+        return respond(cached.data, force);
       }
     }
   }
 
-  console.log("Store data request from userId:", userId, "force:", force);
+  log.info("Store data request", { force });
 
   // 2. Cached snapshot from Supabase. Credits are not part of this payload:
   //    the UI reads them from /api/user/credits (the workspace ledger).
@@ -78,11 +95,7 @@ export async function GET(request: Request) {
       snapshotAt: creditsRow?.store_snapshot_at,
     };
     serverSnapshotCache.set(userId, { data: payload, timestamp: Date.now() });
-    return Response.json(payload, {
-      headers: {
-        "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
-      },
-    });
+    return respond(payload, force);
   }
 
   if (force) {
@@ -93,36 +106,21 @@ export async function GET(request: Request) {
   const tokenResult = await getValidShopifyToken(userId);
 
   if (tokenResult.status === "not_connected") {
-    return Response.json({
-      connected: false,
-      message: "Shopify store not connected",
-    });
+    return respond({ connected: false, message: "Shopify store not connected" }, force);
   }
 
   if (tokenResult.status === "reauth_required") {
     // The Shopify refresh token is dead (expired or already rotated). The
     // merchant must reconnect — retrying with the stored token won't help.
-    return Response.json({
-      connected: false,
-      reauthRequired: true,
-      message: "Shopify session expired — please reconnect your store",
-    });
+    return respond({ connected: false, reauthRequired: true, message: "Shopify session expired — please reconnect your store" }, force);
   }
 
   if (tokenResult.status === "temporarily_unavailable") {
     // Transient: keep showing the last sync rather than asking for a reconnect.
     if (creditsRow?.store_snapshot?.data_quality?.schema_version === 9) {
-      return Response.json({
-        connected: true,
-        data: creditsRow.store_snapshot,
-        ...reauthMetadata,
-        snapshotAt: creditsRow?.store_snapshot_at,
-      });
+      return respond({ connected: true, data: creditsRow.store_snapshot, ...reauthMetadata, snapshotAt: creditsRow?.store_snapshot_at }, force);
     }
-    return Response.json(
-      { error: "Shopify is temporarily unavailable. Please retry shortly." },
-      { status: 503 },
-    );
+    return respond({ error: "Shopify is temporarily unavailable. Please retry shortly." }, force, 503);
   }
 
   try {
@@ -132,10 +130,10 @@ export async function GET(request: Request) {
       userId
     );
 
-    console.log("Store data fetched:", {
-      store: storeData.store,
+    log.info("Store data fetched", {
+      force,
       orderCount: storeData.orders.orders_last_30_days,
-      productCount: storeData.products.length
+      productCount: storeData.products.length,
     });
 
     // Save snapshot to Supabase
@@ -144,9 +142,8 @@ export async function GET(request: Request) {
         store_snapshot: storeData,
         store_snapshot_at: new Date().toISOString()
       });
-      console.log("Snapshot saved successfully");
     } catch (error) {
-      console.error("Snapshot save failed:", error);
+      log.error("Snapshot save failed", { force }, error);
     }
 
     const syncPayload = {
@@ -156,32 +153,15 @@ export async function GET(request: Request) {
       snapshotAt: new Date().toISOString(),
     };
     serverSnapshotCache.set(userId, { data: syncPayload, timestamp: Date.now() });
-    return Response.json(syncPayload, {
-      headers: {
-        "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
-      },
-    });
+    return respond(syncPayload, force);
   } catch (error) {
-    console.error("Store data error:", error);
+    log.error("Store data sync failed", { force }, error);
     // If Shopify sync fails but we have an existing snapshot in Supabase,
     // gracefully fall back to it so the founder's dashboard remains operational.
     if (creditsRow?.store_snapshot) {
-      const fallbackPayload = {
-        connected: true,
-        data: creditsRow.store_snapshot,
-        ...reauthMetadata,
-        snapshotAt: creditsRow?.store_snapshot_at,
-      };
-      return Response.json(fallbackPayload, {
-        headers: {
-          "Cache-Control": "private, max-age=60",
-        },
-      });
+      return respond({ connected: true, data: creditsRow.store_snapshot, ...reauthMetadata, snapshotAt: creditsRow?.store_snapshot_at }, force);
     }
 
-    return Response.json(
-      { error: "Failed to fetch store data" },
-      { status: 500 }
-    );
+    return respond({ error: "Failed to fetch store data" }, force, 500);
   }
 }
