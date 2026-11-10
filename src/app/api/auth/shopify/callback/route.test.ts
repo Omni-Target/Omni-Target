@@ -213,7 +213,9 @@ describe("Shopify OAuth callback — legitimate flows", () => {
     expect(m.getUserIdsLinkedToStore).toHaveBeenCalledWith(SHOP);
     expect(m.createSignInToken).toHaveBeenCalledWith({ userId: "user_a", expiresInSeconds: 300 });
     expect(m.upsertUserIntegration).toHaveBeenCalledWith("user_a", expect.any(Object));
-    expect(res.headers.get("location")).toBe(`${APP}/auth/shopify-callback?token=ticket-123&destination=%2Fdashboard`);
+    // The ticket rides in the fragment, never in a query string a server could log (fix 8.1).
+    expect(res.headers.get("location")).toBe(`${APP}/auth/shopify-callback#token=ticket-123&destination=%2Fdashboard`);
+    expect(new URL(res.headers.get("location")!).search).toBe("");
   });
 
   it("a store linked to several accounts requires an explicit sign-in", async () => {

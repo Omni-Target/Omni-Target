@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs/config";
+import { SENSITIVE_CALLBACK_PATHS } from "./src/lib/observability/redact-url";
 
 /**
  * Baseline security headers applied to every response.
@@ -46,6 +47,11 @@ const nextConfig: NextConfig = {
         pathname: "**",
       },
     ],
+  },
+  logging: {
+    // The development request log prints full URLs and cannot redact them; these
+    // routes carry sign-in tickets, OAuth codes or signatures (fix 8.1).
+    incomingRequests: { ignore: SENSITIVE_CALLBACK_PATHS },
   },
   experimental: {
     // Tree-shake large named-export libraries so only used modules are bundled.

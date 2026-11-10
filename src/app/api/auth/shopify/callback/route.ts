@@ -427,8 +427,10 @@ export async function GET(request: Request) {
       userId: targetUserId,
       expiresInSeconds: 300,
     });
+    // The ticket travels in the fragment, which the browser never sends to a
+    // server, so no request log (ours, Next.js or Vercel) can record it (fix 8.1).
     return redirectTo(
-      `${appBaseUrl}/auth/shopify-callback?token=${encodeURIComponent(signInToken.token)}&destination=${encodeURIComponent(destination)}`,
+      `${appBaseUrl}/auth/shopify-callback#token=${encodeURIComponent(signInToken.token)}&destination=${encodeURIComponent(destination)}`,
       cookies,
     );
   } catch (err: unknown) {

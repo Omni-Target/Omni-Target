@@ -7,13 +7,32 @@ import { Loader2, AlertCircle, ArrowRight } from "lucide-react";
 import { Wordmark } from "@/components/shared/logo";
 import { Button } from "@/components/ui/button";
 import { safeInternalPath } from "@/lib/safe-redirect";
+import { readTicketParams } from "@/lib/observability/redact-url";
+
+/**
+ * The ticket arrives in the URL fragment (fix 8.1), which is never sent to a
+ * server or written to a request log. It is read once and then removed from
+ * the address bar so it does not linger in history.
+ */
+function useTicketParams() {
+  const searchParams = useSearchParams();
+  const [params] = useState(() => {
+    if (typeof window === "undefined") return { token: null, destination: null };
+    const read = readTicketParams(window.location.hash, window.location.search);
+    if (window.location.hash || searchParams.get("token")) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+    return read;
+  });
+  return params;
+}
 
 function ShopifyCallbackContent() {
-  const searchParams = useSearchParams();
-  const token = searchParams.get("token");
+  const params = useTicketParams();
+  const token = params.token;
   // SEC-03: never navigate to a URL-supplied value without the allow-list
   // (blocks javascript: execution and open redirects).
-  const destination = safeInternalPath(searchParams.get("destination"));
+  const destination = safeInternalPath(params.destination);
   const { isSignedIn } = useAuth();
   const clerk = useClerk();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);

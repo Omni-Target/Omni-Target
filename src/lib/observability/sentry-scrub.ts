@@ -6,6 +6,8 @@
  * (error messages, breadcrumbs, span descriptions) by pattern, because
  * third-party errors often embed a token or email in the message itself.
  */
+import { redactRelativeUrls } from "./redact-url";
+
 const FILTERED = "[Filtered]";
 const MAX_DEPTH = 12;
 
@@ -35,8 +37,13 @@ const TEXT_PATTERNS: Array<[RegExp, string]> = [
   [/\b0[789][01]\d{8}\b/g, FILTERED], // Nigerian local mobile
 ];
 
+/** Keys that hold a credential under a URL-parameter name. `code` stays readable: it is usually an error code. */
+const SENSITIVE_EXACT_KEYS = new Set(["ticket", "__clerk_ticket", "sig"]);
+
 export function scrubText(text: string): string {
-  return TEXT_PATTERNS.reduce((result, [pattern, replacement]) => result.replace(pattern, replacement), text);
+  const scrubbed = TEXT_PATTERNS.reduce((result, [pattern, replacement]) => result.replace(pattern, replacement), text);
+  // Relative paths keep their safe parameters; tickets, codes, state and signatures go (fix 8.1).
+  return redactRelativeUrls(scrubbed);
 }
 
 function scrubValue(value: unknown, depth: number): unknown {
@@ -51,7 +58,7 @@ function scrubValue(value: unknown, depth: number): unknown {
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
     if (SKIP_KEYS.has(key)) result[key] = item;
-    else if (SENSITIVE_KEY.test(key) && !isTokenCount(key, item)) result[key] = FILTERED;
+    else if ((SENSITIVE_KEY.test(key) && !isTokenCount(key, item)) || SENSITIVE_EXACT_KEYS.has(key)) result[key] = FILTERED;
     else result[key] = scrubValue(item, depth + 1);
   }
   return result;
