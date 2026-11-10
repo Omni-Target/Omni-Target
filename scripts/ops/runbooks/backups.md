@@ -19,19 +19,37 @@ until a production backup has been deployed and verified.
 | `prune` | Applies retention; the newest backup in each tier is always kept | R2 object write |
 | `restore-test` | Decrypts the newest backup into a new throwaway database and compares row counts and the credit total with the manifest | R2 object read, age key, local Postgres |
 
-Objects are stored as `<prefix>/<tier>/<YYYY-MM-DD>/omnitarget.dump.age` with a
-`.manifest.json` beside each. Retention is 14 days daily, 8 weeks weekly (Sundays,
-UTC) and 6 months monthly (the 1st, UTC).
+Objects are stored as
+`<prefix>/<tier>/<YYYY-MM-DD>/<UTC timestamp>-<run id>/omnitarget.dump.age` with a
+`.manifest.json` beside each. Every run has its own key, and uploads use a
+conditional write (`If-None-Match: *`), so an existing object is never
+overwritten. Retention is 14 days daily, 8 weeks weekly (Sundays, UTC) and
+6 months monthly (the 1st, UTC).
 
-The manifest holds table row counts, the credit total, database size and
-checksums. It holds no row data and is not encrypted.
+The manifest holds no row data and is not encrypted. It records:
+
+- the backup id, the GitHub run and commit;
+- the source project ref, host, database and role;
+- migration history: the full id list and the latest id;
+- schema counts: tables, functions, indexes, triggers, constraints, foreign keys and RLS tables;
+- table row counts, the legacy credit total, and the ledger's balance and entry sums;
+- database size, dump duration and SHA-256 of the dump before and after encryption.
+
+`verify` and `restore-test` refuse a backup whose source is not
+`BACKUP_EXPECTED_PROJECT_REF`. `restore-test` passes only when the restored
+copy has the same rows, migration history, schema counts and ledger sums, and
+balances equal the ledger total. `pg_restore --exit-on-error` also fails on any
+row that breaks a restored constraint or foreign key.
 
 ## Credentials
 
 Never use the admin database credentials in GitHub Actions.
 
-**Backup role.** Run once per database as an administrator, with a generated
-password that goes straight into a secret store:
+**Backup role.** Staging has `omnitarget_backup`. Its password was last
+rotated on 2026-11-10. At that time it could read all 37 tables, write none,
+and its sessions were read-only by default. To set the role up on another
+database, run this once as an administrator, with a generated password that
+goes straight into a secret store:
 
 ```sql
 create role omnitarget_backup with login password '<generated>'
@@ -62,23 +80,58 @@ it leaks. Confirm the token can delete objects before relying on `prune`.
 `BACKUP_AGE_RECIPIENT`:
 
 - A custodian key, whose private half is held offline and never enters CI.
+  For staging this is the existing staging backup key,
+  `~/.config/omnitarget/keys/staging-pre-reset-2026-11-09.agekey`, on the
+  operator's machine. Copy it into the team's password manager: one machine is
+  not a recovery plan.
 - A restore-test key, whose private half exists only in the `backup-restore`
-  GitHub environment.
+  GitHub environment. A lost restore-test key is replaced by generating a new
+  pair. The custodian key still decrypts every backup.
+
+The decryption keys are never stored in R2.
 
 ## GitHub configuration
 
+Both environments accept deployments only from `main` and `staging`.
+
 Environment `backup-staging`:
 
-- Variables: `BACKUP_R2_BUCKET`, `BACKUP_PREFIX`, `BACKUP_AGE_RECIPIENT`
-- Secrets: `R2_ENDPOINT`, `BACKUP_DATABASE_URL`,
-  `BACKUP_R2_ACCESS_KEY_ID`, `BACKUP_R2_SECRET_ACCESS_KEY`,
+- Variables: `BACKUP_R2_BUCKET` (`jsonl-assets`), `BACKUP_PREFIX`
+  (`backups/staging-scheduled`), `BACKUP_EXPECTED_PROJECT_REF`
+  (`eraycbxedmufsdvhtrvk`), `BACKUP_AGE_RECIPIENT`
+- Secrets: `R2_ENDPOINT`, `BACKUP_DATABASE_URL` (the backup role, through the
+  session pooler), `BACKUP_R2_ACCESS_KEY_ID`, `BACKUP_R2_SECRET_ACCESS_KEY`,
   `BACKUP_R2_READ_ACCESS_KEY_ID`, `BACKUP_R2_READ_SECRET_ACCESS_KEY`
 
 Environment `backup-restore`:
 
-- Variables: `BACKUP_R2_BUCKET`, `BACKUP_PREFIX`
+- Variables: `BACKUP_R2_BUCKET`, `BACKUP_PREFIX`, `BACKUP_EXPECTED_PROJECT_REF`
 - Secrets: `R2_ENDPOINT`, `BACKUP_R2_READ_ACCESS_KEY_ID`,
   `BACKUP_R2_READ_SECRET_ACCESS_KEY`, `BACKUP_AGE_RESTORE_IDENTITY`
+
+The four `BACKUP_R2_*` key secrets must be API tokens scoped to the backup
+bucket, never the application's R2 key: that key also reaches the media bucket.
+
+**Schedule.** GitHub runs schedules only from the default branch, `main`. Every
+job checks out `staging`, which holds the script and the pinned lockfile, so
+`main` carries only the workflow until the production release. Nightly backup
+`17 2 * * *` UTC. Weekly restore test `47 3 * * 0` UTC. Both can also be started
+by hand (`workflow_dispatch`, with `restore_test`).
+
+**Failure visibility.** A failed backup, verify, prune or restore test fails
+its job. GitHub then notifies the account that last changed the schedule, and a
+`report-failure` job opens or comments on a "Scheduled backup failed" issue
+naming the run. The issue contains no data.
+
+## Recovery objectives (staging)
+
+| | Target | Basis |
+|---|---|---|
+| RPO | 24 hours | One nightly backup. Anything written since the last successful backup is lost. Not point-in-time recovery |
+| RTO | 1 hour | 2026-11-10 drill: download, decrypt and restore of a 265 KB backup took 4 seconds. The rest of the hour covers finding the key, checks, grants and pointing the application at the database |
+
+These are for staging at its present size. Production needs its own measured
+drill and approval.
 
 ## Restoring
 
@@ -117,8 +170,10 @@ identified.
    pg_restore --no-owner --no-privileges --exit-on-error -d "$TARGET_URL" omnitarget.dump
    ```
 
-5. Compare `count(*)` per table and `sum(credits_balance)` from
-   `user_integrations` with the manifest.
+5. Compare with the manifest: `count(*)` per table, `sum(credits_balance)` from
+   `user_integrations`, `schema_migrations`, and the ledger
+   (`sum(credit_accounts.balance)` must equal `sum(credit_ledger.quantity)`).
+   `db-backup.mjs restore-test` does all of this against a local database.
 
 6. Re-apply grants. `--no-privileges` omits them, so run the migrations' grants
    and `scripts/ops/assert-rls-lockdown.mjs` before pointing the application at
@@ -132,3 +187,13 @@ identified.
   platform settings are outside it.
 - Anything written after the last backup is lost.
 - Writes made during a restore are not reconciled; stop the application first.
+
+## Verification record
+
+**2026-11-10, staging, run from the operator's machine with the staging R2 credentials:**
+- **Backup:** `20261110T185100Z-local714457`, taken by the backup role through the pooler. Source `eraycbxedmufsdvhtrvk`, 37 tables, migrations through `0021_credit_ledger`, 265,557 bytes encrypted to both recipients.
+- **Verify:** the stored size, SHA-256 and age header all match the manifest.
+- **Restore test:** into a disposable local Postgres 17, decrypted once with the custodian key and once with the restore-test key. Rows (150), migration history, schema counts (96 functions, 85 indexes, 10 triggers, 154 constraints, 34 foreign keys, 37 RLS tables) and ledger sums all match. Total 3.6 seconds.
+- **Overwrite protection:** a second conditional write to an existing key was refused with 412.
+
+The scheduled GitHub run is verified separately, once the bucket-scoped R2 tokens are in place and the workflow is on `main`.

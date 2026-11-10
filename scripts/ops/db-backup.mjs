@@ -114,6 +114,38 @@ async function creditSum(client) {
   return Number(rows[0].total);
 }
 
+/** The project ref from a Supabase pooler user (role.<ref>) or host (db.<ref>.supabase.co). */
+function sourceOf(url) {
+  const u = new URL(url);
+  const user = decodeURIComponent(u.username);
+  const ref = user.includes(".") ? user.split(".").pop() : u.hostname.match(/^db\.([a-z0-9]+)\.supabase\.co$/)?.[1] ?? null;
+  return { project_ref: ref, host: u.hostname, database: u.pathname.slice(1) || "postgres", role: user.split(".")[0] };
+}
+
+/** Schema shape: what a restore must reproduce besides the rows. */
+async function schemaState(client) {
+  const one = async (sql) => Number((await client.query(sql)).rows[0].n);
+  const migrations = (await client.query("select id from public.schema_migrations order by id")).rows.map((row) => row.id);
+  const hasLedger = (await client.query("select to_regclass('public.credit_ledger') is not null as present")).rows[0].present;
+  const ledger = hasLedger
+    ? (await client.query(`select (select coalesce(sum(balance), 0) from public.credit_accounts)::bigint as balances,
+                                  (select coalesce(sum(quantity), 0) from public.credit_ledger)::bigint as entries`)).rows[0]
+    : null;
+  return {
+    migrations: { count: migrations.length, latest: migrations.at(-1) ?? null, ids: migrations },
+    schema: {
+      tables: await one("select count(*) as n from pg_class c join pg_namespace s on s.oid = c.relnamespace where s.nspname = 'public' and c.relkind = 'r'"),
+      functions: await one("select count(*) as n from pg_proc p join pg_namespace s on s.oid = p.pronamespace where s.nspname = 'public'"),
+      indexes: await one("select count(*) as n from pg_indexes where schemaname = 'public'"),
+      triggers: await one("select count(*) as n from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace s on s.oid = c.relnamespace where s.nspname = 'public' and not t.tgisinternal"),
+      constraints: await one("select count(*) as n from pg_constraint k join pg_namespace s on s.oid = k.connamespace where s.nspname = 'public'"),
+      foreign_keys: await one("select count(*) as n from pg_constraint k join pg_namespace s on s.oid = k.connamespace where s.nspname = 'public' and k.contype = 'f'"),
+      rls_tables: await one("select count(*) as n from pg_class c join pg_namespace s on s.oid = c.relnamespace where s.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity"),
+    },
+    ledger: ledger && { balance_sum: Number(ledger.balances), entry_sum: Number(ledger.entries) },
+  };
+}
+
 async function tableCounts(client) {
   const { rows } = await client.query(
     `select c.relname as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -127,9 +159,13 @@ async function tableCounts(client) {
   return counts;
 }
 
+/** Writes a new object; refuses (412) rather than overwrite an existing key. */
 function upload(client, bucket, key, path, contentType) {
   return client.send(
-    new PutObjectCommand({ Bucket: bucket, Key: key, Body: createReadStream(path), ContentLength: statSync(path).size, ContentType: contentType }),
+    new PutObjectCommand({
+      Bucket: bucket, Key: key, Body: createReadStream(path), ContentLength: statSync(path).size, ContentType: contentType,
+      IfNoneMatch: "*",
+    }),
   );
 }
 
@@ -150,6 +186,7 @@ async function listKeys(client, bucket, prefix) {
 }
 
 async function newestManifest(client, bucket, prefix, dir) {
+  // Keys sort by date, then by the run's UTC timestamp.
   const keys = (await listKeys(client, bucket, `${prefix}/daily/`)).filter((key) => key.endsWith(".manifest.json")).sort();
   if (!keys.length) throw new Error("No backups found");
   const manifestKey = keys.at(-1);
@@ -174,6 +211,7 @@ async function backup() {
 
     // Counts and dump share one snapshot, so the manifest describes exactly
     // what was dumped even while the application keeps writing.
+    const startedAt = Date.now();
     const measured = await withClient(databaseUrl, async (db) => {
       await db.query("begin isolation level repeatable read read only");
       const snapshot = (await db.query("select pg_export_snapshot() as id")).rows[0].id;
@@ -182,6 +220,7 @@ async function backup() {
         database_size_bytes: Number((await db.query("select pg_database_size(current_database()) as size")).rows[0].size),
         table_row_counts: await tableCounts(db),
         credit_balance_sum: await creditSum(db),
+        ...(await schemaState(db)),
       };
       await run("pg_dump", ["-Fc", "--no-owner", "--no-privileges", "--schema=public", `--snapshot=${snapshot}`, ...args], { output: plain, env });
       await db.query("commit");
@@ -192,12 +231,21 @@ async function backup() {
     await run("age", [...recipients.flatMap((value) => ["-r", value]), "-o", encrypted, plain]);
     rmSync(plain);
 
+    // Unique per run: a second backup on the same day never replaces the first.
+    const runId = process.env.GITHUB_RUN_ID ? `gh${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT ?? "1"}` : `local${process.pid}`;
+    const stamp = `${now.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z")}-${runId}`;
     const manifest = {
+      format: 2,
+      backup_id: stamp,
+      source: sourceOf(databaseUrl),
+      run: { github_run_id: process.env.GITHUB_RUN_ID ?? null, git_sha: process.env.GITHUB_SHA ?? null, trigger: process.env.GITHUB_EVENT_NAME ?? "manual" },
       ...measured,
       created_at: now.toISOString(),
+      dump_seconds: Number(((Date.now() - startedAt) / 1000).toFixed(1)),
       dump_sha256: dumpSha,
       encrypted_sha256: await sha256(encrypted),
       encrypted_bytes: statSync(encrypted).size,
+      recipients: recipients.length,
     };
     const manifestPath = join(dir, "manifest.json");
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), { mode: 0o600 });
@@ -206,11 +254,14 @@ async function backup() {
     if (now.getUTCDay() === 0) tiers.push("weekly");
     if (now.getUTCDate() === 1) tiers.push("monthly");
     for (const tier of tiers) {
-      const stem = `${prefix}/${tier}/${date}/omnitarget`;
+      const stem = `${prefix}/${tier}/${date}/${stamp}/omnitarget`;
       await upload(client, bucket, `${stem}.dump.age`, encrypted, "application/octet-stream");
       await upload(client, bucket, `${stem}.manifest.json`, manifestPath, "application/json");
     }
-    console.log(JSON.stringify({ ok: true, date, tiers, bytes: manifest.encrypted_bytes, tables: Object.keys(manifest.table_row_counts).length }));
+    console.log(JSON.stringify({
+      ok: true, backup_id: stamp, source: manifest.source.project_ref, tiers, bytes: manifest.encrypted_bytes,
+      tables: Object.keys(manifest.table_row_counts).length, migrations: manifest.migrations.latest, dump_seconds: manifest.dump_seconds,
+    }));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -228,8 +279,13 @@ async function verify() {
     await download(client, bucket, dumpKey, copy);
     if ((await sha256(copy)) !== manifest.encrypted_sha256) throw new Error("Stored checksum does not match the manifest");
     if (readFileSync(copy).subarray(0, 21).toString() !== "age-encryption.org/v1") throw new Error("Stored object is not age-encrypted");
+    const expectedRef = process.env.BACKUP_EXPECTED_PROJECT_REF;
+    if (expectedRef && manifest.source?.project_ref !== expectedRef) throw new Error("Newest backup is not from the expected project");
     const ageHours = (Date.now() - Date.parse(manifest.created_at)) / 3_600_000;
-    console.log(JSON.stringify({ ok: true, created_at: manifest.created_at, age_hours: Number(ageHours.toFixed(1)), bytes: manifest.encrypted_bytes }));
+    console.log(JSON.stringify({
+      ok: true, backup_id: manifest.backup_id ?? null, source: manifest.source?.project_ref ?? null, created_at: manifest.created_at,
+      age_hours: Number(ageHours.toFixed(1)), bytes: manifest.encrypted_bytes, migrations: manifest.migrations?.latest ?? null,
+    }));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -268,29 +324,54 @@ async function restoreTest() {
   const database = `restore_test_${Date.now()}`;
   const scratchUrl = new URL(restoreUrl);
   scratchUrl.pathname = `/${database}`;
+  const started = Date.now();
+  const timings = {};
+  const mark = (label, since) => (timings[label] = Number(((Date.now() - since) / 1000).toFixed(1)));
   try {
     const { manifest, dumpKey } = await newestManifest(client, bucket, prefix, dir);
+    const expectedRef = process.env.BACKUP_EXPECTED_PROJECT_REF;
+    if (expectedRef && manifest.source?.project_ref !== expectedRef) throw new Error("Newest backup is not from the expected project");
     const encrypted = join(dir, "db.dump.age");
+    let t = Date.now();
     await download(client, bucket, dumpKey, encrypted);
+    mark("download_s", t);
     if ((await sha256(encrypted)) !== manifest.encrypted_sha256) throw new Error("Encrypted checksum mismatch");
     const plain = join(dir, "db.dump");
+    t = Date.now();
     await run("age", ["-d", "-i", identity, "-o", plain, encrypted]);
+    mark("decrypt_s", t);
     if ((await sha256(plain)) !== manifest.dump_sha256) throw new Error("Decrypted checksum mismatch");
 
     await withClient(restoreUrl, (db) => db.query(`create database ${database}`));
     // The dump recreates schema public, so remove the default one first.
     await withClient(scratchUrl.href, (db) => db.query("drop schema public cascade"));
     const { args, env } = connectionParts(scratchUrl.href);
+    t = Date.now();
+    // --exit-on-error: any row that violates a restored constraint or foreign key fails the restore.
     await run("pg_restore", ["--no-owner", "--no-privileges", "--exit-on-error", ...args], { input: plain, env });
+    mark("restore_s", t);
 
-    const [restored, restoredCredits] = await withClient(scratchUrl.href, async (db) => [await tableCounts(db), await creditSum(db)]);
+    const [restored, restoredCredits, state] = await withClient(scratchUrl.href, async (db) => [await tableCounts(db), await creditSum(db), await schemaState(db)]);
     const mismatches = Object.entries(manifest.table_row_counts)
       .filter(([table, count]) => restored[table] !== count)
       .map(([table, expected]) => ({ table, expected, restored: restored[table] ?? null }));
     const creditsMatch = restoredCredits === manifest.credit_balance_sum;
+    const checks = { rows: mismatches.length === 0, legacyCredits: creditsMatch };
+    if (manifest.migrations) {
+      checks.migrations = JSON.stringify(state.migrations.ids) === JSON.stringify(manifest.migrations.ids);
+      checks.schema = Object.entries(manifest.schema).every(([key, value]) => state.schema[key] === value);
+    }
+    if (manifest.ledger) {
+      checks.ledger = state.ledger?.balance_sum === manifest.ledger.balance_sum && state.ledger?.entry_sum === manifest.ledger.entry_sum
+        && state.ledger.balance_sum === state.ledger.entry_sum;
+    }
     const rows = Object.values(restored).reduce((sum, n) => sum + n, 0);
-    const ok = mismatches.length === 0 && creditsMatch;
-    console.log(JSON.stringify({ ok, backup: manifest.created_at, tables: Object.keys(restored).length, rows, creditsMatch, mismatches }));
+    const ok = Object.values(checks).every(Boolean);
+    mark("total_s", started);
+    console.log(JSON.stringify({
+      ok, backup_id: manifest.backup_id ?? null, backup: manifest.created_at, source: manifest.source?.project_ref ?? null,
+      tables: Object.keys(restored).length, rows, migrations: state.migrations.latest, schema: state.schema, checks, mismatches, timings,
+    }));
     if (!ok) process.exitCode = 1;
   } finally {
     await withClient(restoreUrl, (db) => db.query(`drop database if exists ${database}`)).catch(() => {});

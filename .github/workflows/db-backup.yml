@@ -5,7 +5,9 @@ name: Database backup
 #
 # An interim Free-plan safeguard, not point-in-time recovery. Runs against
 # staging only. Production needs its own bucket, role, keys and approval.
-# Scheduled runs start only once this file is on the default branch.
+# Scheduled runs start only once this file is on the default branch (main).
+# Every job checks out `staging`, which holds the backup script and its
+# lockfile; main carries only this workflow until the production release.
 # This repository is public, so the script logs aggregates only.
 # See scripts/ops/runbooks/backups.md.
 
@@ -35,6 +37,7 @@ concurrency:
 env:
   BACKUP_R2_BUCKET: ${{ vars.BACKUP_R2_BUCKET }}
   BACKUP_PREFIX: ${{ vars.BACKUP_PREFIX }}
+  BACKUP_EXPECTED_PROJECT_REF: ${{ vars.BACKUP_EXPECTED_PROJECT_REF }}
   R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
 
 jobs:
@@ -45,6 +48,8 @@ jobs:
     environment: backup-staging
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: staging
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -97,6 +102,8 @@ jobs:
           --health-retries 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: staging
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -127,3 +134,23 @@ jobs:
       - name: Remove the restore-test key
         if: always()
         run: rm -f "$RUNNER_TEMP/restore.key"
+
+  # A failed backup or restore test opens (or comments on) one tracking issue,
+  # in addition to GitHub's failure notification. It names the run only.
+  report-failure:
+    if: failure()
+    needs: [backup, restore-test]
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the backup failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Scheduled backup failed"
+          number=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          body="The database backup workflow failed: $RUN_URL (trigger: ${{ github.event_name }}). See scripts/ops/runbooks/backups.md."
+          if [ -n "$number" ]; then gh issue comment "$number" --body "$body"; else gh issue create --title "$title" --body "$body"; fi
