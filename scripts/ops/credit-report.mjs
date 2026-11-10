@@ -6,7 +6,9 @@
  *   - accounts whose two balance columns disagree;
  *   - packs granted 3/10 credits before 2026-09-03, when "Starter Pack – 5" and
  *     "Growth Pack – 15" were on sale (possible under-credits);
- *   - whether the manual KASA claim referenced in billing-db.ts exists.
+ *   - whether the manual KASA claim exists (formerly referenced by the legacy
+ *     reconciliation in billing-db.ts; since task 5 such legacy claims make
+ *     the ledger record the charge as legacy_claimed instead of crediting it).
  *
  * Before/after comparison around a change:
  *   node scripts/ops/credit-report.mjs --out before.json

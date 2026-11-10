@@ -40,39 +40,19 @@ describe("schema and migration state", () => {
     expect(await q("select table_name, grantee from information_schema.role_table_grants where table_schema = 'public' and grantee in ('anon', 'authenticated')")).toEqual([]);
   });
 
-  it("lets only service_role run the credit functions", async () => {
-    for (const fn of ["add_user_credits(text,integer,integer)", "grant_free_credit(text)", "apply_credit_adjustment(text,text,integer,text,jsonb)"]) {
+  it("leaves the retired user-keyed credit functions callable by no client role and changing nothing", async () => {
+    // Since 0021 every balance change goes through the workspace ledger (supabase/tests/credits.db.test.mjs).
+    const id = await account({ credits: 2 });
+    for (const fn of ["add_user_credits(text,integer,integer)", "grant_free_credit(text)", "increment_credits(text,integer,integer)",
+      "apply_credit_adjustment(text,text,integer,text,jsonb)"]) {
       const [row] = await q(
         `select has_function_privilege('anon', 'public.${fn}', 'execute') as anon, has_function_privilege('authenticated', 'public.${fn}', 'execute') as authed,
                 has_function_privilege('service_role', 'public.${fn}', 'execute') as service`,
       );
-      expect(row, fn).toEqual({ anon: false, authed: false, service: true });
+      expect(row, fn).toEqual({ anon: false, authed: false, service: false });
     }
-  });
-});
-
-describe("credit functions under concurrency", () => {
-  it("applies 20 simultaneous grants exactly once each", async () => {
-    const id = await account();
-    await Promise.all(Array.from({ length: 20 }, () => q("select public.add_user_credits($1, 1, 1)", [id])));
-    expect(await balance(id)).toEqual({ credits: 20, credits_balance: 20, credits_total_purchased: 20 });
-  });
-
-  it("grants the free credit once, however many requests arrive", async () => {
-    const id = await account();
-    const results = await Promise.all(Array.from({ length: 10 }, () => q("select public.grant_free_credit($1) as granted", [id])));
-    expect(results.filter(([row]) => row.granted)).toHaveLength(1);
-    expect((await balance(id)).credits_balance).toBe(1);
-  });
-
-  it("applies an adjustment once and never below zero", async () => {
-    const id = await account();
-    const key = unique("adjustment");
-    const first = await q("select public.apply_credit_adjustment($1, $2, 5, 'test', '{}'::jsonb) as r", [key, id]);
-    const again = await q("select public.apply_credit_adjustment($1, $2, 5, 'test', '{}'::jsonb) as r", [key, id]);
-    expect([first[0].r, again[0].r]).toEqual(["applied", "already_applied"]);
-    expect((await balance(id)).credits_balance).toBe(5);
-    await expect(q("select public.apply_credit_adjustment($1, $2, -10, 'test', '{}'::jsonb)", [unique("adjustment"), id])).rejects.toThrow(/negative/);
+    await expect(q("select public.add_user_credits($1, 5, 5)", [id])).rejects.toThrow(/credit_function_retired/);
+    expect(await balance(id)).toMatchObject({ credits: 2, credits_balance: 2 });
   });
 });
 

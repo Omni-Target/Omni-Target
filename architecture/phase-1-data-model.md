@@ -70,8 +70,8 @@ Shop data deletion, workspace closure and Clerk identity deletion stay separate.
 ### Transitional behaviour until tasks 4 to 6
 
 - Since task 4, each shop has its own encrypted credential, so an account keeps several stores connected independently. The legacy store snapshot is still one per Clerk user and follows the user's current workspace until snapshots move per shop.
-- Balances still come from `user_integrations`. `credit_accounts` starts at zero until the ledger and opening balances of task 5.
-- New campaigns are not yet attributed to a workspace (0023). Deletion removes attributed campaigns and, through the legacy redaction, unattributed ones for the shop; a campaign attributed to another workspace is never touched.
+- Since task 5 (0021), balances come only from the workspace ledger. Legacy balances in `user_integrations` are no longer read or written; each is carried into its legacy workspace by `open_legacy_credit_balance` in task 6.
+- Since task 5, campaigns created by brief generation carry their workspace. Older campaigns are attributed by the legacy migration (0023). Deletion removes attributed campaigns and, through the legacy redaction, unattributed ones for the shop; a campaign attributed to another workspace is never touched.
 - The legacy redaction still clears generation receipts and Meta events per Clerk user rather than per workspace.
 
 ## Credentials (migration 0020, implemented)
@@ -97,7 +97,7 @@ Shop data deletion, workspace closure and Clerk identity deletion stay separate.
 
 New connections write no token to `user_integrations`; only the store's domains and scopes, and Meta's non-secret hints (`meta_connected_at`, `pixel_health`). No code reads the legacy token columns any more. They are neither cleared nor dropped here: existing plaintext is removed only after the scheduled backup and restore gate, as part of the legacy migration (task 6) and the contract step. Staging held no legacy credentials when task 4 was implemented (verified: 0 rows), so there was nothing to backfill; production's legacy tokens are migrated with the legacy shops in task 6.
 
-## Credits
+## Credits (migration 0021, implemented)
 
 | Table | Key columns | Constraints |
 |---|---|---|
@@ -125,6 +125,20 @@ New connections write no token to `user_integrations`; only the store's domains 
 
 No transaction stays open across a Shopify or AI call.
 
+### As implemented in 0021
+
+- **One writer.** `apply_credit_mutation` is internal (service_role cannot call it). A trigger on `credit_accounts` refuses any balance change made outside it, even by the table owner, and 0021 refuses to apply over a non-zero balance, so `balance = sum(ledger)` holds from the first entry. The ledger refuses update, delete and truncate.
+- **Typed operations** granted to service_role: `workspace_credit_status`, `create_purchase_intent`, `attach_intent_charge`, `fail_purchase_intent`, `grant_intent_purchase`, `record_shop_purchase`, `grant_workspace_free_credit`, `adjust_workspace_credits`, `reverse_credit_entry`, `refund_purchase`, `revoke_credit_entitlement`, `save_billing_cursor`, `commit_brief_generation(workspace, …)` and `legacy_credit_reconciliation_report`.
+- **Payment record and grant together.** `settle_purchase` writes `provider_purchases`, the ledger entry or entitlement, the Stripe or Paystack `payments` status and the intent status in one transaction. A failure leaves none of them.
+- **Attribution.** An intent always wins. Without one, a charge goes to the workspace whose binding covered its date with at least ten minutes to spare on both sides and only one binding near it. Anything else is recorded as `unattributed` with `needs_review`, and is not credited.
+- **Legacy claims.** A charge the legacy code already claimed in `processed_payments` is recorded as `legacy_claimed` and never credited again. For a subscription, the legacy claim covers only the periods that had started when it was made.
+- **Subscriptions.** One grant per period, keyed `<subscription id>@<current period end>` and attributed at the period's start.
+- **Entitlements.** Unlimited purchases stack end to end and change only by revocation. Generation during an entitlement writes no ledger entry.
+- **Free credit.** Once per workspace and once per shop. It is refused for a legacy workspace whose opening balance shows the free credit was already used.
+- **Reversals and refunds.** A reversal applies once per entry. A refund removes at most what the purchase granted. Both are refused, changing nothing, when the balance cannot cover them.
+- **Opening balances.** `open_legacy_credit_balance(workspace)` works only for the workspace created for that legacy row, with the same owner. The opening entry equals the legacy balance. If free credit, payments, adjustments and usage don't explain that balance, or the two legacy balance columns disagree, a row goes to `credit_opening_reviews`. `user_integrations` is not changed. `credit_opening_reviews` takes the place of the planned `credit_migration_review`.
+- **Retired.** `add_user_credits`, `increment_credits`, `grant_free_credit` and `apply_credit_adjustment` now raise and are revoked. The user-keyed `commit_brief_generation` is replaced by the workspace version.
+
 ## Tenant data
 
 `workspace_id` is added to `campaigns`, `campaign_brief_versions`, `brief_generation_receipts`, `payments`, `credit_usage` and `capi_events`. It starts nullable and is filled by the legacy migration.
@@ -143,11 +157,11 @@ Run as a dry run first, which writes a report. Then it is applied per account, i
    - A domain claimed by several rows is `contested`. Every connection attempt is refused until `review_legacy_claims` keeps one claim as provisional (still confirmed only by that account's own connection) and rejects the others, with reviewer and note.
    - A missing or invalid domain is `unresolved` and binds nothing.
 3. **Credentials.** A credential is migrated only when its shop is bound and the credential is shown to work. Others are recorded as retired, by metadata only.
-4. **Opening balances** equal current balances, to preserve them. Each is compared with what the records explain (free grant, plus payment grants, minus usage, plus adjustments). Differences go to `credit_migration_review`. No historical transaction is invented.
+4. **Opening balances** equal current balances, to preserve them. Each is compared with what the records explain (free grant, plus payment grants, minus usage, plus adjustments). Differences go to `credit_opening_reviews` (0021). No historical transaction is invented.
 5. **Purchases.** Known claimed purchases are recorded in `provider_purchases` against their existing account. A new workspace never inherits an older purchase.
 6. **Orphans**, such as payments or usage with no account, are recorded in `legacy_orphans` and not attached anywhere.
 
-Mapping tables: `legacy_shop_claims` (0018), and `legacy_account_map`, `credit_migration_review`, `legacy_orphans` (0022).
+Mapping tables: `legacy_shop_claims` (0018), `credit_opening_reviews` (0021), and `legacy_account_map` and `legacy_orphans` (0022).
 
 ## Migration sequence
 
@@ -158,8 +172,8 @@ Historical files `0001` to `0017` are kept unchanged. A schema baseline taken at
 | `0018_workspaces_and_shop_bindings` | Workspaces, credit accounts, shops, bindings, events, lifecycle events, compliance requests, deletions, transfers, legacy claims, `campaigns.workspace_id`, and their functions (implemented) |
 | `0019_shop_leases` | Per-shop install and refresh leases, lease-guarded install functions, `record_shop_update` (task 3.1, implemented) |
 | `0020_encrypted_credentials` | Encrypted shop and Meta credentials, credential-carrying install commit, lifecycle clearing, refresh and re-encryption with version checks (task 4, implemented) |
-| `0021_credit_ledger` | Accounts, ledger, entitlements, intents, provider purchases, sync state, canonical functions |
-| `0022_legacy_mapping` | Mapping and review tables |
+| `0021_credit_ledger` | Ledger, entitlements, intents, provider purchases, billing sync state, opening-balance reviews, canonical functions (task 5, implemented) |
+| `0022_legacy_mapping` | `legacy_account_map` and `legacy_orphans` |
 | `0023_workspace_columns` | `workspace_id` on tenant tables, with indexes |
 | `0024_commerce_model` | Products, variants, inventory, locations, orders, line items, minimal customers, returns, metafields, metaobject definitions and metaobjects, shop settings and access |
 | `0025_sync_inbox_metrics` | Sync runs and checkpoints, webhook inbox, metrics |

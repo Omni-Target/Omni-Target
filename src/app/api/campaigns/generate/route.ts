@@ -21,8 +21,7 @@ import { reusableRecommendationsFromVersions } from "@/lib/campaigns/reuse-insig
 import { canonicalRegenerationProduct } from "@/lib/campaigns/regeneration-product";
 import type { StoreProduct } from "@/lib/store-data";
 
-import { detectColumns } from "@/lib/billing-db";
-import { availableCredits } from "@/lib/credit-balance";
+import { creditStatusFor } from "@/modules/credits/ledger";
 import { getChannelBehavioralGuidance, getGeographicBuyingDynamics } from "@/lib/campaigns/qualitative-guidance";
 import { summarizeMarketingHistory } from "@/lib/marketing-evidence";
 
@@ -244,24 +243,20 @@ export async function POST(request: Request) {
   });
   if (!limited.ok) return limited.response;
 
-  const cols = await detectColumns();
-  const selectQuery = [
-    "store_snapshot",
-    cols.hasCredits ? "credits" : "credits_balance",
-    "credits_balance",
-    "credits_unlimited_until"
-  ].join(", ");
+  const integration = await queryUserIntegrationSelect(userId!, "store_snapshot");
 
-  const integration = await queryUserIntegrationSelect(userId!, selectQuery);
-
-  // Credit gate: check if user has credits or unlimited access
-  const hasUnlimited =
-    integration?.credits_unlimited_until &&
-    new Date(integration.credits_unlimited_until) > new Date();
-
-  const currentCredits = availableCredits(integration, cols.hasCredits);
-
-  const hasCredits = currentCredits > 0;
+  // Credit gate: the current workspace's balance and unlimited access, from the
+  // ledger. The commit below re-checks both under the account lock.
+  const credits = await creditStatusFor(userId!);
+  if (!credits.workspaceId) {
+    return NextResponse.json(
+      { error: "no_workspace", message: "Connect your Shopify store before creating a brief.", charged: false },
+      { status: 409 },
+    );
+  }
+  const workspaceId = credits.workspaceId;
+  const hasUnlimited = credits.isUnlimited;
+  const hasCredits = credits.balance > 0;
 
   try {
     const body: Partial<GenerateRequest> = await request.json();
@@ -925,7 +920,7 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
       selectedDuration: 14, selectedIntlDuration: 14, selectedStrategyIndex: 1, selectedIntlStrategyIndex: 1,
     };
     const result = await commitBriefGeneration({
-      p_user_id: userId!, p_request_id: requestId, p_request_hash: requestHash,
+      p_workspace: workspaceId, p_user_id: userId!, p_request_id: requestId, p_request_hash: requestHash,
       p_campaign_id: isRegeneration ? body.campaignId! : null,
       p_campaign: {
         brand_name: brandName, product_name: productName, product_description: productDescription,
@@ -954,6 +949,14 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
         message: "You have no briefs remaining. Purchase a pack to continue.",
         redirect: "/pricing",
       }, { status: 402 });
+    }
+
+    if (error instanceof Error && (error.message === "workspace_inactive" || error.message === "workspace_access_denied")) {
+      return NextResponse.json({
+        error: "workspace_inactive",
+        message: "Reconnect your Shopify store to create briefs. No credit was charged.",
+        charged: false,
+      }, { status: 409 });
     }
 
     if (error instanceof Error && error.message === "Could not confirm the brief was saved. Please retry.") {

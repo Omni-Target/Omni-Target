@@ -162,119 +162,11 @@ export async function getPaymentById(paymentId: string) {
   return data;
 }
 
-/**
- * Atomically claim a payment for processing (idempotency guard).
- *
- * Returns true if THIS call claimed it (first time → caller should grant
- * credits), false if it was already processed (caller should skip). Relies on
- * the `processed_payments` primary key to make concurrent duplicate webhook /
- * callback deliveries safe.
- *
- * See supabase/migrations/0001_payment_integrity.sql.
- */
-export async function claimPayment(paymentId: string): Promise<boolean> {
-  const { error } = await supabaseAdmin
-    .from("processed_payments")
-    .insert({ payment_id: paymentId });
-
-  if (!error) return true;
-
-  // Unique violation → already claimed by a previous (possibly concurrent) run.
-  if (error.code === "23505") return false;
-
-  // Table missing (migration not applied yet) → don't block real payments, but
-  // warn loudly. Idempotency is not enforced until the migration is applied.
-  if (error.code === "42P01") {
-    console.error(
-      "[claimPayment] processed_payments table is missing — apply migration 0001. Proceeding WITHOUT idempotency guard."
-    );
-    return true;
-  }
-
-  throw error;
-}
-
-/**
- * Release a previously claimed payment so a retry can re-process it. Called when
- * a grant fails after the claim, to avoid permanently locking out a legitimate
- * payment.
- */
-export async function releasePayment(paymentId: string): Promise<void> {
-  const { error } = await supabaseAdmin
-    .from("processed_payments")
-    .delete()
-    .eq("payment_id", paymentId);
-
-  if (error && error.code !== "42P01") {
-    console.error("[releasePayment]", error);
-  }
-}
-
 const isMissingRpc = (error: { code?: string }) =>
   error.code === "42883" || error.code === "PGRST202";
 
-/**
- * Non-atomic stand-in used only until migration 0014 is applied. Writes both
- * balance columns so the grant is visible to every reader.
- */
-async function addCreditsWithoutRpc(
-  userId: string,
-  credits: number,
-  totalPurchased: number,
-): Promise<number> {
-  const current = await getUserIntegration(userId);
-  if (!current) throw new Error(`No integration row for user ${userId}`);
-  const hasCreditsColumn = "credits" in current;
-  const newBalance = (current.credits ?? current.credits_balance ?? 0) + credits;
-  await updateUserIntegration(userId, {
-    credits_balance: newBalance,
-    credits_total_purchased: (current.credits_total_purchased || 0) + totalPurchased,
-    ...(hasCreditsColumn ? { credits: newBalance } : {}),
-  });
-  return newBalance;
-}
-
-/**
- * Atomically add credits to a user's balance, keeping both balance columns in
- * step (migration 0014). Returns the new balance.
- */
-export async function incrementCredits(
-  userId: string,
-  credits: number,
-  totalPurchased: number,
-): Promise<number> {
-  const { data, error } = await supabaseAdmin.rpc("add_user_credits", {
-    p_user_id: userId,
-    p_credits: credits,
-    p_purchased: totalPurchased,
-  });
-  if (!error) return data as number;
-
-  if (isMissingRpc(error)) {
-    console.error("[incrementCredits] add_user_credits is missing — apply migration 0014.");
-    return addCreditsWithoutRpc(userId, credits, totalPurchased);
-  }
-  throw error;
-}
-
-/**
- * Grant the one free install credit: added to the balance, at most once.
- * Returns true only for the call that granted it.
- */
-export async function grantFreeCredit(userId: string): Promise<boolean> {
-  const { data, error } = await supabaseAdmin.rpc("grant_free_credit", { p_user_id: userId });
-  if (!error) return data === true;
-
-  if (isMissingRpc(error)) {
-    console.error("[grantFreeCredit] grant_free_credit is missing — apply migration 0014.");
-    const current = await getUserIntegration(userId);
-    if (!current || current.free_credit_used) return false;
-    await addCreditsWithoutRpc(userId, 1, 0);
-    await updateUserIntegration(userId, { free_credit_used: true });
-    return true;
-  }
-  throw error;
-}
+// Credits: every balance change goes through the workspace ledger (migration
+// 0021, src/modules/credits). Nothing in this module writes a balance.
 
 /**
  * Query user integration directly using raw supabase select structure if needed,
@@ -815,24 +707,6 @@ export async function listUserBriefCampaigns(userId: string, limit = 100) {
   return rows.map((r) => ({ ...r, variation_count: counts.get(r.id) ?? 0 }));
 }
 
-/**
- * Log credit usage.
- */
-export async function insertCreditUsage(userId: string, creditsUsed: number, action: string) {
-  const { error } = await supabaseAdmin
-    .from("credit_usage")
-    .insert({
-      clerk_user_id: userId,
-      credits_used: creditsUsed,
-      action: action,
-    });
-
-  if (error) {
-    console.error("Error in insertCreditUsage:", error);
-    throw error;
-  }
-}
-
 /** Record every billed token category, including prompt-cache reads and writes. */
 export async function logApiUsage(
   userId: string | null,
@@ -907,7 +781,7 @@ export async function isBriefRegenerationCommitReady(): Promise<boolean> {
 }
 
 export async function commitBriefGeneration(params: {
-  p_user_id: string; p_request_id: string; p_request_hash: string; p_campaign_id: string | null;
+  p_workspace: string; p_user_id: string; p_request_id: string; p_request_hash: string; p_campaign_id: string | null;
   p_campaign: Record<string, unknown>; p_copy: Record<string, unknown>;
   p_context: Record<string, unknown>; p_response: Record<string, unknown>;
 }) {
@@ -927,7 +801,8 @@ export async function commitBriefGeneration(params: {
     "regeneration_product_changed",
     "invalid_regeneration",
     "idempotency_conflict",
-    "integration_not_found",
+    "workspace_inactive",
+    "workspace_access_denied",
   ];
   if (knownBusinessErrors.includes(error.message)) {
     throw new Error(error.message);

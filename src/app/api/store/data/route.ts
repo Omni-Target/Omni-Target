@@ -51,7 +51,8 @@ export async function GET(request: Request) {
 
   console.log("Store data request from userId:", userId, "force:", force);
 
-  // 2. Get credits info & cached snapshot from Supabase
+  // 2. Cached snapshot from Supabase. Credits are not part of this payload:
+  //    the UI reads them from /api/user/credits (the workspace ledger).
   const creditsRow = await getUserIntegration(userId);
 
   const snapshotDate = creditsRow?.store_snapshot_at
@@ -73,8 +74,6 @@ export async function GET(request: Request) {
     const payload = {
       connected: true,
       data: creditsRow.store_snapshot,
-      credits_balance: creditsRow?.credits_balance || 0,
-      credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
       ...reauthMetadata,
       snapshotAt: creditsRow?.store_snapshot_at,
     };
@@ -97,8 +96,6 @@ export async function GET(request: Request) {
     return Response.json({
       connected: false,
       message: "Shopify store not connected",
-      credits_balance: creditsRow?.credits_balance || 0,
-      credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
     });
   }
 
@@ -109,8 +106,6 @@ export async function GET(request: Request) {
       connected: false,
       reauthRequired: true,
       message: "Shopify session expired — please reconnect your store",
-      credits_balance: creditsRow?.credits_balance || 0,
-      credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
     });
   }
 
@@ -120,8 +115,6 @@ export async function GET(request: Request) {
       return Response.json({
         connected: true,
         data: creditsRow.store_snapshot,
-        credits_balance: creditsRow?.credits_balance || 0,
-        credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
         ...reauthMetadata,
         snapshotAt: creditsRow?.store_snapshot_at,
       });
@@ -159,8 +152,6 @@ export async function GET(request: Request) {
     const syncPayload = {
       connected: true,
       data: storeData,
-      credits_balance: creditsRow?.credits_balance || 0,
-      credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
       ...reauthMetadata,
       snapshotAt: new Date().toISOString(),
     };
@@ -178,8 +169,6 @@ export async function GET(request: Request) {
       const fallbackPayload = {
         connected: true,
         data: creditsRow.store_snapshot,
-        credits_balance: creditsRow?.credits_balance || 0,
-        credits_unlimited_until: creditsRow?.credits_unlimited_until || null,
         ...reauthMetadata,
         snapshotAt: creditsRow?.store_snapshot_at,
       };

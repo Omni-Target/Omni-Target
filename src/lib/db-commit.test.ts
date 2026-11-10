@@ -6,6 +6,7 @@ vi.mock("@/platform/supabase", () => ({ supabaseAdmin: { rpc, from } }));
 import { commitBriefGeneration, getGenerationReceipt, getGenerationReceiptById, isBriefRegenerationCommitReady, logApiUsage, saveRecoveredCreativeHooks } from "./db";
 
 const params = {
+  p_workspace: "00000000-0000-4000-8000-0000000000aa",
   p_user_id: "user-1",
   p_request_id: "00000000-0000-4000-8000-000000000001",
   p_request_hash: "hash",

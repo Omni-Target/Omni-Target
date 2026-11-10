@@ -13,8 +13,7 @@ const m = vi.hoisted(() => ({
   upsertUserIntegration: vi.fn(),
   updateUserIntegration: vi.fn(),
   getUserIntegration: vi.fn(),
-  detectColumns: vi.fn(),
-  handleFreeCreditOnInstall: vi.fn(),
+  grantFreeCredit: vi.fn(),
   fetchWithRetry: vi.fn(),
   sendEmail: vi.fn(),
   disconnectShopInstallation: vi.fn(),
@@ -63,10 +62,7 @@ vi.mock("@/lib/db", () => ({
   getUserIntegration: m.getUserIntegration,
   disconnectShopInstallation: m.disconnectShopInstallation,
 }));
-vi.mock("@/lib/billing-db", () => ({
-  detectColumns: m.detectColumns,
-  handleFreeCreditOnInstall: m.handleFreeCreditOnInstall,
-}));
+vi.mock("@/modules/credits/ledger", () => ({ grantFreeCredit: m.grantFreeCredit }));
 vi.mock("@/lib/http", () => ({ fetchWithRetry: m.fetchWithRetry }));
 vi.mock("@/lib/shopify-store-logo", () => ({ fetchShopifyStoreLogo: vi.fn(async () => null) }));
 vi.mock("@/lib/email", () => ({ sendEmail: m.sendEmail }));
@@ -123,14 +119,7 @@ beforeEach(() => {
   for (const fn of Object.values(m)) fn.mockReset();
   m.auth.mockResolvedValue({ userId: null });
   m.getUserIdsLinkedToStore.mockResolvedValue([]);
-  m.detectColumns.mockResolvedValue({
-    hasShopDomain: true,
-    hasAccessToken: true,
-    hasRefreshToken: true,
-    hasTokenExpiresAt: true,
-    hasFreeCreditUsed: true,
-    hasCredits: true,
-  });
+  m.grantFreeCredit.mockResolvedValue("already_granted");
   m.getUserIntegration.mockResolvedValue({ free_credit_used: true });
   m.getUser.mockResolvedValue({ publicMetadata: { onboardingStep: "complete" } });
   m.createSignInToken.mockResolvedValue({ token: "ticket-123" });
@@ -349,7 +338,22 @@ describe("Shopify OAuth callback — workspace ownership (Phase 1 task 3)", () =
     const res = await GET(signedCallback({ state: nonce, cookie }));
     expect(res.headers.get("location")).toContain("error=shopify_auth_failed");
     expect(m.upsertUserIntegration).not.toHaveBeenCalled();
-    expect(m.handleFreeCreditOnInstall).not.toHaveBeenCalled();
+    expect(m.grantFreeCredit).not.toHaveBeenCalled();
+  });
+
+  it("grants the free credit to the newly bound workspace through the ledger and welcomes only on a real grant (task 5)", async () => {
+    m.auth.mockResolvedValue({ userId: "user_a" });
+    m.grantFreeCredit.mockResolvedValue("granted");
+    let state = stateCookie({ from: "dashboard", uid: "user_a" });
+    await GET(signedCallback({ state: state.nonce, cookie: state.cookie }));
+    expect(m.grantFreeCredit).toHaveBeenCalledWith("ws-new", "user_a");
+    expect(m.sendEmail).toHaveBeenCalledTimes(1);
+
+    m.sendEmail.mockClear();
+    m.grantFreeCredit.mockResolvedValue("shop_already_granted");
+    state = stateCookie({ from: "dashboard", uid: "user_a" });
+    await GET(signedCallback({ state: state.nonce, cookie: state.cookie }));
+    expect(m.sendEmail).not.toHaveBeenCalled();
   });
 
   it("connecting a second store leaves the first store's workspace and credential alone (task 4)", async () => {

@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 import { auth } from "@clerk/nextjs/server";
-import { createPayment } from "@/lib/db";
+import { startProviderPurchase } from "@/modules/credits/provider-payments";
 import { getPackById } from "@/lib/credit-packs";
 import { paymentProviderDisabledResponse } from "@/lib/payments/provider-flags";
 
@@ -34,17 +34,11 @@ export async function POST(
     );
   }
 
-  // Create payment record
-  const payment = await createPayment({
-    clerk_user_id: userId,
-    provider: "stripe",
-    pack: packId,
-    amount_usd: pack.price_usd,
-    currency: "USD",
-    credits_granted: pack.credits,
-    unlimited_days: pack.unlimited_days,
-    status: "pending",
-  });
+  // Purchase intent for the current workspace, then the pending payment row.
+  const started = await startProviderPurchase(userId, "stripe", pack);
+  if (!started.ok) {
+    return Response.json({ error: started.error }, { status: started.status });
+  }
 
   // Create Stripe checkout session
   const session = await
@@ -71,7 +65,7 @@ export async function POST(
       metadata: {
         clerk_user_id: userId,
         pack_id: packId,
-        payment_id: payment?.id || "",
+        payment_id: started.paymentId,
       },
     });
 

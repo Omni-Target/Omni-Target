@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
-import { createPayment } from "@/lib/db";
+import { startProviderPurchase } from "@/modules/credits/provider-payments";
 import { getPackById } from "@/lib/credit-packs";
 import { paymentProviderDisabledResponse } from "@/lib/payments/provider-flags";
 
@@ -44,19 +44,14 @@ export async function POST(request: Request) {
     );
   }
 
-  let payment;
+  let paymentId: string;
   try {
-    // Create pending payment record
-    payment = await createPayment({
-      clerk_user_id: userId,
-      provider: "paystack",
-      pack: packId,
-      amount_ngn: pack.price_ngn,
-      currency: "NGN",
-      credits_granted: pack.credits,
-      unlimited_days: pack.unlimited_days,
-      status: "pending",
-    });
+    // Purchase intent for the current workspace, then the pending payment row.
+    const started = await startProviderPurchase(userId, "paystack", pack);
+    if (!started.ok) {
+      return Response.json({ error: started.error }, { status: started.status });
+    }
+    paymentId = started.paymentId;
   } catch (error) {
     console.error("Payment insert error:", error);
     return Response.json(
@@ -78,12 +73,12 @@ export async function POST(request: Request) {
         email,
         amount: pack.price_ngn * 100,
         currency: "NGN",
-        reference: payment.id,
+        reference: paymentId,
         callback_url: `${process.env.NEXT_PUBLIC_APP_URL}/api/payments/paystack/verify`,
         metadata: {
           clerk_user_id: userId,
           pack_id: packId,
-          payment_id: payment.id,
+          payment_id: paymentId,
           pack_name: pack.name,
         },
       }),

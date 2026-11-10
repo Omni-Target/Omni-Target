@@ -70,7 +70,13 @@ const workspaceCount = async (owner) => (await q("select count(*)::int as n from
 const currentBinding = async (shop) =>
   (await q("select b.* from public.shop_bindings b join public.shops s on s.id = b.shop_id where s.myshopify_domain = $1 and b.released_at is null", [shop]))[0];
 const events = async (ws) => (await q("select event from public.workspace_events where workspace_id = $1 order by id", [ws])).map((row) => row.event);
-const setBalance = (ws, balance) => q("update public.credit_accounts set balance = $2 where workspace_id = $1", [ws, balance]);
+// Since 0021 a balance changes only through the ledger, so fixtures use a support adjustment.
+const setBalance = async (ws, balance) => {
+  const [{ balance: current }] = await q("select balance from public.credit_accounts where workspace_id = $1", [ws]);
+  if (balance !== current) {
+    await q("select public.adjust_workspace_credits($1, $2, $3, 'test_fixture', 'fixture balance', '{}'::jsonb)", [ws, balance - current, randomUUID()]);
+  }
+};
 const emptyWorkspace = async (owner) => (await q("insert into public.workspaces (owner_clerk_user_id) values ($1) returning id", [owner]))[0].id;
 const campaign = async (creator, ws, store = null) =>
   (await q("insert into public.campaigns (clerk_user_id, product_name, workspace_id, brief_data) values ($1, 'Lamp', $2, $3) returning id", [

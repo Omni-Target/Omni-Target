@@ -1,6 +1,6 @@
 import { getPaymentById } from "@/lib/db";
 import { getPackById } from "@/lib/credit-packs";
-import { grantCredits } from "@/lib/grant-credits";
+import { settleProviderPayment } from "@/modules/credits/provider-payments";
 import { getEnv, requireEnv } from "@/lib/env";
 
 export async function GET(request: Request) {
@@ -55,8 +55,11 @@ export async function GET(request: Request) {
       return Response.redirect(`${appUrl}/pricing?status=failed`);
     }
 
-    // Idempotent + atomic grant (safe against callback replays).
-    await grantCredits(payment.clerk_user_id, pack, payment.id, reference);
+    // Credited to the purchase intent's workspace; idempotent against replays.
+    const outcome = await settleProviderPayment("paystack", payment.id, pack, reference);
+    if (outcome !== "granted" && outcome !== "duplicate") {
+      return Response.redirect(`${appUrl}/pricing?status=failed`);
+    }
 
     return Response.redirect(
       `${appUrl}/dashboard?payment=success&pack=${pack.id}`

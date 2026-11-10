@@ -28,6 +28,7 @@ import {
 } from "@/modules/workspaces/repository";
 import { sealShopCredential } from "@/modules/credentials/shopify";
 import { workspaceCookie } from "@/modules/workspaces/current";
+import { grantFreeCredit, type FreeCreditOutcome } from "@/modules/credits/ledger";
 import { createLogger } from "@/platform/logger";
 import { fetchWithRetry } from "@/lib/http";
 import { shopifyAdminRestUrl } from "@/lib/shopify-config";
@@ -307,16 +308,21 @@ export async function GET(request: Request) {
     const storeLogoUrl = await fetchShopifyStoreLogo(myshopifyUrl, customDomain);
     const storeName: string = installed.identity.name || "Store";
 
-    const { detectColumns, handleFreeCreditOnInstall } = await import("@/lib/billing-db");
-    const cols = await detectColumns();
-
-    // Give 1 free credit on install if free_credit_used is false
+    // An existing account row marks a returning login (onboarding skip below).
     const userIntegration = await getUserIntegration(targetUserId);
-    const freeCreditUsedBefore = cols.hasFreeCreditUsed ? !!userIntegration?.free_credit_used : false;
 
-    await handleFreeCreditOnInstall(targetUserId);
+    // One free credit per workspace and per shop, through the ledger.
+    let freeCredit: FreeCreditOutcome | "failed" | "skipped" = "skipped";
+    if (installed.result.workspace_id) {
+      try {
+        freeCredit = await grantFreeCredit(installed.result.workspace_id, targetUserId);
+      } catch (err) {
+        freeCredit = "failed";
+        log.error("Free install credit could not be granted", { shop }, err);
+      }
+    }
 
-    if (!freeCreditUsedBefore && storeEmail) {
+    if (freeCredit === "granted" && storeEmail) {
       try {
         const { sendEmail } = await import("@/lib/email");
         const { welcomeEmailHtml } = await import("@/emails/welcome");

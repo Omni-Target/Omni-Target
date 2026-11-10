@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 import { getPackById } from "@/lib/credit-packs";
-import { grantCredits } from "@/lib/grant-credits";
+import { settleProviderPayment } from "@/modules/credits/provider-payments";
 import { requireEnv } from "@/lib/env";
 
 export async function POST(request: Request) {
@@ -26,9 +26,11 @@ export async function POST(request: Request) {
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    const { clerk_user_id, pack_id, payment_id } = session.metadata ?? {};
+    // Who is credited comes from the purchase intent keyed by payment_id, not
+    // from session metadata.
+    const { pack_id, payment_id } = session.metadata ?? {};
 
-    if (!clerk_user_id || !pack_id || !payment_id) {
+    if (!pack_id || !payment_id) {
       console.error("[stripe-webhook] missing metadata on session", session.id);
       return Response.json({ received: true });
     }
@@ -53,15 +55,11 @@ export async function POST(request: Request) {
     }
 
     try {
-      await grantCredits(
-        clerk_user_id,
-        pack,
-        payment_id,
-        session.payment_intent as string
-      );
+      // Credited to the intent's workspace; the payment row settles in the same
+      // transaction. Idempotent, so Stripe's retries are safe.
+      await settleProviderPayment("stripe", payment_id, pack, (session.payment_intent as string | null) ?? null);
     } catch (err) {
-      console.error("[stripe-webhook] grantCredits failed", err);
-      // 500 → Stripe retries; grantCredits is idempotent so this is safe.
+      console.error("[stripe-webhook] settlement failed", err);
       return Response.json({ error: "Processing failed" }, { status: 500 });
     }
   }
