@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 // jsdom, as in the browser: buildBriefPdfPayload has a browser-only branch.
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import pg from "pg";
+
+// The PDF embeds the product image from gatewayInsight, which trimming never
+// touches, by downloading it; a download that times out in one render but not
+// the other would look like a difference. Every render gets the same image.
+vi.mock("@/lib/safe-image-fetch", () => ({
+  fetchSafeImage: async () => new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]), { headers: { "content-type": "image/jpeg" } }),
+}));
 import { trimStoredBrief } from "./evidence";
 import { renderSavedBrief } from "./brief-renderings";
 
