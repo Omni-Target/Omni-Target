@@ -77,7 +77,11 @@ vi.mock("@/modules/workspaces/repository", () => ({
   shopOwner: h.shopOwner,
 }));
 
-vi.mock("@/lib/db", () => ({ supabaseAdmin: { from: h.from }, disconnectShopInstallation: h.revoke }));
+vi.mock("@/platform/supabase", () => ({ supabaseAdmin: { from: h.from } }));
+vi.mock("@/lib/db", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/db")>()),
+  disconnectShopInstallation: h.revoke,
+}));
 vi.mock("@/lib/verify-shopify-hmac", () => ({ verifyShopifyHmac: h.verify }));
 vi.mock("@/lib/connectors/shopify", () => ({ fetchShopifyStoreData: h.sync }));
 vi.mock("next/server", async (importOriginal) => ({

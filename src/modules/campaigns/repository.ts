@@ -29,6 +29,16 @@ export async function getCampaign(ctx: TenantContext, campaignId: string) {
   return data;
 }
 
+/**
+ * Whether the creator has saved a brief in any workspace. A system read for
+ * the brief-nudge cron only; user requests always go through a TenantContext.
+ */
+export async function creatorHasAnyCampaign(userId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin.from("campaigns").select("id").eq("clerk_user_id", userId).limit(1);
+  if (error) throw new Error("Could not check the creator's briefs.");
+  return (data ?? []).length > 0;
+}
+
 /** Launched campaigns for the dashboard, without the large brief blob. */
 export async function listActiveCampaigns(ctx: TenantContext) {
   const { data, error } = await supabaseAdmin.from("campaigns")

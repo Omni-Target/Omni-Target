@@ -34,6 +34,15 @@ describe("server-only boundaries", () => {
     expect(creators.map((file) => file.path)).toEqual(["platform/supabase.ts"]);
   });
 
+  it("uses the service-role client only in repositories (Phase 1 task 7)", () => {
+    const isRepository = (path: string) => path === "lib/db.ts" || /^(modules|platform)\//.test(path);
+    const offenders = files
+      .filter((file) => /from\s+["']@\/platform\/supabase["']/.test(file.text) || /\bsupabaseAdmin\b/.test(file.text))
+      .filter((file) => !isRepository(file.path))
+      .map((file) => file.path);
+    expect(offenders).toEqual([]);
+  });
+
   it("never imports database access from a client component", () => {
     const offenders = files.filter((file) => isClientModule(file.text) && importsDatabase(file.text)).map((file) => file.path);
     expect(offenders).toEqual([]);

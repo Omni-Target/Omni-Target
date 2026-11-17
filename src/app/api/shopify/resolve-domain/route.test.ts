@@ -21,7 +21,7 @@ const net = vi.hoisted(() => ({
 }));
 const rpc = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/db", () => ({ supabaseAdmin: { rpc } }));
+vi.mock("@/platform/supabase", () => ({ supabaseAdmin: { rpc } }));
 
 vi.mock("node:dns", () => {
   const lookup = (

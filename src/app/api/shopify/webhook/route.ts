@@ -1,5 +1,7 @@
 import { verifyShopifyHmac } from "@/lib/verify-shopify-hmac";
-import { disconnectShopInstallation, supabaseAdmin } from "@/lib/db";
+import { disconnectShopInstallation, legacyShopOwner, markStoreSnapshotStale } from "@/lib/db";
+import { claimWebhookDelivery } from "@/modules/webhooks/repository";
+import { claimCapiEvent, recordCapiResult } from "@/modules/capi/repository";
 import { captureBackgroundFailure } from "@/lib/observability/capture";
 import {
   lifecycleEventKey,
@@ -37,59 +39,6 @@ function hashSha256(value?: string): string | null {
 
 /** A webhook only marks a snapshot stale if it is older than this. */
 const STALE_MARK_MIN_AGE_MS = 15 * 60_000;
-
-/**
- * Delivery deduplication (ING-05): one row per (shop, webhook id). Returns false
- * only for a repeat delivery. Without a webhook id, or before migration 0015,
- * processing continues and the business-event key below still protects Meta.
- */
-async function claimWebhookDelivery(shopDomain: string, webhookId: string | null, topic: string | null): Promise<boolean> {
-  if (!webhookId) return true;
-  const { data, error } = await supabaseAdmin
-    .from("webhook_deliveries")
-    .upsert(
-      { shop_domain: shopDomain.toLowerCase(), webhook_id: webhookId, topic: topic ?? "unknown" },
-      { onConflict: "shop_domain,webhook_id", ignoreDuplicates: true },
-    )
-    .select("webhook_id");
-  if (error) {
-    console.error("Webhook delivery claim unavailable:", error.message);
-    return true;
-  }
-  return (data as unknown[]).length > 0;
-}
-
-/**
- * Business-event idempotency (ING-05): one row per (shop, order, event type),
- * so a Purchase is sent once however many webhooks mention the order. Returns
- * the claim id, or null if already claimed. Until migration 0015 is applied the
- * new columns do not exist, and a best-effort existence check stands in.
- */
-async function claimCapiEvent(row: Record<string, unknown>): Promise<string | null> {
-  const { data, error } = await supabaseAdmin
-    .from("capi_events")
-    .upsert(row, { onConflict: "shop_domain,shopify_order_id,event_type", ignoreDuplicates: true })
-    .select("id");
-  if (!error) return (data as { id: string }[])[0]?.id ?? null;
-
-  if (error.code !== "42P10" && error.code !== "PGRST204" && error.code !== "42703") throw error;
-  const legacyRow = { ...row };
-  delete legacyRow.shop_domain;
-  delete legacyRow.event_type;
-  const { data: existing } = await supabaseAdmin
-    .from("capi_events")
-    .select("id")
-    .eq("clerk_user_id", row.clerk_user_id as string)
-    .eq("shopify_order_id", row.shopify_order_id as string)
-    .limit(1);
-  if (existing?.length) return null;
-  const { data: inserted, error: insertError } = await supabaseAdmin
-    .from("capi_events")
-    .insert(legacyRow)
-    .select("id");
-  if (insertError) throw insertError;
-  return (inserted as { id: string }[])[0]?.id ?? null;
-}
 
 interface WebhookIntegration {
   clerk_user_id: string;
@@ -155,11 +104,7 @@ async function forwardPurchaseToMeta(shopDomain: string, integration: WebhookInt
     captureBackgroundFailure("meta-capi-send", err);
   }
 
-  const { error } = await supabaseAdmin
-    .from("capi_events")
-    .update({ meta_response: metaResponse, status })
-    .eq("id", claimId);
-  if (error) console.error("Failed to record CAPI result:", error.message);
+  await recordCapiResult(claimId, metaResponse, status);
 }
 
 /**
@@ -221,17 +166,12 @@ async function processWebhook(shopDomain: string, topic: string | null, payload:
   const domain = shopDomain.toLowerCase();
   let owner = await shopOwner(domain);
   if (!owner) {
-    const { data, error } = await supabaseAdmin
-      .from("user_integrations")
-      .select("clerk_user_id")
-      .or(`shopify_store_url.eq.${domain},shop_domain.eq.${domain}`)
-      .order("updated_at", { ascending: false })
-      .limit(1);
-    if (error) {
-      console.error("Error looking up integration for webhook:", error.message);
+    try {
+      owner = await legacyShopOwner(domain);
+    } catch (err) {
+      console.error("Error looking up integration for webhook:", err instanceof Error ? err.message : "unknown");
       return;
     }
-    owner = (data as { clerk_user_id: string }[] | null)?.[0]?.clerk_user_id ?? null;
   }
   if (!owner) {
     console.warn("No account found for this shop's webhook");
@@ -248,12 +188,9 @@ async function processWebhook(shopDomain: string, topic: string | null, payload:
 
   // ING-05: the next visit refreshes the store. A full sync per order was
   // unbounded work inside a webhook, and busy stores re-synced constantly.
-  const { error: staleError } = await supabaseAdmin
-    .from("user_integrations")
-    .update({ store_snapshot_at: null })
-    .eq("clerk_user_id", owner)
-    .lt("store_snapshot_at", new Date(Date.now() - STALE_MARK_MIN_AGE_MS).toISOString());
-  if (staleError) console.error("Failed to mark snapshot stale:", staleError.message);
+  await markStoreSnapshotStale(owner, new Date(Date.now() - STALE_MARK_MIN_AGE_MS)).catch((err) =>
+    console.error("Failed to mark snapshot stale:", err instanceof Error ? err.message : "unknown"),
+  );
 }
 
 export async function POST(request: Request) {

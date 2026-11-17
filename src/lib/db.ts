@@ -2,9 +2,9 @@ import "server-only";
 import { supabaseAdmin } from "@/platform/supabase";
 import type { UserIntegration } from "@/lib/types/integration";
 
-// The client lives in src/platform/supabase.ts, behind server-only and a
-// validated environment. Re-exported so existing call sites are unchanged.
-export { supabaseAdmin };
+// The legacy user_integrations repository until Phase 2 replaces the snapshot.
+// The client lives in src/platform/supabase.ts and is never re-exported: only
+// repositories (this file, src/modules, src/platform) use it.
 
 /**
  * Get user integration record by Clerk User ID.
@@ -337,6 +337,63 @@ export async function detectDbColumns() {
       hasTokenExpiresAt: true,
     };
   }
+}
+
+/** The newest legacy account for a shop not yet modelled as a workspace (webhooks). Throws when unreadable. */
+export async function legacyShopOwner(domain: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from("user_integrations")
+    .select("clerk_user_id")
+    .or(`shopify_store_url.eq.${domain},shop_domain.eq.${domain}`)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return (data as { clerk_user_id: string }[] | null)?.[0]?.clerk_user_id ?? null;
+}
+
+/** Marks the account's store snapshot stale when it is older than `olderThan`, so the next visit refreshes it. */
+export async function markStoreSnapshotStale(userId: string, olderThan: Date): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("user_integrations")
+    .update({ store_snapshot_at: null })
+    .eq("clerk_user_id", userId)
+    .lt("store_snapshot_at", olderThan.toISOString());
+  if (error) throw new Error(error.message);
+}
+
+/** One page of accounts with a connected Shopify store, by account id (webhook reconciliation cron). */
+export async function listConnectedStoreAccounts(cursor: number, pageSize: number) {
+  const { data, error } = await supabaseAdmin
+    .from("user_integrations")
+    .select("clerk_user_id, shopify_store_url, shop_domain")
+    .or("shopify_store_url.not.is.null,shop_domain.not.is.null")
+    .order("clerk_user_id")
+    .range(cursor, cursor + pageSize - 1);
+  if (error || !data) throw new Error(error?.message ?? "Connected stores are unavailable.");
+  return data;
+}
+
+/** Connected stores never synced or last synced before `staleBefore`, oldest first (sync cron). */
+export async function listStoresDueForSync(staleBefore: Date, limit: number) {
+  const { data, error } = await supabaseAdmin
+    .from("user_integrations")
+    .select("clerk_user_id, shopify_store_url, shop_domain, store_snapshot_at")
+    .or("shopify_store_url.not.is.null,shop_domain.not.is.null")
+    .or(`store_snapshot_at.is.null,store_snapshot_at.lte.${staleBefore.toISOString()}`)
+    .order("store_snapshot_at", { ascending: true, nullsFirst: true })
+    .limit(limit);
+  if (error || !data) throw new Error(error?.message ?? "Stores due for sync are unavailable.");
+  return data;
+}
+
+/** Accounts connected at or before `createdBefore` (brief-nudge cron). */
+export async function listAccountsCreatedBefore(createdBefore: Date) {
+  const { data, error } = await supabaseAdmin
+    .from("user_integrations")
+    .select("clerk_user_id, created_at")
+    .lte("created_at", createdBefore.toISOString());
+  if (error || !data) throw new Error(error?.message ?? "Accounts are unavailable.");
+  return data;
 }
 
 /**

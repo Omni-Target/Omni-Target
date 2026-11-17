@@ -1,5 +1,5 @@
 import { Resend } from 'resend';
-import { supabaseAdmin } from './db';
+import { emailSentSince, recordEmailSent } from '@/modules/notifications/email-log';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
@@ -34,16 +34,7 @@ export async function sendEmail({
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     
-    const { data: existingLog } = await supabaseAdmin
-      .from('email_log')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('template', templateName)
-      .gte('sent_at', sevenDaysAgo.toISOString())
-      .limit(1)
-      .maybeSingle();
-
-    if (existingLog) {
+    if (await emailSentSince(userId, templateName, sevenDaysAgo)) {
       console.log(`Skipping email: ${templateName} already sent to ${userId} within 7 days`);
       return { success: true, skipped: true };
     }
@@ -63,10 +54,7 @@ export async function sendEmail({
     }
 
     if (userId && templateName) {
-      await supabaseAdmin.from('email_log').insert({
-        user_id: userId,
-        template: templateName
-      });
+      await recordEmailSent(userId, templateName);
     }
 
     return { success: true, data };

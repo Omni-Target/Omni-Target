@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin, updateUserIntegration } from "@/lib/db";
+import { listStoresDueForSync, updateUserIntegration } from "@/lib/db";
 import { getValidShopifyToken } from "@/lib/shopify-token";
 import { fetchShopifyStoreData } from "@/lib/connectors/shopify";
 import { captureBackgroundFailure } from "@/lib/observability/capture";
@@ -22,18 +22,14 @@ export async function GET(request: Request) {
 
     // Find stores that have connected Shopify and haven't synced in 4+ hours,
     // prioritizing the ones that haven't been synced in the longest time.
-    const fourHoursAgo = new Date(Date.now() - 4 * 3600 * 1000).toISOString();
+    const fourHoursAgo = new Date(Date.now() - 4 * 3600 * 1000);
 
-    const { data: integrations, error: fetchErr } = await supabaseAdmin
-      .from("user_integrations")
-      .select("clerk_user_id, shopify_store_url, shop_domain, store_snapshot_at")
-      .or("shopify_store_url.not.is.null,shop_domain.not.is.null")
-      .or(`store_snapshot_at.is.null,store_snapshot_at.lte.${fourHoursAgo}`)
-      .order("store_snapshot_at", { ascending: true, nullsFirst: true })
-      .limit(10); // Batch size to stay comfortably within 60s execution window
-
-    if (fetchErr || !integrations) {
-      console.error("[Cron:sync-stores] Error fetching integrations:", fetchErr);
+    let integrations: Awaited<ReturnType<typeof listStoresDueForSync>>;
+    try {
+      // Batch size to stay comfortably within 60s execution window
+      integrations = await listStoresDueForSync(fourHoursAgo, 10);
+    } catch (fetchErr) {
+      console.error("[Cron:sync-stores] Error fetching integrations:", fetchErr instanceof Error ? fetchErr.message : "unknown");
       return NextResponse.json(
         { error: "Failed to fetch integrations" },
         { status: 500 }

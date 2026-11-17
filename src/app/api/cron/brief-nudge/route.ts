@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/db';
+import { listAccountsCreatedBefore } from '@/lib/db';
+import { creatorHasAnyCampaign } from '@/modules/campaigns/repository';
 import { sendEmail } from '@/lib/email';
 import { briefNudgeEmailHtml } from '@/emails/brief-nudge';
 import { clerkClient } from '@clerk/nextjs/server';
@@ -20,13 +21,11 @@ export async function GET(request: Request) {
     targetDate.setHours(targetDate.getHours() - 48);
 
     // Get all user integrations created more than 48 hours ago
-    const { data: integrations, error: intError } = await supabaseAdmin
-      .from('user_integrations')
-      .select('clerk_user_id, created_at')
-      .lte('created_at', targetDate.toISOString());
-
-    if (intError || !integrations) {
-      console.error('Error fetching integrations:', intError);
+    let integrations: Awaited<ReturnType<typeof listAccountsCreatedBefore>>;
+    try {
+      integrations = await listAccountsCreatedBefore(targetDate);
+    } catch (intError) {
+      console.error('Error fetching integrations:', intError instanceof Error ? intError.message : 'unknown');
       return NextResponse.json({ error: 'Failed to fetch integrations' }, { status: 500 });
     }
 
@@ -36,14 +35,10 @@ export async function GET(request: Request) {
       const userId = integration.clerk_user_id;
       if (!userId) continue;
 
-      // Check if user has any campaigns (briefs)
-      const { data: campaigns, error: campError } = await supabaseAdmin
-        .from('campaigns')
-        .select('id')
-        .eq('clerk_user_id', userId)
-        .limit(1);
-      
-      if (!campError && campaigns && campaigns.length === 0) {
+      // Check if user has any campaigns (briefs); when unknown, send nothing.
+      const hasBrief = await creatorHasAnyCampaign(userId).catch(() => null);
+
+      if (hasBrief === false) {
         // User has 0 briefs. Attempt to send nudge email.
         // The sendEmail utility will prevent duplicate sends using email_log.
         try {

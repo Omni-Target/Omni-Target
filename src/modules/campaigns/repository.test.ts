@@ -5,6 +5,7 @@ vi.mock("@/platform/supabase", () => ({ supabaseAdmin: { from: m.from, rpc: m.rp
 vi.mock("@/modules/workspaces/current", () => ({ currentWorkspaceFor: m.currentWorkspaceFor }));
 
 import {
+  creatorHasAnyCampaign,
   finalizeBriefVersion,
   getBriefVersions,
   getCampaign,
@@ -60,6 +61,15 @@ describe("tenant guard (Phase 1 task 7)", () => {
     await expect(listBriefCampaigns(ctx)).resolves.toEqual([{ id: "c-1", variation_count: 2 }]);
     guarded(list);
     guarded(counts);
+  });
+
+  it("lets the nudge cron check a creator's briefs across workspaces, failing loudly", async () => {
+    const found = query({ data: [{ id: "c-1" }], error: null });
+    m.from.mockReturnValueOnce(found).mockReturnValueOnce(query({ data: [], error: null })).mockReturnValueOnce(query({ data: null, error: { message: "down" } }));
+    await expect(creatorHasAnyCampaign("user-1")).resolves.toBe(true);
+    expect(found.eqs).toEqual([["clerk_user_id", "user-1"]]);
+    await expect(creatorHasAnyCampaign("user-1")).resolves.toBe(false);
+    await expect(creatorHasAnyCampaign("user-1")).rejects.toThrow();
   });
 
   it("ignores a generation receipt from another of the user's workspaces", async () => {

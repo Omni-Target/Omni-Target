@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/db";
+import { listConnectedStoreAccounts } from "@/lib/db";
 import { captureBackgroundFailure } from "@/lib/observability/capture";
 import { shopifyAdminRestUrl } from "@/lib/shopify-config";
 import { safeEqual } from "@/lib/shopify-oauth";
@@ -117,14 +117,12 @@ export async function GET(request: Request) {
   const apply = url.searchParams.get("apply") === "true";
   const cursor = Math.max(0, Number(url.searchParams.get("cursor")) || 0);
 
-  const { data, error } = await supabaseAdmin
-    .from("user_integrations")
-    .select("clerk_user_id, shopify_store_url, shop_domain")
-    .or("shopify_store_url.not.is.null,shop_domain.not.is.null")
-    .order("clerk_user_id")
-    .range(cursor, cursor + PAGE_SIZE - 1);
-
-  if (error || !data) return NextResponse.json({ error: "integrations_unavailable" }, { status: 500 });
+  let data: Awaited<ReturnType<typeof listConnectedStoreAccounts>>;
+  try {
+    data = await listConnectedStoreAccounts(cursor, PAGE_SIZE);
+  } catch {
+    return NextResponse.json({ error: "integrations_unavailable" }, { status: 500 });
+  }
 
   // Several accounts can share a shop; one healthy token is enough.
   const shops = new Map<string, string[]>();

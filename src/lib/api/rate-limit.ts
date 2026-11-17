@@ -1,5 +1,5 @@
 import type { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/db";
+import { consumeRateLimit } from "@/platform/rate-limit-store";
 import { apiError } from "./response";
 
 export interface RateLimitConfig {
@@ -56,15 +56,7 @@ export async function enforceRateLimit(
     return { ok: true };
   };
   try {
-    const { data, error } = await supabaseAdmin.rpc("check_rate_limit", {
-      p_key: key,
-      p_limit: config.limit,
-      p_window_seconds: config.windowSeconds,
-    });
-
-    if (error) return unavailable(error.message);
-
-    if (data === false) {
+    if (!(await consumeRateLimit(key, config.limit, config.windowSeconds))) {
       return {
         ok: false,
         response: apiError(
@@ -77,6 +69,6 @@ export async function enforceRateLimit(
 
     return { ok: true };
   } catch (err) {
-    return unavailable(err);
+    return unavailable(err instanceof Error ? err.message : err);
   }
 }

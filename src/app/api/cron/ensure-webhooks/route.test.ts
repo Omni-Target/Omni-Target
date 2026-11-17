@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ range: vi.fn(), getValidShopifyToken: vi.fn() }));
 
-vi.mock("@/lib/db", () => {
+vi.mock("@/platform/supabase", () => {
   const chain = { select: () => chain, or: () => chain, order: () => chain, range: h.range };
   return { supabaseAdmin: { from: () => chain } };
 });
