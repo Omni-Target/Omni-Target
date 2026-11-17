@@ -88,6 +88,8 @@ Measured read-only on staging: the staging database is 15.3 MB, of which our `pu
 
 ## Candidates for the pre-Phase 2 optimisation review
 
+> **Done.** Task 12 measured these candidates and decided them in `storage-optimisation.md`. The list below is kept as it stood before the review.
+
 Under ADR 0002 (decision 2), these are reviewed before Phase 2 writes any rows. Each candidate is applied only once two things hold:
 - its saving is measured against the fixtures;
 - every reader of the data has been checked.

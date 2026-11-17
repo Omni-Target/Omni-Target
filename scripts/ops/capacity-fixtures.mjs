@@ -56,8 +56,13 @@ export const MIRROR = [
 ];
 
 /** Loads one synthetic shop, entirely inside Postgres. */
-export async function loadShop(client, { products, orders, months = 36, domain = "capacity-fixture.myshopify.com" }) {
+export async function loadShop(client, { products, orders, months = 36, domain = "capacity-fixture.myshopify.com", distribution = "even" }) {
   const s = shape({ products, orders });
+  // Which product each line item sells: spread evenly (the worst case for
+  // aggregates), or Pareto, where about 20% of products take 80% of sales.
+  const productIndex = distribution === "pareto"
+    ? `floor(${products} * power(((hashint8(o * 2 + l) & 2147483647)::float / 2147483648), 7))::bigint`
+    : `((o * 31 + l * 17) % ${products})`;
   const shop = (await client.query("insert into public.shops (shopify_shop_id, myshopify_domain, name) values (424242, $1, 'Capacity Fixture') returning id", [domain])).rows[0].id;
   const P = 1_000_000_000; // product ids
   const V = 2_000_000_000; // variant ids
@@ -110,11 +115,12 @@ export async function loadShop(client, { products, orders, months = 36, domain =
         from generate_series(1, ${orders}) o, lateral (select now() - make_interval(secs => ((1 - o::float / ${orders}) * ${span})::bigint) as t) x`, [shop]],
     [`insert into public.order_line_items (shop_id, shopify_id, order_shopify_id, product_shopify_id, variant_shopify_id, title, sku, quantity, current_quantity,
         refunded_quantity, unit_price, total_discount)
-      select $1, ${L} + o * 2 + l, ${O} + o, ${P} + 1 + (o * 31 + l * 17) % ${products}, ${V} + ((o * 31 + l * 17) % ${products}) * 3 + 1 + l % 3,
+      select $1, ${L} + o * 2 + l, ${O} + o, ${P} + 1 + p.pi, ${V} + p.pi * 3 + 1 + l % 3,
              initcap(substr(repeat('everyday heavyweight organic cotton tee relaxed linen shirt ', 3), 1 + o % 20, 25 + o % 41)),
-             'SKU-' || (1 + (o * 31 + l * 17) % ${products}) || '-' || (1 + l % 3), 1 + o % 3, 1 + o % 3, case when o % 33 = 0 and l = 1 then 1 else 0 end,
+             'SKU-' || (1 + p.pi) || '-' || (1 + l % 3), 1 + o % 3, 1 + o % 3, case when o % 33 = 0 and l = 1 then 1 else 0 end,
              19.99 + o % 80, (o % 7) * 1.25
-        from generate_series(1, ${orders}) o, lateral generate_series(1, case when o % 2 = 0 then 2 else 1 end) l`, [shop]],
+        from generate_series(1, ${orders}) o, lateral generate_series(1, case when o % 2 = 0 then 2 else 1 end) l,
+             lateral (select ${productIndex} as pi) p`, [shop]],
     [`insert into public.refunds (shop_id, shopify_id, order_shopify_id, shopify_created_at, total_refunded, currency)
       select $1, 8000000000 + o, ${O} + o, now() - make_interval(secs => ((1 - o::float / ${orders}) * ${span})::bigint) + interval '9 days', 20, 'USD'
         from generate_series(33, ${orders}, 33) o`, [shop]],

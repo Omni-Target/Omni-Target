@@ -1,0 +1,45 @@
+# Storage optimisation review (Phase 1, task 12)
+
+Measured 2026-11-18, under ADR 0002 decision 2. Every candidate was measured on its own, and checked against the code that reads the data, before any decision.
+
+## Method
+
+`scripts/ops/storage-optimisation.mjs` builds the very large capacity fixture in throwaway local Postgres:
+- 70,000 products and 500,000 orders over 36 months;
+- a Pareto spread of sales, where about 20% of products take 80% of units.
+
+The fixture's mirror is 732 MB. The raw report is `architecture/capacity/optimisation-review-2026-11-18.json`.
+
+**One candidate at a time.** For each candidate, the affected tables are copied twice: once unchanged (the control) and once with the change. Both copies are rebuilt with the same indexes, so the difference belongs to that candidate alone.
+
+**Indexes** are judged on query time. Each representative query is timed with the index and without it, inside a transaction that is rolled back, with a 60-second limit.
+
+The tool measures the 0024/0025 design, as it was before this task's migration.
+
+## Results and decisions
+
+| Candidate | Saving | What reads it | Decision |
+|---|---|---|---|
+| **Integer shop key** instead of the 16-byte shop UUID, in every row and index | **60.1 MB (8.2%)**: 698 → 638 MB across the 20 tables | Only joins; nothing outside the database sees it | **Apply** (migration 0029) |
+| **Sparse product metrics**: a row only when the product sold in that window | **37.1 MB (5.1%)**: 51 → 14 MB | Metric readers; a missing row means no activity | **Apply** (0029, with a check that every row records activity) |
+| **Raw city and presentment currency only when they differ** from the city and the shop currency | 7.0 MB (1.0%); this fixture never differs, so real shops save less | Readers fall back to the main field | **Apply** (0029, with checks that enforce it) |
+| **Inventory levels only where a shop has several locations**; otherwise the variant's own quantity | 159 bytes per level; about 33 MB for a single-location shop of this size | Per-location readiness (Phase 3), which needs several locations to say anything | **Apply** as a Phase 2 import rule; no schema change |
+| **Metafield values over 1,000 characters** | None measured (the fixture has none) | The catalog-claims reader discards values over 1,000 characters | **Apply** (0029: the limit drops from 2,000 to 1,000, matching the reader) |
+| **`return_line_items_line_item_idx`** (index) | Under 1 MB | No planned query: returned units per product took 62.7 ms with it and 62.8 ms without | **Drop** (0029) |
+| Metafield allow-list (one key of three) | 40.1 MB (5.5%) | The claims reader uses every non-reference metafield of 1,000 characters or less, from any namespace, as factual evidence | **Reject:** it would remove AI evidence |
+| Description excerpt of 300 characters instead of up to 600 | 6.0 MB (0.8%) | The copy-evidence and factual-claims checks, and the hooks prompt ("verified description and catalog claims") | **Reject:** it would remove AI factual evidence |
+| Variant `selected_options` dropped (the title repeats the values) | 9.5 MB (1.3%) | Structured option names such as Size and Colour, which titles lose; needed for variant-level analysis (Phase 3) | **Reject:** small saving, real loss |
+| Metafield key dictionary (namespace and key replaced by a per-shop key id) | 11.5 MB (1.6%) | Every metafield write and read would need a key lookup | **Reject for now:** under 2%, for added ingestion complexity. Revisit if metafields grow. |
+| `orders_customer_idx` dropped (31.5 MB, the largest index) | 31.5 MB (4.3%) | One customer's orders (redaction, repeat lookups): 0.4 ms with it, 38 ms without. Cohort repeat query: 317 ms with it, 428 ms without in its set-based form; over 60 s without it in its correlated form. | **Keep** |
+| `order_line_items_product_idx` dropped | 9.4 MB (1.3%) | Single-product drill-downs, timed after the migration (see below); batch metrics don't use it (62 ms either way) | **Keep:** see the validation below |
+
+**Accepted savings on this fixture:** about 105 MB (14%), from the integer shop key, sparse metrics, order duplicates and the index. A single-location shop of this size saves about 33 MB more in inventory levels. Retention (task 11) is separate, and adds its own saving once pruning is approved.
+
+## What stays as it is
+
+These were measured or reviewed and left unchanged:
+- **Product descriptions.** The excerpt stays at up to 600 characters.
+- **Metafield namespaces.** All are kept, with values up to 1,000 characters.
+- **Variant option structure.**
+- **Product metric windows.** Phase 4 decides them. With sparse rows, each window costs only the products that sold in it. Here that is 2,709 products for 7 days, 8,969 for 30, 20,187 for 90 and 45,991 for 365, against 70,000 in the catalog.
+- **Every remaining index.** Each serves a planned query or a foreign key.

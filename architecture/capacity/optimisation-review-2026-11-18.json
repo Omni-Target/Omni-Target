@@ -1,0 +1,465 @@
+{
+  "generated_at": "2026-11-17T23:13:34.447Z",
+  "profile": "xlarge",
+  "products": 70000,
+  "orders": 500000,
+  "distribution": "pareto",
+  "mirror_bytes": 767918080,
+  "tables": [
+    {
+      "table": "order_line_items",
+      "rows": 750000,
+      "heap": 123224064,
+      "indexes": 65191936,
+      "toast": 8192,
+      "total": 188481536
+    },
+    {
+      "table": "orders",
+      "rows": 500000,
+      "heap": 102408192,
+      "indexes": 73687040,
+      "toast": 8192,
+      "total": 176160768
+    },
+    {
+      "table": "product_variants",
+      "rows": 210000,
+      "heap": 47792128,
+      "indexes": 28508160,
+      "toast": 8192,
+      "total": 76349440
+    },
+    {
+      "table": "metafields",
+      "rows": 210000,
+      "heap": 49692672,
+      "indexes": 19128320,
+      "toast": 8192,
+      "total": 68870144
+    },
+    {
+      "table": "inventory_levels",
+      "rows": 420000,
+      "heap": 35471360,
+      "indexes": 31309824,
+      "toast": 0,
+      "total": 66822144
+    },
+    {
+      "table": "customers",
+      "rows": 300000,
+      "heap": 45514752,
+      "indexes": 12197888,
+      "toast": 8192,
+      "total": 57761792
+    },
+    {
+      "table": "product_metrics",
+      "rows": 280000,
+      "heap": 39550976,
+      "indexes": 17408000,
+      "toast": 8192,
+      "total": 57008128
+    },
+    {
+      "table": "products",
+      "rows": 70000,
+      "heap": 47570944,
+      "indexes": 3448832,
+      "toast": 8192,
+      "total": 51068928
+    },
+    {
+      "table": "webhook_events",
+      "rows": 41667,
+      "heap": 7938048,
+      "indexes": 7962624,
+      "toast": 8192,
+      "total": 15941632
+    },
+    {
+      "table": "return_line_items",
+      "rows": 12000,
+      "heap": 1122304,
+      "indexes": 1458176,
+      "toast": 8192,
+      "total": 2621440
+    },
+    {
+      "table": "refunds",
+      "rows": 15151,
+      "heap": 1286144,
+      "indexes": 1261568,
+      "toast": 8192,
+      "total": 2588672
+    },
+    {
+      "table": "returns",
+      "rows": 10000,
+      "heap": 1097728,
+      "indexes": 851968,
+      "toast": 8192,
+      "total": 1990656
+    },
+    {
+      "table": "metaobjects",
+      "rows": 3500,
+      "heap": 1482752,
+      "indexes": 221184,
+      "toast": 8192,
+      "total": 1744896
+    },
+    {
+      "table": "sync_runs",
+      "rows": 60,
+      "heap": 16384,
+      "indexes": 40960,
+      "toast": 8192,
+      "total": 98304
+    },
+    {
+      "table": "metaobject_definitions",
+      "rows": 5,
+      "heap": 8192,
+      "indexes": 32768,
+      "toast": 8192,
+      "total": 81920
+    },
+    {
+      "table": "inventory_locations",
+      "rows": 3,
+      "heap": 8192,
+      "indexes": 16384,
+      "toast": 8192,
+      "total": 65536
+    },
+    {
+      "table": "sync_checkpoints",
+      "rows": 7,
+      "heap": 8192,
+      "indexes": 16384,
+      "toast": 8192,
+      "total": 65536
+    },
+    {
+      "table": "shop_access",
+      "rows": 1,
+      "heap": 8192,
+      "indexes": 16384,
+      "toast": 8192,
+      "total": 65536
+    },
+    {
+      "table": "shop_settings",
+      "rows": 1,
+      "heap": 8192,
+      "indexes": 16384,
+      "toast": 8192,
+      "total": 65536
+    },
+    {
+      "table": "store_metrics",
+      "rows": 7,
+      "heap": 8192,
+      "indexes": 16384,
+      "toast": 8192,
+      "total": 65536
+    }
+  ],
+  "candidates": [
+    {
+      "id": "integer_shop_key",
+      "tables": "all 20 mirror tables",
+      "control_bytes": 731799552,
+      "changed_bytes": 668778496,
+      "saving_bytes": 63021056,
+      "saving_share_of_mirror": 8.2
+    },
+    {
+      "id": "description_300",
+      "tables": "products",
+      "control_bytes": 51142656,
+      "changed_bytes": 44851200,
+      "saving_bytes": 6291456,
+      "saving_share_of_mirror": 0.8
+    },
+    {
+      "id": "variant_options_dropped",
+      "tables": "product_variants",
+      "control_bytes": 70139904,
+      "changed_bytes": 60178432,
+      "saving_bytes": 9961472,
+      "saving_share_of_mirror": 1.3
+    },
+    {
+      "id": "order_duplicates_nulled",
+      "tables": "orders",
+      "control_bytes": 167108608,
+      "changed_bytes": 159760384,
+      "saving_bytes": 7348224,
+      "saving_share_of_mirror": 1
+    },
+    {
+      "id": "metafield_key_dictionary",
+      "tables": "metafields",
+      "control_bytes": 64118784,
+      "changed_bytes": 52019200,
+      "saving_bytes": 12099584,
+      "saving_share_of_mirror": 1.6
+    },
+    {
+      "id": "metafield_allow_list",
+      "tables": "metafields",
+      "control_bytes": 64118784,
+      "changed_bytes": 22102016,
+      "saving_bytes": 42016768,
+      "saving_share_of_mirror": 5.5
+    },
+    {
+      "id": "product_metrics_sparse",
+      "tables": "product_metrics",
+      "control_bytes": 53829632,
+      "changed_bytes": 14950400,
+      "products_with_sales_by_window": {
+        "7": 2709,
+        "30": 8969,
+        "90": 20187,
+        "365": 45991
+      },
+      "products": 70000,
+      "saving_bytes": 38879232,
+      "saving_share_of_mirror": 5.1
+    }
+  ],
+  "long_metafield_values": 0,
+  "indexes": [
+    {
+      "index": "orders_customer_idx",
+      "table": "orders",
+      "bytes": 33038336
+    },
+    {
+      "index": "inventory_levels_pkey",
+      "table": "inventory_levels",
+      "bytes": 31309824
+    },
+    {
+      "index": "order_line_items_pkey",
+      "table": "order_line_items",
+      "bytes": 30474240
+    },
+    {
+      "index": "order_line_items_order_idx",
+      "table": "order_line_items",
+      "bytes": 24846336
+    },
+    {
+      "index": "orders_pkey",
+      "table": "orders",
+      "bytes": 20324352
+    },
+    {
+      "index": "orders_processed_idx",
+      "table": "orders",
+      "bytes": 20324352
+    },
+    {
+      "index": "metafields_pkey",
+      "table": "metafields",
+      "bytes": 19128320
+    },
+    {
+      "index": "product_metrics_pkey",
+      "table": "product_metrics",
+      "bytes": 17408000
+    },
+    {
+      "index": "customers_pkey",
+      "table": "customers",
+      "bytes": 12197888
+    },
+    {
+      "index": "product_variants_inventory_item_idx",
+      "table": "product_variants",
+      "bytes": 11395072
+    },
+    {
+      "index": "product_variants_pkey",
+      "table": "product_variants",
+      "bytes": 11395072
+    },
+    {
+      "index": "order_line_items_product_idx",
+      "table": "order_line_items",
+      "bytes": 9871360
+    },
+    {
+      "index": "product_variants_product_idx",
+      "table": "product_variants",
+      "bytes": 5718016
+    },
+    {
+      "index": "webhook_events_shop_domain_webhook_id_key",
+      "table": "webhook_events",
+      "bytes": 4554752
+    },
+    {
+      "index": "products_pkey",
+      "table": "products",
+      "bytes": 2859008
+    },
+    {
+      "index": "webhook_events_pkey",
+      "table": "webhook_events",
+      "bytes": 1703936
+    },
+    {
+      "index": "webhook_events_received_idx",
+      "table": "webhook_events",
+      "bytes": 1695744
+    },
+    {
+      "index": "refunds_pkey",
+      "table": "refunds",
+      "bytes": 630784
+    },
+    {
+      "index": "refunds_order_idx",
+      "table": "refunds",
+      "bytes": 630784
+    },
+    {
+      "index": "products_status_idx",
+      "table": "products",
+      "bytes": 589824
+    },
+    {
+      "index": "return_line_items_line_item_idx",
+      "table": "return_line_items",
+      "bytes": 499712
+    },
+    {
+      "index": "return_line_items_pkey",
+      "table": "return_line_items",
+      "bytes": 499712
+    },
+    {
+      "index": "return_line_items_return_idx",
+      "table": "return_line_items",
+      "bytes": 458752
+    },
+    {
+      "index": "returns_pkey",
+      "table": "returns",
+      "bytes": 425984
+    },
+    {
+      "index": "returns_order_idx",
+      "table": "returns",
+      "bytes": 425984
+    },
+    {
+      "index": "metaobjects_pkey",
+      "table": "metaobjects",
+      "bytes": 163840
+    },
+    {
+      "index": "metaobjects_type_idx",
+      "table": "metaobjects",
+      "bytes": 57344
+    },
+    {
+      "index": "sync_runs_shop_idx",
+      "table": "sync_runs",
+      "bytes": 16384
+    },
+    {
+      "index": "metaobject_definitions_shop_id_type_key",
+      "table": "metaobject_definitions",
+      "bytes": 16384
+    },
+    {
+      "index": "shop_settings_pkey",
+      "table": "shop_settings",
+      "bytes": 16384
+    },
+    {
+      "index": "shop_access_pkey",
+      "table": "shop_access",
+      "bytes": 16384
+    },
+    {
+      "index": "inventory_locations_pkey",
+      "table": "inventory_locations",
+      "bytes": 16384
+    },
+    {
+      "index": "sync_checkpoints_pkey",
+      "table": "sync_checkpoints",
+      "bytes": 16384
+    },
+    {
+      "index": "sync_runs_pkey",
+      "table": "sync_runs",
+      "bytes": 16384
+    },
+    {
+      "index": "metaobject_definitions_pkey",
+      "table": "metaobject_definitions",
+      "bytes": 16384
+    },
+    {
+      "index": "store_metrics_pkey",
+      "table": "store_metrics",
+      "bytes": 16384
+    },
+    {
+      "index": "webhook_events_pending_idx",
+      "table": "webhook_events",
+      "bytes": 8192
+    },
+    {
+      "index": "sync_runs_one_full_idx",
+      "table": "sync_runs",
+      "bytes": 8192
+    }
+  ],
+  "index_impact": {
+    "orders_customer_idx": {
+      "One customer's orders (redaction, repeat lookup)": {
+        "with_index_ms": 0.4,
+        "without_index_ms": 38.4
+      },
+      "60-day repeat by first-order month (cohorts, set-based batch)": {
+        "with_index_ms": 316.7,
+        "without_index_ms": 427.7
+      },
+      "60-day repeat by first-order month (cohorts, correlated form)": {
+        "with_index_ms": 552.4,
+        "without_index_ms": null
+      }
+    },
+    "order_line_items_product_idx": {
+      "One product's 365-day sales (drill-down)": {
+        "with_index_ms": 118.6,
+        "without_index_ms": 97.2
+      },
+      "Every product's 30-day units (metrics, batch)": {
+        "with_index_ms": 62.1,
+        "without_index_ms": 61.8
+      }
+    },
+    "return_line_items_line_item_idx": {
+      "Returned units per product (batch)": {
+        "with_index_ms": 62.7,
+        "without_index_ms": 62.8
+      }
+    }
+  },
+  "inventory_levels": {
+    "rows": 420000,
+    "bytes": 66822144,
+    "bytes_per_level": 159
+  }
+}
