@@ -1,7 +1,8 @@
 /**
  * Real Postgres tests for the commerce mirror (Phase 1, task 8): migrations
  * 0024 (commerce model) and 0025 (sync runs, checkpoints, webhook inbox,
- * metrics). Synthetic rows only.
+ * metrics), as changed by 0029 (shop key) and 0030 (monthly summaries).
+ * Synthetic rows only.
  *
  *   TEST_DATABASE_URL=postgresql://...@127.0.0.1:5432/postgres pnpm test:db
  */
@@ -50,11 +51,13 @@ async function newShop(shop = domain()) {
   return { id, shop, shopify };
 }
 
+/** Monthly summaries (0030): written only by refresh_monthly_aggregates, read by service_role. */
+const SUMMARIES = ["product_monthly_metrics", "store_monthly_metrics", "cohort_monthly_outcomes"];
 /** Every table that mirrors or is derived from one shop's Shopify data. */
 const SYNCED = [
   "products", "product_variants", "inventory_locations", "inventory_levels", "customers", "orders", "order_line_items",
   "refunds", "returns", "return_line_items", "metafields", "metaobject_definitions", "metaobjects", "shop_settings",
-  "shop_access", "sync_runs", "sync_checkpoints", "webhook_events", "product_metrics", "store_metrics",
+  "shop_access", "sync_runs", "sync_checkpoints", "webhook_events", "product_metrics", "store_metrics", ...SUMMARIES,
 ];
 /** Tables that name a shop but hold ownership, billing, credentials or history, which redaction handles separately. */
 const NOT_SYNCED = [
@@ -86,6 +89,10 @@ async function seed({ id, shop }) {
     ["insert into public.product_metrics (shop_key, product_shopify_id, window_days, calc_version, window_end, currency, units) values ($1, 10, 30, 1, now(), 'GBP', 1)", [id]],
     ["insert into public.store_metrics (shop_key, window_days, calc_version, window_end, currency, orders) values ($1, 30, 1, now(), 'GBP', 1)", [id]],
   ]);
+  // The summaries are not writable by service_role; the table owner stands in for the refresh function.
+  await q("insert into public.product_monthly_metrics (shop_key, product_shopify_id, month, calc_version, currency, orders, units) values ($1, 10, date_trunc('month', now()), 1, 'GBP', 1, 1)", [id]);
+  await q("insert into public.store_monthly_metrics (shop_key, month, calc_version, currency, orders) values ($1, date_trunc('month', now()), 1, 'GBP', 1)", [id]);
+  await q("insert into public.cohort_monthly_outcomes (shop_key, cohort_month, calc_version, currency, first_time_customers, observed_through) values ($1, date_trunc('month', now()), 1, 'GBP', 1, now())", [id]);
 }
 const syncedRows = async (shop) => Number((await one("select public.shop_synced_row_count($1) as n", [shop])).n);
 
@@ -98,15 +105,18 @@ describe("commerce mirror: access and shape", () => {
     expect(await keyedBy("shop_id")).toEqual([...NOT_SYNCED].sort());
   });
 
-  it("locks every synced table to service_role reads and writes, with RLS on, and keeps the deletion helpers internal", async () => {
+  it("locks every synced table to service_role, with RLS on, and keeps the deletion helpers internal", async () => {
     for (const table of SYNCED) {
       const row = await one(
         `select c.relrowsecurity as rls,
-                has_table_privilege('service_role', c.oid, 'select,insert,update,delete') as rw,
+                has_table_privilege('service_role', c.oid, 'select') as read,
+                has_table_privilege('service_role', c.oid, 'insert') or has_table_privilege('service_role', c.oid, 'update')
+                  or has_table_privilege('service_role', c.oid, 'delete') as write,
                 has_table_privilege('service_role', c.oid, 'truncate') as truncate,
                 has_table_privilege('anon', c.oid, 'select') or has_table_privilege('authenticated', c.oid, 'select') as public_read
            from pg_class c where c.oid = $1::regclass`, [`public.${table}`]);
-      expect(row, table).toEqual({ rls: true, rw: true, truncate: false, public_read: false });
+      // The summaries are read-only to the application: only the refresh function writes them.
+      expect(row, table).toEqual({ rls: true, read: true, write: !SUMMARIES.includes(table), truncate: false, public_read: false });
     }
     for (const fn of ["delete_shop_synced_data(text)", "shop_synced_row_count(text)"]) {
       const row = await one(

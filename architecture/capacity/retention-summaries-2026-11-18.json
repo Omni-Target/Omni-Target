@@ -1,0 +1,319 @@
+{
+  "generated_at": "2026-11-17T23:48:31.369Z",
+  "months_of_history": 36,
+  "distribution": "pareto",
+  "profiles": {
+    "small": {
+      "products": 500,
+      "orders": 5000,
+      "mirror_bytes": 7380992,
+      "summaries": {
+        "product_monthly_metrics": {
+          "rows": 3013,
+          "final": 2611,
+          "bytes": 679936
+        },
+        "store_monthly_metrics": {
+          "rows": 36,
+          "final": 31,
+          "bytes": 65536
+        },
+        "cohort_monthly_outcomes": {
+          "rows": 36,
+          "final": 19,
+          "bytes": 65536
+        }
+      },
+      "summary_bytes": 811008,
+      "summary_share_of_mirror": 0.1099,
+      "sale_dates": {
+        "dated": 484,
+        "products": 500,
+        "products_bytes_before": 425984,
+        "products_bytes_after": 434176
+      },
+      "refresh": {
+        "full_ms": 212,
+        "full": {
+          "store_months": 36,
+          "cohort_months": 36,
+          "product_months": 3013,
+          "products_dated": 484
+        },
+        "daily_ms": 99,
+        "daily": {
+          "store_months": 5,
+          "cohort_months": 17,
+          "product_months": 402,
+          "products_dated": 0
+        },
+        "month_by_month": {
+          "calls": 37,
+          "max_ms": 22,
+          "total_ms": 439
+        }
+      },
+      "retention_status": {
+        "ms": 8,
+        "result": {
+          "cutoff": "2024-11-17T23:48:35.017486+00:00",
+          "pruning": "not_authorised",
+          "months_beyond": 12,
+          "orders_beyond": 1620,
+          "customers_beyond": 0,
+          "retention_months": 24,
+          "line_items_beyond": 2430,
+          "months_beyond_unsummarised": 0
+        }
+      },
+      "redact": {
+        "ms": 5,
+        "orders_named": 2,
+        "result": {
+          "outcome": "completed",
+          "redacted": {
+            "inbox": 0,
+            "orders": 2,
+            "customers": 1
+          },
+          "resolution": "customer_data_redacted",
+          "compliance_request_id": "f5a6447c-3932-47d4-b392-fcffd3ceb67f"
+        }
+      }
+    },
+    "medium": {
+      "products": 5000,
+      "orders": 50000,
+      "mirror_bytes": 59924480,
+      "summaries": {
+        "product_monthly_metrics": {
+          "rows": 30158,
+          "final": 26232,
+          "bytes": 6029312
+        },
+        "store_monthly_metrics": {
+          "rows": 36,
+          "final": 31,
+          "bytes": 65536
+        },
+        "cohort_monthly_outcomes": {
+          "rows": 36,
+          "final": 19,
+          "bytes": 65536
+        }
+      },
+      "summary_bytes": 6160384,
+      "summary_share_of_mirror": 0.1028,
+      "sale_dates": {
+        "dated": 4847,
+        "products": 5000,
+        "products_bytes_before": 3670016,
+        "products_bytes_after": 3751936
+      },
+      "refresh": {
+        "full_ms": 1467,
+        "full": {
+          "store_months": 36,
+          "cohort_months": 36,
+          "product_months": 30158,
+          "products_dated": 4847
+        },
+        "daily_ms": 436,
+        "daily": {
+          "store_months": 5,
+          "cohort_months": 17,
+          "product_months": 3926,
+          "products_dated": 0
+        },
+        "month_by_month": {
+          "calls": 37,
+          "max_ms": 80,
+          "total_ms": 1563
+        }
+      },
+      "retention_status": {
+        "ms": 28,
+        "result": {
+          "cutoff": "2024-11-17T23:48:47.302701+00:00",
+          "pruning": "not_authorised",
+          "months_beyond": 12,
+          "orders_beyond": 16203,
+          "customers_beyond": 0,
+          "retention_months": 24,
+          "line_items_beyond": 24304,
+          "months_beyond_unsummarised": 0
+        }
+      },
+      "redact": {
+        "ms": 5,
+        "orders_named": 2,
+        "result": {
+          "outcome": "completed",
+          "redacted": {
+            "inbox": 0,
+            "orders": 2,
+            "customers": 1
+          },
+          "resolution": "customer_data_redacted",
+          "compliance_request_id": "8820d7be-3068-4b65-bfd5-c2bc53a123f9"
+        }
+      }
+    },
+    "large": {
+      "products": 20000,
+      "orders": 200000,
+      "mirror_bytes": 235397120,
+      "summaries": {
+        "product_monthly_metrics": {
+          "rows": 120637,
+          "final": 104867,
+          "bytes": 23625728
+        },
+        "store_monthly_metrics": {
+          "rows": 36,
+          "final": 31,
+          "bytes": 65536
+        },
+        "cohort_monthly_outcomes": {
+          "rows": 36,
+          "final": 19,
+          "bytes": 65536
+        }
+      },
+      "summary_bytes": 23756800,
+      "summary_share_of_mirror": 0.1009,
+      "sale_dates": {
+        "dated": 19290,
+        "products": 20000,
+        "products_bytes_before": 14409728,
+        "products_bytes_after": 14737408
+      },
+      "refresh": {
+        "full_ms": 4999,
+        "full": {
+          "store_months": 36,
+          "cohort_months": 36,
+          "product_months": 120637,
+          "products_dated": 19290
+        },
+        "daily_ms": 2164,
+        "daily": {
+          "store_months": 5,
+          "cohort_months": 17,
+          "product_months": 15770,
+          "products_dated": 0
+        },
+        "month_by_month": {
+          "calls": 37,
+          "max_ms": 327,
+          "total_ms": 6431
+        }
+      },
+      "retention_status": {
+        "ms": 118,
+        "result": {
+          "cutoff": "2024-11-17T23:49:17.491171+00:00",
+          "pruning": "not_authorised",
+          "months_beyond": 12,
+          "orders_beyond": 64814,
+          "customers_beyond": 0,
+          "retention_months": 24,
+          "line_items_beyond": 97221,
+          "months_beyond_unsummarised": 0
+        }
+      },
+      "redact": {
+        "ms": 5,
+        "orders_named": 2,
+        "result": {
+          "outcome": "completed",
+          "redacted": {
+            "inbox": 0,
+            "orders": 2,
+            "customers": 1
+          },
+          "resolution": "customer_data_redacted",
+          "compliance_request_id": "8960b7cb-2bc0-4ba9-b851-48064dbe8ff7"
+        }
+      }
+    },
+    "xlarge": {
+      "products": 70000,
+      "orders": 500000,
+      "mirror_bytes": 658317312,
+      "summaries": {
+        "product_monthly_metrics": {
+          "rows": 324170,
+          "final": 281802,
+          "bytes": 58761216
+        },
+        "store_monthly_metrics": {
+          "rows": 36,
+          "final": 31,
+          "bytes": 65536
+        },
+        "cohort_monthly_outcomes": {
+          "rows": 36,
+          "final": 19,
+          "bytes": 65536
+        }
+      },
+      "summary_bytes": 58892288,
+      "summary_share_of_mirror": 0.0895,
+      "sale_dates": {
+        "dated": 64524,
+        "products": 70000,
+        "products_bytes_before": 50364416,
+        "products_bytes_after": 51478528
+      },
+      "refresh": {
+        "full_ms": 11698,
+        "full": {
+          "store_months": 36,
+          "cohort_months": 36,
+          "product_months": 324170,
+          "products_dated": 64524
+        },
+        "daily_ms": 5469,
+        "daily": {
+          "store_months": 5,
+          "cohort_months": 17,
+          "product_months": 42368,
+          "products_dated": 0
+        },
+        "month_by_month": {
+          "calls": 37,
+          "max_ms": 1010,
+          "total_ms": 17975
+        }
+      },
+      "retention_status": {
+        "ms": 376,
+        "result": {
+          "cutoff": "2024-11-17T23:50:32.140579+00:00",
+          "pruning": "not_authorised",
+          "months_beyond": 12,
+          "orders_beyond": 162037,
+          "customers_beyond": 0,
+          "retention_months": 24,
+          "line_items_beyond": 243055,
+          "months_beyond_unsummarised": 0
+        }
+      },
+      "redact": {
+        "ms": 10,
+        "orders_named": 2,
+        "result": {
+          "outcome": "completed",
+          "redacted": {
+            "inbox": 0,
+            "orders": 2,
+            "customers": 1
+          },
+          "resolution": "customer_data_redacted",
+          "compliance_request_id": "56e1c738-a960-4934-8673-62e33f8e6965"
+        }
+      }
+    }
+  }
+}

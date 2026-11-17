@@ -58,6 +58,33 @@ The report is `architecture/capacity/fixtures-2026-11-18.json`. It uses the same
 
 **Migration 0029.** It converts in place, keeping any rows, and its down script converts back. A local check seeded one row in every commerce table before 0029, then ran up, down and up. All 20 rows survived each step, with the correct shop.
 
+## Retention summaries (migration 0030)
+
+Task 11's approved policy adds storage rather than saving it. It saves only once pruning is separately approved. Measured with the real tables and refresh function on the Pareto fixtures (36 months): `scripts/ops/retention-summaries.mjs`, report `capacity/retention-summaries-2026-11-18.json`.
+
+| Profile | Summaries | Share of the mirror | Full refresh (36 months) | Slowest one-month refresh | `retention_status` | `customers/redact` |
+|---|---|---|---|---|---|---|
+| Small | 0.77 MB | 11.0% | 0.2 s | 22 ms | 8 ms | 5 ms |
+| Medium | 5.9 MB | 10.3% | 1.5 s | 80 ms | 28 ms | 5 ms |
+| Large | 22.7 MB | 10.1% | 5.0 s | 0.33 s | 118 ms | 5 ms |
+| Very large | 56.2 MB | 8.9% | 11.7 s | 1.0 s | 0.38 s | 10 ms |
+
+**Where the space goes.**
+- **Product-month rows** take almost all of it: about 180 bytes each, including indexes. That is 18.7 MB per year of history for the very large shop. Task 11 estimated 15 MB from a narrower stand-in table.
+- **Store and cohort rows** add 36 rows each.
+- **Product sale dates** add 1.1 MB (2.2%) to the very large shop's `products`.
+
+**Against 24-month retention.**
+- Line-level history costs 118 MB a year for the very large shop; the summaries cost 18.7 MB a year.
+- Once pruning is approved, each year beyond the window saves about 100 MB.
+- Until then the summaries are an extra 9–11% of the mirror.
+
+**Timing.**
+- **The 8 s timeout.** API calls run under PostgREST's `authenticator` role, which has an 8 s statement timeout on Supabase (read from staging). `service_role` has none of its own.
+- **Full refresh.** The very large shop's 11.7 s local full refresh could exceed that timeout on shared compute.
+- **Month by month.** The slowest single month took 1.0 s, so Phase 2 refreshes one month per call.
+- **Refresh scope.** The refresh reads only its range of months for units and sale dates, so a one-month call does one month's work.
+
 ## What stays as it is
 
 These were measured or reviewed and left unchanged:

@@ -209,10 +209,32 @@ export const beginUninstall = (event: LifecycleEvent) => call<UninstallResult>("
 
 export const recordShopRedact = (event: LifecycleEvent) => call<RedactResult>("record_shop_redact", lifecycleArgs(event));
 
-export const recordCustomerCompliance = (topic: "customers/redact" | "customers/data_request", event: LifecycleEvent) =>
-  call<{ outcome: "completed" | "duplicate"; compliance_request_id?: string }>("record_customer_compliance", {
+/** The customer and orders a compliance webhook names (Shopify's customer.id and orders_to_redact / orders_requested). */
+export interface ComplianceSubject {
+  customerId: number | null;
+  orderIds: number[];
+}
+
+/**
+ * Records a customer compliance request (migration 0030). customers/redact
+ * removes the customer's data from the commerce mirror at once;
+ * customers/data_request stays "open" when data is held, for fulfilment.
+ */
+export const recordCustomerCompliance = (
+  topic: "customers/redact" | "customers/data_request",
+  event: LifecycleEvent,
+  subject: ComplianceSubject = { customerId: null, orderIds: [] },
+) =>
+  call<{
+    outcome: "completed" | "open" | "duplicate";
+    compliance_request_id?: string;
+    resolution?: string | null;
+    redacted?: { customers: number; orders: number; inbox: number };
+  }>("record_customer_compliance", {
     p_topic: topic,
     ...lifecycleArgs(event),
+    p_customer_shopify_id: subject.customerId,
+    p_order_ids: subject.orderIds,
   });
 
 export const processWorkspaceDeletion = (deletionId: string) =>

@@ -103,6 +103,12 @@ That is 10–12% less than above. Per entity:
 
 The import pre-flight now projects with 4,100 bytes per product and 880 per order. Details are in `storage-optimisation.md`.
 
+### Monthly summaries (migration 0030)
+
+The retention summaries add about 180 bytes per product-month with sales, roughly 9–11% of the mirror over 36 months. For the very large shop that is 56.2 MB.
+
+The pre-flight coefficients above do not include them yet; its 25% headroom covers them for now. Phase 2's pre-flight projects the retained 24 months of order lines plus the summaries (`retention-evaluation.md`).
+
 ## Candidates for the pre-Phase 2 optimisation review
 
 > **Done.** Task 12 measured these candidates and decided them in `storage-optimisation.md`. The list below is kept as it stood before the review.

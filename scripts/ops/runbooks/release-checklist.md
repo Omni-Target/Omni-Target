@@ -61,5 +61,25 @@ copy of staging's.
   the production domain. Preview builds stay off (`deployments.md`).
 - Shopify app: compliance webhook URLs and scopes in `shopify.app.toml` point to
   production.
+
+## Shopify approvals
+
+- **`read_all_orders`: a prerequisite for complete historical ingestion** (task 11, decision 6). Request it in the Partner Dashboard under API access requests, and record the outcome here. Without it:
+  - a shop's orders are readable for 60 days only, and Phase 2 imports 60 days and marks the orders domain partial (`orderHistoryWindow`, `src/modules/retention/policy.ts`);
+  - the 24-month detailed window and the monthly summaries cover only what was imported.
+
+  Status: **not yet confirmed** (Phase 0 blocker B2).
+- **Protected customer data, Level 1** (orders and customers), and whichever Level 2 fields are used: confirm the approvals before Phase 2 reads those fields.
+- **Compliance webhooks act on mirrored data** from migration 0030:
+  - `customers/redact` deletes the customer's row and clears identifying fields on their orders;
+  - `customers/data_request` stays open, with a Sentry warning, while data is held.
+
+  The fulfilment path for data requests is a Phase 2 deliverable; until it exists, fulfil manually within 30 days.
+
+## Order retention (task 11, migration 0030)
+
+- **Policy:** 24 months of detailed orders and line items, with permanent monthly product, store and anonymised cohort summaries.
+- **Pruning is not implemented and not authorised.** It needs a separate approval and a verified production backup and restore before any job exists.
+- **The summaries need a schedule.** `refresh_monthly_aggregates` must run after imports and daily (Phase 2). Without it, `retention_status` reports months beyond the window as unsummarised.
 - Backups: production needs its own bucket, backup role, R2 tokens, age keys
   and schedule (`backups.md`).

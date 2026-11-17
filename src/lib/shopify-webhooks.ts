@@ -1,13 +1,14 @@
 import { after } from "next/server";
 import { verifyShopifyHmac } from "@/lib/verify-shopify-hmac";
 import { createLogger } from "@/lib/logger";
-import { captureBackgroundFailure } from "@/lib/observability/capture";
+import { captureBackgroundFailure, captureOperationalAlert } from "@/lib/observability/capture";
 import { lifecycleEventKey, parseShopifyShopId, parseTriggeredAt, webhookShopDomain } from "@/modules/workspaces/lifecycle";
 import {
   processUnboundShopRedact,
   processWorkspaceDeletion,
   recordCustomerCompliance,
   recordShopRedact,
+  type ComplianceSubject,
   type RedactResult,
 } from "@/modules/workspaces/repository";
 
@@ -37,9 +38,13 @@ function isPrivacyTopic(topic: string | null): topic is PrivacyTopic {
  * recognised by its delivery id. A request is never dropped, including a
  * shop/redact that arrives after the merchant reinstalled.
  *
- *   • customers/data_request, customers/redact: recorded and resolved at once.
- *     Omni Target keeps no customer-level records: store snapshots hold
- *     aggregates and Meta send logs hold order ids and values (SEC-09).
+ *   • customers/redact: recorded, and the customer's data in the commerce
+ *     mirror (customer row, the identifying fields on their orders, inbox
+ *     payloads naming them) is removed in the same transaction (0030).
+ *   • customers/data_request: recorded; resolved at once when no data is
+ *     held, otherwise left open with a warning so it is fulfilled within 30
+ *     days. Store snapshots hold aggregates and Meta send logs hold order ids
+ *     and values (SEC-09).
  *   • shop/redact: starts the workspace deletion workflow, which deletes the
  *     shop's data, verifies nothing is left and only then releases the shop.
  *     Work that does not finish here is retried by /api/cron/process-deletions.
@@ -104,8 +109,15 @@ export async function handleShopifyPrivacyWebhook(
       log.info("shop/redact recorded", { shop, outcome: recorded.outcome });
       after(() => runShopRedaction(recorded, shop));
     } else {
-      const recorded = await recordCustomerCompliance(topic, event);
-      log.info(`${topic} recorded; no customer-level records are held`, { shop, outcome: recorded.outcome });
+      const recorded = await recordCustomerCompliance(topic, event, complianceSubject(topic, payload));
+      log.info(`${topic} recorded`, { shop, outcome: recorded.outcome, resolution: recorded.resolution ?? null });
+      if (recorded.outcome === "open") {
+        // The customer's data is held: Shopify expects it provided to the merchant within 30 days.
+        captureOperationalAlert("shopify-compliance", `${topic}: customer data is held and must be provided within 30 days`, "warning", {
+          shop,
+          compliance_request_id: recorded.compliance_request_id ?? null,
+        });
+      }
     }
   } catch (error) {
     log.error(`${topic} could not be recorded`, { shop });
@@ -114,6 +126,20 @@ export async function handleShopifyPrivacyWebhook(
   }
 
   return Response.json({ received: true }, { status: 200 });
+}
+
+/**
+ * The customer and orders a customers/* payload names. Shopify sends
+ * customer.id with orders_to_redact (redact) or orders_requested
+ * (data_request); IDs parse like the shop's, and anything else is ignored.
+ */
+export function complianceSubject(topic: "customers/redact" | "customers/data_request", payload: unknown): ComplianceSubject {
+  const body = (payload ?? {}) as { customer?: { id?: unknown } | null; orders_to_redact?: unknown; orders_requested?: unknown };
+  const named = topic === "customers/redact" ? body.orders_to_redact : body.orders_requested;
+  return {
+    customerId: parseShopifyShopId(body.customer?.id),
+    orderIds: Array.isArray(named) ? named.map(parseShopifyShopId).filter((id): id is number => id !== null) : [],
+  };
 }
 
 /**

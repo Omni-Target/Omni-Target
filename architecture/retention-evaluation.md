@@ -1,6 +1,20 @@
 # Order retention evaluation (Phase 1, task 11)
 
-Evaluated 2026-11-17, under ADR 0002 decision 4. **Nothing has been deleted, archived or migrated.** This document recommends a policy, and pruning starts only after that policy is approved.
+Evaluated 2026-11-17, under ADR 0002 decision 4. **Approved 2026-11-18 with one amendment** (customer facts, decision 3 below), and implemented by migration 0030 in task 12. **Nothing has been deleted, archived or migrated, and pruning is not authorised.**
+
+## Decision (approved 2026-11-18)
+
+| # | Decision | Where it is implemented |
+|---|---|---|
+| 1 | Keep **24 months** of detailed order and line-item history. | `ORDER_RETENTION_MONTHS` in `src/modules/retention/policy.ts`; `retention_status` (0030) uses the same window. |
+| 2 | **Permanent monthly summaries** by product and by store, so history outlives the retention window. | `product_monthly_metrics`, `store_monthly_metrics` and `refresh_monthly_aggregates` (0030). |
+| 3 | **No permanent identifiable customer facts by default.** Customer-level facts need a defined retention purpose and must follow Shopify's redaction requirements. Permanent history uses anonymised cohort statistics. | `cohort_monthly_outcomes` (0030) holds counts and revenue only. Customer rows are kept only while the customer has orders inside the window (`customers.last_order_at`; the table comment states the purpose). `customers/redact` now removes the customer's data from the mirror. |
+| 4 | Keep **first-sale and last-sale dates** for products, which hold no personal information. | `products.first_sold_at` and `last_sold_at` (0030). A refresh only ever widens them. |
+| 5 | The summaries must support **year-over-year comparison and historical product performance after pruning**. | A month is final 120 days after it ends and is never changed again. A database test deletes a test shop's month of orders and customers, and shows its summaries and sale dates unchanged. |
+| 6 | **Track the `read_all_orders` approval** as a prerequisite for complete historical ingestion. Never assume orders older than 60 days are readable without it. | `orderHistoryWindow` in `src/modules/retention/policy.ts` reads 60 days without the scope and names it as missing. The approval is on the release checklist and the Phase 2 prerequisites below. |
+| 7 | The approval covers the **summary structures and retention architecture only**. Pruning needs a separate explicit approval and verified backup and restore. | No pruning code exists. `retention_status` is read-only and reports `pruning: not_authorised`. |
+
+The recommendation below is kept as proposed. Its item 3, permanent customer facts, is superseded by decision 3.
 
 ## Method
 
@@ -55,8 +69,8 @@ Today's sync computes from the newest paid orders only, at most about 25,000. Fo
 | Per-product windows up to 365 days (product metrics, geography by product, Phase 4 evidence strength) | Order lines for the window | Covered, but no margin to recompute last year's 365-day figure or compare two | Covered, with a full prior year | Covered |
 | Gateway decision (first-order cohorts, 90-day half-life) | First orders, weighted by age | Cohorts over a year old hold about 6% of the weight; with aggregates of cohort outcomes, nothing is lost | They hold about 0.4% | Under 0.02% |
 | 60-day repeat after a first order; second-order "bridge" product | First and second orders per customer | Cohorts from the last ~10 months, which is enough | More mature cohorts | Same |
-| First-order product detection | Each customer's first order and its products | Unaffected: kept permanently on customers (0024) | Unaffected | Unaffected |
-| Repurchase cycles, including durable goods over 12–36 months | Each customer's order dates | Unaffected **if** customers keep their second and last order dates permanently (proposed below); otherwise lost beyond 12 months | Same condition, beyond 24 months | Same condition, beyond 36 months |
+| First-order product detection | Each customer's first order and its products | Kept on the customer row while the customer has an order inside the window. As adopted (decision 3), a customer who returns after more than the window without ordering counts as new. | Same, after 24 months without an order | Same, after 36 months |
+| Repurchase cycles, including durable goods over 12–36 months | Each customer's order dates | Per customer within the window. Beyond it, only as anonymised cohort outcomes: repeat within 30 to 365 days, by first-order month (decision 3) | Same, with 24 months per customer | Same, with 36 months per customer |
 | Customer lifetime value | Lifetime order count and spend | Unaffected: Shopify supplies both on the customer record | Unaffected | Unaffected |
 | Year-over-year seasonality | Monthly product and store totals | Covered by monthly aggregates; line-level comparisons (by channel, by city) not possible | Line-level comparisons possible for the latest year | Line-level for two prior years |
 | Return and refund rates; return lag | Returns and refunds within about 90–120 days of the order | Covered | Covered | Covered |
@@ -64,7 +78,7 @@ Today's sync computes from the newest paid orders only, at most about 25,000. Fo
 | Recalculating a metric after its definition changes | Order lines | 12 months; older periods need a re-import from Shopify | 24 months | 36 months |
 | Customer redaction | Every row naming the customer | Fewest rows to redact | | Most rows |
 
-## Recommendation (for approval)
+## Recommendation (as proposed 2026-11-17)
 
 **Keep 24 months of line-level orders, with permanent aggregates.**
 
@@ -76,6 +90,8 @@ Today's sync computes from the newest paid orders only, at most about 25,000. Fo
 3. **Permanent facts,** so long-cycle analysis survives pruning:
    - on customers: `second_order_at` and `last_order_at`, in addition to the first order and its products (0024);
    - on products: `first_sold_at` and `last_sold_at`.
+
+   > **Superseded for customers by decision 3.** Customer rows are bounded by the window rather than permanent. `last_order_at` was added only to mark when a customer leaves the window, and `second_order_at` was not added. Long-cycle repeat behaviour is kept as anonymised cohort outcomes. The product dates were adopted (decision 4).
 4. **Pruning, after approval only:**
    - a monthly job, run in batches;
    - only months whose aggregates are final;
@@ -94,6 +110,7 @@ Today's sync computes from the newest paid orders only, at most about 25,000. Fo
 
 ## Consequences for the roadmap
 
+As proposed, before approval:
 - **Task 12, the pre-Phase 2 optimisation migration,** adds the aggregate tables and the customer and product facts above, if this policy is approved. Pruning itself comes later, as an approved job.
 - **Phase 2 initial import:**
   - order lines older than 24 months are streamed into the aggregates and customer facts, and not stored;
@@ -101,9 +118,42 @@ Today's sync computes from the newest paid orders only, at most about 25,000. Fo
 - **The capacity pre-flight** (task 10) projects imports with all orders. With retention it should project only the last 24 months of lines, plus aggregates.
 - **Historical data access depends on Shopify approval.** Orders older than 60 days are only reachable with the `read_all_orders` approval, which is still to be confirmed in the Partner Dashboard (Phase 0, blocker B2).
 
+### As implemented (task 12, migration 0030)
+
+**Built:**
+- the three summary tables;
+- product sale dates;
+- bounded customer rows, with customer redaction against the mirror;
+- `refresh_monthly_aggregates` and `retention_status`.
+
+No pruning exists. The summaries are built from stored order lines, so nothing is summarised that was not first imported.
+
+**Prerequisites before Phase 2's historical import:**
+
+1. **`read_all_orders` approval** (Partner Dashboard, API access requests).
+   - Without it, an import reads 60 days (`orderHistoryWindow`) and marks the orders domain partial.
+   - The approval is tracked on `scripts/ops/runbooks/release-checklist.md`.
+   - This does not block anything built so far.
+
+**Phase 2 obligations:**
+
+- **Import window.** Detailed orders are imported for the 24-month window only.
+  - Reading older history into the summaries alone, for shops with more than 24 months, is a Phase 2 design choice to bring for approval. It also needs `read_all_orders`.
+- **Refresh scheduling.** Call `refresh_monthly_aggregates` after each import, and daily over `aggregateRefreshRange()`, the months not yet final.
+- **Mappers.**
+  - Maintain `customers.last_order_at`.
+  - Follow 0029's rules: a sparse metric row only with activity, and no duplicate of the main city or currency field.
+- **Data requests.** `customers/data_request` stays `open` with a Sentry warning when data is held.
+  - Phase 2 provides the fulfilment path within Shopify's 30 days: an export of the customer's rows to the merchant, or a documented manual procedure.
+- **Redaction.** Re-imports and webhooks must not restore data that a `customers/redact` removed. Phase 2 checks how Shopify returns a redacted customer's orders, and suppresses accordingly.
+- **Capacity pre-flight.** It projects only the retained 24 months of order lines, plus the summaries.
+- **Pruning.** Pruning comes only after a separate approval and a verified backup and restore. When it does, it is a batched job that:
+  - touches only months whose summaries are final (`retention_status.months_beyond_unsummarised = 0`);
+  - never runs during a shop's sync.
+
 ## Assumptions
 
 - **The data is synthetic.**
   - Orders are spread evenly over time. Real shops that are growing hold more of their orders in recent months, so the savings from a cap are somewhat smaller.
   - Real sales concentration varies, so the aggregate sizes sit between the Pareto and even figures.
-- **Timings were not measured.** Retention changes storage, not request latency: request paths read metrics, which are unaffected.
+- **Timings were not measured for this evaluation.** Retention changes storage, not request latency: request paths read metrics, which are unaffected. Task 12 later measured the real summaries and their refresh (`storage-optimisation.md`, "Retention summaries"). For the very large shop: 56.2 MB over 36 months, 18.7 MB a year rather than the 15 MB estimated above, and at most 1.0 s for a one-month refresh, locally.

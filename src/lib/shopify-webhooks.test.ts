@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   verify: vi.fn(),
   capture: vi.fn(),
+  alert: vi.fn(),
   recordShopRedact: vi.fn(),
   recordCustomerCompliance: vi.fn(),
   processWorkspaceDeletion: vi.fn(),
@@ -11,7 +12,7 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/verify-shopify-hmac", () => ({ verifyShopifyHmac: h.verify }));
-vi.mock("@/lib/observability/capture", () => ({ captureBackgroundFailure: h.capture }));
+vi.mock("@/lib/observability/capture", () => ({ captureBackgroundFailure: h.capture, captureOperationalAlert: h.alert }));
 vi.mock("@/modules/workspaces/repository", () => ({
   recordShopRedact: h.recordShopRedact,
   recordCustomerCompliance: h.recordCustomerCompliance,
@@ -23,7 +24,7 @@ vi.mock("next/server", async (importOriginal) => ({
   after: (task: () => Promise<unknown>) => h.afterTasks.push(task),
 }));
 
-import { handleShopifyPrivacyWebhook } from "./shopify-webhooks";
+import { complianceSubject, handleShopifyPrivacyWebhook } from "./shopify-webhooks";
 
 const deliver = (topic: string, body: unknown, headers: Record<string, string> = {}) =>
   handleShopifyPrivacyWebhook(
@@ -45,7 +46,7 @@ const redactBody = { shop_id: 954889, shop_domain: "s.myshopify.com" };
 
 beforeEach(() => {
   vi.stubEnv("SHOPIFY_WEBHOOK_SECRET", "secret");
-  for (const fn of [h.verify, h.capture, h.recordShopRedact, h.recordCustomerCompliance, h.processWorkspaceDeletion, h.processUnboundShopRedact]) fn.mockReset();
+  for (const fn of [h.verify, h.capture, h.alert, h.recordShopRedact, h.recordCustomerCompliance, h.processWorkspaceDeletion, h.processUnboundShopRedact]) fn.mockReset();
   h.afterTasks = [];
   h.verify.mockResolvedValue(true);
   h.recordShopRedact.mockResolvedValue({ outcome: "deletion_started", compliance_request_id: "req-1", deletion_id: "del-1" });
@@ -93,12 +94,44 @@ describe("shop/redact (Phase 1 task 3)", () => {
   });
 });
 
-describe("customer compliance topics", () => {
-  it("records and resolves them", async () => {
-    const response = await deliver("customers/data_request", { shop_id: 954889, shop_domain: "s.myshopify.com", customer: { id: 1 } });
+describe("customer compliance topics (Task 11 decision 3, migration 0030)", () => {
+  it("records a data request with the customer and orders it names", async () => {
+    const response = await deliver("customers/data_request", {
+      shop_id: 954889, shop_domain: "s.myshopify.com", customer: { id: 1 }, orders_requested: [11, "12"],
+    });
     expect(response.status).toBe(200);
-    expect(h.recordCustomerCompliance).toHaveBeenCalledWith("customers/data_request", expect.objectContaining({ domain: "s.myshopify.com", shopifyShopId: 954889 }));
+    expect(h.recordCustomerCompliance).toHaveBeenCalledWith(
+      "customers/data_request",
+      expect.objectContaining({ domain: "s.myshopify.com", shopifyShopId: 954889 }),
+      { customerId: 1, orderIds: [11, 12] },
+    );
     expect(h.recordShopRedact).not.toHaveBeenCalled();
+    expect(h.alert).not.toHaveBeenCalled();
+  });
+
+  it("passes orders_to_redact for a redaction", async () => {
+    await deliver("customers/redact", { shop_id: 954889, shop_domain: "s.myshopify.com", customer: { id: "77" }, orders_to_redact: [5, 6] });
+    expect(h.recordCustomerCompliance).toHaveBeenCalledWith("customers/redact", expect.anything(), { customerId: 77, orderIds: [5, 6] });
+  });
+
+  it("warns when a data request finds data held, so it is fulfilled within 30 days", async () => {
+    h.recordCustomerCompliance.mockResolvedValue({ outcome: "open", compliance_request_id: "req-9", resolution: null });
+    expect((await deliver("customers/data_request", { shop_id: 954889, shop_domain: "s.myshopify.com", customer: { id: 1 } })).status).toBe(200);
+    expect(h.alert).toHaveBeenCalledWith("shopify-compliance", expect.stringContaining("30 days"), "warning", {
+      shop: "s.myshopify.com", compliance_request_id: "req-9",
+    });
+  });
+
+  it("answers 500 when the request cannot be recorded, so Shopify retries", async () => {
+    h.recordCustomerCompliance.mockRejectedValue(new Error("db down"));
+    expect((await deliver("customers/redact", { shop_id: 954889, shop_domain: "s.myshopify.com", customer: { id: 1 } })).status).toBe(500);
+  });
+
+  it("ignores IDs that are not positive integers", () => {
+    expect(complianceSubject("customers/redact", { customer: { id: "abc" }, orders_to_redact: [1, -2, "x", 3.5, null, "4"] }))
+      .toEqual({ customerId: null, orderIds: [1, 4] });
+    expect(complianceSubject("customers/data_request", { orders_to_redact: [1] })).toEqual({ customerId: null, orderIds: [] });
+    expect(complianceSubject("customers/redact", null)).toEqual({ customerId: null, orderIds: [] });
   });
 });
 

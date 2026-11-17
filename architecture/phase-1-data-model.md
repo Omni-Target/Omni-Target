@@ -182,7 +182,9 @@ These tables are empty until Phase 2 ingestion writes them.
   - return line items to returns.
 
   Each cascades on delete. Links between separately imported domains are not foreign keys: a line item can outlive its product, and a return can arrive before its order.
-- **Minimised customers.** Customers hold no name, email, phone or address. Each keeps its first order and that order's products, so first-purchase analysis survives order retention.
+- **Minimised customers.** Customers hold no name, email, phone or address.
+  - Each keeps its first order and that order's products for first-purchase analysis, but only while the customer has an order inside the 24-month retention window (`last_order_at`, 0030).
+  - `customers/redact` deletes the row.
 - **Withheld fields.** Orders keep the destination at city level at most. Fields Shopify withholds without protected-data approval are nullable.
 - **Metafields and metaobjects** are separate tables.
 - **`shop_access`** records:
@@ -198,12 +200,40 @@ These tables are empty until Phase 2 ingestion writes them.
   - It records each delivery once per shop and webhook ID.
   - A delivery's payload is kept only until it is handled: a processed or ignored row must have none. A dead delivery keeps its payload for replay.
   - It is matched by domain too, because a delivery can name a shop not yet modelled.
-- **`product_metrics` and `store_metrics`.** One row per window and calculation version, recomputed in place. A metric whose input Shopify withheld is listed in `unavailable` with a reason, not reported as zero. Monthly aggregates that outlive order retention are designed in task 11.
+- **`product_metrics` and `store_metrics`.** One row per window and calculation version, recomputed in place. A metric whose input Shopify withheld is listed in `unavailable` with a reason, not reported as zero. The monthly summaries that outlive order retention are below.
+
+### Retention and monthly summaries (0030)
+
+Task 11's policy was approved on 2026-11-18 (`retention-evaluation.md`): 24 months of detailed orders and line items, with permanent summaries. 0030 builds the structures. It deletes nothing, and no pruning exists.
+
+**Monthly summaries.** Each is keyed by shop, month and `calc_version`, and holds counts and money only:
+- `product_monthly_metrics`: one row per product and month with sales. Orders, units, gross sales, discounts, refunded and returned units, customers and first-time customers.
+- `store_monthly_metrics`: one row per month. Orders, units, subtotal, discounts, tax, shipping, total, refunds, customers and new customers.
+- `cohort_monthly_outcomes`: one row per first-order month. First-time customers, repeats within 30, 60, 90, 180 and 365 days, first-order and 60-day revenue. It holds no customer identifier, so redaction never needs to touch it.
+
+**Refresh.** `refresh_monthly_aggregates(shop_key, from, to, calc_version)` rebuilds a range of months from the stored order lines. Test and cancelled orders are left out.
+- **Finality.** A product or store month is final 120 days after it ends. A cohort is final once its 365-day window has closed, plus the same 120 days. A final row is never changed, so the summaries outlive the orders behind them.
+- **Writes.** Only this function writes the summaries; `service_role` can read them, not write them.
+- **Sale dates.** It also widens `products.first_sold_at` and `last_sold_at`. These product facts are permanent and carry no personal information.
+
+**Status.** `retention_status(shop_key)` is read-only. It reports:
+- what lies beyond 24 months (orders, line items, customers, months);
+- how many of those months lack a final summary;
+- `pruning: not_authorised`.
+
+**Customer compliance.**
+- `customers/redact` deletes the customer's row and clears the customer and destination fields on the orders it names or the customer placed. It also drops inbox payloads about the customer or those orders, all in the transaction that records the request.
+- `customers/data_request` stays `open` when data is held. The webhook raises a Sentry warning so it is fulfilled within 30 days.
+
+**Measured** (`scripts/ops/retention-summaries.mjs`; the report is `capacity/retention-summaries-2026-11-18.json`):
+- **Size.** For the very large shop over 36 months, the summaries take 56.2 MB (8.9% of the mirror), about 180 bytes per product-month with sales.
+- **Refresh, locally.** A refresh over all 36 months takes 11.7 s, and the slowest single-month call 1.0 s.
+- **Statement timeout.** API calls run under the 8 s timeout that PostgREST's `authenticator` role has on Supabase. So Phase 2 refreshes month by month: after each import, and daily over the months not yet final.
 
 ### Deletion
 
 - **What runs.** `process_workspace_deletion` and `process_unbound_shop_redact` call the internal `delete_shop_synced_data`. Verification counts with `shop_synced_row_count` and requires zero.
-- **Coverage check.** A database test fails if any table with a `shop_id` column is neither deleted with the shop nor explicitly classed as ownership, billing, credential or history data.
+- **Coverage check.** A database test fails if any shop-keyed table is neither deleted with the shop nor explicitly classed as ownership, billing, credential or history data. Synced tables carry `shop_key`; the others keep the shop's UUID. The 0030 summaries are deleted with the shop.
 - **Legacy function.** `redact_shop_data` on its own handles only legacy data.
 - **Known limit.** Deleting a very large shop runs in one transaction. Its duration is measured in the capacity tests (task 10).
 
@@ -212,7 +242,7 @@ These tables are empty until Phase 2 ingestion writes them.
 - **Where commerce data lives.** PostgreSQL is the primary store for all of it: catalog, inventory, orders, line items, customers, returns and metrics. Order history stays in Postgres.
 - **What R2 holds.** R2 is the object store for PDFs, reports, media, uploaded documents, bulk-operation JSONL, encrypted backups and encrypted archives. It is not a query store.
 - **Before Phase 2 writes any rows,** the storage-heavy structures are reviewed. The candidates are in `capacity-measurements.md`. Each saving is validated by measurement and against its readers before it is applied.
-- **Retention** is decided by task 11, evaluated in `retention-evaluation.md`. The recommendation is 24 months of order lines, with permanent monthly aggregates and customer facts. It awaits approval, and nothing is pruned before then.
+- **Retention** was decided by task 11 (`retention-evaluation.md`), approved on 2026-11-18. It keeps 24 months of order lines, with permanent monthly product and store summaries, anonymised cohort outcomes and product sale dates. 0030 implements the structures. Pruning needs a separate approval and a verified backup and restore.
 - **Columnar analytical storage** in R2 (Parquet or Iceberg) is a future option, with the revisit triggers set out in the ADR.
 
 ## Brief evidence (task 9, implemented; migration 0026)
@@ -288,11 +318,12 @@ Historical files `0001` to `0017` are kept unchanged. A schema baseline taken at
 | `0027_capacity_snapshots` | Daily size snapshots and the size read for the import pre-flight check (task 10, implemented; measurements in `capacity-measurements.md`) |
 | `0028_operational_hygiene` | User-ID indexes on CAPI events, payments, credit usage and API usage; daily pruning of stale rate-limit windows and webhook dedupe keys; race-free email claims; the brief-nudge query (task 10, DATA-07, implemented) |
 | `0029_commerce_storage` | The measured storage optimisations: integer shop key, sparse product metrics, duplicate order fields not stored, metafield values up to 1,000 characters, one unused index removed. Converted in place and reversible (task 12, implemented; `storage-optimisation.md`) |
+| `0030_retention_architecture` | Task 11's approved retention structures, with no pruning (task 12, implemented):<br>• monthly product and store summaries and anonymised cohort outcomes, with their refresh;<br>• product sale dates and bounded customer rows;<br>• `retention_status`;<br>• customer redaction and data requests against the mirror. |
 
-| Next (planned, before Phase 2) | The storage optimisations the pre-Phase 2 review validates (ADR 0002, decision 2), and any retention aggregates task 11's approved policy needs |
+No further schema change is planned before Phase 2.
 
 Task 3.1 took `0019`, so every later migration moved up by one. Task 9 came before task 10, so the brief archive took `0026`.
 
-Every migration has a down script, runs against a database that already holds data, and changes no existing rows. Data moves only through the dry-run-first migration scripts.
+Every migration has a down script and runs against a database that already holds data. None changes existing values, with one exception: 0029 converts each row's shop UUID to the integer key in place and keeps every row. Data moves only through the dry-run-first migration scripts. 0030's down script was checked to restore 0029's schema exactly.
 
 The contract step, which removes legacy token, credit and snapshot columns, comes after Phase 2. It is part of the release plan and needs its own approval.
