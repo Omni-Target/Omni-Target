@@ -1,0 +1,117 @@
+# Capacity measurements (Phase 1, task 10)
+
+Measured 2026-11-17. These figures replace the estimates in the Phase 0 plan (§8.3).
+
+**What this is.** These are local benchmarks: synthetic data in Postgres 17.11 under Docker.
+- **Sizes carry over to Supabase.** It uses the same on-disk format; staging runs Postgres 17.6.
+- **Timings do not.** Supabase Free runs on shared compute.
+
+**Reproducing it:**
+```bash
+DATABASE_URL=postgresql://…@127.0.0.1:…/postgres node scripts/ops/capacity-fixtures.mjs --out report.json
+```
+The raw report is `architecture/capacity/fixtures-2026-11-17.json`.
+
+## Fixture profiles
+
+Each profile is one shop, with orders spread evenly over 36 months.
+
+| Profile | Products | Variants | Orders | Line items | Customers | Inventory levels | Metafields | Product metric rows |
+|---|---|---|---|---|---|---|---|---|
+| Small | 500 | 1.5k | 5k | 7.5k | 3k | 3k | 1.5k | 2k |
+| Medium | 5k | 15k | 50k | 75k | 30k | 30k | 15k | 20k |
+| Large | 20k | 60k | 200k | 300k | 120k | 120k | 60k | 80k |
+| Very large (the incident) | 70k | 210k | 500k | 750k | 300k | 420k | 210k | 280k |
+
+Every profile also includes:
+- **Order history:** refunds on 3% of orders and returns on 2%.
+- **Products:** 3 metafields per product, metaobjects for 5% of products, and 4 metric windows per product.
+- **Locations:** 3 locations, with 2 inventory levels per variant.
+- **Webhooks:** 30 days of handled order webhooks, which hold no payload.
+- **Sync records:** sync runs and checkpoints.
+
+**Field widths:**
+- product titles are 25–65 characters;
+- description excerpts are 150–600 characters;
+- metafield excerpts are 30–200 characters.
+
+## Results
+
+Storage of the commerce mirror, tables and indexes, after `VACUUM ANALYZE`:
+
+| Profile | Mirror | Share of the 500 MB Free quota | Delete the shop (local) | Top products, 30 days (local) |
+|---|---|---|---|---|
+| Small | 7.9 MB | 1.6% | 0.1 s | 4 ms |
+| Medium | 66 MB | 13% | 0.5 s | 12 ms |
+| Large | 260 MB | 52% | 2.1 s | 36 ms |
+| Very large | **733 MB** | **147%** | 6.2 s | 64 ms |
+
+### Cost per entity
+
+Storage grows linearly. These costs include indexes:
+
+- **Per product: about 4.6 KB.** That covers the product, 3 variants, 6 inventory levels, 3 metafields and 4 metric rows.
+- **Per order: about 0.9 KB.** That covers the order, 1.5 line items, a 0.6 share of a customer, refunds, returns and webhook history.
+- **Fixed per shop:** 0.25 MB.
+
+The import pre-flight check uses these figures.
+
+### Where the very large shop's 733 MB goes
+
+Heap is 482 MB and indexes are 250 MB.
+
+| Table | Rows | MB | Bytes per row |
+|---|---|---|---|
+| order_line_items | 750k | 180 | 252 |
+| orders | 500k | 168 | 352 |
+| product_variants | 210k | 73 | 364 |
+| metafields | 210k | 66 | 328 |
+| inventory_levels | 420k | 64 | 159 |
+| customers | 300k | 55 | 193 |
+| product_metrics | 280k | 54 | 204 |
+| products | 70k | 49 | 730 |
+| webhook_events (30 days) | 42k | 15 | 383 |
+
+### Supabase's own share
+
+Measured read-only on staging: the staging database is 15.3 MB, of which our `public` schema is 2.4 MB. The rest, about 13 MB, is Postgres catalogs, auth, storage, cron and net. That leaves about 485 MB of the Free plan for application data.
+
+## Findings
+
+1. **The Phase 0 estimate was low.** The incident-scale shop needs 733 MB, not 350–450 MB.
+   - It cannot fit on the Free plan at all.
+   - With the 20–30% headroom that row updates and dead tuples need in practice, it needs about 0.9 GB.
+2. **One large shop nears the upgrade threshold by itself.** It uses 260 MB (54% of the quota, counting Supabase's share). That is just under the 60% threshold.
+3. **Medium shops fit.** Several could share the Free plan.
+4. **Deletion is the slow operation.** Deleting a very large shop takes 6.2 s locally, in one transaction. On shared compute it may take several times longer and could exceed an API statement timeout. Phase 2 should delete large shops in batches across cron runs; the verification already tolerates a deletion that is retried.
+5. **Reads are not the concern at this scale.** The analytical queries stay well under 100 ms locally, using the indexes.
+
+## Levers
+
+These are for Phase 2's mappers and Task 11's retention policy. Savings are estimated from the very large profile.
+
+| Lever | Estimated saving |
+|---|---|
+| Line-level order retention of 24 instead of 36 months (task 11 evaluates it) | about 120 MB |
+| Inventory levels only where a shop really has several locations, otherwise the variant's own quantity | up to 64 MB |
+| Metrics only for products with sales in the window, and fewer windows | 20–40 MB |
+| Only the metafields a brief uses (one or two keys rather than three), with shorter excerpts | 20–40 MB |
+| Product description excerpt of 300 characters instead of 600 | about 10 MB |
+| `ship_city_raw` only when it differs from `ship_city`; `presentment_currency` only when it differs | about 10 MB |
+
+Together they bring the very large shop to roughly 450–500 MB. That is still too close to the quota for one shop on Free, so the levers reduce cost but do not avoid the upgrade.
+
+## Upgrade recommendation
+
+- **Staging and development: stay on Free.** Staging holds test data only.
+- **Production: start on Pro, $25 a month.** The Phase 0 thresholds call for Pro before any of these happen:
+  - the first merchant above about 10k products or 100k orders is onboarded, since their projected database would pass 60% of Free;
+  - any paying merchant is onboarded, because Free has no automatic backups or point-in-time recovery;
+  - the incident-scale merchant is onboarded, since 733 MB is over the Free quota.
+
+  The merchants Omnitarget targets include incident-scale shops, so this comes to: start production on Pro.
+- **Why Pro is enough:**
+  - Its 8 GB of included disk holds about ten incident-scale shops before the levers, or about fifteen after them.
+  - Monitoring (task 10) alerts at 60% and 75% of whatever quota applies.
+  - The import pre-flight check refuses a full import that would pass 75%.
+- **This is a recommendation.** Upgrading needs your separate approval when the time comes.
