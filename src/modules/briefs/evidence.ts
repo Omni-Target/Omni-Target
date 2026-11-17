@@ -69,3 +69,19 @@ export function boundBriefEvidence(snapshot: unknown, productName: string): Stor
   // Readers treat this as StoreInsights; they only reach the fields kept above.
   return evidence as StoreInsights;
 }
+
+/**
+ * An existing saved brief with its store snapshot replaced by bounded
+ * evidence, or null when there is nothing to trim. `kind` is "brief" for a
+ * campaign's or version's brief_data, "receipt" for a generation receipt's
+ * response (whose briefData holds the brief). The product is chosen as the
+ * brief view chooses it: the brief's own productName, else the campaign's.
+ */
+export function trimStoredBrief(kind: "brief" | "receipt", value: unknown, campaignProductName?: string | null): Json | null {
+  if (!isObject(value)) return null;
+  const brief = kind === "brief" ? value : value.briefData;
+  if (!isObject(brief) || !isObject(brief.storeInsights) || isBoundedEvidence(brief.storeInsights)) return null;
+  const productName = (brief.productName ?? campaignProductName ?? "") as string;
+  const trimmed = { ...brief, storeInsights: boundBriefEvidence(brief.storeInsights, productName) };
+  return kind === "brief" ? trimmed : { ...value, briefData: trimmed };
+}

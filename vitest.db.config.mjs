@@ -7,7 +7,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["supabase/tests/**/*.db.test.mjs", "src/**/*.db.test.ts"],
+    include: ["supabase/tests/**/*.db.test.mjs", "src/**/*.db.test.{ts,tsx}"],
     testTimeout: 30_000,
     fileParallelism: false,
   },

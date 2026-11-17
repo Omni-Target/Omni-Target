@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
-import { BriefStep } from "@/components/campaigns/steps/brief-step";
-import { buildBriefPdfPayload, buildBriefText, budgetPlanFor } from "@/lib/campaigns/brief";
-import { buildBriefHTML } from "@/lib/brief-html-template";
+import { briefRenderings } from "./brief-renderings";
 import type { AiInsights, GeneratedCopy, StoreInsights } from "@/components/campaigns/types";
-import { boundBriefEvidence, isBoundedEvidence } from "./evidence";
+import { boundBriefEvidence, isBoundedEvidence, trimStoredBrief } from "./evidence";
 
 /** As stored: brief_data goes through jsonb. */
 const stored = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
@@ -108,28 +105,11 @@ function insights(peakDays: string[] = []): AiInsights {
   };
 }
 
-const views = async (storeInsights: StoreInsights | null, ai: AiInsights, maxTestBudget: number | null, selectedDuration: 7 | 14 | 30) => {
-  const common = { aiInsights: ai, storeInsights, selectedDuration, selectedIntlDuration: 14 as const, selectedStrategyIndex: 1, selectedIntlStrategyIndex: 1, maxTestBudget };
-  const payload = buildBriefPdfPayload({
-    ...common, generatedAt: "2026-11-02T00:00:00.000Z", brandName: "Ada Wear", productName: PRODUCT, productPrice: undefined,
-    goal: "Drive Website Sales", generatedCopy: copy, selectedCta: "Shop Now", gatewayInsight: null, isNewLaunch: false,
+const views = (storeInsights: StoreInsights | null, ai: AiInsights, maxTestBudget: number | null, selectedDuration: 7 | 14 | 30) =>
+  briefRenderings({
+    storeInsights, aiInsights: ai, generatedCopy: copy, selectedCta: "Shop Now", productName: PRODUCT, brandName: "Ada Wear",
+    goal: "Drive Website Sales", generatedAt: "2026-11-02T00:00:00.000Z", maxTestBudget, selectedDuration,
   });
-  return {
-    payload,
-    // Each render carries a fresh CSP nonce; everything else must match.
-    html: (await buildBriefHTML(payload)).replace(/nonce-[A-Za-z0-9+/=]+/g, "nonce-X").replace(/nonce="[^"]*"/g, 'nonce="X"'),
-    text: buildBriefText({ ...common, generatedCopy: copy, selectedCta: "Shop Now", goal: "Drive Website Sales", gatewayInsight: null }),
-    plan: budgetPlanFor({ aiInsights: ai, storeInsights, maxTestBudget, selectedDuration }),
-    markup: renderToStaticMarkup(
-      <BriefStep
-        generatedCopy={copy} copiedField={null} onCopy={() => {}} selectedCta="Shop Now" storeInsights={storeInsights} aiInsights={ai}
-        loadingAiInsights={false} goal="Drive Website Sales" selectedStrategyIndex={1} setSelectedStrategyIndex={() => {}}
-        selectedDuration={selectedDuration} setSelectedDuration={() => {}} isDownloadingPdf={false} onDownloadPdf={() => {}}
-        onCopyBrief={() => {}} onCreateNew={() => {}} maxTestBudget={maxTestBudget} setMaxTestBudget={() => {}}
-      />,
-    ),
-  };
-};
 
 const cases: Array<[string, StoreInsights]> = [
   ["a matched product in a 1,000-product catalog", snapshot()],
@@ -185,6 +165,24 @@ describe("bounded brief evidence (task 9)", () => {
     expect(isBoundedEvidence(snapshot())).toBe(false);
     expect(boundBriefEvidence(once, PRODUCT)).toBe(once);
     expect(boundBriefEvidence(stored(once), "Another product")).toEqual(once);
+  });
+
+  it("trims a saved brief or receipt, choosing the product as the brief view does, and leaves trimmed ones alone", () => {
+    const brief = stored({ productName: PRODUCT, selectedDuration: 7, storeInsights: snapshot() });
+    const trimmed = trimStoredBrief("brief", brief)!;
+    expect({ ...trimmed, storeInsights: undefined }).toEqual({ ...brief, storeInsights: undefined });
+    expect(trimmed.storeInsights).toEqual(boundBriefEvidence(brief.storeInsights, PRODUCT));
+
+    const unnamed = stored({ storeInsights: snapshot() });
+    expect((trimStoredBrief("brief", unnamed, PRODUCT)!.storeInsights as StoreInsights).products?.map((p) => p.name)).toEqual([PRODUCT]);
+
+    const receipt = stored({ campaignId: "c-1", headline: "Hi", briefData: brief });
+    const trimmedReceipt = trimStoredBrief("receipt", receipt)!;
+    expect(trimmedReceipt.headline).toBe("Hi");
+    expect(trimmedReceipt.briefData).toEqual(trimmed);
+
+    expect(trimStoredBrief("brief", trimmed)).toBeNull();
+    expect(trimStoredBrief("receipt", { briefData: { storeInsights: null } })).toBeNull();
   });
 
   it("returns nothing for a missing snapshot", () => {

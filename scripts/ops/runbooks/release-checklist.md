@@ -26,6 +26,9 @@ copy of staging's.
 | `SHOPIFY_TOKEN_REFRESH_DISABLED` | S1 | Stops token refresh on an environment sharing tokens | Unset in production |
 | `SHOPIFY_TEST_BILLING` | S0 (SEC-12) | Allows Shopify test charges to grant credits | Unset in production |
 | `LOG_LEVEL` | Phase 1 task 1 | Structured logger level | Unset (`info`) |
+| `BRIEF_ARCHIVE_PUBLIC_KEY` | Phase 1 task 9 | Encrypts archived briefs (ops tool only, not the app) | Generate a production key pair with `brief-archive.mjs keygen`; the private key goes to the custodian (`brief-archive.md`) |
+| `BRIEF_ARCHIVE_R2_BUCKET`, `BRIEF_ARCHIVE_PREFIX` | Phase 1 task 9 | Where archived briefs go (ops tool only) | The production backup bucket, prefix `brief-archive/<production ref>` |
+| `BRIEF_ARCHIVE_R2_ACCESS_KEY_ID`, `BRIEF_ARCHIVE_R2_SECRET_ACCESS_KEY` | Phase 1 task 9 | R2 token for the archive (ops tool only) | A token scoped to that bucket, with read, write and delete |
 
 ## Database
 
@@ -41,6 +44,12 @@ copy of staging's.
   contested or unresolved `legacy_shop_claims`, and `legacy_orphans`.
 - Plaintext credential columns are cleared only after a verified backup and
   restore: `--apply --clear-plaintext --backup-verified`.
+- Trim existing briefs to bounded evidence (task 9, `brief-archive.md`):
+  1. Restore a fresh production backup locally, and prove every brief renders identically once trimmed (`VERIFY_STORED_BRIEFS=1 … pnpm test:db src/modules/briefs`).
+  2. Take and verify a new backup.
+  3. Run `brief-archive.mjs archive` as a dry run.
+  4. Run it with `--apply --backup-verified --identity-file …`.
+  5. Run `prune --apply` daily until the archives expire (30 days).
 
 ## Platform
 

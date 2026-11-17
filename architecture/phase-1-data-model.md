@@ -207,6 +207,43 @@ These tables are empty until Phase 2 ingestion writes them.
 - **Legacy function.** `redact_shop_data` on its own handles only legacy data.
 - **Known limit.** Deleting a very large shop runs in one transaction. Its duration is measured in the capacity tests (task 10).
 
+## Brief evidence (task 9, implemented; migration 0026)
+
+### What a new brief stores
+
+A new brief stores bounded evidence, not the whole store snapshot (2–4 MB). The snapshot used to be copied into the campaign, every version and the generation receipt. The evidence stays under `storeInsights`, so readers are unchanged. It keeps:
+
+- the store's identity, country and currency;
+- five order aggregates;
+- the one product the brief is for;
+- the store-wide out-of-stock count;
+- three storefront analytics fields;
+- data-quality warnings.
+
+### Proof that rendering is unchanged
+
+Tests prove that the following are identical from the full snapshot and from the evidence:
+
+- the PDF payload and HTML;
+- the copied text;
+- the budget plan;
+- the rendered brief.
+
+### Existing briefs
+
+Existing briefs are trimmed by `scripts/ops/brief-archive.mjs` (`scripts/ops/runbooks/brief-archive.md`):
+
+- **Encryption.** Each batch of original rows is archived to R2, encrypted with X25519, HKDF-SHA256 and AES-256-GCM to a custodian key.
+- **Verify first.** Each archive is checksummed, then downloaded and decrypted again before any row is trimmed.
+- **Narrow change.** Only the snapshot subtree changes. A row edited concurrently is skipped.
+- **Restore** writes back the exact original bytes.
+- **Retention.** Archives expire after 30 days, inside Shopify's redaction deadline, and are pruned.
+- **Tracking.** `brief_archive_runs` and `brief_archive_entries` hold only hashes, sizes, row IDs and timestamps. They are owner-only.
+
+### Release verification
+
+Before production is trimmed, `VERIFY_STORED_BRIEFS=1 pnpm test:db src/modules/briefs` runs against a restored production copy. It proves that every saved brief renders identically once trimmed.
+
 ## Legacy migration from `user_integrations` (migrations 0022 and 0023, implemented)
 
 Run with `scripts/ops/legacy-migration.mjs`. The default is a dry run inside a rolled-back transaction; `--apply` commits each account in its own transaction. `legacy_account_map` records each migrated row. A legacy claim on a shop already connected through the new model is marked `unresolved`: it can neither bind nor block that shop. Rows written by the current code get their `workspace_id` from insert triggers (0023): a version and a receipt from their campaign, a Stripe or Paystack payment from its purchase intent, a CAPI event from its shop's binding.
@@ -239,10 +276,10 @@ Historical files `0001` to `0017` are kept unchanged. A schema baseline taken at
 | `0023_workspace_columns` | `workspace_id` on tenant tables, with indexes |
 | `0024_commerce_model` | Products, variants, inventory, locations, orders, line items, refunds, minimal customers, returns, metafields, metaobject definitions and metaobjects, shop settings and access (task 8, implemented) |
 | `0025_sync_inbox_metrics` | Sync runs and checkpoints, webhook inbox, metrics (task 8, implemented) |
-| `0026_capacity_snapshots` | Daily size snapshots |
-| `0027_brief_evidence_archive` | Archive tracking for trimmed briefs |
+| `0026_brief_archive` | Archive tracking for trimmed briefs (task 9, implemented) |
+| `0027_capacity_snapshots` | Daily size snapshots (task 10) |
 
-Task 3.1 took `0019`, so every later migration moved up by one.
+Task 3.1 took `0019`, so every later migration moved up by one. Task 9 came before task 10, so the brief archive took `0026`.
 
 Every migration has a down script, runs against a database that already holds data, and changes no existing rows. Data moves only through the dry-run-first migration scripts.
 

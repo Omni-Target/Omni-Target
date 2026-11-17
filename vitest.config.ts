@@ -8,7 +8,7 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     // Real Postgres tests run in the Database job (vitest.db.config.mjs).
-    exclude: ["**/node_modules/**", "src/**/*.db.test.ts"],
+    exclude: ["**/node_modules/**", "src/**/*.db.test.{ts,tsx}"],
   },
   resolve: {
     alias: {
