@@ -1,34 +1,34 @@
 # Vercel deployments
 
-The application deploys from the `omni-target-6gnl` Vercel project.
+Development happens on `staging`, locally and against the staging Supabase
+project. `main` and production change only at the production release.
 
-| Git branch | Vercel environment | Builds? |
+| Git branch | Vercel (`omni-target-6gnl`) | Builds? |
 |---|---|---|
-| `main` | Production | Yes |
-| `staging` | Preview, with its own staging-scoped variables | Yes |
-| Any other branch (task and PR branches) | Preview | **No**: cancelled by `ignoreCommand` |
+| `main` | Production | Yes, unchanged until the release |
+| `staging`, task and PR branches | Preview | **No** |
 
-## Why other branches do not build
+## No preview deployments
 
-Only `staging` has a dedicated set of Preview variables. Any other branch would
-build against the project's shared variables, which belong to production. A
-preview must never run with production credentials, so `vercel.json` cancels
-those builds before they start:
+Preview builds of this project run with production-scoped variables, so none
+are built. Two settings enforce this:
 
-```json
-"ignoreCommand": "if [ \"$VERCEL_ENV\" = production ] || [ \"$VERCEL_GIT_COMMIT_REF\" = staging ]; then exit 1; else exit 0; fi"
-```
+- `vercel.json` `ignoreCommand`, versioned with the code:
+  `if [ "$VERCEL_ENV" = production ]; then exit 1; else exit 0; fi`
+- The project's Ignored Build Step (Project Settings → Git) holds the same
+  command, which covers branches whose `vercel.json` predates it.
 
-Vercel reads exit code 0 as "skip" and 1 as "build". A cancelled deployment
-appears with state `CANCELED` and never receives runtime variables. Pull
-requests are verified by the GitHub `Verify` and `Database` checks and by
-local testing, not by preview deployments.
+Exit code 0 means "skip" and 1 means "build". A skipped push appears as a
+`CANCELED` deployment that never receives runtime variables. Pull requests are
+verified by the GitHub `Verify` and `Database` checks and by local testing.
 
-To give another branch its own preview, first scope a complete set of
-non-production variables to that branch in Vercel, then add the branch to the
-condition above.
+## Online staging verification
+
+When an online check is needed, create a dedicated staging deployment with
+staging-only variables on `app.staging.omnitarget.co`. Never use an ad-hoc
+preview of the production project.
 
 ## Production
 
-Production builds are not affected by this command. A production release is a
-separate, explicitly approved step.
+Production configuration (variables, domains, deployment settings) is left
+untouched until the release. See `release-checklist.md`.

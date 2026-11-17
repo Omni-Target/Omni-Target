@@ -112,11 +112,27 @@ Environment `backup-restore`:
 The four `BACKUP_R2_*` key secrets must be API tokens scoped to the backup
 bucket, never the application's R2 key: that key also reaches the media bucket.
 
-**Schedule.** GitHub runs schedules only from the default branch, `main`. Every
-job checks out `staging`, which holds the script and the pinned lockfile, so
-`main` carries only the workflow until the production release. Nightly backup
-`17 2 * * *` UTC. Weekly restore test `47 3 * * 0` UTC. Both can also be started
-by hand (`workflow_dispatch`, with `restore_test`).
+**Schedule.** Development never touches `main`, so GitHub's own `schedule`
+trigger (default branch only) does not fire. The staging database schedules the
+workflow instead: `scripts/ops/staging-backup-schedule.sql` (applied to staging
+on 2026-11-17) installs two `pg_cron` jobs that call GitHub's workflow-dispatch
+API on ref `staging` through `pg_net`:
+
+- `staging-backup-nightly` at `17 2 * * *` UTC: backup, verify and prune.
+- `staging-backup-weekly-restore` at `47 3 * * 0` UTC: backup plus restore test.
+
+The jobs need a fine-grained GitHub token for `Omni-Target/Omni-Target` with only
+**Actions: Read and write**, stored in the staging project's Vault. In the
+Supabase SQL editor (never in chat or Git):
+
+```sql
+select vault.create_secret('<token>', 'github_backup_dispatch_token', 'Dispatches the staging backup workflow');
+```
+
+Until it exists, each run logs a warning and dispatches nothing. Check runs
+with `select * from cron.job_run_details order by start_time desc limit 5` and
+the responses in `net._http_response`. Both jobs can also be started by hand
+(`workflow_dispatch` on `staging`, with `restore_test`).
 
 **Failure visibility.** A failed backup, verify, prune or restore test fails
 its job. GitHub then notifies the account that last changed the schedule, and a

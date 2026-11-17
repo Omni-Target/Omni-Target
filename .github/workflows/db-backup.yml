@@ -5,9 +5,10 @@ name: Database backup
 #
 # An interim Free-plan safeguard, not point-in-time recovery. Runs against
 # staging only. Production needs its own bucket, role, keys and approval.
-# Scheduled runs start only once this file is on the default branch (main).
-# Every job checks out `staging`, which holds the backup script and its
-# lockfile; main carries only this workflow until the production release.
+# Development never touches main, so GitHub's own `schedule` (default branch
+# only) does not fire. The schedule runs on staging instead: pg_cron in the
+# staging database dispatches this workflow on ref `staging`
+# (scripts/ops/staging-backup-schedule.sql). Jobs check out `staging`.
 # This repository is public, so the script logs aggregates only.
 # See scripts/ops/runbooks/backups.md.
 
