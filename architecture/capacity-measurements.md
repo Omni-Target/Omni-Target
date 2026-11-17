@@ -86,22 +86,29 @@ Measured read-only on staging: the staging database is 15.3 MB, of which our `pu
 4. **Deletion is the slow operation.** Deleting a very large shop takes 6.2 s locally, in one transaction. On shared compute it may take several times longer and could exceed an API statement timeout. Phase 2 should delete large shops in batches across cron runs; the verification already tolerates a deletion that is retried.
 5. **Reads are not the concern at this scale.** The analytical queries stay well under 100 ms locally, using the indexes.
 
-## Levers
+## Candidates for the pre-Phase 2 optimisation review
 
-These are for Phase 2's mappers and Task 11's retention policy. Savings are estimated from the very large profile.
+Under ADR 0002 (decision 2), these are reviewed before Phase 2 writes any rows. Each candidate is applied only once two things hold:
+- its saving is measured against the fixtures;
+- every reader of the data has been checked.
 
-| Lever | Estimated saving |
-|---|---|
-| Line-level order retention of 24 instead of 36 months (task 11 evaluates it) | about 120 MB |
-| Inventory levels only where a shop really has several locations, otherwise the variant's own quantity | up to 64 MB |
-| Metrics only for products with sales in the window, and fewer windows | 20–40 MB |
-| Only the metafields a brief uses (one or two keys rather than three), with shorter excerpts | 20–40 MB |
-| Product description excerpt of 300 characters instead of 600 | about 10 MB |
-| `ship_city_raw` only when it differs from `ship_city`; `presentment_currency` only when it differs | about 10 MB |
+Anything that functionality, filtering, analytics or intelligence needs stays. Savings are for the very large profile.
 
-Together they bring the very large shop to roughly 450–500 MB. That is still too close to the quota for one shop on Free, so the levers reduce cost but do not avoid the upgrade.
+| Candidate | Saving | Evidence so far |
+|---|---|---|
+| Integer shop key instead of the 16-byte shop UUID, in every row and index | 10–14% on the largest tables, roughly 70–85 MB in total | Measured on orders (168 → 144 MB) and line items (180 → 163 MB) |
+| Inventory levels only where a shop really has several locations; otherwise the variant's own quantity | up to 64 MB | Estimate; depends on per-location readiness needs (Phase 3) |
+| Metrics only for products with sales in the window, and only the windows the readers use | 20–40 MB | Estimate |
+| Only the metafields a brief uses (one or two keys rather than three), with shorter excerpts | 20–40 MB | Estimate; depends on the evidence rules (Phase 6) |
+| Indexes not used by any planned query | to be measured | Not yet reviewed |
+| Product description excerpt of 300 characters instead of 600 | about 10 MB | Estimate; check the readiness and AI evidence readers first |
+| `ship_city_raw` only when it differs from `ship_city`; `presentment_currency` only when it differs | about 10 MB | Estimate |
 
-## Upgrade recommendation
+**Retention is not on this list.** Line-level order retention (24 instead of 36 months would save about 120 MB) is decided by task 11, not here.
+
+**Moving history to R2 doesn't pay.** A separate analysis looked at keeping only hot data in Postgres and moving order history to R2. It found an extra 100–200 MB per merchant of this size, worth $0.01–0.03 a month on Pro. That doesn't justify a second storage system (ADR 0002).
+
+## Supabase plan (ADR 0002, decision 6)
 
 - **Staging and development: stay on Free.** Staging holds test data only.
 - **Production: start on Pro, $25 a month.** The Phase 0 thresholds call for Pro before any of these happen:
@@ -111,7 +118,7 @@ Together they bring the very large shop to roughly 450–500 MB. That is still t
 
   The merchants Omnitarget targets include incident-scale shops, so this comes to: start production on Pro.
 - **Why Pro is enough:**
-  - Its 8 GB of included disk holds about ten incident-scale shops before the levers, or about fifteen after them.
+  - Its 8 GB of included disk holds about ten incident-scale shops as measured, and more after the optimisation review.
   - Monitoring (task 10) alerts at 60% and 75% of whatever quota applies.
   - The import pre-flight check refuses a full import that would pass 75%.
-- **This is a recommendation.** Upgrading needs your separate approval when the time comes.
+- **Decided: Pro is the intended production starting plan (ADR 0002).** The upgrade is approved separately during the production release. Nothing is upgraded before then.

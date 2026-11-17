@@ -54,7 +54,7 @@ copy of staging's.
 
 ## Platform
 
-- Supabase plan: the capacity measurements (task 10, `architecture/capacity-measurements.md`) recommend production starts on Pro. The upgrade needs its own approval. Set `DATABASE_QUOTA_MB` to the chosen plan's size.
+- Supabase plan: Pro is the intended production starting plan (ADR 0002, decision 6; measurements in `architecture/capacity-measurements.md`). Approve the upgrade during the release; nothing is upgraded before. Set `DATABASE_QUOTA_MB` to the plan's disk size (`8192` for Pro's included 8 GB).
 - Capacity snapshots: `/api/cron/capacity` runs daily from `vercel.json` once production deploys; confirm the first snapshot and that Sentry receives its alerts.
 
 - Vercel production: production variables above, crons from `vercel.json`, and

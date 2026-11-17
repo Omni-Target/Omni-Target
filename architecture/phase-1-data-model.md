@@ -207,6 +207,14 @@ These tables are empty until Phase 2 ingestion writes them.
 - **Legacy function.** `redact_shop_data` on its own handles only legacy data.
 - **Known limit.** Deleting a very large shop runs in one transaction. Its duration is measured in the capacity tests (task 10).
 
+### Storage decision (ADR 0002)
+
+- **Where commerce data lives.** PostgreSQL is the primary store for all of it: catalog, inventory, orders, line items, customers, returns and metrics. Order history stays in Postgres.
+- **What R2 holds.** R2 is the object store for PDFs, reports, media, uploaded documents, bulk-operation JSONL, encrypted backups and encrypted archives. It is not a query store.
+- **Before Phase 2 writes any rows,** the storage-heavy structures are reviewed. The candidates are in `capacity-measurements.md`. Each saving is validated by measurement and against its readers before it is applied.
+- **Retention** is decided by task 11.
+- **Columnar analytical storage** in R2 (Parquet or Iceberg) is a future option, with the revisit triggers set out in the ADR.
+
 ## Brief evidence (task 9, implemented; migration 0026)
 
 ### What a new brief stores
@@ -279,6 +287,8 @@ Historical files `0001` to `0017` are kept unchanged. A schema baseline taken at
 | `0026_brief_archive` | Archive tracking for trimmed briefs (task 9, implemented) |
 | `0027_capacity_snapshots` | Daily size snapshots and the size read for the import pre-flight check (task 10, implemented; measurements in `capacity-measurements.md`) |
 | `0028_operational_hygiene` | User-ID indexes on CAPI events, payments, credit usage and API usage; daily pruning of stale rate-limit windows and webhook dedupe keys; race-free email claims; the brief-nudge query (task 10, DATA-07, implemented) |
+
+| Next (planned, before Phase 2) | The storage optimisations the pre-Phase 2 review validates (ADR 0002, decision 2), and any retention aggregates task 11's approved policy needs |
 
 Task 3.1 took `0019`, so every later migration moved up by one. Task 9 came before task 10, so the brief archive took `0026`.
 
