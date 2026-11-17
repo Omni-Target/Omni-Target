@@ -147,7 +147,9 @@ Campaigns stay creator-only. Queries require both the workspace and the creator.
 
 The workspace comes from server-side context: the session user plus their selected workspace, checked for ownership and status. A browser-supplied workspace, shop or user ID is never trusted.
 
-## Legacy migration from `user_integrations`
+## Legacy migration from `user_integrations` (migrations 0022 and 0023, implemented)
+
+Run with `scripts/ops/legacy-migration.mjs`. The default is a dry run inside a rolled-back transaction; `--apply` commits each account in its own transaction. `legacy_account_map` records each migrated row. A legacy claim on a shop already connected through the new model is marked `unresolved`: it can neither bind nor block that shop. Rows written by the current code get their `workspace_id` from insert triggers (0023): a version and a receipt from their campaign, a Stripe or Paystack payment from its purchase intent, a CAPI event from its shop's binding.
 
 Run as a dry run first, which writes a report. Then it is applied per account, idempotently, recording what was migrated, skipped and why.
 

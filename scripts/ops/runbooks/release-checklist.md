@@ -33,10 +33,14 @@ copy of staging's.
   (0012 RLS lockdown and 0013 onward, 0018 workspaces, 0019 leases,
   0020 credentials, 0021 credit ledger, and later ones), after a verified
   production backup.
-- Run the legacy migration (task 6) as a dry run first, then apply it. This
-  opens legacy credit balances, maps shops and moves plaintext credentials.
+- Run the legacy migration (task 6) as a dry run first, review the report,
+  then apply it. It gives each legacy account its own workspace, opens its
+  credit balance, records its purchases and attributes its history:
+  `DATABASE_URL=… node scripts/ops/legacy-migration.mjs --expect-ref <production ref>`
+  (dry run), then the same with `--apply`. Review `credit_opening_reviews`,
+  contested or unresolved `legacy_shop_claims`, and `legacy_orphans`.
 - Plaintext credential columns are cleared only after a verified backup and
-  restore.
+  restore: `--apply --clear-plaintext --backup-verified`.
 
 ## Platform
 
