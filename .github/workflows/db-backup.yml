@@ -59,9 +59,9 @@ jobs:
       - name: Install PostgreSQL 17 client and age
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          sudo curl -fsS --retry 5 --retry-all-errors --retry-delay 5 -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update -q
+          sudo apt-get update -q -o Acquire::Retries=5
           sudo apt-get install -yq postgresql-client-17 age
           echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
       - run: pnpm install --frozen-lockfile
@@ -113,9 +113,9 @@ jobs:
       - name: Install PostgreSQL 17 client and age
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          sudo curl -fsS --retry 5 --retry-all-errors --retry-delay 5 -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update -q
+          sudo apt-get update -q -o Acquire::Retries=5
           sudo apt-get install -yq postgresql-client-17 age
           echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
       - run: pnpm install --frozen-lockfile
