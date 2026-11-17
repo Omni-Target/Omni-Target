@@ -8,3 +8,8 @@ import * as Sentry from "@sentry/nextjs";
 export function captureBackgroundFailure(job: string, error: unknown): void {
   Sentry.captureException(error, { tags: { job } });
 }
+
+/** Reports a condition that needs attention but is not an error in the code, such as a database nearing its quota. */
+export function captureOperationalAlert(job: string, message: string, level: "warning" | "error", context: Record<string, unknown>): void {
+  Sentry.captureMessage(message, { level, tags: { job }, extra: context });
+}

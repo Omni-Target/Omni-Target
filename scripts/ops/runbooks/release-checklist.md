@@ -26,6 +26,7 @@ copy of staging's.
 | `SHOPIFY_TOKEN_REFRESH_DISABLED` | S1 | Stops token refresh on an environment sharing tokens | Unset in production |
 | `SHOPIFY_TEST_BILLING` | S0 (SEC-12) | Allows Shopify test charges to grant credits | Unset in production |
 | `LOG_LEVEL` | Phase 1 task 1 | Structured logger level | Unset (`info`) |
+| `DATABASE_QUOTA_MB` | Phase 1 task 10 | Database quota for capacity alerts (60% / 75%) and the import pre-flight check | The production plan's database size in MB, e.g. `8192` on Pro (`architecture/capacity-measurements.md`) |
 | `BRIEF_ARCHIVE_PUBLIC_KEY` | Phase 1 task 9 | Encrypts archived briefs (ops tool only, not the app) | Generate a production key pair with `brief-archive.mjs keygen`; the private key goes to the custodian (`brief-archive.md`) |
 | `BRIEF_ARCHIVE_R2_BUCKET`, `BRIEF_ARCHIVE_PREFIX` | Phase 1 task 9 | Where archived briefs go (ops tool only) | The production backup bucket, prefix `brief-archive/<production ref>` |
 | `BRIEF_ARCHIVE_R2_ACCESS_KEY_ID`, `BRIEF_ARCHIVE_R2_SECRET_ACCESS_KEY` | Phase 1 task 9 | R2 token for the archive (ops tool only) | A token scoped to that bucket, with read, write and delete |
@@ -52,6 +53,9 @@ copy of staging's.
   5. Run `prune --apply` daily until the archives expire (30 days).
 
 ## Platform
+
+- Supabase plan: the capacity measurements (task 10, `architecture/capacity-measurements.md`) recommend production starts on Pro. The upgrade needs its own approval. Set `DATABASE_QUOTA_MB` to the chosen plan's size.
+- Capacity snapshots: `/api/cron/capacity` runs daily from `vercel.json` once production deploys; confirm the first snapshot and that Sentry receives its alerts.
 
 - Vercel production: production variables above, crons from `vercel.json`, and
   the production domain. Preview builds stay off (`deployments.md`).

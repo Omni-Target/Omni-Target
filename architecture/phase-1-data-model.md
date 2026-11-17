@@ -277,7 +277,7 @@ Historical files `0001` to `0017` are kept unchanged. A schema baseline taken at
 | `0024_commerce_model` | Products, variants, inventory, locations, orders, line items, refunds, minimal customers, returns, metafields, metaobject definitions and metaobjects, shop settings and access (task 8, implemented) |
 | `0025_sync_inbox_metrics` | Sync runs and checkpoints, webhook inbox, metrics (task 8, implemented) |
 | `0026_brief_archive` | Archive tracking for trimmed briefs (task 9, implemented) |
-| `0027_capacity_snapshots` | Daily size snapshots (task 10) |
+| `0027_capacity_snapshots` | Daily size snapshots and the size read for the import pre-flight check (task 10, implemented; measurements in `capacity-measurements.md`) |
 
 Task 3.1 took `0019`, so every later migration moved up by one. Task 9 came before task 10, so the brief archive took `0026`.
 
