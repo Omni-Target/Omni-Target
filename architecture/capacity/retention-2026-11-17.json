@@ -1,0 +1,122 @@
+{
+  "generated_at": "2026-11-17T22:37:49.309Z",
+  "months_of_history": 36,
+  "profiles": {
+    "small": {
+      "products": 500,
+      "orders": 5000,
+      "mirror_bytes": 8257536,
+      "order_bytes": 4104192,
+      "other_bytes": 4153344,
+      "customers_bytes": 638976,
+      "line_level_bytes_by_window": {
+        "12": 1387765,
+        "24": 2775530,
+        "36": 4104192
+      },
+      "product_monthly": {
+        "even": {
+          "rows": 7500,
+          "bytes": 1130496
+        },
+        "pareto": {
+          "rows": 2987,
+          "bytes": 475136
+        },
+        "months": 36
+      },
+      "store_monthly": {
+        "rows": 36,
+        "bytes": 24576
+      }
+    },
+    "medium": {
+      "products": 5000,
+      "orders": 50000,
+      "mirror_bytes": 69165056,
+      "order_bytes": 37781504,
+      "other_bytes": 31383552,
+      "customers_bytes": 5824512,
+      "line_level_bytes_by_window": {
+        "12": 12769641,
+        "24": 25538418,
+        "36": 37781504
+      },
+      "product_monthly": {
+        "even": {
+          "rows": 64519,
+          "bytes": 9551872
+        },
+        "pareto": {
+          "rows": 30416,
+          "bytes": 4407296
+        },
+        "months": 36
+      },
+      "store_monthly": {
+        "rows": 36,
+        "bytes": 24576
+      }
+    },
+    "large": {
+      "products": 20000,
+      "orders": 200000,
+      "mirror_bytes": 272048128,
+      "order_bytes": 149757952,
+      "other_bytes": 122290176,
+      "customers_bytes": 23150592,
+      "line_level_bytes_by_window": {
+        "12": 50613269,
+        "24": 101226052,
+        "36": 149757952
+      },
+      "product_monthly": {
+        "even": {
+          "rows": 300000,
+          "bytes": 43286528
+        },
+        "pareto": {
+          "rows": 120725,
+          "bytes": 17596416
+        },
+        "months": 36
+      },
+      "store_monthly": {
+        "rows": 36,
+        "bytes": 24576
+      },
+      "validation_24_months": {
+        "estimated_orders_and_lines_bytes": 99171584,
+        "measured_orders_and_lines_bytes": 96673792
+      }
+    },
+    "xlarge": {
+      "products": 70000,
+      "orders": 500000,
+      "mirror_bytes": 768630784,
+      "order_bytes": 372490240,
+      "other_bytes": 396140544,
+      "customers_bytes": 57761792,
+      "line_level_bytes_by_window": {
+        "12": 125888544,
+        "24": 251776313,
+        "36": 372490240
+      },
+      "product_monthly": {
+        "even": {
+          "rows": 750000,
+          "bytes": 107626496
+        },
+        "pareto": {
+          "rows": 324851,
+          "bytes": 46612480
+        },
+        "months": 36
+      },
+      "store_monthly": {
+        "rows": 36,
+        "bytes": 24576
+      }
+    }
+  }
+}

@@ -212,7 +212,7 @@ These tables are empty until Phase 2 ingestion writes them.
 - **Where commerce data lives.** PostgreSQL is the primary store for all of it: catalog, inventory, orders, line items, customers, returns and metrics. Order history stays in Postgres.
 - **What R2 holds.** R2 is the object store for PDFs, reports, media, uploaded documents, bulk-operation JSONL, encrypted backups and encrypted archives. It is not a query store.
 - **Before Phase 2 writes any rows,** the storage-heavy structures are reviewed. The candidates are in `capacity-measurements.md`. Each saving is validated by measurement and against its readers before it is applied.
-- **Retention** is decided by task 11.
+- **Retention** is decided by task 11, evaluated in `retention-evaluation.md`. The recommendation is 24 months of order lines, with permanent monthly aggregates and customer facts. It awaits approval, and nothing is pruned before then.
 - **Columnar analytical storage** in R2 (Parquet or Iceberg) is a future option, with the revisit triggers set out in the ADR.
 
 ## Brief evidence (task 9, implemented; migration 0026)
