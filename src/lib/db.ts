@@ -386,16 +386,6 @@ export async function listStoresDueForSync(staleBefore: Date, limit: number) {
   return data;
 }
 
-/** Accounts connected at or before `createdBefore` (brief-nudge cron). */
-export async function listAccountsCreatedBefore(createdBefore: Date) {
-  const { data, error } = await supabaseAdmin
-    .from("user_integrations")
-    .select("clerk_user_id, created_at")
-    .lte("created_at", createdBefore.toISOString());
-  if (error || !data) throw new Error(error?.message ?? "Accounts are unavailable.");
-  return data;
-}
-
 /**
  * Execute dynamic select queries on user_integrations table safely.
  */

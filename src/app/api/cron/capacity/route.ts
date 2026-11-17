@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { captureBackgroundFailure, captureOperationalAlert } from "@/lib/observability/capture";
 import { safeEqual } from "@/lib/shopify-oauth";
 import { capacityLevel, quotaBytes } from "@/modules/capacity/policy";
-import { captureCapacitySnapshot } from "@/modules/capacity/repository";
+import { captureCapacitySnapshot, pruneOperationalRows } from "@/modules/capacity/repository";
 
 export const maxDuration = 60;
 export const runtime = "nodejs";
 
 /**
- * Daily capacity snapshot (Phase 1, task 10): records the database's size and
+ * Daily database housekeeping and capacity snapshot (Phase 1, task 10): prunes
+ * stale rate-limit windows and old webhook dedupe keys, then records the database's size and
  * its largest tables, and alerts in Sentry at 60% (warning) and 75% (error) of
  * the plan's quota (DATABASE_QUOTA_MB). Scheduled in vercel.json; requires
  * CRON_SECRET.
@@ -17,6 +18,15 @@ export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret || !safeEqual(request.headers.get("authorization") ?? "", `Bearer ${secret}`)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Housekeeping first, so the snapshot measures what is kept. A failed prune
+  // is reported but never stops the snapshot.
+  let pruned: Awaited<ReturnType<typeof pruneOperationalRows>> | null = null;
+  try {
+    pruned = await pruneOperationalRows();
+  } catch (error) {
+    captureBackgroundFailure("operational-prune", error);
   }
 
   let quota: number;
@@ -39,5 +49,5 @@ export async function GET(request: Request) {
       { database_bytes: snapshot.database_bytes, quota_bytes: quota, largest: snapshot.largest },
     );
   }
-  return NextResponse.json({ level, used_share: snapshot.used_share, database_bytes: snapshot.database_bytes, quota_bytes: quota });
+  return NextResponse.json({ level, used_share: snapshot.used_share, database_bytes: snapshot.database_bytes, quota_bytes: quota, pruned });
 }

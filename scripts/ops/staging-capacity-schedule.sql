@@ -8,3 +8,7 @@
 -- backup schedule, staging-backup-schedule.sql). Apply as the database owner;
 -- re-running replaces the job.
 select cron.schedule('staging-capacity-snapshot', '5 5 * * *', $$select public.capture_capacity_snapshot(524288000)$$);
+
+-- Daily housekeeping (migration 0028), just before the snapshot, as the
+-- production cron does it.
+select cron.schedule('staging-operational-prune', '0 5 * * *', $$select public.prune_operational_rows()$$);

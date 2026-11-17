@@ -17,6 +17,13 @@ export async function captureCapacitySnapshot(quotaBytes: number): Promise<Capac
   return data as CapacitySnapshot;
 }
 
+/** Daily housekeeping (migration 0028): stale rate-limit windows and old webhook dedupe keys. */
+export async function pruneOperationalRows(): Promise<{ rate_limits: number; webhook_deliveries: number }> {
+  const { data, error } = await supabaseAdmin.rpc("prune_operational_rows");
+  if (error || !data) throw new Error(`Housekeeping failed: ${error?.message ?? "no result"}`);
+  return data as { rate_limits: number; webhook_deliveries: number };
+}
+
 export async function databaseSizeBytes(): Promise<number> {
   const { data, error } = await supabaseAdmin.rpc("database_size_bytes");
   if (error || data === null || data === undefined) throw new Error(`Database size unavailable: ${error?.message ?? "no result"}`);

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ capture: vi.fn(), failure: vi.fn(), alert: vi.fn() }));
-vi.mock("@/modules/capacity/repository", () => ({ captureCapacitySnapshot: h.capture }));
+const h = vi.hoisted(() => ({ capture: vi.fn(), prune: vi.fn(), failure: vi.fn(), alert: vi.fn() }));
+vi.mock("@/modules/capacity/repository", () => ({ captureCapacitySnapshot: h.capture, pruneOperationalRows: h.prune }));
 vi.mock("@/lib/observability/capture", () => ({ captureBackgroundFailure: h.failure, captureOperationalAlert: h.alert }));
 
 import { GET } from "./route";
@@ -43,6 +43,18 @@ describe("GET /api/cron/capacity", () => {
     h.capture.mockResolvedValue(snapshotAt(400));
     expect(await (await call()).json()).toMatchObject({ level: "critical" });
     expect(h.alert).toHaveBeenLastCalledWith("capacity-snapshot", "Database at 80% of its 500 MB quota", "error", expect.anything());
+  });
+
+  it("prunes stale operational rows first, and still takes the snapshot when pruning fails", async () => {
+    h.prune.mockResolvedValue({ rate_limits: 12, webhook_deliveries: 3 });
+    h.capture.mockResolvedValue(snapshotAt(100));
+    expect(await (await call()).json()).toMatchObject({ pruned: { rate_limits: 12, webhook_deliveries: 3 } });
+    expect(h.prune.mock.invocationCallOrder[0]).toBeLessThan(h.capture.mock.invocationCallOrder[0]);
+
+    h.prune.mockRejectedValue(new Error("prune failed"));
+    const response = await call();
+    expect(response.status).toBe(200);
+    expect(h.failure).toHaveBeenCalledWith("operational-prune", expect.any(Error));
   });
 
   it("reports a failed snapshot, and a misconfigured quota, as failures", async () => {

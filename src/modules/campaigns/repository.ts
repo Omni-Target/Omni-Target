@@ -29,22 +29,12 @@ export async function getCampaign(ctx: TenantContext, campaignId: string) {
   return data;
 }
 
-/**
- * Whether the creator has saved a brief in any workspace. A system read for
- * the brief-nudge cron only; user requests always go through a TenantContext.
- */
-export async function creatorHasAnyCampaign(userId: string): Promise<boolean> {
-  const { data, error } = await supabaseAdmin.from("campaigns").select("id").eq("clerk_user_id", userId).limit(1);
-  if (error) throw new Error("Could not check the creator's briefs.");
-  return (data ?? []).length > 0;
-}
-
-/** Launched campaigns for the dashboard, without the large brief blob. */
+/** Launched campaigns for the dashboard, newest first, at most 100 (DATA-07), without the large brief blob. */
 export async function listActiveCampaigns(ctx: TenantContext) {
   const { data, error } = await supabaseAdmin.from("campaigns")
     .select("id, brand_name, product_name, product_description, product_price, media_url, campaign_goal, headline, primary_text, description, cta, copywriter_note, status, created_at, launched_at")
     .eq("workspace_id", ctx.workspaceId).eq("clerk_user_id", ctx.userId)
-    .in("status", ["active", "paused", "stopped"]).order("launched_at", { ascending: false });
+    .in("status", ["active", "paused", "stopped"]).order("launched_at", { ascending: false }).limit(100);
   if (error) throw new Error("Could not load campaigns.");
   return data ?? [];
 }

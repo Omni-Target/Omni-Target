@@ -1,5 +1,5 @@
 import { Resend } from 'resend';
-import { emailSentSince, recordEmailSent } from '@/modules/notifications/email-log';
+import { claimEmailSend, releaseEmailClaim } from '@/modules/notifications/email-log';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
@@ -29,13 +29,18 @@ export async function sendEmail({
     return { success: false, error: 'RESEND_API_KEY is not configured' };
   }
 
-  // Prevent duplicate sends if userId and templateName are provided
+  // One send per user and template every 7 days, even when runs overlap: the
+  // send is claimed first (migration 0028) and the claim given back on failure.
+  let claim: string | null = null;
   if (userId && templateName) {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    
-    if (await emailSentSince(userId, templateName, sevenDaysAgo)) {
-      console.log(`Skipping email: ${templateName} already sent to ${userId} within 7 days`);
+    try {
+      claim = await claimEmailSend(userId, templateName, 7);
+    } catch (error) {
+      console.error('Email not sent: the send log is unavailable.', error instanceof Error ? error.message : 'unknown');
+      return { success: false, error: 'email_log_unavailable' };
+    }
+    if (!claim) {
+      console.log(`Skipping email: ${templateName} already sent within 7 days`);
       return { success: true, skipped: true };
     }
   }
@@ -50,16 +55,14 @@ export async function sendEmail({
 
     if (error) {
       console.error('Resend API error:', error);
+      if (claim) await releaseEmailClaim(claim);
       return { success: false, error };
-    }
-
-    if (userId && templateName) {
-      await recordEmailSent(userId, templateName);
     }
 
     return { success: true, data };
   } catch (error) {
     console.error('Unexpected error sending email:', error);
+    if (claim) await releaseEmailClaim(claim);
     return { success: false, error };
   }
 }

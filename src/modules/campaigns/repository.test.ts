@@ -5,12 +5,12 @@ vi.mock("@/platform/supabase", () => ({ supabaseAdmin: { from: m.from, rpc: m.rp
 vi.mock("@/modules/workspaces/current", () => ({ currentWorkspaceFor: m.currentWorkspaceFor }));
 
 import {
-  creatorHasAnyCampaign,
   finalizeBriefVersion,
   getBriefVersions,
   getCampaign,
   getGenerationReceipt,
   getGenerationReceiptById,
+  listActiveCampaigns,
   listBriefCampaigns,
   saveRecoveredCreativeHooks,
   tenantFor,
@@ -63,13 +63,12 @@ describe("tenant guard (Phase 1 task 7)", () => {
     guarded(counts);
   });
 
-  it("lets the nudge cron check a creator's briefs across workspaces, failing loudly", async () => {
-    const found = query({ data: [{ id: "c-1" }], error: null });
-    m.from.mockReturnValueOnce(found).mockReturnValueOnce(query({ data: [], error: null })).mockReturnValueOnce(query({ data: null, error: { message: "down" } }));
-    await expect(creatorHasAnyCampaign("user-1")).resolves.toBe(true);
-    expect(found.eqs).toEqual([["clerk_user_id", "user-1"]]);
-    await expect(creatorHasAnyCampaign("user-1")).resolves.toBe(false);
-    await expect(creatorHasAnyCampaign("user-1")).rejects.toThrow();
+  it("bounds the dashboard's launched campaigns to the newest 100 of this creator in this workspace (DATA-07)", async () => {
+    const active = query({ data: [{ id: "c-1" }], error: null });
+    m.from.mockReturnValueOnce(active);
+    await expect(listActiveCampaigns(ctx)).resolves.toEqual([{ id: "c-1" }]);
+    guarded(active);
+    expect(active.limit).toHaveBeenCalledWith(100);
   });
 
   it("ignores a generation receipt from another of the user's workspaces", async () => {
