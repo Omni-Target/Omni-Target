@@ -398,7 +398,10 @@ export function buildBriefPdfPayload({
     } as BriefPDFParams["timing"],
     warnings,
     pre_launch_checklist: {
-      out_of_stock_count: storeInsights?.products?.filter((p) => p.in_stock === false).length ?? 0,
+      out_of_stock_count:
+        storeInsights?.catalog?.out_of_stock_count ??
+        storeInsights?.products?.filter((p) => p.in_stock === false).length ??
+        0,
       warnings,
     },
     decisionEvidence: {

@@ -9,6 +9,7 @@ import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { queryUserIntegrationSelect, logApiUsage, isBriefRegenerationCommitReady, commitBriefGeneration } from "@/lib/db";
 import { getBriefVersions, getCampaign, getGenerationReceipt } from "@/modules/campaigns/repository";
+import { boundBriefEvidence } from "@/modules/briefs/evidence";
 import sharp from "sharp";
 import {
   CreativeHookGenerationError,
@@ -917,7 +918,8 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
       brandName, productName, productPrice: parsedPrice, goal: campaignGoal,
       generatedCopy: parsedResponse, selectedCta: parsedResponse.cta,
       aiInsights: recommendations,
-      storeInsights: integration.store_snapshot,
+      // Bounded evidence (task 9), never the whole store snapshot.
+      storeInsights: boundBriefEvidence(integration.store_snapshot, productName),
       gatewayInsight: buildGenerationContext(integration.store_snapshot, productName).gatewayInsight,
       isNewLaunch: !!isNewLaunch,
       selectedDuration: 14, selectedIntlDuration: 14, selectedStrategyIndex: 1, selectedIntlStrategyIndex: 1,

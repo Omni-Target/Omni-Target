@@ -103,6 +103,8 @@ export interface StoreProduct {
 }
 
 export interface StoreInsights {
+  /** Saved briefs only (bounded evidence, task 9): the store-wide count, kept instead of the catalog. */
+  catalog?: { out_of_stock_count?: number };
   data_quality?: import("@/lib/store-data").StoreData["data_quality"];
   prespend?: import("@/lib/store-data").StoreData["prespend"];
   store?: {
