@@ -147,6 +147,15 @@ Campaigns stay creator-only. Queries require both the workspace and the creator.
 
 The workspace comes from server-side context: the session user plus their selected workspace, checked for ownership and status. A browser-supplied workspace, shop or user ID is never trusted.
 
+### Data access (task 7, implemented)
+
+- **Who may use the client.** Only repositories use the service-role client: `src/modules/**`, `src/platform/**`, and `src/lib/db.ts`. `lib/db.ts` remains the legacy `user_integrations` repository until Phase 2. `platform/boundaries.test.ts` fails the build if any other file imports it.
+- **Campaign and brief access.** It goes through `modules/campaigns/repository`.
+  - Each function takes a `TenantContext`, the session user plus the workspace that `tenantFor(userId)` resolves on the server. Each query filters on both `workspace_id` and `clerk_user_id`.
+  - A generation receipt from another of the user's workspaces is not returned.
+  - Finalising a brief checks the campaign belongs to the tenant before calling the database function.
+- **System reads.** Cron jobs use explicitly named functions, such as `creatorHasAnyCampaign` for the brief nudge. These are never called from a user request.
+
 ## Legacy migration from `user_integrations` (migrations 0022 and 0023, implemented)
 
 Run with `scripts/ops/legacy-migration.mjs`. The default is a dry run inside a rolled-back transaction; `--apply` commits each account in its own transaction. `legacy_account_map` records each migrated row. A legacy claim on a shop already connected through the new model is marked `unresolved`: it can neither bind nor block that shop. Rows written by the current code get their `workspace_id` from insert triggers (0023): a version and a receipt from their campaign, a Stripe or Paystack payment from its purchase intent, a CAPI event from its shop's binding.
