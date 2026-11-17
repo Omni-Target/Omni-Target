@@ -162,6 +162,38 @@ describe("legacy account migration", () => {
   });
 });
 
+describe("a migrated legacy owner reconnecting their shop (acceptance)", () => {
+  it("binds the shop into the legacy workspace, with its credits and history, and refuses anyone else first", async () => {
+    const a = await legacyAccount();
+    const { workspace_id: legacyWs } = await migrate(a.row);
+    const shopifyId = String(Math.floor(Math.random() * 9e12) + 1e12);
+
+    // Another account cannot take the claimed shop before its legacy owner reconnects.
+    const intruder = (await one("select public.bind_shop_for_install($1, $2, $3, null, 'Shop') as r", [shopifyId, a.shop, `user_other_${tag()}`])).r;
+    expect(intruder.outcome).toBe("rejected_legacy_claim");
+
+    // The legacy owner's first connection lands in the legacy workspace, not a new one.
+    const bound = (await one("select public.bind_shop_for_install($1, $2, $3, null, 'Shop') as r", [shopifyId, a.shop, a.user])).r;
+    expect(bound).toMatchObject({ outcome: "bound_existing_workspace", workspace_id: legacyWs });
+    expect((await one("select count(*)::int n from public.workspaces where owner_clerk_user_id = $1", [a.user])).n).toBe(1);
+    expect(await one("select status, shop_id is not null as has_shop from public.legacy_shop_claims where legacy_row_id = $1", [a.row]))
+      .toEqual({ status: "confirmed", has_shop: true });
+
+    // Credits and history are there; the legacy free credit is not granted twice.
+    expect((await one("select public.workspace_credit_status($1, $2) as r", [legacyWs, a.user])).r).toMatchObject({ balance: 5 });
+    expect((await one("select count(*)::int n from public.campaigns where workspace_id = $1 and id = $2", [legacyWs, a.campaign])).n).toBe(1);
+    expect((await one("select public.grant_workspace_free_credit($1, $2) as r", [legacyWs, a.user])).r.outcome).toBe("legacy_free_credit_used");
+
+    // The migrated balance pays for a new brief through the ledger.
+    const brief = (await one(
+      `select public.commit_brief_generation($1, $2, $3, 'h', null, '{"product_name":"Lamp"}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb) as r`,
+      [legacyWs, a.user, randomUUID()])).r;
+    expect(brief.credits_balance).toBe(4);
+    expect((await q("select entry_type from public.credit_ledger where workspace_id = $1 order by id", [legacyWs])).map((r) => r.entry_type))
+      .toEqual(["opening_balance", "consumption"]);
+  });
+});
+
 describe("workspace columns for rows written by the current code (0023)", () => {
   it("fills the workspace of versions, receipts, intent payments and CAPI events from what they belong to", async () => {
     const owner = `user_cur_${tag()}`;
