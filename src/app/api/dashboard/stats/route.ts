@@ -1,4 +1,4 @@
-import { getUserCampaigns } from "@/lib/db";
+import { listActiveCampaigns, tenantFor } from "@/modules/campaigns/repository";
 import { getMetaAccessForUser } from "@/modules/credentials/meta";
 import { getUsdRate } from "@/lib/exchange-rates";
 import { fetchWithRetry } from "@/lib/http";
@@ -79,7 +79,7 @@ export async function GET(request: Request) {
   }
   // Independent reads — run them together rather than waterfalling.
   const [activeCampaigns, ngnRate] = await Promise.all([
-    getUserCampaigns(userId),
+    tenantFor(userId).then((tenant) => (tenant ? listActiveCampaigns(tenant) : [])),
     getUsdRate("NGN"),
   ]);
 

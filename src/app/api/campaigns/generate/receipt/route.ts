@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/require-user";
-import { getGenerationReceiptById } from "@/lib/db";
+import { getGenerationReceiptById, tenantFor } from "@/modules/campaigns/repository";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const NO_STORE = { "Cache-Control": "private, no-store" };
@@ -15,7 +15,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const receipt = await getGenerationReceiptById(authResult.userId, requestId);
+    const tenant = await tenantFor(authResult.userId);
+    const receipt = tenant ? await getGenerationReceiptById(tenant, requestId) : null;
     if (!receipt) {
       return NextResponse.json({ status: "pending" }, { status: 202, headers: NO_STORE });
     }

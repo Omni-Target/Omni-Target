@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { getBriefVersions, getCampaignById, queryUserIntegrationSelect, saveRecoveredCreativeHooks } from "@/lib/db";
+import { queryUserIntegrationSelect } from "@/lib/db";
+import { getBriefVersions, getCampaign, saveRecoveredCreativeHooks, tenantFor } from "@/modules/campaigns/repository";
 import { generateCreativeHooksOnly } from "@/lib/insights-engine";
 import type { StoreData, StoreProduct } from "@/lib/store-data";
 
@@ -52,12 +53,14 @@ export async function POST(request: Request) {
     if (!body.campaignId || !body.versionId) {
       return NextResponse.json({ error: "Campaign and version are required." }, { status: 400 });
     }
+    let tenant: Awaited<ReturnType<typeof tenantFor>> = null;
     let savedProductDescription: string | null = null;
     let savedProductPrice: string | number | null = null;
     if (body.campaignId && body.versionId) {
-      const campaign = await getCampaignById(userId, body.campaignId);
-      const versions = campaign ? await getBriefVersions(userId, body.campaignId) : [];
-      if (!campaign || !versions.some((version) => version.id === body.versionId)) {
+      tenant = await tenantFor(userId);
+      const campaign = tenant ? await getCampaign(tenant, body.campaignId) : null;
+      const versions = tenant && campaign ? await getBriefVersions(tenant, body.campaignId) : [];
+      if (!tenant || !campaign || !versions.some((version) => version.id === body.versionId)) {
         return NextResponse.json({ error: "Brief version not found." }, { status: 404 });
       }
       if (campaign.product_name?.trim().toLowerCase() !== productName.trim().toLowerCase()) {
@@ -127,8 +130,8 @@ export async function POST(request: Request) {
     const creativeHooks = await generateCreativeHooksOnly(
       storeSnapshot, targetProductOverride, cleanAngleUsed, userId
     );
-    if (body.campaignId && body.versionId) {
-      await saveRecoveredCreativeHooks(userId, body.campaignId, body.versionId, creativeHooks);
+    if (tenant && body.campaignId && body.versionId) {
+      await saveRecoveredCreativeHooks(tenant, body.campaignId, body.versionId, creativeHooks);
     }
 
     return NextResponse.json({

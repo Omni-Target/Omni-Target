@@ -7,7 +7,8 @@ import { NextResponse } from "next/server";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { queryUserIntegrationSelect, logApiUsage, getBriefVersions, getCampaignById, getGenerationReceipt, isBriefRegenerationCommitReady, commitBriefGeneration } from "@/lib/db";
+import { queryUserIntegrationSelect, logApiUsage, isBriefRegenerationCommitReady, commitBriefGeneration } from "@/lib/db";
+import { getBriefVersions, getCampaign, getGenerationReceipt } from "@/modules/campaigns/repository";
 import sharp from "sharp";
 import {
   CreativeHookGenerationError,
@@ -255,6 +256,8 @@ export async function POST(request: Request) {
     );
   }
   const workspaceId = credits.workspaceId;
+  // Campaigns stay creator-only inside the workspace the user is working in.
+  const tenant = { userId: userId!, workspaceId };
   const hasUnlimited = credits.isUnlimited;
   const hasCredits = credits.balance > 0;
 
@@ -268,13 +271,13 @@ export async function POST(request: Request) {
     const requestInput = { ...body };
     delete requestInput.requestId;
     const requestHash = createHash("sha256").update(JSON.stringify(requestInput)).digest("hex");
-    const receipt = await getGenerationReceipt(userId!, requestId, requestHash);
+    const receipt = await getGenerationReceipt(tenant, requestId, requestHash);
     if (receipt) return NextResponse.json(receipt);
     const isRegeneration = body.isRegeneration === true;
     let reusableRecommendations: MetaRecommendations | null = null;
     if (isRegeneration) {
-      const campaign = body.campaignId ? await getCampaignById(userId!, body.campaignId) : null;
-      const versions = campaign ? await getBriefVersions(userId!, campaign.id) : [];
+      const campaign = body.campaignId ? await getCampaign(tenant, body.campaignId) : null;
+      const versions = campaign ? await getBriefVersions(tenant, campaign.id) : [];
       if (!campaign || !versions.length) {
         return NextResponse.json({ error: "Original brief session not found. Please create a brief first." }, { status: 404 });
       }

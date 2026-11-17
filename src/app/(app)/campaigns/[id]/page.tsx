@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
-import { getCampaignById, getBriefVersions } from "@/lib/db";
+import { getBriefVersions, getCampaign, tenantFor } from "@/modules/campaigns/repository";
 import { PageContainer } from "@/components/layout/page-container";
 import { BriefView } from "./brief-view";
 
@@ -21,12 +21,14 @@ export default async function CampaignBriefPage({
   const { userId } = await auth();
   if (!userId) notFound();
 
-  const campaign = await getCampaignById(userId, id);
+  const tenant = await tenantFor(userId);
+  if (!tenant) notFound();
+  const campaign = await getCampaign(tenant, id);
   if (!campaign) notFound();
 
   // The retained regeneration attempts, so the user can review the alternatives
   // and switch which one is their selected brief.
-  const versions = await getBriefVersions(userId, id);
+  const versions = await getBriefVersions(tenant, id);
 
   return (
     <PageContainer width="wide" className="pb-24 lg:pb-12">

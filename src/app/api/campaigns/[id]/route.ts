@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/require-user";
-import { getCampaignById, getBriefVersions, finalizeBriefVersion } from "@/lib/db";
+import { finalizeBriefVersion, getBriefVersions, getCampaign, tenantFor } from "@/modules/campaigns/repository";
 import { computeBudgetPlan, normalizeMaxTotalBudget, savedMaxTestBudget } from "@/lib/budget-plan";
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -8,11 +8,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   if (!authResult.ok) return authResult.response;
   const { userId } = authResult;
   const { id } = await params;
-  const campaign = await getCampaignById(userId, id);
-  if (!campaign) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const tenant = await tenantFor(userId);
+  const campaign = tenant ? await getCampaign(tenant, id) : null;
+  if (!tenant || !campaign) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== "object") return NextResponse.json({ error: "Invalid request" }, { status: 400 });
-  const versions = await getBriefVersions(userId, id);
+  const versions = await getBriefVersions(tenant, id);
   const version = versions.find((v) => v.id === body.versionId) ??
     (!body.versionId ? versions.find((v) => v.is_selected) : undefined);
   if (!version) return NextResponse.json({ error: "Version not found" }, { status: 404 });
@@ -57,7 +58,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     delete context.maxTestBudget;
   }
   try {
-    await finalizeBriefVersion(userId, id, version.id, context, body.copy, body.status);
+    await finalizeBriefVersion(tenant, id, version.id, context, body.copy, body.status);
     return NextResponse.json({ ok: true, id });
   } catch (error) {
     console.error("Brief save failed", error);

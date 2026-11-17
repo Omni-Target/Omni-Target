@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({
   requireUser: vi.fn(),
   enforceRateLimit: vi.fn(),
-  getCampaignById: vi.fn(),
+  tenantFor: vi.fn(),
+  getCampaign: vi.fn(),
   getBriefVersions: vi.fn(),
   queryUserIntegrationSelect: vi.fn(),
   saveRecoveredCreativeHooks: vi.fn(),
@@ -15,11 +16,14 @@ const m = vi.hoisted(() => ({
 vi.mock("@/lib/api/require-user", () => ({ requireUser: m.requireUser }));
 vi.mock("@/lib/api/rate-limit", () => ({ enforceRateLimit: m.enforceRateLimit }));
 vi.mock("@/lib/db", () => ({
-  getCampaignById: m.getCampaignById,
-  getBriefVersions: m.getBriefVersions,
   queryUserIntegrationSelect: m.queryUserIntegrationSelect,
-  saveRecoveredCreativeHooks: m.saveRecoveredCreativeHooks,
   getUserIntegration: m.getUserIntegration,
+}));
+vi.mock("@/modules/campaigns/repository", () => ({
+  tenantFor: m.tenantFor,
+  getCampaign: m.getCampaign,
+  getBriefVersions: m.getBriefVersions,
+  saveRecoveredCreativeHooks: m.saveRecoveredCreativeHooks,
 }));
 vi.mock("@/lib/insights-engine", () => ({
   generateCreativeHooksOnly: m.generateCreativeHooksOnly,
@@ -78,7 +82,8 @@ describe("hook recovery requires an owned brief (SEC-08)", () => {
     );
     expect(res.status).toBe(400);
     expect(m.generateCreativeHooksOnly).not.toHaveBeenCalled();
-    expect(m.getCampaignById).not.toHaveBeenCalled();
+    expect(m.tenantFor).not.toHaveBeenCalled();
+    expect(m.getCampaign).not.toHaveBeenCalled();
   });
 });
 

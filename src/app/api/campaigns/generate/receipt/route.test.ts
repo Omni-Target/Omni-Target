@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { requireUser, getGenerationReceiptById } = vi.hoisted(() => ({
+const { requireUser, tenantFor, getGenerationReceiptById } = vi.hoisted(() => ({
   requireUser: vi.fn(),
+  tenantFor: vi.fn(),
   getGenerationReceiptById: vi.fn(),
 }));
 vi.mock("@/lib/api/require-user", () => ({ requireUser }));
-vi.mock("@/lib/db", () => ({ getGenerationReceiptById }));
+vi.mock("@/modules/campaigns/repository", () => ({ tenantFor, getGenerationReceiptById }));
 
 import { GET } from "./route";
 
@@ -15,6 +16,7 @@ const request = () => new Request(`http://localhost/api/campaigns/generate/recei
 describe("generation receipt recovery", () => {
   beforeEach(() => {
     requireUser.mockReset().mockResolvedValue({ ok: true, userId: "user-1" });
+    tenantFor.mockReset().mockResolvedValue({ userId: "user-1", workspaceId: "ws-1" });
     getGenerationReceiptById.mockReset();
   });
 
@@ -23,7 +25,7 @@ describe("generation receipt recovery", () => {
     const response = await GET(request());
     expect(response.status).toBe(202);
     expect(response.headers.get("Cache-Control")).toContain("no-store");
-    expect(getGenerationReceiptById).toHaveBeenCalledWith("user-1", requestId);
+    expect(getGenerationReceiptById).toHaveBeenCalledWith({ userId: "user-1", workspaceId: "ws-1" }, requestId);
   });
 
   it("returns the saved result for its owner", async () => {

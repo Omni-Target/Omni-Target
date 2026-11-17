@@ -433,29 +433,9 @@ async function clearShopCredentials(shop: string, clearSnapshot: boolean): Promi
 /** Removes one account's data from every table (migration 0016). */
 export async function deleteUserData(userId: string): Promise<void> {
   const { error } = await supabaseAdmin.rpc("delete_user_data", { p_user_id: userId });
-  if (!error) return;
-  if (!isMissingRpc(error)) throw error;
-
-  console.error("[delete_user_data] missing — apply migration 0016.");
-  await deleteUserCampaigns(userId);
-  await deleteUserCapiEvents(userId);
-  await deleteUserIntegration(userId);
+  if (error) throw error;
 }
 
-/**
- * Delete all campaigns for a user.
- */
-export async function deleteUserCampaigns(userId: string) {
-  const { error } = await supabaseAdmin
-    .from("campaigns")
-    .delete()
-    .eq("clerk_user_id", userId);
-
-  if (error) {
-    console.error("Error in deleteUserCampaigns:", error);
-    throw error;
-  }
-}
 
 /**
  * Delete all CAPI events for a user.
@@ -472,27 +452,6 @@ export async function deleteUserCapiEvents(userId: string) {
   }
 }
 
-/**
- * Get active campaigns for a user.
- */
-export async function getUserCampaigns(userId: string) {
-  const { data, error } = await supabaseAdmin
-    .from("campaigns")
-    // Project the display columns and skip the large `brief_data` JSONB — an
-    // active-campaigns list never needs the full brief blob.
-    .select(
-      "id, brand_name, product_name, product_description, product_price, media_url, campaign_goal, headline, primary_text, description, cta, copywriter_note, status, created_at, launched_at",
-    )
-    .eq("clerk_user_id", userId)
-    .in("status", ["active", "paused", "stopped"])
-    .order("launched_at", { ascending: false });
-
-  if (error) {
-    console.error("Error in getUserCampaigns:", error);
-    return [];
-  }
-  return data || [];
-}
 
 // --- Brief persistence & versioning (perf/reliability initiative) -----------
 // A `campaigns` row is one brief session; `campaign_brief_versions` holds each
@@ -522,190 +481,12 @@ export interface CampaignInsert extends BriefCopyFields {
   brief_data?: Record<string, unknown> | null;
 }
 
-/**
- * Create a campaign (brief session) row; returns its id, or null on failure.
- */
-export async function insertCampaign(
-  userId: string,
-  data: CampaignInsert,
-): Promise<string | null> {
-  const { data: row, error } = await supabaseAdmin
-    .from("campaigns")
-    .insert({ clerk_user_id: userId, status: "draft", ...data })
-    .select("id")
-    .single();
 
-  if (error) {
-    console.error("Error in insertCampaign:", error);
-    return null;
-  }
-  return row?.id ?? null;
-}
 
-/**
- * Append a brief generation attempt (version) to a campaign; returns its id.
- */
-export async function insertBriefVersion(
-  userId: string,
-  campaignId: string,
-  data: BriefCopyFields & { attempt_number: number; is_selected?: boolean },
-): Promise<string | null> {
-  const { data: row, error } = await supabaseAdmin
-    .from("campaign_brief_versions")
-    .insert({
-      campaign_id: campaignId,
-      clerk_user_id: userId,
-      attempt_number: data.attempt_number,
-      is_selected: data.is_selected ?? false,
-      headline: data.headline ?? null,
-      primary_text: data.primary_text ?? null,
-      description: data.description ?? null,
-      cta: data.cta ?? null,
-      copywriter_note: data.copywriter_note ?? null,
-    })
-    .select("id")
-    .single();
 
-  if (error) {
-    console.error("Error in insertBriefVersion:", error);
-    return null;
-  }
-  return row?.id ?? null;
-}
 
-/**
- * All brief attempts for a campaign, oldest first. Authz-scoped to the owner.
- */
-export async function getBriefVersions(userId: string, campaignId: string) {
-  const { data, error } = await supabaseAdmin
-    .from("campaign_brief_versions")
-    .select("*")
-    .eq("clerk_user_id", userId)
-    .eq("campaign_id", campaignId)
-    .order("attempt_number", { ascending: true });
 
-  if (error) {
-    console.error("Error in getBriefVersions:", error);
-    return [];
-  }
-  return data || [];
-}
 
-/**
- * Fetch a single campaign by id, scoped to its owner (authz). Null if not found.
- */
-export async function getCampaignById(userId: string, campaignId: string) {
-  const { data, error } = await supabaseAdmin
-    .from("campaigns")
-    .select("*")
-    .eq("clerk_user_id", userId)
-    .eq("id", campaignId)
-    .maybeSingle();
-
-  if (error) {
-    console.error("Error in getCampaignById:", error);
-    return null;
-  }
-  return data;
-}
-
-/**
- * Patch a campaign owned by the user. Returns true on success.
- */
-export async function updateCampaign(
-  userId: string,
-  campaignId: string,
-  patch: Record<string, unknown>,
-): Promise<boolean> {
-  const { error } = await supabaseAdmin
-    .from("campaigns")
-    .update({ ...patch, updated_at: new Date().toISOString() })
-    .eq("clerk_user_id", userId)
-    .eq("id", campaignId);
-
-  if (error) {
-    console.error("Error in updateCampaign:", error);
-    return false;
-  }
-  return true;
-}
-
-/**
- * Mark one version as the selected variation and clear the others. Both writes
- * are owner-scoped, so exactly one version per campaign ends up selected.
- */
-export async function selectBriefVersion(
-  userId: string,
-  campaignId: string,
-  versionId: string,
-): Promise<boolean> {
-  const clear = await supabaseAdmin
-    .from("campaign_brief_versions")
-    .update({ is_selected: false })
-    .eq("clerk_user_id", userId)
-    .eq("campaign_id", campaignId);
-
-  if (clear.error) {
-    console.error("Error clearing brief selection:", clear.error);
-    return false;
-  }
-
-  const set = await supabaseAdmin
-    .from("campaign_brief_versions")
-    .update({ is_selected: true })
-    .eq("clerk_user_id", userId)
-    .eq("campaign_id", campaignId)
-    .eq("id", versionId);
-
-  if (set.error) {
-    console.error("Error setting brief selection:", set.error);
-    return false;
-  }
-  return true;
-}
-
-/**
- * List a user's brief campaigns (history), newest first, with projected columns
- * (no large JSONB). Feeds the dashboard history panel and /campaigns list.
- */
-export async function listUserBriefCampaigns(userId: string, limit = 100) {
-  const { data, error } = await supabaseAdmin
-    .from("campaigns")
-    .select(
-      "id, brand_name, product_name, product_description, product_price, media_url, headline, cta, status, created_at",
-    )
-    .eq("clerk_user_id", userId)
-    // Generation writes brief_data in the same transaction as the credit debit,
-    // so a saved draft remains discoverable if the browser loses the response.
-    .not("brief_data", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(limit);
-
-  if (error) {
-    console.error("Error in listUserBriefCampaigns:", error);
-    throw new Error("Could not load saved briefs.");
-  }
-  const rows = data || [];
-  if (rows.length === 0) return rows;
-
-  // Attach the number of generation attempts per campaign (one extra query,
-  // counted in memory — cheap at per-user volumes).
-  const { data: versionRows, error: vErr } = await supabaseAdmin
-    .from("campaign_brief_versions")
-    .select("campaign_id")
-    .eq("clerk_user_id", userId);
-
-  if (vErr) {
-    console.error("Error counting brief versions:", vErr);
-    return rows.map((r) => ({ ...r, variation_count: 1 }));
-  }
-
-  const counts = new Map<string, number>();
-  for (const v of versionRows || []) {
-    counts.set(v.campaign_id, (counts.get(v.campaign_id) ?? 0) + 1);
-  }
-  return rows.map((r) => ({ ...r, variation_count: counts.get(r.id) ?? 0 }));
-}
 
 /** Record every billed token category, including prompt-cache reads and writes. */
 export async function logApiUsage(
@@ -739,33 +520,7 @@ export async function logApiUsage(
   }
 }
 
-/** Read an existing generation receipt before repeating expensive model calls. */
-export async function getGenerationReceipt(userId: string, requestId: string, requestHash: string) {
-  const { data, error } = await supabaseAdmin.from("brief_generation_receipts")
-    .select("request_hash,response").eq("clerk_user_id", userId).eq("request_id", requestId).maybeSingle();
-  if (error) {
-    console.error("Could not verify prior generation request:", error.message, error.code);
-    throw new Error("Could not verify prior generation request.");
-  }
-  if (data && data.request_hash !== requestHash) throw new Error("idempotency_conflict");
-  return data?.response ?? null;
-}
 
-/** Read a completed request after the browser lost its generation response. */
-export async function getGenerationReceiptById(userId: string, requestId: string): Promise<Record<string, unknown> | null> {
-  const { data, error } = await supabaseAdmin.from("brief_generation_receipts")
-    .select("response")
-    .eq("clerk_user_id", userId)
-    .eq("request_id", requestId)
-    .maybeSingle();
-  if (error) {
-    console.error("Could not check generation receipt:", error.message, error.code);
-    throw new Error("Could not check whether the brief was saved.");
-  }
-  return data?.response && typeof data.response === "object" && !Array.isArray(data.response)
-    ? data.response as Record<string, unknown>
-    : null;
-}
 
 /** Stop regenerations before model calls when the atomic save fix is not deployed. */
 export async function isBriefRegenerationCommitReady(): Promise<boolean> {
@@ -815,67 +570,4 @@ export async function commitBriefGeneration(params: {
   throw new Error("Could not confirm the brief was saved. Please retry.");
 }
 
-export async function finalizeBriefVersion(userId: string, campaignId: string, versionId: string,
-  context: unknown, copy: unknown, status?: string) {
-  const { error } = await supabaseAdmin.rpc("finalize_brief_version", {
-    p_user_id: userId, p_campaign_id: campaignId, p_version_id: versionId,
-    p_context: context ?? {}, p_copy: copy ?? {}, p_status: status ?? null,
-  });
-  if (!error) return;
 
-  if (error.code === "PGRST202" || error.code === "42883") {
-    console.warn("RPC finalize_brief_version not found. Using direct Supabase update fallback.");
-    try {
-      await supabaseAdmin.from("campaign_brief_versions")
-        .update({ is_selected: false })
-        .eq("campaign_id", campaignId)
-        .eq("clerk_user_id", userId);
-      await supabaseAdmin.from("campaign_brief_versions")
-        .update({ is_selected: true })
-        .eq("id", versionId)
-        .eq("clerk_user_id", userId);
-    } catch {}
-    await supabaseAdmin.from("campaigns")
-      .update({
-        brief_data: context as Record<string, unknown>,
-        status: status === "complete" ? "complete" : undefined,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", campaignId)
-      .eq("clerk_user_id", userId);
-    return;
-  }
-
-  throw new Error(error.message);
-}
-
-/** Attach a later, verified hook result without rewriting immutable generation evidence. */
-export async function saveRecoveredCreativeHooks(
-  userId: string,
-  campaignId: string,
-  versionId: string,
-  hooks: import("./brief-pdf-types").CreativeHook[],
-) {
-  const { data: version, error: readError } = await supabaseAdmin
-    .from("campaign_brief_versions")
-    .select("brief_data")
-    .eq("id", versionId)
-    .eq("campaign_id", campaignId)
-    .eq("clerk_user_id", userId)
-    .single();
-  if (readError || !version) throw new Error("Brief version not found.");
-
-  const existing = version.brief_data && typeof version.brief_data === "object" &&
-    !Array.isArray(version.brief_data)
-    ? version.brief_data as Record<string, unknown>
-    : {};
-  const { data: updated, error: writeError } = await supabaseAdmin
-    .from("campaign_brief_versions")
-    .update({ brief_data: { ...existing, recovered_creative_hooks: hooks } })
-    .eq("id", versionId)
-    .eq("campaign_id", campaignId)
-    .eq("clerk_user_id", userId)
-    .select("id")
-    .single();
-  if (writeError || !updated) throw new Error("Recovered hooks could not be saved.");
-}

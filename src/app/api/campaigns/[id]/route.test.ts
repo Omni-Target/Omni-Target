@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { requireUser, getCampaignById, getBriefVersions, finalizeBriefVersion } = vi.hoisted(() => ({
+const { requireUser, tenantFor, getCampaign, getBriefVersions, finalizeBriefVersion } = vi.hoisted(() => ({
   requireUser: vi.fn(),
-  getCampaignById: vi.fn(),
+  tenantFor: vi.fn(),
+  getCampaign: vi.fn(),
   getBriefVersions: vi.fn(),
   finalizeBriefVersion: vi.fn(),
 }));
 vi.mock("@/lib/api/require-user", () => ({ requireUser }));
-vi.mock("@/lib/db", () => ({ getCampaignById, getBriefVersions, finalizeBriefVersion }));
+vi.mock("@/modules/campaigns/repository", () => ({ tenantFor, getCampaign, getBriefVersions, finalizeBriefVersion }));
 
 import { PUT } from "./route";
 
@@ -26,7 +27,8 @@ const savedContext = () => finalizeBriefVersion.mock.calls[0][3] as Record<strin
 describe("PUT /api/campaigns/[id] — merchant test budget (S0.6)", () => {
   beforeEach(() => {
     requireUser.mockReset().mockResolvedValue({ ok: true, userId: "user-1" });
-    getCampaignById.mockReset().mockResolvedValue({
+    tenantFor.mockReset().mockResolvedValue({ userId: "user-1", workspaceId: "ws-1" });
+    getCampaign.mockReset().mockResolvedValue({
       id: "campaign-1",
       brief_data: { storeInsights: { store: { currency: "NGN", currency_symbol: "₦" } } },
     });
@@ -67,7 +69,7 @@ describe("PUT /api/campaigns/[id] — merchant test budget (S0.6)", () => {
   });
 
   it("keeps the campaign's saved cap when a caller does not send one (e.g. saving a new variation)", async () => {
-    getCampaignById.mockResolvedValue({
+    getCampaign.mockResolvedValue({
       id: "campaign-1",
       brief_data: {
         storeInsights: { store: { currency: "USD" } },
@@ -80,7 +82,7 @@ describe("PUT /api/campaigns/[id] — merchant test budget (S0.6)", () => {
   });
 
   it("clears the cap when the merchant empties the field", async () => {
-    getCampaignById.mockResolvedValue({
+    getCampaign.mockResolvedValue({
       id: "campaign-1",
       brief_data: { storeInsights: { store: { currency: "USD" } }, budget_plan: { max_total_budget: 700 } },
     });

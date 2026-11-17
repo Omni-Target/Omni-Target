@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/require-user";
-import { listUserBriefCampaigns } from "@/lib/db";
+import { listBriefCampaigns, tenantFor } from "@/modules/campaigns/repository";
 
-type CampaignList = Awaited<ReturnType<typeof listUserBriefCampaigns>>;
+type CampaignList = Awaited<ReturnType<typeof listBriefCampaigns>>;
 
 /** List saved briefs, including drafts whose generation already used a credit. */
 export async function GET() {
@@ -11,7 +11,9 @@ export async function GET() {
   const { userId } = authResult;
 
   try {
-    const campaigns: CampaignList = await listUserBriefCampaigns(userId!);
+    // Saved briefs of this creator in their current workspace only.
+    const tenant = await tenantFor(userId!);
+    const campaigns: CampaignList = tenant ? await listBriefCampaigns(tenant) : [];
     return NextResponse.json({ campaigns }, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ error: "Saved briefs are temporarily unavailable." }, {
