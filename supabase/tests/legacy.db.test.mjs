@@ -77,6 +77,20 @@ describe("legacy account migration", () => {
     expect(await balance(ws)).toBe(5);
   });
 
+  it("attributes a legacy purchase that reconciliation already recorded without a workspace", async () => {
+    const ref = gid();
+    const a = await legacyAccount({ payments: [{ credits: 5, ref }] });
+    await q("insert into public.processed_payments (payment_id) values ($1)", [`shopify:${ref}`]);
+    const shop = await one("insert into public.shops (shopify_shop_id, myshopify_domain) values ($1, $2) returning id", [String(Math.floor(Math.random() * 9e12) + 1e12), a.shop]);
+    await q(`select public.record_shop_purchase($1, $2, 'one_time', 'starter', 5, 'ACTIVE', false, true, 9, 'USD', now(), '{}'::jsonb)`, [shop.id, ref]);
+    expect((await one("select workspace_id from public.provider_purchases where external_id = $1", [ref])).workspace_id).toBeNull();
+    const result = await migrate(a.row);
+    expect(result.purchases_recorded).toBe(1);
+    expect(await one("select workspace_id, review_status, ledger_entry_id from public.provider_purchases where external_id = $1", [ref]))
+      .toEqual({ workspace_id: result.workspace_id, review_status: "legacy_claimed", ledger_entry_id: null });
+    expect(await balance(result.workspace_id)).toBe(5);
+  });
+
   it("marks a domain claimed by two legacy accounts as contested, and one already connected as unresolved", async () => {
     const shared = domain();
     const [a, b] = [await legacyAccount({ shop: shared }), await legacyAccount({ shop: shared })];

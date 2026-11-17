@@ -126,7 +126,11 @@ begin
          jsonb_build_object('legacy_payment_id', p.id, 'legacy_row_id', u.id)
     from public.payments p
    where p.clerk_user_id = u.clerk_user_id and p.status = 'success' and p.provider in ('shopify', 'stripe', 'paystack')
-  on conflict (provider, external_id) do nothing;
+  -- A charge reconciliation already recorded as legacy_claimed, with no workspace, joins this account.
+  on conflict (provider, external_id) do update
+     set workspace_id = excluded.workspace_id, purchaser_clerk_user_id = excluded.purchaser_clerk_user_id,
+         details = public.provider_purchases.details || excluded.details, updated_at = now()
+   where public.provider_purchases.review_status = 'legacy_claimed' and public.provider_purchases.workspace_id is null;
   get diagnostics v_purchases = row_count;
 
   -- Credentials: a legacy row has no Shopify shop id, so no shop is bound now and its
