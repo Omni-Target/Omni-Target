@@ -156,6 +156,57 @@ The workspace comes from server-side context: the session user plus their select
   - Finalising a brief checks the campaign belongs to the tenant before calling the database function.
 - **System reads.** Cron jobs use explicitly named functions, such as `creatorHasAnyCampaign` for the brief nudge. These are never called from a user request.
 
+## Commerce mirror (migrations 0024 and 0025, implemented)
+
+These tables are empty until Phase 2 ingestion writes them.
+
+### Keys and ownership
+
+- **Per shop, not per workspace.** Shopify data is mirrored per shop. Every row carries `shop_id`, and the primary key is `(shop_id, shopify_id)`, so a replayed import updates rows in place and two shops' IDs never collide.
+- **Workspace access.** A workspace reaches the rows only through its active binding.
+- **Ownership transfer.** After a transfer, the mirror serves the new owner. Campaigns, credits and history stay with the original workspace.
+
+### Writes and access
+
+- **Who writes.** Ingestion writes the mirror directly, in batched upserts on the primary key, so `service_role` may select, insert, update and delete. It cannot truncate.
+- **Unchanged tables.** Ownership, lifecycle and credit tables keep their function-only writes.
+- **Lockdown.** RLS is on, and `anon` and `authenticated` have no access.
+
+### Shape
+
+- **Narrow columns.** Columns are typed, and text is length-bounded. JSONB holds only small documents with a size check: at most 8 KB for metaobject fields, and 16 KB for settings and access documents.
+- **Shopify enumerations** are stored lower-case and checked for shape, not against a fixed list. A new Shopify value never fails an import.
+- **Foreign keys** link children imported with their parent:
+  - variants to products;
+  - line items and refunds to orders;
+  - return line items to returns.
+
+  Each cascades on delete. Links between separately imported domains are not foreign keys: a line item can outlive its product, and a return can arrive before its order.
+- **Minimised customers.** Customers hold no name, email, phone or address. Each keeps its first order and that order's products, so first-purchase analysis survives order retention.
+- **Withheld fields.** Orders keep the destination at city level at most. Fields Shopify withholds without protected-data approval are nullable.
+- **Metafields and metaobjects** are separate tables.
+- **`shop_access`** records:
+  - granted scopes;
+  - each data domain's availability;
+  - every field Shopify withheld.
+
+### Sync runs, inbox and metrics (0025)
+
+- **`sync_runs`.** At most one initial or full import per shop and data domain can be queued or running. Incremental and reconcile runs proceed alongside it.
+- **`sync_checkpoints`.** Records the committed line and the watermark. Shopify's signed result URL is never stored: it is read again from the bulk operation.
+- **`webhook_events` (inbox).**
+  - It records each delivery once per shop and webhook ID.
+  - A delivery's payload is kept only until it is handled: a processed or ignored row must have none. A dead delivery keeps its payload for replay.
+  - It is matched by domain too, because a delivery can name a shop not yet modelled.
+- **`product_metrics` and `store_metrics`.** One row per window and calculation version, recomputed in place. A metric whose input Shopify withheld is listed in `unavailable` with a reason, not reported as zero. Monthly aggregates that outlive order retention are designed in task 11.
+
+### Deletion
+
+- **What runs.** `process_workspace_deletion` and `process_unbound_shop_redact` call the internal `delete_shop_synced_data`. Verification counts with `shop_synced_row_count` and requires zero.
+- **Coverage check.** A database test fails if any table with a `shop_id` column is neither deleted with the shop nor explicitly classed as ownership, billing, credential or history data.
+- **Legacy function.** `redact_shop_data` on its own handles only legacy data.
+- **Known limit.** Deleting a very large shop runs in one transaction. Its duration is measured in the capacity tests (task 10).
+
 ## Legacy migration from `user_integrations` (migrations 0022 and 0023, implemented)
 
 Run with `scripts/ops/legacy-migration.mjs`. The default is a dry run inside a rolled-back transaction; `--apply` commits each account in its own transaction. `legacy_account_map` records each migrated row. A legacy claim on a shop already connected through the new model is marked `unresolved`: it can neither bind nor block that shop. Rows written by the current code get their `workspace_id` from insert triggers (0023): a version and a receipt from their campaign, a Stripe or Paystack payment from its purchase intent, a CAPI event from its shop's binding.
@@ -186,8 +237,8 @@ Historical files `0001` to `0017` are kept unchanged. A schema baseline taken at
 | `0021_credit_ledger` | Ledger, entitlements, intents, provider purchases, billing sync state, opening-balance reviews, canonical functions (task 5, implemented) |
 | `0022_legacy_mapping` | `legacy_account_map` and `legacy_orphans` |
 | `0023_workspace_columns` | `workspace_id` on tenant tables, with indexes |
-| `0024_commerce_model` | Products, variants, inventory, locations, orders, line items, minimal customers, returns, metafields, metaobject definitions and metaobjects, shop settings and access |
-| `0025_sync_inbox_metrics` | Sync runs and checkpoints, webhook inbox, metrics |
+| `0024_commerce_model` | Products, variants, inventory, locations, orders, line items, refunds, minimal customers, returns, metafields, metaobject definitions and metaobjects, shop settings and access (task 8, implemented) |
+| `0025_sync_inbox_metrics` | Sync runs and checkpoints, webhook inbox, metrics (task 8, implemented) |
 | `0026_capacity_snapshots` | Daily size snapshots |
 | `0027_brief_evidence_archive` | Archive tracking for trimmed briefs |
 
