@@ -86,6 +86,23 @@ Measured read-only on staging: the staging database is 15.3 MB, of which our `pu
 4. **Deletion is the slow operation.** Deleting a very large shop takes 6.2 s locally, in one transaction. On shared compute it may take several times longer and could exceed an API statement timeout. Phase 2 should delete large shops in batches across cron runs; the verification already tolerates a deletion that is retried.
 5. **Reads are not the concern at this scale.** The analytical queries stay well under 100 ms locally, using the indexes.
 
+## After task 12's optimisations (migration 0029)
+
+Re-measured on the optimised schema with the same fixtures. The report is `architecture/capacity/fixtures-2026-11-18.json`.
+
+| Profile | Mirror |
+|---|---|
+| Small | 7.1 MB |
+| Medium | 58.2 MB |
+| Large | 229.0 MB |
+| Very large | 643.5 MB |
+
+That is 10–12% less than above. Per entity:
+- **Per product:** about 3.9–4.8 KB.
+- **Per order:** about 0.80–0.87 KB.
+
+The import pre-flight now projects with 4,100 bytes per product and 880 per order. Details are in `storage-optimisation.md`.
+
 ## Candidates for the pre-Phase 2 optimisation review
 
 > **Done.** Task 12 measured these candidates and decided them in `storage-optimisation.md`. The list below is kept as it stood before the review.

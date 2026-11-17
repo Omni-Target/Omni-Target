@@ -31,14 +31,14 @@ async function windowShares(client, months) {
   const { rows: [r] } = await client.query(`
     select (select count(*) filter (where processed_at > ${cut})::float / greatest(count(*), 1) from public.orders) as orders,
            (select count(*) filter (where o.processed_at > ${cut})::float / greatest(count(*), 1)
-              from public.order_line_items li join public.orders o on o.shop_id = li.shop_id and o.shopify_id = li.order_shopify_id) as order_line_items,
+              from public.order_line_items li join public.orders o on o.shop_key = li.shop_key and o.shopify_id = li.order_shopify_id) as order_line_items,
            (select count(*) filter (where o.processed_at > ${cut})::float / greatest(count(*), 1)
-              from public.refunds r join public.orders o on o.shop_id = r.shop_id and o.shopify_id = r.order_shopify_id) as refunds,
+              from public.refunds r join public.orders o on o.shop_key = r.shop_key and o.shopify_id = r.order_shopify_id) as refunds,
            (select count(*) filter (where o.processed_at > ${cut})::float / greatest(count(*), 1)
-              from public.returns r join public.orders o on o.shop_id = r.shop_id and o.shopify_id = r.order_shopify_id) as returns,
+              from public.returns r join public.orders o on o.shop_key = r.shop_key and o.shopify_id = r.order_shopify_id) as returns,
            (select count(*) filter (where o.processed_at > ${cut})::float / greatest(count(*), 1)
-              from public.return_line_items rl join public.returns r on r.shop_id = rl.shop_id and r.shopify_id = rl.return_shopify_id
-              join public.orders o on o.shop_id = r.shop_id and o.shopify_id = r.order_shopify_id) as return_line_items`);
+              from public.return_line_items rl join public.returns r on r.shop_key = rl.shop_key and r.shopify_id = rl.return_shopify_id
+              join public.orders o on o.shop_key = r.shop_key and o.shopify_id = r.order_shopify_id) as return_line_items`);
   return r;
 }
 
@@ -52,14 +52,14 @@ async function productMonthly(client, products, spread) {
   await client.query(`drop table if exists ${table}`);
   await client.query(`
     create table ${table} as
-      select li.shop_id, ${product} as product_shopify_id, date_trunc('month', o.processed_at)::date as month,
+      select li.shop_key, ${product} as product_shopify_id, date_trunc('month', o.processed_at)::date as month,
              count(distinct o.shopify_id)::int as orders, sum(li.quantity)::int as units,
              sum(li.unit_price * li.quantity)::numeric(20, 4) as gross_sales, sum(li.total_discount)::numeric(20, 4) as discounts,
              sum(li.refunded_quantity)::int as refunded_units, 0::int as returned_units,
              count(distinct o.customer_shopify_id)::int as customers
-        from public.order_line_items li join public.orders o on o.shop_id = li.shop_id and o.shopify_id = li.order_shopify_id
+        from public.order_line_items li join public.orders o on o.shop_key = li.shop_key and o.shopify_id = li.order_shopify_id
        where li.product_shopify_id is not null group by 1, 2, 3`);
-  await client.query(`alter table ${table} add primary key (shop_id, product_shopify_id, month)`);
+  await client.query(`alter table ${table} add primary key (shop_key, product_shopify_id, month)`);
   await client.query(`vacuum analyze ${table}`);
   const { rows: [r] } = await client.query(`select count(*)::int as rows, pg_total_relation_size('${table}') as bytes from ${table}`);
   return { rows: r.rows, bytes: Number(r.bytes) };
@@ -69,11 +69,11 @@ async function storeMonthly(client) {
   await client.query("drop table if exists x_store_monthly");
   await client.query(`
     create table x_store_monthly as
-      select shop_id, date_trunc('month', processed_at)::date as month, count(*)::int as orders, sum(total_price)::numeric(20, 4) as gross_sales,
+      select shop_key, date_trunc('month', processed_at)::date as month, count(*)::int as orders, sum(total_price)::numeric(20, 4) as gross_sales,
              sum(total_discounts)::numeric(20, 4) as discounts, sum(total_refunded)::numeric(20, 4) as refunded,
              count(distinct customer_shopify_id)::int as customers
         from public.orders group by 1, 2`);
-  await client.query("alter table x_store_monthly add primary key (shop_id, month)");
+  await client.query("alter table x_store_monthly add primary key (shop_key, month)");
   const { rows: [r] } = await client.query("select count(*)::int as rows, pg_total_relation_size('x_store_monthly') as bytes from x_store_monthly");
   return { rows: r.rows, bytes: Number(r.bytes) };
 }
@@ -83,13 +83,13 @@ async function measuredWindow(client, months) {
   const cut = `now() - interval '${months} months'`;
   await client.query(`
     create table v_orders as select * from public.orders where processed_at > ${cut};
-    alter table v_orders add primary key (shop_id, shopify_id);
-    create index on v_orders (shop_id, processed_at);
-    create index on v_orders (shop_id, customer_shopify_id, processed_at) where customer_shopify_id is not null;
-    create table v_lines as select li.* from public.order_line_items li join v_orders o on o.shop_id = li.shop_id and o.shopify_id = li.order_shopify_id;
-    alter table v_lines add primary key (shop_id, shopify_id);
-    create index on v_lines (shop_id, order_shopify_id);
-    create index on v_lines (shop_id, product_shopify_id) where product_shopify_id is not null;`);
+    alter table v_orders add primary key (shop_key, shopify_id);
+    create index on v_orders (shop_key, processed_at);
+    create index on v_orders (shop_key, customer_shopify_id, processed_at) where customer_shopify_id is not null;
+    create table v_lines as select li.* from public.order_line_items li join v_orders o on o.shop_key = li.shop_key and o.shopify_id = li.order_shopify_id;
+    alter table v_lines add primary key (shop_key, shopify_id);
+    create index on v_lines (shop_key, order_shopify_id);
+    create index on v_lines (shop_key, product_shopify_id) where product_shopify_id is not null;`);
   // VACUUM cannot run inside the implicit transaction of a multi-statement query.
   await client.query("vacuum analyze v_orders");
   await client.query("vacuum analyze v_lines");

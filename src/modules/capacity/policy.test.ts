@@ -23,7 +23,8 @@ describe("capacity policy (task 10)", () => {
   });
 
   it("projects every measured profile at or above its measured size, without being wildly conservative", () => {
-    const report = JSON.parse(readFileSync(join(process.cwd(), "architecture/capacity/fixtures-2026-11-17.json"), "utf8"));
+    // Measured on the schema Phase 2 writes (after migration 0029).
+    const report = JSON.parse(readFileSync(join(process.cwd(), "architecture/capacity/fixtures-2026-11-18.json"), "utf8"));
     for (const [name, profile] of Object.entries<{ products: number; orders: number; mirror: number }>(report.profiles)) {
       const projected = projectedImportBytes(profile);
       expect(projected, name).toBeGreaterThanOrEqual(profile.mirror);

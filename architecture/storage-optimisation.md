@@ -35,6 +35,29 @@ The tool measures the 0024/0025 design, as it was before this task's migration.
 
 **Accepted savings on this fixture:** about 105 MB (14%), from the integer shop key, sparse metrics, order duplicates and the index. A single-location shop of this size saves about 33 MB more in inventory levels. Retention (task 11) is separate, and adds its own saving once pruning is approved.
 
+## Validation after migration 0029
+
+**Before and after.** `scripts/ops/capacity-fixtures.mjs` was re-run on the optimised schema. It now writes what Phase 2 will write:
+- presentment currency and the raw city only when they differ;
+- product metrics only for products with sales in the window.
+
+The report is `architecture/capacity/fixtures-2026-11-18.json`. It uses the same even spread of sales as the task 10 baseline:
+
+| Profile | Before (task 10) | After (0029) | Saving |
+|---|---|---|---|
+| Small (500 products / 5k orders) | 7.9 MB | 7.1 MB | 10% |
+| Medium (5k / 50k) | 66.0 MB | 58.2 MB | 11.8% |
+| Large (20k / 200k) | 259.5 MB | 229.0 MB | 11.8% |
+| Very large (70k / 500k) | 733.0 MB | 643.5 MB | 89.5 MB (12.2%) |
+
+**Why the even spread saves less here.** With sales spread evenly, most products sell within 365 days, so sparse metrics save less than under the Pareto spread above. Real shops sit between the two.
+
+**Order lines index.** On a typical product (14 lines, the median), one product's 365-day sales took 0.8 ms with `order_line_items_product_idx` and 164 ms without it. The earlier test used the best-selling product, where an index can't help. **Decision: keep.**
+
+**Capacity pre-flight.** The coefficients now follow this schema: 4,100 bytes per product and 880 per order, with 25% headroom. Every profile is projected at 1.13–1.35 times its measured size.
+
+**Migration 0029.** It converts in place, keeping any rows, and its down script converts back. A local check seeded one row in every commerce table before 0029, then ran up, down and up. All 20 rows survived each step, with the correct shop.
+
 ## What stays as it is
 
 These were measured or reviewed and left unchanged:

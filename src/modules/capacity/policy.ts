@@ -9,10 +9,10 @@
 export const WARNING_SHARE = 0.6;
 export const CRITICAL_SHARE = 0.75;
 
-/** Measured 4.6–5.5 KB per product (product, 3 variants, inventory levels, metafields, metrics). */
-export const BYTES_PER_PRODUCT = 4_700;
-/** Measured 0.89–0.96 KB per order (order, line items, customer share, refunds, returns, webhooks). */
-export const BYTES_PER_ORDER = 960;
+/** Measured 3.9–4.8 KB per product on the task 12 schema (product, 3 variants, inventory levels, metafields, metrics). */
+export const BYTES_PER_PRODUCT = 4_100;
+/** Measured 0.80–0.87 KB per order on the task 12 schema (order, line items, customer share, refunds, returns, webhooks). */
+export const BYTES_PER_ORDER = 880;
 export const BYTES_PER_SHOP = 256 * 1024;
 /** Room for row updates and dead tuples between vacuums. */
 export const GROWTH_HEADROOM = 1.25;

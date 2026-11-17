@@ -162,7 +162,7 @@ These tables are empty until Phase 2 ingestion writes them.
 
 ### Keys and ownership
 
-- **Per shop, not per workspace.** Shopify data is mirrored per shop. Every row carries `shop_id`, and the primary key is `(shop_id, shopify_id)`, so a replayed import updates rows in place and two shops' IDs never collide.
+- **Per shop, not per workspace.** Shopify data is mirrored per shop. Every row carries the shop's integer key, `shop_key` (`shops.shop_key`, from migration 0029; 0024 used the shop's UUID). The primary key is `(shop_key, shopify_id)`, so a replayed import updates rows in place and two shops' IDs never collide. Ownership, billing and history tables keep the shop's UUID.
 - **Workspace access.** A workspace reaches the rows only through its active binding.
 - **Ownership transfer.** After a transfer, the mirror serves the new owner. Campaigns, credits and history stay with the original workspace.
 
@@ -287,6 +287,7 @@ Historical files `0001` to `0017` are kept unchanged. A schema baseline taken at
 | `0026_brief_archive` | Archive tracking for trimmed briefs (task 9, implemented) |
 | `0027_capacity_snapshots` | Daily size snapshots and the size read for the import pre-flight check (task 10, implemented; measurements in `capacity-measurements.md`) |
 | `0028_operational_hygiene` | User-ID indexes on CAPI events, payments, credit usage and API usage; daily pruning of stale rate-limit windows and webhook dedupe keys; race-free email claims; the brief-nudge query (task 10, DATA-07, implemented) |
+| `0029_commerce_storage` | The measured storage optimisations: integer shop key, sparse product metrics, duplicate order fields not stored, metafield values up to 1,000 characters, one unused index removed. Converted in place and reversible (task 12, implemented; `storage-optimisation.md`) |
 
 | Next (planned, before Phase 2) | The storage optimisations the pre-Phase 2 review validates (ADR 0002, decision 2), and any retention aggregates task 11's approved policy needs |
 

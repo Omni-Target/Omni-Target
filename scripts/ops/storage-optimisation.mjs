@@ -11,6 +11,9 @@
  *
  *   DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/postgres \
  *     node scripts/ops/storage-optimisation.mjs [--profile xlarge] [--out report.json]
+ *
+ * It measures the 0024/0025 design, before migration 0029 applied the accepted
+ * candidates. To reproduce the review, run it at commit 01ab208.
  */
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -221,6 +224,8 @@ async function main() {
     const c = new pg.Client({ connectionString: dbUrl("opt_review") });
     await c.connect();
     try {
+      const before0029 = (await c.query("select 1 from information_schema.columns where table_schema = 'public' and table_name = 'products' and column_name = 'shop_id'")).rowCount === 1;
+      if (!before0029) throw new Error("This review measures the design before migration 0029; run it at commit 01ab208.");
       const { products, orders } = PROFILES[profile];
       const { shop } = await loadShop(c, { products, orders, months: 36, distribution: "pareto" });
       await c.query("vacuum analyze");

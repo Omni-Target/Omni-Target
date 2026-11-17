@@ -1,0 +1,957 @@
+{
+  "generated_at": "2026-11-17T23:23:01.535Z",
+  "server": "17.11 (Debian 17.11-1.pgdg13+2)",
+  "months": 36,
+  "empty": {
+    "database": 11551247,
+    "mirror": 458752,
+    "tables": [
+      {
+        "table": "webhook_events",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 32768,
+        "toast": 8192,
+        "total": 40960
+      },
+      {
+        "table": "product_variants",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 24576,
+        "toast": 8192,
+        "total": 32768
+      },
+      {
+        "table": "orders",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 24576,
+        "toast": 8192,
+        "total": 32768
+      },
+      {
+        "table": "sync_runs",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 24576,
+        "toast": 8192,
+        "total": 32768
+      },
+      {
+        "table": "order_line_items",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 24576,
+        "toast": 8192,
+        "total": 32768
+      },
+      {
+        "table": "metaobjects",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 16384,
+        "toast": 8192,
+        "total": 24576
+      },
+      {
+        "table": "products",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 16384,
+        "toast": 8192,
+        "total": 24576
+      },
+      {
+        "table": "refunds",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 16384,
+        "toast": 8192,
+        "total": 24576
+      },
+      {
+        "table": "returns",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 16384,
+        "toast": 8192,
+        "total": 24576
+      },
+      {
+        "table": "return_line_items",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 16384,
+        "toast": 8192,
+        "total": 24576
+      },
+      {
+        "table": "metaobject_definitions",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 16384,
+        "toast": 8192,
+        "total": 24576
+      },
+      {
+        "table": "shop_settings",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 8192,
+        "toast": 8192,
+        "total": 16384
+      },
+      {
+        "table": "shop_access",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 8192,
+        "toast": 8192,
+        "total": 16384
+      },
+      {
+        "table": "customers",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 8192,
+        "toast": 8192,
+        "total": 16384
+      },
+      {
+        "table": "sync_checkpoints",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 8192,
+        "toast": 8192,
+        "total": 16384
+      },
+      {
+        "table": "metafields",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 8192,
+        "toast": 8192,
+        "total": 16384
+      },
+      {
+        "table": "product_metrics",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 8192,
+        "toast": 8192,
+        "total": 16384
+      },
+      {
+        "table": "store_metrics",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 8192,
+        "toast": 8192,
+        "total": 16384
+      },
+      {
+        "table": "inventory_locations",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 8192,
+        "toast": 8192,
+        "total": 16384
+      },
+      {
+        "table": "inventory_levels",
+        "rows": 0,
+        "heap": 0,
+        "indexes": 8192,
+        "toast": 0,
+        "total": 8192
+      }
+    ]
+  },
+  "profiles": {
+    "small": {
+      "products": 500,
+      "orders": 5000,
+      "shape": {
+        "products": 500,
+        "variants": 1500,
+        "locations": 3,
+        "inventory_levels": 3000,
+        "customers": 3000,
+        "orders": 5000,
+        "line_items": 7500,
+        "refunds": 151,
+        "returns": 100,
+        "metafields": 1500,
+        "metaobject_definitions": 5,
+        "metaobjects": 25,
+        "product_metrics_at_most": 2000,
+        "store_metrics": 7
+      },
+      "load_seconds": 1,
+      "database": 18899471,
+      "mirror": 7471104,
+      "tables": [
+        {
+          "table": "order_line_items",
+          "rows": 7500,
+          "heap": 1204224,
+          "indexes": 565248,
+          "toast": 8192,
+          "total": 1810432
+        },
+        {
+          "table": "orders",
+          "rows": 5000,
+          "heap": 917504,
+          "indexes": 647168,
+          "toast": 8192,
+          "total": 1605632
+        },
+        {
+          "table": "customers",
+          "rows": 3000,
+          "heap": 458752,
+          "indexes": 114688,
+          "toast": 8192,
+          "total": 614400
+        },
+        {
+          "table": "product_variants",
+          "rows": 1500,
+          "heap": 335872,
+          "indexes": 221184,
+          "toast": 8192,
+          "total": 598016
+        },
+        {
+          "table": "metafields",
+          "rows": 1500,
+          "heap": 360448,
+          "indexes": 139264,
+          "toast": 8192,
+          "total": 540672
+        },
+        {
+          "table": "inventory_levels",
+          "rows": 3000,
+          "heap": 237568,
+          "indexes": 196608,
+          "toast": 0,
+          "total": 466944
+        },
+        {
+          "table": "products",
+          "rows": 500,
+          "heap": 335872,
+          "indexes": 49152,
+          "toast": 8192,
+          "total": 425984
+        },
+        {
+          "table": "product_metrics",
+          "rows": 1218,
+          "heap": 172032,
+          "indexes": 65536,
+          "toast": 8192,
+          "total": 278528
+        },
+        {
+          "table": "webhook_events",
+          "rows": 417,
+          "heap": 81920,
+          "indexes": 139264,
+          "toast": 8192,
+          "total": 262144
+        },
+        {
+          "table": "sync_runs",
+          "rows": 60,
+          "heap": 16384,
+          "indexes": 40960,
+          "toast": 8192,
+          "total": 98304
+        },
+        {
+          "table": "returns",
+          "rows": 100,
+          "heap": 16384,
+          "indexes": 32768,
+          "toast": 8192,
+          "total": 90112
+        },
+        {
+          "table": "return_line_items",
+          "rows": 120,
+          "heap": 16384,
+          "indexes": 32768,
+          "toast": 8192,
+          "total": 90112
+        },
+        {
+          "table": "metaobjects",
+          "rows": 25,
+          "heap": 16384,
+          "indexes": 32768,
+          "toast": 8192,
+          "total": 90112
+        },
+        {
+          "table": "refunds",
+          "rows": 151,
+          "heap": 16384,
+          "indexes": 32768,
+          "toast": 8192,
+          "total": 90112
+        },
+        {
+          "table": "metaobject_definitions",
+          "rows": 5,
+          "heap": 8192,
+          "indexes": 32768,
+          "toast": 8192,
+          "total": 81920
+        },
+        {
+          "table": "sync_checkpoints",
+          "rows": 7,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "shop_settings",
+          "rows": 1,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "store_metrics",
+          "rows": 7,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "inventory_locations",
+          "rows": 3,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "shop_access",
+          "rows": 1,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        }
+      ],
+      "database_growth": 7348224,
+      "queries_ms": {
+        "Top products by units, last 30 days": 4.5,
+        "Repeat-customer rate, last 12 months": 2.8,
+        "One product's 365-day sales": 1.4,
+        "One product's metrics row": 1.1
+      },
+      "deletion": {
+        "ms": 143,
+        "rows_left": 0
+      }
+    },
+    "medium": {
+      "products": 5000,
+      "orders": 50000,
+      "shape": {
+        "products": 5000,
+        "variants": 15000,
+        "locations": 3,
+        "inventory_levels": 30000,
+        "customers": 30000,
+        "orders": 50000,
+        "line_items": 75000,
+        "refunds": 1515,
+        "returns": 1000,
+        "metafields": 15000,
+        "metaobject_definitions": 5,
+        "metaobjects": 250,
+        "product_metrics_at_most": 20000,
+        "store_metrics": 7
+      },
+      "load_seconds": 6,
+      "database": 72505011,
+      "mirror": 61038592,
+      "tables": [
+        {
+          "table": "order_line_items",
+          "rows": 75000,
+          "heap": 12075008,
+          "indexes": 5341184,
+          "toast": 8192,
+          "total": 17457152
+        },
+        {
+          "table": "orders",
+          "rows": 50000,
+          "heap": 9109504,
+          "indexes": 5898240,
+          "toast": 8192,
+          "total": 15048704
+        },
+        {
+          "table": "customers",
+          "rows": 30000,
+          "heap": 4554752,
+          "indexes": 958464,
+          "toast": 8192,
+          "total": 5554176
+        },
+        {
+          "table": "product_variants",
+          "rows": 15000,
+          "heap": 3325952,
+          "indexes": 1630208,
+          "toast": 8192,
+          "total": 4997120
+        },
+        {
+          "table": "metafields",
+          "rows": 15000,
+          "heap": 3547136,
+          "indexes": 1187840,
+          "toast": 8192,
+          "total": 4775936
+        },
+        {
+          "table": "inventory_levels",
+          "rows": 30000,
+          "heap": 2301952,
+          "indexes": 1835008,
+          "toast": 0,
+          "total": 4169728
+        },
+        {
+          "table": "products",
+          "rows": 5000,
+          "heap": 3391488,
+          "indexes": 237568,
+          "toast": 8192,
+          "total": 3670016
+        },
+        {
+          "table": "product_metrics",
+          "rows": 11852,
+          "heap": 1679360,
+          "indexes": 499712,
+          "toast": 8192,
+          "total": 2220032
+        },
+        {
+          "table": "webhook_events",
+          "rows": 4167,
+          "heap": 761856,
+          "indexes": 868352,
+          "toast": 8192,
+          "total": 1671168
+        },
+        {
+          "table": "refunds",
+          "rows": 1515,
+          "heap": 106496,
+          "indexes": 131072,
+          "toast": 8192,
+          "total": 278528
+        },
+        {
+          "table": "returns",
+          "rows": 1000,
+          "heap": 114688,
+          "indexes": 98304,
+          "toast": 8192,
+          "total": 253952
+        },
+        {
+          "table": "return_line_items",
+          "rows": 1200,
+          "heap": 98304,
+          "indexes": 114688,
+          "toast": 8192,
+          "total": 253952
+        },
+        {
+          "table": "metaobjects",
+          "rows": 250,
+          "heap": 106496,
+          "indexes": 32768,
+          "toast": 8192,
+          "total": 180224
+        },
+        {
+          "table": "sync_runs",
+          "rows": 60,
+          "heap": 16384,
+          "indexes": 40960,
+          "toast": 8192,
+          "total": 98304
+        },
+        {
+          "table": "metaobject_definitions",
+          "rows": 5,
+          "heap": 8192,
+          "indexes": 32768,
+          "toast": 8192,
+          "total": 81920
+        },
+        {
+          "table": "sync_checkpoints",
+          "rows": 7,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "shop_access",
+          "rows": 1,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "shop_settings",
+          "rows": 1,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "store_metrics",
+          "rows": 7,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "inventory_locations",
+          "rows": 3,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        }
+      ],
+      "database_growth": 60953764,
+      "queries_ms": {
+        "Top products by units, last 30 days": 13.9,
+        "Repeat-customer rate, last 12 months": 7.2,
+        "One product's 365-day sales": 0.6,
+        "One product's metrics row": 0.6
+      },
+      "deletion": {
+        "ms": 528,
+        "rows_left": 0
+      }
+    },
+    "large": {
+      "products": 20000,
+      "orders": 200000,
+      "shape": {
+        "products": 20000,
+        "variants": 60000,
+        "locations": 3,
+        "inventory_levels": 120000,
+        "customers": 120000,
+        "orders": 200000,
+        "line_items": 300000,
+        "refunds": 6060,
+        "returns": 4000,
+        "metafields": 60000,
+        "metaobject_definitions": 5,
+        "metaobjects": 1000,
+        "product_metrics_at_most": 80000,
+        "store_metrics": 7
+      },
+      "load_seconds": 12,
+      "database": 251639475,
+      "mirror": 240123904,
+      "tables": [
+        {
+          "table": "order_line_items",
+          "rows": 300000,
+          "heap": 48529408,
+          "indexes": 21258240,
+          "toast": 8192,
+          "total": 69836800
+        },
+        {
+          "table": "orders",
+          "rows": 200000,
+          "heap": 36413440,
+          "indexes": 23486464,
+          "toast": 8192,
+          "total": 59949056
+        },
+        {
+          "table": "customers",
+          "rows": 120000,
+          "heap": 18210816,
+          "indexes": 3801088,
+          "toast": 8192,
+          "total": 22052864
+        },
+        {
+          "table": "product_variants",
+          "rows": 60000,
+          "heap": 13287424,
+          "indexes": 6373376,
+          "toast": 8192,
+          "total": 19701760
+        },
+        {
+          "table": "metafields",
+          "rows": 60000,
+          "heap": 14196736,
+          "indexes": 4734976,
+          "toast": 8192,
+          "total": 18972672
+        },
+        {
+          "table": "inventory_levels",
+          "rows": 120000,
+          "heap": 9191424,
+          "indexes": 7323648,
+          "toast": 0,
+          "total": 16547840
+        },
+        {
+          "table": "products",
+          "rows": 20000,
+          "heap": 13565952,
+          "indexes": 802816,
+          "toast": 8192,
+          "total": 14409728
+        },
+        {
+          "table": "product_metrics",
+          "rows": 48614,
+          "heap": 6873088,
+          "indexes": 1982464,
+          "toast": 8192,
+          "total": 8896512
+        },
+        {
+          "table": "webhook_events",
+          "rows": 16667,
+          "heap": 3039232,
+          "indexes": 3219456,
+          "toast": 8192,
+          "total": 6299648
+        },
+        {
+          "table": "refunds",
+          "rows": 6060,
+          "heap": 417792,
+          "indexes": 425984,
+          "toast": 8192,
+          "total": 884736
+        },
+        {
+          "table": "returns",
+          "rows": 4000,
+          "heap": 442368,
+          "indexes": 294912,
+          "toast": 8192,
+          "total": 778240
+        },
+        {
+          "table": "return_line_items",
+          "rows": 4800,
+          "heap": 393216,
+          "indexes": 327680,
+          "toast": 8192,
+          "total": 761856
+        },
+        {
+          "table": "metaobjects",
+          "rows": 1000,
+          "heap": 417792,
+          "indexes": 65536,
+          "toast": 8192,
+          "total": 524288
+        },
+        {
+          "table": "sync_runs",
+          "rows": 60,
+          "heap": 16384,
+          "indexes": 40960,
+          "toast": 8192,
+          "total": 98304
+        },
+        {
+          "table": "metaobject_definitions",
+          "rows": 5,
+          "heap": 8192,
+          "indexes": 32768,
+          "toast": 8192,
+          "total": 81920
+        },
+        {
+          "table": "sync_checkpoints",
+          "rows": 7,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "shop_access",
+          "rows": 1,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "shop_settings",
+          "rows": 1,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "store_metrics",
+          "rows": 7,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "inventory_locations",
+          "rows": 3,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        }
+      ],
+      "database_growth": 240088228,
+      "queries_ms": {
+        "Top products by units, last 30 days": 81.5,
+        "Repeat-customer rate, last 12 months": 66,
+        "One product's 365-day sales": 1.2,
+        "One product's metrics row": 0.8
+      },
+      "deletion": {
+        "ms": 4233,
+        "rows_left": 0
+      }
+    },
+    "xlarge": {
+      "products": 70000,
+      "orders": 500000,
+      "shape": {
+        "products": 70000,
+        "variants": 210000,
+        "locations": 3,
+        "inventory_levels": 420000,
+        "customers": 300000,
+        "orders": 500000,
+        "line_items": 750000,
+        "refunds": 15151,
+        "returns": 10000,
+        "metafields": 210000,
+        "metaobject_definitions": 5,
+        "metaobjects": 3500,
+        "product_metrics_at_most": 280000,
+        "store_metrics": 7
+      },
+      "load_seconds": 33,
+      "database": 686200499,
+      "mirror": 674734080,
+      "tables": [
+        {
+          "table": "order_line_items",
+          "rows": 750000,
+          "heap": 121667584,
+          "indexes": 55156736,
+          "toast": 8192,
+          "total": 176889856
+        },
+        {
+          "table": "orders",
+          "rows": 500000,
+          "heap": 91029504,
+          "indexes": 58580992,
+          "toast": 8192,
+          "total": 149667840
+        },
+        {
+          "table": "product_variants",
+          "rows": 210000,
+          "heap": 46497792,
+          "indexes": 22151168,
+          "toast": 8192,
+          "total": 68698112
+        },
+        {
+          "table": "metafields",
+          "rows": 210000,
+          "heap": 49692672,
+          "indexes": 16506880,
+          "toast": 8192,
+          "total": 66248704
+        },
+        {
+          "table": "inventory_levels",
+          "rows": 420000,
+          "heap": 32161792,
+          "indexes": 25591808,
+          "toast": 0,
+          "total": 57786368
+        },
+        {
+          "table": "customers",
+          "rows": 300000,
+          "heap": 45514752,
+          "indexes": 9486336,
+          "toast": 8192,
+          "total": 55050240
+        },
+        {
+          "table": "products",
+          "rows": 70000,
+          "heap": 47570944,
+          "indexes": 2703360,
+          "toast": 8192,
+          "total": 50323456
+        },
+        {
+          "table": "product_metrics",
+          "rows": 145267,
+          "heap": 20520960,
+          "indexes": 5922816,
+          "toast": 8192,
+          "total": 26484736
+        },
+        {
+          "table": "webhook_events",
+          "rows": 41667,
+          "heap": 7585792,
+          "indexes": 8093696,
+          "toast": 8192,
+          "total": 15720448
+        },
+        {
+          "table": "refunds",
+          "rows": 15151,
+          "heap": 1040384,
+          "indexes": 983040,
+          "toast": 8192,
+          "total": 2064384
+        },
+        {
+          "table": "returns",
+          "rows": 10000,
+          "heap": 1097728,
+          "indexes": 671744,
+          "toast": 8192,
+          "total": 1810432
+        },
+        {
+          "table": "return_line_items",
+          "rows": 12000,
+          "heap": 966656,
+          "indexes": 761856,
+          "toast": 8192,
+          "total": 1769472
+        },
+        {
+          "table": "metaobjects",
+          "rows": 3500,
+          "heap": 1482752,
+          "indexes": 188416,
+          "toast": 8192,
+          "total": 1712128
+        },
+        {
+          "table": "sync_runs",
+          "rows": 60,
+          "heap": 16384,
+          "indexes": 40960,
+          "toast": 8192,
+          "total": 98304
+        },
+        {
+          "table": "metaobject_definitions",
+          "rows": 5,
+          "heap": 8192,
+          "indexes": 32768,
+          "toast": 8192,
+          "total": 81920
+        },
+        {
+          "table": "sync_checkpoints",
+          "rows": 7,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "shop_access",
+          "rows": 1,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "shop_settings",
+          "rows": 1,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "store_metrics",
+          "rows": 7,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        },
+        {
+          "table": "inventory_locations",
+          "rows": 3,
+          "heap": 8192,
+          "indexes": 16384,
+          "toast": 8192,
+          "total": 65536
+        }
+      ],
+      "database_growth": 674649252,
+      "queries_ms": {
+        "Top products by units, last 30 days": 76,
+        "Repeat-customer rate, last 12 months": 47.3,
+        "One product's 365-day sales": 0.6,
+        "One product's metrics row": 0.5
+      },
+      "deletion": {
+        "ms": 6702,
+        "rows_left": 0
+      }
+    }
+  }
+}

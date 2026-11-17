@@ -46,7 +46,7 @@ const domain = () => `c-${tag()}.myshopify.com`;
 const shopifyId = () => String(Math.floor(Math.random() * 9e12) + 1e12);
 async function newShop(shop = domain()) {
   const shopify = shopifyId();
-  const { id } = await one("insert into public.shops (shopify_shop_id, myshopify_domain) values ($1, $2) returning id", [shopify, shop]);
+  const { id } = await one("insert into public.shops (shopify_shop_id, myshopify_domain) values ($1, $2) returning shop_key as id", [shopify, shop]);
   return { id, shop, shopify };
 }
 
@@ -65,35 +65,37 @@ const NOT_SYNCED = [
 /** One row in every synced table for this shop, written as service_role. */
 async function seed({ id, shop }) {
   await asService([
-    ["insert into public.products (shop_id, shopify_id, title, status) values ($1, 10, 'Lamp', 'active')", [id]],
-    ["insert into public.product_variants (shop_id, shopify_id, product_shopify_id, price, inventory_item_id) values ($1, 11, 10, 25, 12)", [id]],
-    ["insert into public.inventory_locations (shop_id, shopify_id, name, country_code) values ($1, 13, 'Warehouse', 'GB')", [id]],
-    ["insert into public.inventory_levels (shop_id, inventory_item_id, location_shopify_id, available) values ($1, 12, 13, 4)", [id]],
-    ["insert into public.customers (shop_id, shopify_id, orders_count) values ($1, 14, 1)", [id]],
-    ["insert into public.orders (shop_id, shopify_id, shopify_created_at, processed_at, currency, total_price, customer_shopify_id) values ($1, 15, now(), now(), 'GBP', 25, 14)", [id]],
-    ["insert into public.order_line_items (shop_id, shopify_id, order_shopify_id, product_shopify_id, quantity, unit_price) values ($1, 16, 15, 10, 1, 25)", [id]],
-    ["insert into public.refunds (shop_id, shopify_id, order_shopify_id, shopify_created_at, total_refunded, currency) values ($1, 17, 15, now(), 25, 'GBP')", [id]],
-    ["insert into public.returns (shop_id, shopify_id, order_shopify_id, status) values ($1, 18, 15, 'closed')", [id]],
-    ["insert into public.return_line_items (shop_id, shopify_id, return_shopify_id, line_item_shopify_id, quantity, return_reason) values ($1, 19, 18, 16, 1, 'defective')", [id]],
-    ["insert into public.metafields (shop_id, owner_type, owner_shopify_id, namespace, key, type, value_excerpt) values ($1, 'product', 10, 'specs', 'wattage', 'number_integer', '40')", [id]],
-    ["insert into public.metaobject_definitions (shop_id, shopify_id, type) values ($1, 20, 'material')", [id]],
-    ["insert into public.metaobjects (shop_id, shopify_id, type, fields) values ($1, 21, 'material', '{\"name\": \"Brass\"}')", [id]],
-    ["insert into public.shop_settings (shop_id, currency, timezone) values ($1, 'GBP', 'Europe/London')", [id]],
-    ["insert into public.shop_access (shop_id, granted_scopes) values ($1, '{read_products}')", [id]],
-    ["insert into public.sync_runs (shop_id, domain, kind) values ($1, 'catalog', 'initial')", [id]],
-    ["insert into public.sync_checkpoints (shop_id, domain, committed_line) values ($1, 'catalog', 500)", [id]],
-    ["insert into public.webhook_events (shop_domain, shop_id, webhook_id, topic, payload) values ($2, $1, $3, 'orders/paid', '{\"id\": 15}')", [id, shop, randomUUID()]],
-    ["insert into public.product_metrics (shop_id, product_shopify_id, window_days, calc_version, window_end, currency, units) values ($1, 10, 30, 1, now(), 'GBP', 1)", [id]],
-    ["insert into public.store_metrics (shop_id, window_days, calc_version, window_end, currency, orders) values ($1, 30, 1, now(), 'GBP', 1)", [id]],
+    ["insert into public.products (shop_key, shopify_id, title, status) values ($1, 10, 'Lamp', 'active')", [id]],
+    ["insert into public.product_variants (shop_key, shopify_id, product_shopify_id, price, inventory_item_id) values ($1, 11, 10, 25, 12)", [id]],
+    ["insert into public.inventory_locations (shop_key, shopify_id, name, country_code) values ($1, 13, 'Warehouse', 'GB')", [id]],
+    ["insert into public.inventory_levels (shop_key, inventory_item_id, location_shopify_id, available) values ($1, 12, 13, 4)", [id]],
+    ["insert into public.customers (shop_key, shopify_id, orders_count) values ($1, 14, 1)", [id]],
+    ["insert into public.orders (shop_key, shopify_id, shopify_created_at, processed_at, currency, total_price, customer_shopify_id) values ($1, 15, now(), now(), 'GBP', 25, 14)", [id]],
+    ["insert into public.order_line_items (shop_key, shopify_id, order_shopify_id, product_shopify_id, quantity, unit_price) values ($1, 16, 15, 10, 1, 25)", [id]],
+    ["insert into public.refunds (shop_key, shopify_id, order_shopify_id, shopify_created_at, total_refunded, currency) values ($1, 17, 15, now(), 25, 'GBP')", [id]],
+    ["insert into public.returns (shop_key, shopify_id, order_shopify_id, status) values ($1, 18, 15, 'closed')", [id]],
+    ["insert into public.return_line_items (shop_key, shopify_id, return_shopify_id, line_item_shopify_id, quantity, return_reason) values ($1, 19, 18, 16, 1, 'defective')", [id]],
+    ["insert into public.metafields (shop_key, owner_type, owner_shopify_id, namespace, key, type, value_excerpt) values ($1, 'product', 10, 'specs', 'wattage', 'number_integer', '40')", [id]],
+    ["insert into public.metaobject_definitions (shop_key, shopify_id, type) values ($1, 20, 'material')", [id]],
+    ["insert into public.metaobjects (shop_key, shopify_id, type, fields) values ($1, 21, 'material', '{\"name\": \"Brass\"}')", [id]],
+    ["insert into public.shop_settings (shop_key, currency, timezone) values ($1, 'GBP', 'Europe/London')", [id]],
+    ["insert into public.shop_access (shop_key, granted_scopes) values ($1, '{read_products}')", [id]],
+    ["insert into public.sync_runs (shop_key, domain, kind) values ($1, 'catalog', 'initial')", [id]],
+    ["insert into public.sync_checkpoints (shop_key, domain, committed_line) values ($1, 'catalog', 500)", [id]],
+    ["insert into public.webhook_events (shop_domain, shop_key, webhook_id, topic, payload) values ($2, $1, $3, 'orders/paid', '{\"id\": 15}')", [id, shop, randomUUID()]],
+    ["insert into public.product_metrics (shop_key, product_shopify_id, window_days, calc_version, window_end, currency, units) values ($1, 10, 30, 1, now(), 'GBP', 1)", [id]],
+    ["insert into public.store_metrics (shop_key, window_days, calc_version, window_end, currency, orders) values ($1, 30, 1, now(), 'GBP', 1)", [id]],
   ]);
 }
 const syncedRows = async (shop) => Number((await one("select public.shop_synced_row_count($1) as n", [shop])).n);
 
 describe("commerce mirror: access and shape", () => {
   it("classifies every shop-keyed table: each is synced (and deleted with the shop) or explicitly not", async () => {
-    const rows = await q("select table_name from information_schema.columns where table_schema = 'public' and column_name = 'shop_id'");
-    const tables = rows.map((row) => row.table_name).filter((name) => !NOT_SYNCED.includes(name)).sort();
-    expect(tables).toEqual([...SYNCED].sort());
+    const keyedBy = async (column) =>
+      (await q("select table_name from information_schema.columns where table_schema = 'public' and column_name = $1", [column])).map((row) => row.table_name).sort();
+    // Synced tables carry the integer shop key (0029); ownership, billing and history keep the shop's UUID.
+    expect((await keyedBy("shop_key")).filter((name) => name !== "shops")).toEqual([...SYNCED].sort());
+    expect(await keyedBy("shop_id")).toEqual([...NOT_SYNCED].sort());
   });
 
   it("locks every synced table to service_role reads and writes, with RLS on, and keeps the deletion helpers internal", async () => {
@@ -117,36 +119,41 @@ describe("commerce mirror: access and shape", () => {
   it("keys rows by shop and Shopify ID: a replay updates in place and two shops never collide", async () => {
     const a = await newShop();
     const b = await newShop();
-    const upsert = "insert into public.products (shop_id, shopify_id, title, status) values ($1, 99, $2, 'active') on conflict (shop_id, shopify_id) do update set title = excluded.title";
+    const upsert = "insert into public.products (shop_key, shopify_id, title, status) values ($1, 99, $2, 'active') on conflict (shop_key, shopify_id) do update set title = excluded.title";
     await asService([[upsert, [a.id, "First"]], [upsert, [a.id, "Replayed"]], [upsert, [b.id, "Other shop"]]]);
-    expect(await q("select shop_id, title from public.products where shopify_id = 99 and shop_id in ($1, $2) order by title", [a.id, b.id]))
-      .toEqual([{ shop_id: b.id, title: "Other shop" }, { shop_id: a.id, title: "Replayed" }]);
+    expect(await q("select shop_key, title from public.products where shopify_id = 99 and shop_key in ($1, $2) order by title", [a.id, b.id]))
+      .toEqual([{ shop_key: b.id, title: "Other shop" }, { shop_key: a.id, title: "Replayed" }]);
   });
 
   it("removes children with their parent, refuses orphaned line items, and accepts a return before its order", async () => {
     const s = await newShop();
     await seed(s);
-    await service("delete from public.products where shop_id = $1 and shopify_id = 10", [s.id]);
-    expect((await one("select count(*)::int as n from public.product_variants where shop_id = $1", [s.id])).n).toBe(0);
-    await service("delete from public.orders where shop_id = $1 and shopify_id = 15", [s.id]);
-    expect(await one("select (select count(*)::int from public.order_line_items where shop_id = $1) as lines, (select count(*)::int from public.refunds where shop_id = $1) as refunds", [s.id]))
+    await service("delete from public.products where shop_key = $1 and shopify_id = 10", [s.id]);
+    expect((await one("select count(*)::int as n from public.product_variants where shop_key = $1", [s.id])).n).toBe(0);
+    await service("delete from public.orders where shop_key = $1 and shopify_id = 15", [s.id]);
+    expect(await one("select (select count(*)::int from public.order_line_items where shop_key = $1) as lines, (select count(*)::int from public.refunds where shop_key = $1) as refunds", [s.id]))
       .toEqual({ lines: 0, refunds: 0 });
-    await expect(service("insert into public.order_line_items (shop_id, shopify_id, order_shopify_id, quantity, unit_price) values ($1, 50, 999, 1, 1)", [s.id]))
+    await expect(service("insert into public.order_line_items (shop_key, shopify_id, order_shopify_id, quantity, unit_price) values ($1, 50, 999, 1, 1)", [s.id]))
       .rejects.toThrow(/foreign key/);
-    await service("insert into public.returns (shop_id, shopify_id, order_shopify_id, status) values ($1, 51, 777, 'requested')", [s.id]);
+    await service("insert into public.returns (shop_key, shopify_id, order_shopify_id, status) values ($1, 51, 777, 'requested')", [s.id]);
   });
 
   it("stores a new Shopify enumeration value but rejects malformed and oversized data", async () => {
     const s = await newShop();
-    await service("insert into public.products (shop_id, shopify_id, title, status) values ($1, 1, 'Future', 'some_future_status')", [s.id]);
-    await service("insert into public.products (shop_id, shopify_id, title, status) values ($1, 7, 'Parent', 'active')", [s.id]);
+    await service("insert into public.products (shop_key, shopify_id, title, status) values ($1, 1, 'Future', 'some_future_status')", [s.id]);
+    await service("insert into public.products (shop_key, shopify_id, title, status) values ($1, 7, 'Parent', 'active')", [s.id]);
     const rejected = [
-      ["insert into public.products (shop_id, shopify_id, title, status) values ($1, 2, 'Upper case', 'ACTIVE')", [s.id]],
-      ["insert into public.products (shop_id, shopify_id, title, status, tags) values ($1, 3, 'Too many tags', 'active', $2)", [s.id, Array.from({ length: 251 }, (_, i) => `t${i}`)]],
-      ["insert into public.metaobjects (shop_id, shopify_id, type, fields) values ($1, 4, 'big', $2)", [s.id, { blob: "x".repeat(9000) }]],
-      ["insert into public.orders (shop_id, shopify_id, shopify_created_at, processed_at, currency, total_price) values ($1, 5, now(), now(), 'gbp', 1)", [s.id]],
-      ["insert into public.orders (shop_id, shopify_id, shopify_created_at, processed_at, currency, total_price, ship_country_code) values ($1, 6, now(), now(), 'GBP', 1, 'United Kingdom')", [s.id]],
-      ["insert into public.product_variants (shop_id, shopify_id, product_shopify_id, price, unit_cost) values ($1, 8, 7, 1, 1)", [s.id]],
+      ["insert into public.products (shop_key, shopify_id, title, status) values ($1, 2, 'Upper case', 'ACTIVE')", [s.id]],
+      ["insert into public.products (shop_key, shopify_id, title, status, tags) values ($1, 3, 'Too many tags', 'active', $2)", [s.id, Array.from({ length: 251 }, (_, i) => `t${i}`)]],
+      ["insert into public.metaobjects (shop_key, shopify_id, type, fields) values ($1, 4, 'big', $2)", [s.id, { blob: "x".repeat(9000) }]],
+      ["insert into public.orders (shop_key, shopify_id, shopify_created_at, processed_at, currency, total_price) values ($1, 5, now(), now(), 'gbp', 1)", [s.id]],
+      ["insert into public.orders (shop_key, shopify_id, shopify_created_at, processed_at, currency, total_price, ship_country_code) values ($1, 6, now(), now(), 'GBP', 1, 'United Kingdom')", [s.id]],
+      ["insert into public.product_variants (shop_key, shopify_id, product_shopify_id, price, unit_cost) values ($1, 8, 7, 1, 1)", [s.id]],
+      // 0029: a metric row records activity; duplicates of the main field are not stored; metafield values stop at 1,000 characters.
+      ["insert into public.product_metrics (shop_key, product_shopify_id, window_days, calc_version, window_end, currency) values ($1, 7, 30, 1, now(), 'GBP')", [s.id]],
+      ["insert into public.orders (shop_key, shopify_id, shopify_created_at, processed_at, currency, total_price, ship_city, ship_city_raw) values ($1, 9, now(), now(), 'GBP', 1, 'Leeds', 'Leeds')", [s.id]],
+      ["insert into public.orders (shop_key, shopify_id, shopify_created_at, processed_at, currency, presentment_currency, total_price) values ($1, 10, now(), now(), 'GBP', 'GBP', 1)", [s.id]],
+      ["insert into public.metafields (shop_key, owner_type, owner_shopify_id, namespace, key, type, value_excerpt) values ($1, 'product', 7, 'custom', 'long', 'multi_line_text_field', $2)", [s.id, "x".repeat(1001)]],
     ];
     for (const [sql, params] of rejected) {
       await expect(service(sql, params), sql).rejects.toThrow(/check constraint/);
@@ -157,8 +164,8 @@ describe("commerce mirror: access and shape", () => {
     const columns = (await q("select column_name from information_schema.columns where table_schema = 'public' and table_name = 'customers'")).map((row) => row.column_name);
     expect(columns.filter((name) => /email|phone|name|address|zip|city/.test(name))).toEqual([]);
     const s = await newShop();
-    await service("insert into public.orders (shop_id, shopify_id, shopify_created_at, processed_at, currency, total_price) values ($1, 1, now(), now(), 'USD', 10)", [s.id]);
-    expect(await one("select customer_shopify_id, ship_country_code, ship_city from public.orders where shop_id = $1", [s.id]))
+    await service("insert into public.orders (shop_key, shopify_id, shopify_created_at, processed_at, currency, total_price) values ($1, 1, now(), now(), 'USD', 10)", [s.id]);
+    expect(await one("select customer_shopify_id, ship_country_code, ship_city from public.orders where shop_key = $1", [s.id]))
       .toEqual({ customer_shopify_id: null, ship_country_code: null, ship_city: null });
   });
 });
@@ -167,7 +174,7 @@ describe("sync runs and the webhook inbox", () => {
   it("allows one queued or running full import per shop and domain, alongside incremental runs", async () => {
     const s = await newShop();
     const run = (kind, dataDomain = "orders") =>
-      service("insert into public.sync_runs (shop_id, domain, kind) values ($1, $2, $3) returning id", [s.id, dataDomain, kind]);
+      service("insert into public.sync_runs (shop_key, domain, kind) values ($1, $2, $3) returning id", [s.id, dataDomain, kind]);
     const [first] = await run("initial");
     await expect(run("full")).rejects.toThrow(/sync_runs_one_full_idx/);
     await run("incremental");
@@ -181,7 +188,7 @@ describe("sync runs and the webhook inbox", () => {
     const s = await newShop();
     const webhook = randomUUID();
     const record = () => service(
-      "insert into public.webhook_events (shop_domain, shop_id, webhook_id, topic, payload) values ($1, $2, $3, 'orders/paid', '{\"id\": 1}') on conflict (shop_domain, webhook_id) do nothing returning id",
+      "insert into public.webhook_events (shop_domain, shop_key, webhook_id, topic, payload) values ($1, $2, $3, 'orders/paid', '{\"id\": 1}') on conflict (shop_domain, webhook_id) do nothing returning id",
       [s.shop, s.id, webhook]);
     const [first] = await record();
     expect(await record()).toEqual([]);
@@ -202,7 +209,7 @@ describe("shop/redact deletes the shop's mirrored data", () => {
     const shop = domain();
     const shopify = shopifyId();
     const installed = (await one("select public.bind_shop_for_install($1, $2, $3, null, 'Test shop') as r", [shopify, shop, actor])).r;
-    const s = { shop, id: (await one("select id from public.shops where myshopify_domain = $1", [shop])).id };
+    const s = { shop, id: (await one("select shop_key as id from public.shops where myshopify_domain = $1", [shop])).id };
     const other = await newShop();
     await seed(s);
     await seed(other);
