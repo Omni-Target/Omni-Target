@@ -68,7 +68,9 @@ copy of staging's.
   - a shop's orders are readable for 60 days only, and Phase 2 imports 60 days and marks the orders domain partial (`orderHistoryWindow`, `src/modules/retention/policy.ts`);
   - the 24-month detailed window and the monthly summaries cover only what was imported.
 
-  Status: **not yet confirmed** (Phase 0 blocker B2).
+  Status: **approved internally 2026-11-18** (Phase 2 decision 1). The dev store's installation grants it and reaches orders older than 60 days (Phase 2 task 1).
+
+  At release, confirm Shopify's approval in the Partner Dashboard. Every production installation is checked before its import (`checkShopAccess`, recorded in `shop_access`).
 - **Protected customer data, Level 1** (orders and customers), and whichever Level 2 fields are used: confirm the approvals before Phase 2 reads those fields.
 - **Compliance webhooks act on mirrored data** from migration 0030:
   - `customers/redact` deletes the customer's row and clears identifying fields on their orders;

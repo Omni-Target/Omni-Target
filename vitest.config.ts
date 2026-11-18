@@ -7,8 +7,9 @@ export default defineConfig({
     // (the budget-reasoning rewrite) is actually exercised, matching the browser.
     environment: "jsdom",
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
-    // Real Postgres tests run in the Database job (vitest.db.config.mjs).
-    exclude: ["**/node_modules/**", "src/**/*.db.test.{ts,tsx}"],
+    // Real Postgres tests run in the Database job (vitest.db.config.mjs); live
+    // staging and Shopify checks only by hand (vitest.live.config.mjs).
+    exclude: ["**/node_modules/**", "src/**/*.db.test.{ts,tsx}", "src/**/*.live.test.ts"],
   },
   resolve: {
     alias: {
