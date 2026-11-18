@@ -29,7 +29,7 @@ Authorised 2026-11-18. This document maps the Phase 2 requirements onto the Phas
 | # | Task | Depends on |
 |---|---|---|
 | 1 | Shopify access verification: app configuration, granted scopes, Level 1 field probe and the per-shop capability matrix (`shop_access`) | — |
-| 2 | Control-plane migration: redaction suppression, capacity reservations, summary adjustments, history staging, compliance exports, and bounded ingestion write RPCs | — |
+| 2 | Redaction suppression and the ingestion guard (migration 0031). Each other schema change ships with the task that uses it: write RPCs (4), capacity reservations (5), history staging (7), summary adjustments (8) and compliance exports (9) | — |
 | 3 | Trigger.dev foundation: SDK, configuration, queues with per-shop concurrency, Sentry and logging in workers, and triggering from Next.js with idempotency keys | — |
 | 4 | Bulk operations client: start, poll and finish webhook, cancel, at most 5 per shop, streaming JSONL with `__parentId`, checkpoints, expired URLs, selective R2 staging and domain mappers | 2 |
 | 5 | Capacity guard: projection from the optimised schema, 24-month window, summaries, indexes and headroom; concurrency-safe reservations | 2 |
@@ -48,9 +48,11 @@ Authorised 2026-11-18. This document maps the Phase 2 requirements onto the Phas
    - For each staging shop, a report records the granted scopes, the oldest reachable order, and every Level 1 and destination field as available or withheld.
    - `shop_access` holds the per-domain availability.
    - Level 2 fields are never requested.
-2. **Control plane.**
+2. **Suppression and guard.**
    - The migration is reversible and changes no existing rows.
-   - Database tests cover suppression lookups, reservations under concurrent callers, adjustments and the totals that include them, staging isolation by run, and every write RPC staying within its batch bound.
+   - Each redaction records keyed digests, once, for a shop modelled or not, and they survive the shop's deletion.
+   - Only a shop bound to an active workspace is ingestible, and a write holds that workspace against lifecycle changes until it commits.
+   - The same bounds apply to each later task's schema: concurrent reservations (5), staging isolation by run (7), adjustments and their totals (8), and every write RPC within its batch bound (4).
 3. **Trigger.dev.**
    - Tasks are thin wrappers over module services.
    - At most one import runs per shop and data domain.
@@ -114,6 +116,30 @@ Authorised 2026-11-18. This document maps the Phase 2 requirements onto the Phas
 - **Fields.** None was withheld: the Level 1 customer fields (order count, amount spent, created date), the order's customer reference, and the destination city, province and country. The shop had orders and customers to test against.
 
 **Production stores.** A development store shows what the app's development access allows. Production installations are checked the same way, per shop, before every import, and the import plans only from what that check recorded.
+
+### Task 3 (foundation): Trigger.dev setup (2026-11-18)
+
+**Installed.** `@trigger.dev/sdk`, `@trigger.dev/build` and the CLI, all at 4.8.5.
+
+**Configured.**
+- `trigger.config.ts`: project `proj_owlfjcsbkqwtsyyykwqd`, tasks in `./src/trigger`, `maxDuration` 3600 s, three retries.
+- `pnpm dev:trigger` runs the worker with the `omnitarget` login profile and `.env.local`.
+
+**Verified.** The `health-check` task registered on the dev worker (Node 24). A run triggered from code completed.
+
+**Remaining for task 3.** Queues with per-shop concurrency, Sentry and logging in workers, and triggering from Next.js with idempotency keys. These come with the first real tasks.
+
+### Task 2: redaction suppression and the ingestion guard (2026-11-18; migration 0031)
+
+**`redaction_suppressions`.**
+- Each customer and order a `customers/redact` names is stored as an HMAC-SHA256 digest of shop, type and Shopify ID, under `REDACTION_SUPPRESSION_KEY`.
+- Entries are keyed by the Shopify shop ID. They hold even for a shop never modelled, and survive shop deletion and reinstall.
+- The webhook computes the digests. If the key is missing, the webhook answers 500 so Shopify retries; a redaction is never recorded without its suppression.
+
+**Ingestion guard.**
+- `shop_ingestion_open` admits only a shop bound to an active workspace.
+- Every task 4 write calls `lock_shop_for_ingestion` first. It holds that workspace against uninstall, `shop/redact` and deletion until the write commits.
+- `suppressed_subjects` tells a worker which digests in a batch to drop.
 
 ## Dependencies outside the code
 

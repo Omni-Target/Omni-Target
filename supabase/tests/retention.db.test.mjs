@@ -294,7 +294,8 @@ describe("privileges", () => {
     for (const fn of [
       "refresh_monthly_aggregates(integer, date, date, integer)",
       "retention_status(integer)",
-      "record_customer_compliance(text, bigint, text, text, timestamptz, bigint, bigint[])",
+      // 0031 added the suppression digests; earlier calls keep working through the defaults.
+      "record_customer_compliance(text, bigint, text, text, timestamptz, bigint, bigint[], bytea, bytea[], smallint)",
     ]) {
       const row = await one(
         `select has_function_privilege('service_role', $1, 'execute') as service, has_function_privilege('anon', $1, 'execute') as anon,

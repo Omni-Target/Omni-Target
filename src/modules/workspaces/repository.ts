@@ -1,4 +1,5 @@
 import "server-only";
+import { redactionDigests } from "@/modules/compliance/suppression";
 import { supabaseAdmin } from "@/platform/supabase";
 
 /**
@@ -216,26 +217,34 @@ export interface ComplianceSubject {
 }
 
 /**
- * Records a customer compliance request (migration 0030). customers/redact
- * removes the customer's data from the commerce mirror at once;
- * customers/data_request stays "open" when data is held, for fulfilment.
+ * Records a customer compliance request (migrations 0030 and 0031).
+ * customers/redact removes the customer's data from the commerce mirror at
+ * once and records suppression digests, so no later import, replay or retry
+ * stores it again; it fails, and Shopify retries, if the suppression key is
+ * missing. customers/data_request stays "open" when data is held.
  */
-export const recordCustomerCompliance = (
+export const recordCustomerCompliance = async (
   topic: "customers/redact" | "customers/data_request",
   event: LifecycleEvent,
   subject: ComplianceSubject = { customerId: null, orderIds: [] },
-) =>
-  call<{
+) => {
+  const digests = topic === "customers/redact" && event.shopifyShopId !== null ? redactionDigests(event.shopifyShopId, subject) : null;
+  return call<{
     outcome: "completed" | "open" | "duplicate";
     compliance_request_id?: string;
     resolution?: string | null;
     redacted?: { customers: number; orders: number; inbox: number };
+    suppressed?: number;
   }>("record_customer_compliance", {
     p_topic: topic,
     ...lifecycleArgs(event),
     p_customer_shopify_id: subject.customerId,
     p_order_ids: subject.orderIds,
+    p_customer_digest: digests?.customerDigest ?? null,
+    p_order_digests: digests?.orderDigests ?? null,
+    p_key_version: digests?.keyVersion ?? 1,
   });
+};
 
 export const processWorkspaceDeletion = (deletionId: string) =>
   call<DeletionResult>("process_workspace_deletion", { p_deletion: deletionId });

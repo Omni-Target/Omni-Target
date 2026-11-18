@@ -26,6 +26,7 @@ copy of staging's.
 | `SHOPIFY_TOKEN_REFRESH_DISABLED` | S1 | Stops token refresh on an environment sharing tokens | Unset in production |
 | `SHOPIFY_TEST_BILLING` | S0 (SEC-12) | Allows Shopify test charges to grant credits | Unset in production |
 | `LOG_LEVEL` | Phase 1 task 1 | Structured logger level | Unset (`info`) |
+| `REDACTION_SUPPRESSION_KEY` | Phase 2 task 2 | Keys the digests that stop redacted customers and orders from being stored again (migration 0031) | Generate 32 random bytes, base64-encoded, and set it as sensitive in Vercel production and Trigger.dev Production. Keep a recovery copy with the key custodian. Never replace it without keeping the old key: digests made under a lost key can't be matched, and redacted data could return |
 | `TRIGGER_SECRET_KEY` | Phase 2 task 3 | Lets the app trigger Trigger.dev tasks. Locally it is the Development key (`tr_dev_…`) in `.env.local` | The Trigger.dev project's Production secret key (`tr_prod_…`), set in Vercel production only |
 | `DATABASE_QUOTA_MB` | Phase 1 task 10 | Database quota for capacity alerts (60% / 75%) and the import pre-flight check | The production plan's database size in MB, e.g. `8192` on Pro (`architecture/capacity-measurements.md`) |
 | `BRIEF_ARCHIVE_PUBLIC_KEY` | Phase 1 task 9 | Encrypts archived briefs (ops tool only, not the app) | Generate a production key pair with `brief-archive.mjs keygen`; the private key goes to the custodian (`brief-archive.md`) |
