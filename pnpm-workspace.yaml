@@ -1,4 +1,6 @@
 allowBuilds:
+  # Trigger.dev CLI dependency for remote deploy builds; its install script downloads a binary. Not needed for `trigger.dev dev`.
+  '@depot/cli': false
   esbuild: true
   puppeteer: true
   sharp: true

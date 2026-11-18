@@ -51,6 +51,9 @@ shopify.app.*.toml
 
 /docs
 
+# Trigger.dev
+.trigger
+
 # Agent tools & notes
 /.agents/
 skills-lock.json

@@ -14,7 +14,8 @@
     "migrate:down": "node supabase/migrate.mjs down",
     "migrate:create": "node supabase/migrate.mjs create",
     "shopify:dev": "shopify app dev",
-    "test:db": "vitest run --config vitest.db.config.mjs"
+    "test:db": "vitest run --config vitest.db.config.mjs",
+    "dev:trigger": "trigger dev --profile omnitarget --env-file .env.local"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
@@ -27,6 +28,7 @@
     "@sparticuz/chromium-min": "^131.0.1",
     "@supabase/supabase-js": "^2.100.1",
     "@tanstack/react-query": "^5.101.2",
+    "@trigger.dev/sdk": "4.8.5",
     "class-variance-authority": "^0.7.1",
     "cloudinary": "^2.9.0",
     "clsx": "^2.1.1",
@@ -46,6 +48,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@trigger.dev/build": "4.8.5",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
@@ -56,6 +59,7 @@
     "pg": "^8.22.0",
     "playwright": "^1.61.1",
     "tailwindcss": "^4",
+    "trigger.dev": "4.8.5",
     "typescript": "^5",
     "vitest": "^4.1.9"
   },

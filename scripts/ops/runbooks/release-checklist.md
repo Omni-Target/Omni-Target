@@ -26,6 +26,7 @@ copy of staging's.
 | `SHOPIFY_TOKEN_REFRESH_DISABLED` | S1 | Stops token refresh on an environment sharing tokens | Unset in production |
 | `SHOPIFY_TEST_BILLING` | S0 (SEC-12) | Allows Shopify test charges to grant credits | Unset in production |
 | `LOG_LEVEL` | Phase 1 task 1 | Structured logger level | Unset (`info`) |
+| `TRIGGER_SECRET_KEY` | Phase 2 task 3 | Lets the app trigger Trigger.dev tasks. Locally it is the Development key (`tr_dev_…`) in `.env.local` | The Trigger.dev project's Production secret key (`tr_prod_…`), set in Vercel production only |
 | `DATABASE_QUOTA_MB` | Phase 1 task 10 | Database quota for capacity alerts (60% / 75%) and the import pre-flight check | The production plan's database size in MB, e.g. `8192` on Pro (`architecture/capacity-measurements.md`) |
 | `BRIEF_ARCHIVE_PUBLIC_KEY` | Phase 1 task 9 | Encrypts archived briefs (ops tool only, not the app) | Generate a production key pair with `brief-archive.mjs keygen`; the private key goes to the custodian (`brief-archive.md`) |
 | `BRIEF_ARCHIVE_R2_BUCKET`, `BRIEF_ARCHIVE_PREFIX` | Phase 1 task 9 | Where archived briefs go (ops tool only) | The production backup bucket, prefix `brief-archive/<production ref>` |
@@ -55,6 +56,11 @@ copy of staging's.
 ## Platform
 
 - Supabase plan: Pro is the intended production starting plan (ADR 0002, decision 6; measurements in `architecture/capacity-measurements.md`). Approve the upgrade during the release; nothing is upgraded before. Set `DATABASE_QUOTA_MB` to the plan's disk size (`8192` for Pro's included 8 GB).
+- **Trigger.dev** (project `proj_owlfjcsbkqwtsyyykwqd`):
+  - **Deploy.** Deploy the tasks to the Production environment with `trigger deploy --prod --profile omnitarget`. Pass `--native-build` or `--local-build`, because `@depot/cli`'s install script is disabled in `pnpm-workspace.yaml`.
+  - **Environment variables.** Set the production variables in the Trigger.dev Production environment too, since the tasks run there, not on Vercel.
+  - **Plan.** Choose Hobby or Pro from measured run volume, and get it approved before purchase.
+  - **Login profile.** Use the `omnitarget` profile; the machine's default profile belongs to another organisation.
 - Capacity snapshots: `/api/cron/capacity` runs daily from `vercel.json` once production deploys; confirm the first snapshot and that Sentry receives its alerts.
 
 - Vercel production: production variables above, crons from `vercel.json`, and
