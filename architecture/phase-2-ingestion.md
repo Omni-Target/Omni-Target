@@ -162,6 +162,54 @@ Authorised 2026-11-18. This document maps the Phase 2 requirements onto the Phas
 - Every task 4 write calls `lock_shop_for_ingestion` first. It holds that workspace against uninstall, `shop/redact` and deletion until the write commits.
 - `suppressed_subjects` tells a worker which digests in a batch to drop.
 
+### Task 4: bulk operations, streaming, staging and writes (2026-11-18; migration 0032)
+
+**Client** (`bulk.ts`).
+- Starts bulk queries after the Level 2 guard, then reads, cancels and classifies them.
+- Re-runs expired or nearly expired results.
+- Polls from 5 s, backing off to 60 s.
+
+**Streaming** (`jsonl.ts`).
+- Reads line by line, grouping each record with its descendants, including children of inline objects.
+- Batches are bounded by rows and never split a record.
+- A resume skips every record committed at or before the checkpoint line.
+
+**Staging** (`staging.ts`).
+- Copies a result to the private JSONL bucket only when it is large or after a failed attempt.
+- Uploads in parts, with a checksum.
+- Deletion is verified, and a sweep removes anything older than 8 days.
+
+**Queries and mappers.**
+- One bulk query each for catalog, inventory, orders, customers and returns, plus a paginated locations query.
+- Each mapper produces rows that satisfy the 0024 and 0029 checks.
+- The country-aware city rules moved to `src/lib/location-rules.ts`, so the importer carries no AI code; `locations.ts` re-exports them.
+
+**Writes (0032).** `ingest_catalog`, `ingest_inventory`, `ingest_orders`, `ingest_customers`, `ingest_returns`, `derive_customer_order_facts` and `save_sync_checkpoint`.
+- At most 2,000 rows per call.
+- The ingestion guard runs first.
+- Newer data wins.
+- A written record's deleted children are removed.
+- Suppressed customers and orders are never restored.
+- Orders beyond 24 months are not stored.
+- Checkpoints move forward only.
+
+**Shopify behaviour found live on the dev store** (API 2026-07):
+- **Bulk operations need enabling.** They must be enabled for the app in the Dev Dashboard (Access requests). Until then Shopify nulls the mutation with `ACCESS_DENIED`, which the client reports as `not_enabled`. Access lapses after 31 days without a bulk operation.
+- **Tokens were invalidated.** After bulk operations were enabled, the dev store's refresh token was rejected (401) and the shop had to be reconnected. Treat app-configuration changes in the dashboards as possibly requiring merchants to reconnect.
+- **`groupObjects` defaults to `false`.** Without it, children need not follow their parent. The client always sends `true`, and the reader fails loudly on a record outside its group.
+- **No connection inside a list.** A connection inside a list field is not supported (refund line items inside an order's refunds). A line's refunded units are therefore its quantity less its current quantity.
+- **Nesting depth counts below the top level.** Shopify's two-level limit counts nested connections below the top-level one: orders > returns > return line items is accepted.
+- **Node's `fetch` can drop a response body.** It cancels a body whose `Response` was garbage-collected. The result stream holds its `Response` so a slow consumer (staging) cannot lose data silently.
+
+**Verified live.** Every domain's query ran on the dev store and mapped without error:
+- 19 products, 32 variants and 13 metafields;
+- 40 inventory levels and 2 locations;
+- 2 orders, 3 customers.
+
+A real result was also staged in R2, read back identically, and deleted with the deletion verified.
+
+**Still to verify with real data.** The dev store's two orders have no customer and no shipping address, so the bulk export of customer references and destinations is unverified. The access probe now reports such fields as unverified rather than available.
+
 ## Dependencies outside the code
 
 | Dependency | Needed for | Status |

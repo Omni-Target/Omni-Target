@@ -85,6 +85,17 @@ describe("capability matrix", () => {
     expect(report.domains.orders.history?.oldest_reachable_order_at).toBeNull();
   });
 
+  it("verifies a field only from a record that has a value for it", () => {
+    const guest = buildAccessReport(probe({ recentOrder: { nodes: [{ id: "gid://shopify/Order/9", customer: null, shippingAddress: null }] } }), [], now);
+    expect(guest.domains.orders.unverified_fields).toEqual(expect.arrayContaining(["Order.customer", "Order.shippingAddress.city", "Order.shippingAddress.countryCodeV2"]));
+    const full = buildAccessReport(probe({
+      recentOrder: { nodes: [{ id: "gid://shopify/Order/9", customer: { id: "gid://shopify/Customer/1" }, shippingAddress: { city: "Leeds", provinceCode: "ENG", countryCodeV2: "GB" } }] },
+      customerProbe: { nodes: [{ id: "gid://shopify/Customer/1", numberOfOrders: "2", amountSpent: { amount: "10.0", currencyCode: "GBP" }, createdAt: "2025-01-01T00:00:00Z" }] },
+    }), [], now);
+    expect(full.domains.orders.unverified_fields).toBeUndefined();
+    expect(full.domains.customers.unverified_fields).toBeUndefined();
+  });
+
   it("accepts a write scope for its read scope", () => {
     const scopes = ALL_SCOPES.filter((s) => s !== "read_products").concat("write_products");
     expect(buildAccessReport(probe({}, scopes), [], now).domains.catalog.status).toBe("available");

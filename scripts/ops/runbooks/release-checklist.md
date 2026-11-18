@@ -77,6 +77,11 @@ copy of staging's.
 
 ## Shopify approvals
 
+- **Bulk operations** (Phase 2 task 4). Enable bulk query operations for the production app in the Dev Dashboard under Access requests; access is granted immediately.
+  - Access lapses after 31 days without a bulk operation. The daily reconcile keeps it active, so confirm that reconcile is scheduled.
+  - Without it, every import fails with `not_enabled`.
+  - On the dev store, existing installations' tokens were invalidated after this change. Plan for merchants needing to reconnect.
+
 - **`read_all_orders`: a prerequisite for complete historical ingestion** (task 11, decision 6). Request it in the Partner Dashboard under API access requests, and record the outcome here. Without it:
   - a shop's orders are readable for 60 days only, and Phase 2 imports 60 days and marks the orders domain partial (`orderHistoryWindow`, `src/modules/retention/policy.ts`);
   - the 24-month detailed window and the monthly summaries cover only what was imported.

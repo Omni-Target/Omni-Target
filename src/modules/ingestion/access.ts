@@ -107,7 +107,6 @@ export interface ShopAccessReport {
 /** write_x grants read_x. */
 const hasScope = (granted: Set<string>, scope: string) => granted.has(scope) || granted.has(scope.replace(/^read_/, "write_"));
 
-const nonEmpty = (nodes: Array<unknown> | undefined) => (nodes ?? []).some((node) => node !== null && node !== undefined);
 
 /** The capability matrix from what the probe returned and which fields Shopify withheld. */
 export function buildAccessReport(data: AccessProbeData, deniedPaths: string[], now: Date = new Date()): ShopAccessReport {
@@ -145,12 +144,28 @@ export function buildAccessReport(data: AccessProbeData, deniedPaths: string[], 
     domains[domain] = { status, reasons };
   }
 
-  const recentSeen = nonEmpty(data.recentOrder?.nodes);
-  const customerSeen = nonEmpty(data.customerProbe?.nodes);
-  const probedFields = (domain: DataDomain) =>
-    Object.entries(PROBED).filter(([key, entry]) => entry.domain === domain && !WHOLE_DOMAIN.has(key)).map(([, entry]) => entry.field);
-  if (!recentSeen && domains.orders.status !== "inaccessible") domains.orders.unverified_fields = probedFields("orders");
-  if (!customerSeen && domains.customers.status !== "inaccessible") domains.customers.unverified_fields = probedFields("customers");
+  // A field is verified only by a sampled record that has a value for it: an
+  // empty value with no denial (a guest order, no shipping address) proves nothing.
+  const sampled = (connection: { nodes?: Array<Record<string, unknown> | null> } | null | undefined) =>
+    (connection?.nodes ?? []).find((node): node is Record<string, unknown> => Boolean(node)) ?? null;
+  const valueAt = (node: Record<string, unknown> | null, path: string[]) =>
+    path.reduce<unknown>((value, key) => (value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined), node);
+  const unverified = (domain: DataDomain, prefix: string, node: Record<string, unknown> | null) =>
+    Object.entries(PROBED)
+      .filter(([key, entry]) => entry.domain === domain && !WHOLE_DOMAIN.has(key) && !withheldFields[entry.field])
+      .filter(([key]) => {
+        const value = valueAt(node, key.slice(prefix.length).split("."));
+        return value === null || value === undefined || value === "";
+      })
+      .map(([, entry]) => entry.field);
+  if (domains.orders.status !== "inaccessible") {
+    const fields = unverified("orders", "recentOrder.nodes.", sampled(data.recentOrder));
+    if (fields.length) domains.orders.unverified_fields = fields;
+  }
+  if (domains.customers.status !== "inaccessible") {
+    const fields = unverified("customers", "customerProbe.nodes.", sampled(data.customerProbe));
+    if (fields.length) domains.customers.unverified_fields = fields;
+  }
 
   const window = orderHistoryWindow(grantedScopes, now);
   const oldest = (data.oldestOrder?.nodes ?? []).find(Boolean)?.processedAt ?? null;
