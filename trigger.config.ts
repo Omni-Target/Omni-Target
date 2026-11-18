@@ -17,4 +17,9 @@ export default defineConfig({
     enabledInDev: true,
     default: { maxAttempts: 3, minTimeoutInMs: 1_000, maxTimeoutInMs: 10_000, factor: 2, randomize: true },
   },
+  build: {
+    // Workers run the app's server modules, which import "server-only"; under
+    // the react-server condition that marker resolves to an empty module.
+    conditions: ["react-server"],
+  },
 });

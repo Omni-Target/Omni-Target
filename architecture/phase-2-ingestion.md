@@ -127,7 +127,28 @@ Authorised 2026-11-18. This document maps the Phase 2 requirements onto the Phas
 
 **Verified.** The `health-check` task registered on the dev worker (Node 24). A run triggered from code completed.
 
-**Remaining for task 3.** Queues with per-shop concurrency, Sentry and logging in workers, and triggering from Next.js with idempotency keys. These come with the first real tasks.
+### Task 3: workers (2026-11-18)
+
+**Per-shop concurrency.** Tasks declare `concurrency: { perKey: 1 }`, and callers pass the shop's domain as the `concurrencyKey`. So at most one run per shop executes at a time, while other shops proceed in parallel up to the environment's limit. This is the current API, replacing the deprecated `queue.concurrencyLimit`.
+
+**Triggering from Next.js.** `src/modules/jobs/trigger.ts` provides the helper:
+- **Idempotency.** A global idempotency key covers each shop and reason for one hour, so a retried request queues a single run.
+- **Concurrency and tags.** The shop is the concurrency key, and runs are tagged with shop and reason.
+- **Never fails the request.** The call times out after 3 s, and a failure is logged rather than raised.
+- **First caller.** The OAuth callback queues `shop-access-check` after every connected install.
+
+**Payloads.** They are Zod schemas (`src/modules/jobs/payloads.ts`) checked by the task before it runs. A bad payload fails at once (`TASK_INPUT_ERROR`), with no retries.
+
+**Workers run app code.**
+- The `react-server` build condition lets the app's `server-only` modules bundle.
+- The `@/` alias resolves.
+- The dev worker reads `.env.local`.
+
+**Sentry in workers.** `src/trigger/init.ts` starts Sentry with the app's scrubbing options and no default integrations. `tasks.onFailure` reports a run that failed for good by task, run and attempt, never its payload, and flushes before the worker exits. The local worker has no DSN (it is in `.env.development.local`), so local runs send nothing; staging and production workers get the DSN from their Trigger.dev environment.
+
+**Verified on the dev worker.**
+- `shop-access-check` for the dev store ran the app's own modules against staging and Shopify, and completed in one attempt with every domain available.
+- An invalid shop domain failed validation without retrying.
 
 ### Task 2: redaction suppression and the ingestion guard (2026-11-18; migration 0031)
 

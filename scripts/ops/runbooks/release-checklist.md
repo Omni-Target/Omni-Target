@@ -59,7 +59,13 @@ copy of staging's.
 - Supabase plan: Pro is the intended production starting plan (ADR 0002, decision 6; measurements in `architecture/capacity-measurements.md`). Approve the upgrade during the release; nothing is upgraded before. Set `DATABASE_QUOTA_MB` to the plan's disk size (`8192` for Pro's included 8 GB).
 - **Trigger.dev** (project `proj_owlfjcsbkqwtsyyykwqd`):
   - **Deploy.** Deploy the tasks to the Production environment with `trigger deploy --prod --profile omnitarget`. Pass `--native-build` or `--local-build`, because `@depot/cli`'s install script is disabled in `pnpm-workspace.yaml`.
-  - **Environment variables.** Set the production variables in the Trigger.dev Production environment too, since the tasks run there, not on Vercel.
+  - **Environment variables.** Set the production variables in the Trigger.dev Production environment too, since the tasks run there, not on Vercel. The workers need:
+    - `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`;
+    - `APP_ENCRYPTION_KEY` and `APP_ENCRYPTION_KEY_VERSION`;
+    - `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET`, for token refresh;
+    - `REDACTION_SUPPRESSION_KEY`;
+    - `NEXT_PUBLIC_SENTRY_DSN` and `NEXT_PUBLIC_SENTRY_ENVIRONMENT`;
+    - the R2 variables, once bulk staging is used.
   - **Plan.** Choose Hobby or Pro from measured run volume, and get it approved before purchase.
   - **Login profile.** Use the `omnitarget` profile; the machine's default profile belongs to another organisation.
 - Capacity snapshots: `/api/cron/capacity` runs daily from `vercel.json` once production deploys; confirm the first snapshot and that Sentry receives its alerts.
