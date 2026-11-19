@@ -1,10 +1,13 @@
 import { after } from "next/server";
 import { verifyShopifyHmac } from "@/lib/verify-shopify-hmac";
 import { createLogger } from "@/lib/logger";
-import { captureBackgroundFailure, captureOperationalAlert } from "@/lib/observability/capture";
+import { captureBackgroundFailure } from "@/lib/observability/capture";
 import { lifecycleEventKey, parseShopifyShopId, parseTriggeredAt, webhookShopDomain } from "@/modules/workspaces/lifecycle";
 import { shopKeyFor } from "@/modules/ingestion/repository";
 import { purgeShopStaging, r2StagingStore } from "@/modules/ingestion/staging";
+import { settleClosedExports } from "@/modules/compliance/data-requests";
+import { liveDataRequestDeps } from "@/modules/compliance/live";
+import { dispatchComplianceExport } from "@/modules/jobs/trigger";
 import {
   processUnboundShopRedact,
   processWorkspaceDeletion,
@@ -44,9 +47,12 @@ function isPrivacyTopic(topic: string | null): topic is PrivacyTopic {
  *     mirror (customer row, the identifying fields on their orders, inbox
  *     payloads naming them) is removed in the same transaction (0030).
  *   • customers/data_request: recorded; resolved at once when no data is
- *     held, otherwise left open with a warning so it is fulfilled within 30
- *     days. Store snapshots hold aggregates and Meta send logs hold order ids
- *     and values (SEC-09).
+ *     held. Otherwise an export is opened and dispatched to Trigger.dev, which
+ *     prepares the customer's data, delivers it to the workspace owner in the
+ *     app and completes the request; hourly maintenance retries and escalates
+ *     before the 30-day deadline (task 9, migration 0037).
+ *   • customers/redact also withdraws any export of the customer's data and
+ *     deletes its file, and removes the Meta send logs for their orders.
  *   • shop/redact: starts the workspace deletion workflow, which deletes the
  *     shop's data, verifies nothing is left and only then releases the shop.
  *     Work that does not finish here is retried by /api/cron/process-deletions.
@@ -109,19 +115,24 @@ export async function handleShopifyPrivacyWebhook(
     if (topic === "shop/redact") {
       const recorded = await recordShopRedact(event);
       log.info("shop/redact recorded", { shop, outcome: recorded.outcome });
-      after(() => runShopRedaction(recorded, shop));
+      after(async () => {
+        await runShopRedaction(recorded, shop);
+        // Exports of the shop's customers go with the shop's data (decision 5).
+        await settleExportsFor(shop);
+      });
     } else {
       const recorded = await recordCustomerCompliance(topic, event, complianceSubject(topic, payload));
       log.info(`${topic} recorded`, { shop, outcome: recorded.outcome, resolution: recorded.resolution ?? null });
-      if (recorded.outcome === "open") {
-        // The customer's data is held: Shopify expects it provided to the merchant within 30 days.
-        captureOperationalAlert("shopify-compliance", `${topic}: customer data is held and must be provided within 30 days`, "warning", {
-          shop,
-          compliance_request_id: recorded.compliance_request_id ?? null,
-        });
+      const requestId = recorded.compliance_request_id;
+      if (topic === "customers/data_request" && recorded.outcome === "open" && requestId) {
+        // The customer's data is held: export it for the merchant (maintenance retries a failed dispatch).
+        after(() => dispatchComplianceExport(requestId, "webhook"));
       }
-      // Temporary bulk files may hold the redacted customer: purge the shop's staging (decision 5).
-      if (topic === "customers/redact") after(() => purgeStagingFor(shop));
+      if (topic === "customers/redact") {
+        // Temporary bulk files may hold the redacted customer: purge the shop's staging (decision 5).
+        after(() => purgeStagingFor(shop));
+        if ((recorded.redacted?.exports_withdrawn ?? 0) > 0) after(() => settleExportsFor(shop));
+      }
     }
   } catch (error) {
     log.error(`${topic} could not be recorded`, { shop });
@@ -144,6 +155,16 @@ export function complianceSubject(topic: "customers/redact" | "customers/data_re
     customerId: parseShopifyShopId(body.customer?.id),
     orderIds: Array.isArray(named) ? named.map(parseShopifyShopId).filter((id): id is number => id !== null) : [],
   };
+}
+
+/** Withdraws and deletes the shop's closed customer data exports; never raises (hourly maintenance is the backstop). */
+export async function settleExportsFor(shop: string): Promise<void> {
+  try {
+    const report = await settleClosedExports(shop, liveDataRequestDeps());
+    if (report.withdrawn || report.filesDeleted) log.info("Customer data exports settled", { shop, withdrawn: report.withdrawn, filesDeleted: report.filesDeleted });
+  } catch (error) {
+    captureBackgroundFailure("compliance-export-settle", error);
+  }
 }
 
 /** Deletes the shop's staged bulk results; failures are reported, never raised (the sweep is the backstop). */

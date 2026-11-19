@@ -9,6 +9,8 @@ const h = vi.hoisted(() => ({
   recordCustomerCompliance: vi.fn(),
   processWorkspaceDeletion: vi.fn(),
   processUnboundShopRedact: vi.fn(),
+  dispatchExport: vi.fn(async () => "run_1"),
+  settle: vi.fn(async () => ({ withdrawn: 1, filesDeleted: 1 })),
   afterTasks: [] as Array<() => Promise<unknown>>,
 }));
 
@@ -22,6 +24,9 @@ vi.mock("@/modules/workspaces/repository", () => ({
   processWorkspaceDeletion: h.processWorkspaceDeletion,
   processUnboundShopRedact: h.processUnboundShopRedact,
 }));
+vi.mock("@/modules/jobs/trigger", () => ({ dispatchComplianceExport: h.dispatchExport }));
+vi.mock("@/modules/compliance/data-requests", () => ({ settleClosedExports: h.settle }));
+vi.mock("@/modules/compliance/live", () => ({ liveDataRequestDeps: () => ({}) }));
 vi.mock("next/server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/server")>()),
   after: (task: () => Promise<unknown>) => h.afterTasks.push(task),
@@ -49,6 +54,7 @@ const redactBody = { shop_id: 954889, shop_domain: "s.myshopify.com" };
 
 beforeEach(() => {
   vi.stubEnv("SHOPIFY_WEBHOOK_SECRET", "secret");
+  for (const fn of [h.verify, h.capture, h.alert, h.recordShopRedact, h.recordCustomerCompliance, h.processWorkspaceDeletion, h.processUnboundShopRedact, h.dispatchExport, h.settle]) fn.mockClear();
   for (const fn of [h.verify, h.capture, h.alert, h.recordShopRedact, h.recordCustomerCompliance, h.processWorkspaceDeletion, h.processUnboundShopRedact]) fn.mockReset();
   h.afterTasks = [];
   h.verify.mockResolvedValue(true);
@@ -71,6 +77,8 @@ describe("shop/redact (Phase 1 task 3)", () => {
     expect(h.processWorkspaceDeletion).not.toHaveBeenCalled();
     await flush();
     expect(h.processWorkspaceDeletion).toHaveBeenCalledWith("del-1");
+    // Then the shop's customer data exports are withdrawn and their files deleted (task 9).
+    expect(h.settle).toHaveBeenCalledWith("s.myshopify.com", {});
   });
 
   it("redacts a shop with no workspace through the legacy path", async () => {
@@ -118,14 +126,30 @@ describe("customer compliance topics (Task 11 decision 3, migration 0030)", () =
     // The shop's temporary bulk files are purged after the response (decision 5).
     await flush();
     expect(h.purge).toHaveBeenCalledWith({}, 7);
+    expect(h.settle).not.toHaveBeenCalled();
   });
 
-  it("warns when a data request finds data held, so it is fulfilled within 30 days", async () => {
+  it("deletes the files of exports a redaction withdrew", async () => {
+    h.recordCustomerCompliance.mockResolvedValue({ outcome: "completed", redacted: { customers: 1, orders: 1, inbox: 0, exports_withdrawn: 1 } });
+    await deliver("customers/redact", { shop_id: 954889, shop_domain: "s.myshopify.com", customer: { id: 77 } });
+    await flush();
+    expect(h.settle).toHaveBeenCalledWith("s.myshopify.com", {});
+  });
+
+  it("dispatches the export when a data request finds data held (task 9)", async () => {
     h.recordCustomerCompliance.mockResolvedValue({ outcome: "open", compliance_request_id: "req-9", resolution: null });
     expect((await deliver("customers/data_request", { shop_id: 954889, shop_domain: "s.myshopify.com", customer: { id: 1 } })).status).toBe(200);
-    expect(h.alert).toHaveBeenCalledWith("shopify-compliance", expect.stringContaining("30 days"), "warning", {
-      shop: "s.myshopify.com", compliance_request_id: "req-9",
-    });
+    expect(h.dispatchExport).not.toHaveBeenCalled();
+    await flush();
+    expect(h.dispatchExport).toHaveBeenCalledWith("req-9", "webhook");
+    expect(h.alert).not.toHaveBeenCalled();
+  });
+
+  it("dispatches nothing when no data is held", async () => {
+    h.recordCustomerCompliance.mockResolvedValue({ outcome: "completed", compliance_request_id: "req-10", resolution: "no_customer_data_held" });
+    await deliver("customers/data_request", { shop_id: 954889, shop_domain: "s.myshopify.com", customer: { id: 1 } });
+    await flush();
+    expect(h.dispatchExport).not.toHaveBeenCalled();
   });
 
   it("answers 500 when the request cannot be recorded, so Shopify retries", async () => {

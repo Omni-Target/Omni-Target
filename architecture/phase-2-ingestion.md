@@ -356,6 +356,68 @@ No field was withheld in the sample.
 - **Result:** the rebuilt summaries match the import's exactly (22, 82 and 47 orders; 155 product-months). No months are left marked, and no adjustments were recorded.
 - **Not yet exercised on real data:** omni-beta has no order older than 120 days, so it has no final month to adjust. The database tests cover adjustments. The backdated orders due on omni-beta will exercise them.
 
+### Task 9: compliance (2026-11-19; migration 0037)
+
+**Data requests: located, exported, encrypted, delivered, recorded.**
+- **Opening an export.** A `customers/data_request` for a customer whose data we hold opens a `compliance_exports` row in the same transaction that records the request. The row names the customer and the orders Shopify listed. The webhook then dispatches the Trigger.dev task `compliance-data-request`.
+- **Locating the data.** The task claims the export, then reads the customer's data one database call at a time:
+  - their facts;
+  - their orders and the named orders, with lines, refunds and returns, a page at a time;
+  - the Meta send logs for those orders;
+  - webhook payloads about them still in the inbox.
+  
+  Summaries and cohorts are anonymous and are not included. Nothing of another customer is read.
+- **Encrypting.** The document is sealed with AES-256-GCM:
+  - under a key derived (HKDF) from the application keyring for this purpose only;
+  - bound to its request;
+  - under a fresh object key per attempt, in the private bucket under `compliance-exports/`.
+  
+  Its SHA-256 is recorded with it.
+- **Delivering.** The workspace owner is emailed. The email names no customer and carries no customer data. Sending it completes the request (`customer_data_provided`).
+- **Downloading.** The owner downloads the file from **Settings → Customer data requests**. The route checks ownership, verifies the checksum, decrypts, and serves the file as a no-store attachment. Anyone else gets a 404, and so does any export that has expired or been withdrawn.
+- **Expiry.** Exports expire after 30 days. The file is then deleted, and the row keeps no customer identity (enforced by a constraint).
+- **Durability.** A failed dispatch, a stalled run (15 minutes) or a run that failed is dispatched again by the hourly `compliance-maintenance` task. A run that lost its claim can neither read nor record.
+- **Deadline escalation.** Requests not yet provided are reported to Sentry once per level:
+  - a warning at 10 days left;
+  - an error at 3 days left;
+  - an error when overdue.
+
+**Redaction on every write path (decision 5).**
+- **`customers/redact` now also:**
+  - deletes the Meta send logs for the customer's orders;
+  - withdraws any export of their data, clearing the subject at once. Its file is deleted right after the webhook, or by the hourly task.
+  
+  A run exporting at that moment cannot record, and its file is deleted. A retry finds the export withdrawn.
+- **The Meta conversions path** (`orders/paid`) now checks the order and customer digests first. For a redacted subject it stores and sends nothing. If the check fails, it sends nothing and the failure is reported.
+- **`shop/redact`** withdraws the shop's exports and deletes their files after the shop's data is deleted.
+- **What was already covered:** the import RPCs (catalog, inventory, customers, orders, returns, history staging, checkpoints, summaries) check suppression digests and the ingestion guard. The order webhook stores no payload: only the delivery ID, for de-duplication. The thin webhook inbox is task 10.
+
+**Verification.**
+- **Database tests** (`compliance-exports.db.test.mjs`) cover:
+  - opening exports only when data is held;
+  - reads by the claiming run only, and only the customer's own data;
+  - recording, completion on notification, owner-only download, expiry and file deletion;
+  - dispatch, re-dispatch and escalation once per level.
+  
+  They also prove the acceptance criteria:
+  - after `customers/redact`, a re-import, a historical bulk file, a webhook replay and a retried task each leave the customer absent;
+  - after `shop/redact`, every ingestion path refuses the shop (ten RPCs and the import request) and its exports are withdrawn.
+- **Mutation checks:** six guards each fail their test when removed:
+  - withdrawal on redaction;
+  - the run check on reads;
+  - the withdrawal check on record;
+  - the owner check on download;
+  - withdrawal on shop redaction;
+  - escalation once per level.
+- **Unit tests** cover:
+  - the export file (encryption, request binding, tamper detection, key rotation);
+  - the workflow and maintenance with in-memory storage;
+  - the download route;
+  - the settings card;
+  - the webhook dispatch and settlement;
+  - the Meta path's redaction check.
+- **Reversibility:** applying 0037 and then rolling it back restores the 0036 schema exactly.
+
 ## Dependencies outside the code
 
 | Dependency | Needed for | Status |

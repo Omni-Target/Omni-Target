@@ -68,6 +68,8 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@/modules/credentials/meta", () => ({ getMetaAccessForShop: h.meta }));
+const redacted = vi.hoisted(() => vi.fn(async () => false));
+vi.mock("@/modules/compliance/redaction-check", () => ({ redactedSubject: redacted }));
 
 vi.mock("@/lib/observability/capture", () => ({ captureBackgroundFailure: h.capture }));
 vi.mock("@/modules/workspaces/repository", () => ({
@@ -236,6 +238,24 @@ describe("Shopify order webhook (ING-05)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(h.state.capi).toHaveLength(1);
     expect(h.state.capi[0]).toMatchObject({ status: "sent", shopify_order_id: "1001" });
+  });
+
+  it("neither stores nor sends anything about a redacted customer's order (task 9)", async () => {
+    redacted.mockResolvedValueOnce(true);
+    await deliver(order);
+    await flush();
+    expect(redacted).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ orderId: 1001 }));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(h.state.capi).toHaveLength(0);
+  });
+
+  it("sends nothing, and reports it, when redaction cannot be checked", async () => {
+    redacted.mockRejectedValueOnce(new Error("db down"));
+    await deliver(order);
+    await flush();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(h.state.capi).toHaveLength(0);
+    expect(h.capture).toHaveBeenCalledWith("shopify-webhook", expect.any(Error));
   });
 
   it("records a failed send instead of leaving it pending", async () => {

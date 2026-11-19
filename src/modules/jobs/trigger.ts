@@ -2,6 +2,8 @@ import "server-only";
 import { idempotencyKeys, tasks } from "@trigger.dev/sdk";
 import type { shopAccessCheck } from "@/trigger/shop-access";
 import type { shopImport } from "@/trigger/shop-import";
+import type { complianceExport } from "@/trigger/compliance-export";
+import { markExportDispatched } from "@/modules/compliance/exports-repository";
 import { markImportDispatched, requestImport } from "@/modules/ingestion/imports";
 import { createLogger } from "@/platform/logger";
 import { requireEnv } from "@/platform/env";
@@ -92,5 +94,30 @@ export async function requestShopImportForDomain(shopDomain: string): Promise<{ 
   } catch (error) {
     log.warn("Shop import not requested", { shop: shopDomain }, error);
     return { importId: null, runId: null, outcome: "error" };
+  }
+}
+
+/**
+ * Dispatches the export of a customer data request (task 9). The idempotency
+ * key folds repeats with the same reason (the webhook, or one maintenance hour)
+ * into one run; the export's own claim stops two runs from both exporting.
+ * Returns the run id, or null when it could not be queued: the hourly
+ * maintenance dispatches it again.
+ */
+export async function dispatchComplianceExport(requestId: string, reason: string, timeoutMs: number = TRIGGER_TIMEOUT_MS): Promise<string | null> {
+  try {
+    const idempotencyKey = await idempotencyKeys.create(`compliance-export:${requestId}:${reason}`, { scope: "global" });
+    const handle = await withTimeout(
+      tasks.trigger<typeof complianceExport>("compliance-data-request", { requestId }, {
+        idempotencyKey, idempotencyKeyTTL: "1h", tags: ["compliance:data_request"],
+      }),
+      timeoutMs,
+    );
+    await markExportDispatched(requestId, handle.id);
+    log.info("Customer data export dispatched", { requestId, reason, runId: handle.id });
+    return handle.id;
+  } catch (error) {
+    log.warn("Customer data export not dispatched; maintenance will retry", { requestId, reason }, error);
+    return null;
   }
 }

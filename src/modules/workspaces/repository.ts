@@ -233,7 +233,7 @@ export const recordCustomerCompliance = async (
     outcome: "completed" | "open" | "duplicate";
     compliance_request_id?: string;
     resolution?: string | null;
-    redacted?: { customers: number; orders: number; inbox: number };
+    redacted?: { customers: number; orders: number; inbox: number; meta_events?: number; exports_withdrawn?: number };
     suppressed?: number;
   }>("record_customer_compliance", {
     p_topic: topic,

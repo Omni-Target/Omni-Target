@@ -4,11 +4,12 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ShoppingBag, Database, LogOut, ShieldAlert } from "lucide-react";
 import { getUserIntegration } from "@/lib/db";
-import { hasConnectedShop } from "@/modules/workspaces/current";
+import { currentWorkspaceFor, hasConnectedShop } from "@/modules/workspaces/current";
+import { exportsForOwner } from "@/modules/compliance/exports-repository";
 import { PageContainer } from "@/components/layout/page-container";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { IntegrationCard } from "@/components/settings";
+import { CustomerDataRequests, IntegrationCard } from "@/components/settings";
 import { SyncButton } from "@/components/SyncButton";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
 import { normalizeStoreLogoUrl } from "@/lib/store-logo-url";
@@ -31,6 +32,9 @@ export default async function SettingsPage() {
   const integration = await getUserIntegration(userId);
 
   const shopifyConnected = await hasConnectedShop(userId);
+  // Customer data requests for the owner of the current workspace (task 9); a failed read hides the card.
+  const workspace = await currentWorkspaceFor(userId);
+  const dataRequests = workspace ? await exportsForOwner(userId, workspace.workspace_id).catch(() => null) : null;
   const storeDomain =
     integration?.shopify_custom_domain ||
     integration?.shopify_store_url ||
@@ -116,6 +120,9 @@ export default async function SettingsPage() {
             {shopifyConnected && <SyncButton />}
           </div>
         </IntegrationCard>
+
+        {/* Customer data requests (Shopify privacy) */}
+        {dataRequests && <CustomerDataRequests requests={dataRequests} />}
 
         {/* Account */}
         <IntegrationCard

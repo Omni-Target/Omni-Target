@@ -2,6 +2,7 @@ import { verifyShopifyHmac } from "@/lib/verify-shopify-hmac";
 import { disconnectShopInstallation, legacyShopOwner, markStoreSnapshotStale } from "@/lib/db";
 import { claimWebhookDelivery } from "@/modules/webhooks/repository";
 import { claimCapiEvent, recordCapiResult } from "@/modules/capi/repository";
+import { redactedSubject } from "@/modules/compliance/redaction-check";
 import { captureBackgroundFailure } from "@/lib/observability/capture";
 import {
   lifecycleEventKey,
@@ -24,7 +25,7 @@ interface ShopifyOrderPayload {
   currency?: string;
   total_price?: string;
   current_total_price?: string;
-  customer?: { email?: string; phone?: string };
+  customer?: { id?: number | string; email?: string; phone?: string };
   billing_address?: { phone?: string };
   shipping_address?: { phone?: string };
   client_details?: { browser_ip?: string; user_agent?: string };
@@ -49,6 +50,9 @@ interface WebhookIntegration {
 async function forwardPurchaseToMeta(shopDomain: string, integration: WebhookIntegration, payload: ShopifyOrderPayload) {
   const { meta_access_token: metaAccessToken, meta_pixel_id: metaPixelId } = integration;
   if (!metaAccessToken || !metaPixelId || payload.id === undefined) return;
+  // A redacted customer or order is never stored or sent again (task 9, decision 5). If that cannot be
+  // known, the error is reported and nothing is sent.
+  if (await redactedSubject(shopDomain, { orderId: parseShopifyShopId(payload.id), customerId: parseShopifyShopId(payload.customer?.id) })) return;
 
   const eventId = String(payload.id);
   const currency = payload.currency || "NGN";

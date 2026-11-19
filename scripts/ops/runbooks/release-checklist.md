@@ -65,8 +65,14 @@ copy of staging's.
     - `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET`, for token refresh;
     - `REDACTION_SUPPRESSION_KEY`;
     - `NEXT_PUBLIC_SENTRY_DSN` and `NEXT_PUBLIC_SENTRY_ENVIRONMENT`;
-    - the R2 variables, once bulk staging is used.
-  - **Schedules.** `summary-maintenance` (Phase 2 task 8) declares its own schedule, every six hours at minute 20 with a 30-minute start window, created on deploy. Confirm in the Production dashboard that it is attached and that its first run completes. The Free plan allows 10 schedules.
+    - the R2 variables (`R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_JSONL_BUCKET_NAME`): bulk staging, and customer data exports (task 9), which are always written;
+    - `CLERK_SECRET_KEY` and `RESEND_API_KEY`, to email the workspace owner when a customer data export is ready (task 9).
+  - **Schedules.** Two tasks declare their own schedules, created on deploy:
+    - `summary-maintenance` (Phase 2 task 8): every six hours at minute 20, with a 30-minute start window;
+    - `compliance-maintenance` (task 9): hourly at minute 40, with a 10-minute start window.
+
+    Confirm in the Production dashboard that both are attached and that their first runs complete. The Free plan allows 10 schedules.
+  - **Customer data requests** (task 9). Vercel production needs the R2 variables too: the download route and the post-redaction cleanup read the private bucket. Exports live under `compliance-exports/` in `R2_JSONL_BUCKET_NAME`. That bucket must keep no expiry rule shorter than 30 days, and today it has none. Deadline escalations reach Sentry with the tag `job:compliance-deadline`: add an alert rule for it.
   - **Plan.** Choose Hobby or Pro from measured run volume, and get it approved before purchase.
   - **Login profile.** Use the `omnitarget` profile; the machine's default profile belongs to another organisation.
 - Capacity snapshots: `/api/cron/capacity` runs daily from `vercel.json` once production deploys; confirm the first snapshot and that Sentry receives its alerts.
