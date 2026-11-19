@@ -11,7 +11,8 @@ import { maintainSummaries } from "@/modules/retention/maintenance";
  */
 export const summaryMaintenance = schedules.task({
   id: "summary-maintenance",
-  cron: "20 */6 * * *",
+  // Each run starts at a stable time within 30 minutes of the cron time, spreading load.
+  cron: { pattern: "20 */6 * * *", window: "30m" },
   maxDuration: 900,
   retry: { maxAttempts: 2, minTimeoutInMs: 30_000, maxTimeoutInMs: 120_000, factor: 2 },
   run: async () => {

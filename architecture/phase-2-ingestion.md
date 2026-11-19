@@ -350,6 +350,12 @@ No field was withheld in the sample.
 - **Reversibility:** applying 0036 and then rolling it back restores the 0035 schema exactly.
 - **The range wrapper:** `refresh_monthly_aggregates` remains for operations scripts and tests, as a month-by-month loop over the same calculation.
 
+**Live run on staging (2026-11-19).** 0036 was applied with no imports active, and omni-beta (shop key 2) was ready for maintenance. One `summary-maintenance` run went through the Trigger.dev dev worker:
+- **What it did:** refreshed all 17 due months in 10.9 s, one call each. Three open months (September to November 2026) were rebuilt; 14 months had no orders.
+- **Failures:** none.
+- **Result:** the rebuilt summaries match the import's exactly (22, 82 and 47 orders; 155 product-months). No months are left marked, and no adjustments were recorded.
+- **Not yet exercised on real data:** omni-beta has no order older than 120 days, so it has no final month to adjust. The database tests cover adjustments. The backdated orders due on omni-beta will exercise them.
+
 ## Dependencies outside the code
 
 | Dependency | Needed for | Status |
