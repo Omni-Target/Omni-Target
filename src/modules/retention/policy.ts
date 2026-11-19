@@ -64,9 +64,10 @@ const firstOfMonth = (at: Date) => new Date(Date.UTC(at.getUTCFullYear(), at.get
 const isoDate = (at: Date) => at.toISOString().slice(0, 10);
 
 /**
- * The months a scheduled refresh_monthly_aggregates run must cover: every
- * month whose summaries or cohort are not yet final, through the current one.
- * Earlier months are final, and a refresh leaves them as they are.
+ * The months whose summaries or cohort can still change, through the current
+ * one: the "open" months summary_months_due (migration 0036) lists for the
+ * maintenance task. Later changes to earlier, final months reach it as
+ * changed months and are recorded as adjustments.
  */
 export function aggregateRefreshRange(now: Date = new Date()): { from: string; to: string } {
   return {

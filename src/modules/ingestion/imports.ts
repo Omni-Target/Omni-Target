@@ -55,9 +55,3 @@ export async function discardHistory(importId: string, runId: string | null): Pr
   }
   throw new Error("discard_history_stage did not finish");
 }
-
-/** One month of the retained window's summaries (0030), one database call each. */
-export const refreshMonth = (shopKey: number, month: string) =>
-  rpc<{ product_months: number; store_months: number; cohort_months: number; products_dated: number }>("refresh_monthly_aggregates", {
-    p_shop_key: shopKey, p_from: month, p_to: month, p_calc_version: 1,
-  });

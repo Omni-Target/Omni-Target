@@ -120,7 +120,8 @@ describe("monthly summaries (task 11 decisions 2, 4 and 5)", () => {
     const { old, current } = await anchors();
     await seedHistory(s, old, current);
 
-    expect(await refresh(s, old, current)).toEqual({ product_months: 3, store_months: 2, cohort_months: 2, products_dated: 2 });
+    // The range refresh runs month by month (0036): product 10 is dated in both months.
+    expect(await refresh(s, old, current)).toEqual({ product_months: 3, store_months: 2, cohort_months: 2, products_dated: 3 });
     const [o, c] = [isoDate(old), isoDate(current)];
     expect(await productMonths(s)).toEqual([
       { product: 10, month: o, orders: 2, units: 3, gross: 70, discounts: 0, refunded: 1, returned: 0, customers: 1, first_time: 1, final: true },

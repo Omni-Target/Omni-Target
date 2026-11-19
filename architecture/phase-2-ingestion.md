@@ -301,6 +301,55 @@ No field was withheld in the sample.
 
 **Still to verify with real data.** History beyond the window needs omni-beta orders processed more than 24 months ago, for example orders imported with a backdated processed date.
 
+### Task 8: summary maintenance (2026-11-19; migration 0036)
+
+**One month per call.** `refresh_summary_month` (used by the import) and `maintain_summary_month` (used by the scheduled task) each refresh one month of one shop, within the 8 s statement timeout. In that call:
+- An open month is rebuilt from detail.
+- A month is finalised once it ended more than 120 days ago.
+- A cohort is rebuilt until it is final at 485 days.
+- A final month is never rewritten. A database trigger also refuses any update to a final summary row or an adjustment.
+
+**Adjustments.** For a final month inside the window, a change found by recomputing from detail is appended as an adjustment:
+- **What is recorded:** the difference between the recomputation and the final summary plus the adjustments already recorded.
+- **Where:** `product_monthly_adjustments` and `store_monthly_adjustments`, classified as refund, return, refund and return, or correction.
+- **Result:** effective totals (`product_months_effective`, `store_months_effective`) equal a full recomputation for every measured field.
+- **Customer counts** stay as finalised. After finalisation they change only through redaction or customer merges, which are not business corrections.
+- **Left as they are:** final months before the window (history), and final months whose detail is gone (pruned). An empty month is never read as a run of negative corrections.
+- **Concurrency:** a lock per shop and month means two refreshes record a change once.
+
+**Changed months.**
+- **What marks a month:** statement-level triggers on orders and return lines, writing to `summary_dirty_months`. An order marks its month (old and new) when it is added or removed, when Shopify's `updated_at` changes, or when a measured field changes.
+- **What doesn't:** customer redaction changes neither, so it marks nothing.
+- **Clearing:** a refresh clears the mark first, so a change committed during the refresh marks the month again.
+
+**Scheduling.** The Trigger.dev scheduled task `summary-maintenance` runs every six hours, at minute 20.
+- **What it refreshes:** changed months first, then every month that can still change (the last 485 days). Each month is its own call.
+- **Which shops:** only shops ready for maintenance, meaning:
+  - open for ingestion;
+  - orders fully imported at least once;
+  - no import in progress, re-checked in the refresh's own transaction. An incomplete import's missing orders are never read as corrections.
+- **Failures:** a shop that fails is skipped for the rest of the run, and the run fails so that it reaches Sentry. Months left when the 13-minute budget runs out stay due.
+- **Imports:** an import now refreshes its window only when its orders domain succeeded.
+
+**Verification.**
+- **Database tests** (`summary-maintenance.db.test.mjs`) cover:
+  - late refund, return and cancellation adjustments;
+  - effective totals equal to a recomputation;
+  - open-month rebuilds;
+  - immutability;
+  - pruned and history months left untouched;
+  - the readiness gates;
+  - redaction marking nothing;
+  - the month lock.
+- **Mutation checks:** removing each guard fails exactly its test:
+  - the month lock;
+  - the guard for months with no detail left;
+  - the immutability trigger;
+  - the readiness re-check;
+  - excluding the customer field from change detection.
+- **Reversibility:** applying 0036 and then rolling it back restores the 0035 schema exactly.
+- **The range wrapper:** `refresh_monthly_aggregates` remains for operations scripts and tests, as a month-by-month loop over the same calculation.
+
 ## Dependencies outside the code
 
 | Dependency | Needed for | Status |

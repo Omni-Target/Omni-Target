@@ -4,6 +4,7 @@ import { releaseImportCapacity, renewImportCapacity, reserveImportCapacity } fro
 import { sampledRatios } from "@/modules/capacity/projection";
 import { suppressionKey } from "@/modules/compliance/suppression";
 import { getShopifyAccessForShop } from "@/modules/credentials/shopify";
+import { refreshSummaryMonth } from "@/modules/retention/repository";
 import { createLogger } from "@/platform/logger";
 import { checkShopAccess } from "./access-check";
 import type { DataDomain } from "./access";
@@ -326,12 +327,15 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
       if (step.next_after === null) break;
       after = step.next_after;
     }
+    // Only from complete orders: a month summarised from a partial import would become final with gaps.
     const summaries: Stats = {};
-    for (let month = firstOfMonth(ctx.windowStart); month <= new Date(); month = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1))) {
-      add(summaries, await imports.refreshMonth(ctx.shopKey, isoDate(month)));
+    if (results.orders?.status === "succeeded") {
+      for (let month = firstOfMonth(ctx.windowStart); month <= new Date(); month = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1))) {
+        add(summaries, await refreshSummaryMonth(ctx.shopKey, isoDate(month)));
+      }
     }
     ctx.coverage.customer_facts = facts;
-    ctx.coverage.window_summaries = summaries;
+    ctx.coverage.window_summaries = results.orders?.status === "succeeded" ? summaries : { skipped: "orders_incomplete" };
     ctx.coverage.domains = results;
     ctx.coverage.rows_written = ctx.rowsWritten;
     ctx.coverage.finished_at = new Date().toISOString();

@@ -52,7 +52,11 @@ async function newShop(shop = domain()) {
 }
 
 /** Monthly summaries (0030): written only by refresh_monthly_aggregates, read by service_role. */
-const SUMMARIES = ["product_monthly_metrics", "store_monthly_metrics", "cohort_monthly_outcomes"];
+const SUMMARIES = [
+  "product_monthly_metrics", "store_monthly_metrics", "cohort_monthly_outcomes",
+  // Summary maintenance (0036): adjustments and changed months, written only by its functions and triggers.
+  "product_monthly_adjustments", "store_monthly_adjustments", "summary_dirty_months",
+];
 /** Every table that mirrors or is derived from one shop's Shopify data. */
 const SYNCED = [
   "products", "product_variants", "inventory_locations", "inventory_levels", "customers", "orders", "order_line_items",
@@ -95,6 +99,9 @@ async function seed({ id, shop }) {
   await q("insert into public.product_monthly_metrics (shop_key, product_shopify_id, month, calc_version, currency, orders, units) values ($1, 10, date_trunc('month', now()), 1, 'GBP', 1, 1)", [id]);
   await q("insert into public.store_monthly_metrics (shop_key, month, calc_version, currency, orders) values ($1, date_trunc('month', now()), 1, 'GBP', 1)", [id]);
   await q("insert into public.cohort_monthly_outcomes (shop_key, cohort_month, calc_version, currency, first_time_customers, observed_through) values ($1, date_trunc('month', now()), 1, 'GBP', 1, now())", [id]);
+  await q("insert into public.product_monthly_adjustments (shop_key, product_shopify_id, month, calc_version, currency, reason, refunded_units) values ($1, 10, date_trunc('month', now()), 1, 'GBP', 'refund', 1)", [id]);
+  await q("insert into public.store_monthly_adjustments (shop_key, month, calc_version, currency, reason, total_refunded) values ($1, date_trunc('month', now()), 1, 'GBP', 'refund', 5)", [id]);
+  // summary_dirty_months already holds the orders' month, marked by the order insert above.
 }
 const syncedRows = async (shop) => Number((await one("select public.shop_synced_row_count($1) as n", [shop])).n);
 

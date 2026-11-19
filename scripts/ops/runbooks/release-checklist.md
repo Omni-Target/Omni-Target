@@ -66,6 +66,7 @@ copy of staging's.
     - `REDACTION_SUPPRESSION_KEY`;
     - `NEXT_PUBLIC_SENTRY_DSN` and `NEXT_PUBLIC_SENTRY_ENVIRONMENT`;
     - the R2 variables, once bulk staging is used.
+  - **Schedules.** `summary-maintenance` (Phase 2 task 8) declares its own schedule, every six hours at minute 20, created on deploy. Confirm in the Production dashboard that it is attached and that its first run completes. The Free plan allows 10 schedules.
   - **Plan.** Choose Hobby or Pro from measured run volume, and get it approved before purchase.
   - **Login profile.** Use the `omnitarget` profile; the machine's default profile belongs to another organisation.
 - Capacity snapshots: `/api/cron/capacity` runs daily from `vercel.json` once production deploys; confirm the first snapshot and that Sentry receives its alerts.
