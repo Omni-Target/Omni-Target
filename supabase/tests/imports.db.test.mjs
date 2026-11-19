@@ -87,7 +87,7 @@ describe("history beyond the window (decision 3)", () => {
     const s = await boundShop();
     const start = await windowStart();
     const { import_id: id } = await call("request_shop_import", s.key);
-    await expect(json("stage_history_orders", id, [], [])).rejects.toThrow(/import_not_running/);
+    await expect(json("stage_history_orders", id, "run_h", [], [])).rejects.toThrow(/import_not_running/);
     await call("claim_shop_import", id, "run_h", 900);
     // customers/redact named customer 502.
     await call("record_customer_compliance", "customers/redact", s.shopify, s.shop, randomUUID(), new Date(), 502, null,
@@ -110,14 +110,14 @@ describe("history beyond the window (decision 3)", () => {
       { shopify_id: 41, order_shopify_id: 4, product_shopify_id: 10, quantity: 1, unit_price: "25.00" },
       { shopify_id: 61, order_shopify_id: 6, product_shopify_id: 10, quantity: 1, unit_price: "25.00" },
     ];
-    expect(await json("stage_history_orders", id, orders, lines)).toEqual({ orders: 5, lines: 4, in_window: 1, suppressed: 1 });
-    expect(await json("stage_history_orders", id, orders, lines)).toMatchObject({ orders: 0, lines: 0 });
+    expect(await json("stage_history_orders", id, "run_h", orders, lines)).toEqual({ orders: 5, lines: 4, in_window: 1, suppressed: 1, customers: 0 });
+    expect(await json("stage_history_orders", id, "run_h", orders, lines)).toMatchObject({ orders: 0, lines: 0 });
     expect(await one("select count(*)::int as n from public.history_stage_orders where import_id = $1 and order_shopify_id = 3 and customer_digest is null", [id])).toEqual({ n: 1 });
     expect((await q("select month::text, orders::int from public.history_stage_months($1)", [id])).map((r) => r.orders)).toEqual([1, 4]);
 
     const iso = (d) => d.toISOString().slice(0, 10).replace(/-\d\d$/, "-01");
-    expect(await call("summarise_history_month", id, iso(m2), 1)).toEqual({ product_months: 2, store_months: 1 });
-    await call("summarise_history_month", id, iso(m3), 1);
+    expect(await call("summarise_history_month", id, "run_h", iso(m2), 1)).toEqual({ product_months: 2, store_months: 1 });
+    await call("summarise_history_month", id, "run_h", iso(m3), 1);
     expect(await q(
       `select month::text, product_shopify_id::int as product, orders, units, gross_sales::float8 as gross, discounts::float8 as discounts, refunded_units,
               customers, first_time_customers, finalized_at is not null as final
@@ -131,11 +131,11 @@ describe("history beyond the window (decision 3)", () => {
     expect(await one("select orders, customers, new_customers, total_price::float8 as total from public.store_monthly_metrics where shop_key = $1 and month = $2", [s.key, iso(m2)]))
       .toEqual({ orders: 3, customers: 1, new_customers: 0, total: 90 });
     // Final rows never change; a month inside the window is refused.
-    expect(await call("summarise_history_month", id, iso(m2), 1)).toEqual({ product_months: 0, store_months: 0 });
-    await expect(call("summarise_history_month", id, iso(start), 1)).rejects.toThrow(/month_inside_retained_window/);
+    expect(await call("summarise_history_month", id, "run_h", iso(m2), 1)).toEqual({ product_months: 0, store_months: 0 });
+    await expect(call("summarise_history_month", id, "run_h", iso(start), 1)).rejects.toThrow(/month_inside_retained_window/);
 
-    expect(await call("discard_history_stage", id, 2)).toMatchObject({ deleted: 2 });
-    while ((await call("discard_history_stage", id, 2)).remaining > 0);
+    expect(await call("discard_history_stage", id, "run_h", 2)).toMatchObject({ deleted: 2 });
+    while ((await call("discard_history_stage", id, "run_h", 2)).remaining > 0);
     expect(await one("select (select count(*) from public.history_stage_orders where import_id = $1)::int + (select count(*) from public.history_stage_lines where import_id = $1)::int as n", [id])).toEqual({ n: 0 });
   });
 

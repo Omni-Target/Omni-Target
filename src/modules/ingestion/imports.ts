@@ -31,19 +31,25 @@ export const importsNeedingDispatch = (graceSeconds: number, staleSeconds: numbe
     p_requested_grace_seconds: graceSeconds, p_stale_seconds: staleSeconds, p_limit: limit,
   });
 
-export const stageHistory = (importId: string, orders: unknown[], lines: unknown[]) =>
-  rpc<{ orders: number; lines: number; in_window: number; suppressed: number }>("stage_history_orders", { p_import: importId, p_orders: orders, p_lines: lines });
+// History staging, summaries and discards belong to the run holding the import (0035).
+export const stageHistory = (importId: string, runId: string, orders: unknown[], lines: unknown[]) =>
+  rpc<{ orders: number; lines: number; in_window: number; suppressed: number; customers: number }>("stage_history_orders", {
+    p_import: importId, p_run_id: runId, p_orders: orders, p_lines: lines,
+  });
 
 export const historyMonths = (importId: string) => rpc<Array<{ month: string; orders: number }>>("history_stage_months", { p_import: importId });
 
-export const summariseHistoryMonth = (importId: string, month: string) =>
-  rpc<{ product_months: number; store_months: number }>("summarise_history_month", { p_import: importId, p_month: month, p_calc_version: 1 });
+export const summariseHistoryMonth = (importId: string, runId: string, month: string) =>
+  rpc<{ product_months: number; store_months: number }>("summarise_history_month", { p_import: importId, p_run_id: runId, p_month: month, p_calc_version: 1 });
 
-/** Deletes an import's staged history in bounded steps until none is left. */
-export async function discardHistory(importId: string): Promise<number> {
+/**
+ * Deletes an import's staged history in bounded steps until none is left: by the run holding it,
+ * or with runId null once the import has finished (the reconcile job's cleanup).
+ */
+export async function discardHistory(importId: string, runId: string | null): Promise<number> {
   let deleted = 0;
   for (let i = 0; i < 10_000; i++) {
-    const step = await rpc<{ deleted: number; remaining: number }>("discard_history_stage", { p_import: importId, p_limit: 20_000 });
+    const step = await rpc<{ deleted: number; remaining: number }>("discard_history_stage", { p_import: importId, p_run_id: runId, p_limit: 20_000 });
     deleted += step.deleted;
     if (step.remaining === 0) return deleted;
   }

@@ -271,6 +271,36 @@ No field was withheld in the sample.
 
 **Not yet exercised with real data.** History beyond the window, refunds, returns and discounts: omni-beta has none yet. The database tests cover them with synthetic data.
 
+### Task 7: history beyond the window (2026-11-19; migration 0035)
+
+**Equivalence, proven on synthetic data.** omni-beta's oldest order (2026-09-20) is inside the window, so a database test proves the history path (`history-equivalence.db.test.mjs`).
+- **Test data:** one synthetic history covering six months before the window and two inside it, with:
+  - repeat, first-time and returning customers, and guests;
+  - discounts, refunds, a test order, a cancelled order, and a line with no product.
+- **The two paths compared:**
+  - full detail: every order canonical, summarised by `refresh_monthly_aggregates`;
+  - the import: window orders through `ingest_orders`; older orders staged in three batches with one replayed, then summarised and discarded.
+- **Result:** both paths give identical product summaries (28 product-months), store summaries (8 months), customers' first orders and window cohorts.
+- **What the import path leaves:** no detailed order older than the window and no staged rows. A concurrent import staging a conflicting history under the same order IDs is unaffected.
+
+**Defects found and fixed in 0035.**
+1. **The window could move during an import.**
+   - The claim fixed the window start for the bulk queries, but `ingest_orders` recomputed it on every call.
+   - An import still running at 00:00 UTC on the 1st would have refused the window's oldest month as beyond the window, and the history query never fetched it. That month would have been left partly in detail and partly lost, and its summary finalised wrong.
+   - Fix: the start is pinned at the first claim (`shop_imports.window_start`). While the import runs, every order write for the shop, the history staging and the summaries use it.
+2. **Staging was not isolated by run.**
+   - Staging, summaries and discards checked only that the import was running. A superseded run could have discarded the staging of the run that took over, in the middle of its summaries. A month summarised from partial staging stays wrong, because summaries are final.
+   - Fix: these calls now require the run holding the import, and a takeover waits for an in-flight batch to commit. The reconcile job can still clear a finished import's staging.
+3. **Returning customers were counted as new.**
+   - First orders were derived from retained detail only. A customer whose earlier orders were all history therefore counted as new at their first order inside the window, inflating new customers and cohorts.
+   - Fix: history staging records `customers.history_first_order_at`, a date on an existing customer row; the orders themselves are only summarised. `derive_customer_order_facts` takes it as the first order when it is earlier.
+
+**Verification.**
+- **Mutation checks:** restoring each old behaviour fails exactly the test written for it.
+- **Reversibility:** applying 0035 and then rolling it back restores the 0034 schema exactly.
+
+**Still to verify with real data.** History beyond the window needs omni-beta orders processed more than 24 months ago, for example orders imported with a backdated processed date.
+
 ## Dependencies outside the code
 
 | Dependency | Needed for | Status |

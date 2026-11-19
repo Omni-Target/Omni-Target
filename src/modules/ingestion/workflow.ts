@@ -297,13 +297,13 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
           const mapped = units.map(mapOrderUnit);
           const orders = withOrderDigests(mapped.flatMap((m) => (m.order ? [m.order] : [])), key, ctx.shopifyShopId);
           const lines = mapped.flatMap((m) => m.lineItems);
-          const stats = await imports.stageHistory(ctx.importId, orders, lines);
+          const stats = await imports.stageHistory(ctx.importId, ctx.runId, orders, lines);
           return { rows: 0, rejected: units.length - orders.length, stats };
         });
         if (staged.status !== "succeeded") return staged;
         const summarised: Stats = {};
-        for (const { month } of await imports.historyMonths(ctx.importId)) add(summarised, await imports.summariseHistoryMonth(ctx.importId, month));
-        const discarded = await imports.discardHistory(ctx.importId);
+        for (const { month } of await imports.historyMonths(ctx.importId)) add(summarised, await imports.summariseHistoryMonth(ctx.importId, ctx.runId, month));
+        const discarded = await imports.discardHistory(ctx.importId, ctx.runId);
         return { ...staged, written: { ...(staged.written ?? {}), ...summarised, discarded } };
       });
     } else {
@@ -345,7 +345,7 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
     const reason = error instanceof ImportStopped ? error.reason : error instanceof Error ? error.message.slice(0, 500) : "unknown";
     if (ctx.reservationId) await releaseImportCapacity(ctx.reservationId, "failed").catch(() => {});
     if (error instanceof ImportStopped && error.reason === "lost") return { outcome: "busy" };
-    await imports.discardHistory(importId).catch(() => 0);
+    await imports.discardHistory(importId, runId).catch(() => 0);
     if (error instanceof ImportStopped) return finish("partial", ctx.coverage, reason);
     throw error;
   }

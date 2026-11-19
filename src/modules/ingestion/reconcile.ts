@@ -34,7 +34,7 @@ export async function reconcileImports(): Promise<ReconcileReport> {
   for (const item of due) {
     if (item.dispatch_attempts >= MAX_DISPATCHES) {
       await finishImport(item.import_id, null, "failed", null, "dispatch_exhausted");
-      await discardHistory(item.import_id).catch(() => 0);
+      await discardHistory(item.import_id, null).catch(() => 0);
       report.abandoned += 1;
       log.warn("Shop import abandoned after repeated dispatches", { shop: item.shop_domain, importId: item.import_id });
       continue;
