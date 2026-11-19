@@ -1,0 +1,57 @@
+import "server-only";
+import { supabaseAdmin } from "@/platform/supabase";
+
+/** Shop import records, history staging and summary refreshes (migrations 0030 and 0034). */
+type Json = Record<string, unknown>;
+
+async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabaseAdmin.rpc(fn, args);
+  if (error) throw new Error(`${fn}: ${error.message}`);
+  return data as T;
+}
+
+export const requestImport = (shopKey: number) =>
+  rpc<{ outcome: "requested" | "existing" | "not_ingestible"; import_id?: string; status?: string; dispatch_attempts?: number }>("request_shop_import", { p_shop_key: shopKey });
+
+export const markImportDispatched = (importId: string, runId: string) => rpc<Json>("mark_import_dispatched", { p_import: importId, p_run_id: runId });
+
+export type Claim =
+  | { outcome: "claimed"; shop_key: number; shop_domain: string; shopify_shop_id: number; coverage: Json; window_start: string }
+  | { outcome: "finished" | "busy" | "missing"; status?: string };
+export const claimImport = (importId: string, runId: string) => rpc<Claim>("claim_shop_import", { p_import: importId, p_run_id: runId, p_stale_seconds: 900 });
+
+export const importHeartbeat = (importId: string, runId: string, coverage: Json | null = null) =>
+  rpc<{ outcome: "ok" | "lost" }>("import_heartbeat", { p_import: importId, p_run_id: runId, p_coverage: coverage });
+
+export const finishImport = (importId: string, runId: string | null, status: "succeeded" | "partial" | "failed" | "cancelled", coverage: Json | null, error: string | null) =>
+  rpc<{ outcome: "finished" | "not_active" }>("finish_shop_import", { p_import: importId, p_run_id: runId, p_status: status, p_coverage: coverage, p_error: error });
+
+export const importsNeedingDispatch = (graceSeconds: number, staleSeconds: number, limit = 50) =>
+  rpc<Array<{ import_id: string; shop_domain: string; status: string; dispatch_attempts: number }>>("imports_needing_dispatch", {
+    p_requested_grace_seconds: graceSeconds, p_stale_seconds: staleSeconds, p_limit: limit,
+  });
+
+export const stageHistory = (importId: string, orders: unknown[], lines: unknown[]) =>
+  rpc<{ orders: number; lines: number; in_window: number; suppressed: number }>("stage_history_orders", { p_import: importId, p_orders: orders, p_lines: lines });
+
+export const historyMonths = (importId: string) => rpc<Array<{ month: string; orders: number }>>("history_stage_months", { p_import: importId });
+
+export const summariseHistoryMonth = (importId: string, month: string) =>
+  rpc<{ product_months: number; store_months: number }>("summarise_history_month", { p_import: importId, p_month: month, p_calc_version: 1 });
+
+/** Deletes an import's staged history in bounded steps until none is left. */
+export async function discardHistory(importId: string): Promise<number> {
+  let deleted = 0;
+  for (let i = 0; i < 10_000; i++) {
+    const step = await rpc<{ deleted: number; remaining: number }>("discard_history_stage", { p_import: importId, p_limit: 20_000 });
+    deleted += step.deleted;
+    if (step.remaining === 0) return deleted;
+  }
+  throw new Error("discard_history_stage did not finish");
+}
+
+/** One month of the retained window's summaries (0030), one database call each. */
+export const refreshMonth = (shopKey: number, month: string) =>
+  rpc<{ product_months: number; store_months: number; cohort_months: number; products_dated: number }>("refresh_monthly_aggregates", {
+    p_shop_key: shopKey, p_from: month, p_to: month, p_calc_version: 1,
+  });

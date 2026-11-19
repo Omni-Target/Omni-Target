@@ -4,6 +4,7 @@ const h = vi.hoisted(() => ({
   verify: vi.fn(),
   capture: vi.fn(),
   alert: vi.fn(),
+  purge: vi.fn(async () => 2),
   recordShopRedact: vi.fn(),
   recordCustomerCompliance: vi.fn(),
   processWorkspaceDeletion: vi.fn(),
@@ -13,6 +14,8 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/lib/verify-shopify-hmac", () => ({ verifyShopifyHmac: h.verify }));
 vi.mock("@/lib/observability/capture", () => ({ captureBackgroundFailure: h.capture, captureOperationalAlert: h.alert }));
+vi.mock("@/modules/ingestion/repository", () => ({ shopKeyFor: vi.fn(async () => 7) }));
+vi.mock("@/modules/ingestion/staging", () => ({ purgeShopStaging: h.purge, r2StagingStore: () => ({}) }));
 vi.mock("@/modules/workspaces/repository", () => ({
   recordShopRedact: h.recordShopRedact,
   recordCustomerCompliance: h.recordCustomerCompliance,
@@ -112,6 +115,9 @@ describe("customer compliance topics (Task 11 decision 3, migration 0030)", () =
   it("passes orders_to_redact for a redaction", async () => {
     await deliver("customers/redact", { shop_id: 954889, shop_domain: "s.myshopify.com", customer: { id: "77" }, orders_to_redact: [5, 6] });
     expect(h.recordCustomerCompliance).toHaveBeenCalledWith("customers/redact", expect.anything(), { customerId: 77, orderIds: [5, 6] });
+    // The shop's temporary bulk files are purged after the response (decision 5).
+    await flush();
+    expect(h.purge).toHaveBeenCalledWith({}, 7);
   });
 
   it("warns when a data request finds data held, so it is fulfilled within 30 days", async () => {

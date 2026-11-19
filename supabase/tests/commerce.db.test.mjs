@@ -63,8 +63,8 @@ const SYNCED = [
 const NOT_SYNCED = [
   "shop_bindings", "shop_credentials", "workspace_events", "ownership_transfers", "legacy_shop_claims",
   "credit_ledger", "provider_purchases", "purchase_intents", "billing_sync_state",
-  // Capacity reservation history (0033).
-  "capacity_reservations",
+  // Capacity reservation history (0033) and import records (0034).
+  "capacity_reservations", "shop_imports",
 ];
 
 /** One row in every synced table for this shop, written as service_role. */

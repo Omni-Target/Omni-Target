@@ -29,7 +29,7 @@ const m = vi.hoisted(() => ({
   enqueueAccessCheck: vi.fn(async () => "run_1"),
 }));
 
-vi.mock("@/modules/jobs/trigger", () => ({ enqueueShopAccessCheck: m.enqueueAccessCheck }));
+vi.mock("@/modules/jobs/trigger", () => ({ requestShopImportForDomain: m.enqueueAccessCheck }));
 
 vi.mock("@/modules/workspaces/repository", () => ({
   acquireInstallLease: m.acquireLease,
@@ -206,7 +206,7 @@ describe("Shopify OAuth callback — legitimate flows", () => {
     expect(m.upsertUserIntegration).toHaveBeenCalledWith("user_a", expect.objectContaining({ shopify_store_url: SHOP }));
     expect(m.createSignInToken).not.toHaveBeenCalled();
     // Phase 2: the shop's granted access is checked in the background once it is connected.
-    expect(m.enqueueAccessCheck).toHaveBeenCalledWith({ shopDomain: SHOP, reason: "install" });
+    expect(m.enqueueAccessCheck).toHaveBeenCalledWith(SHOP);
     // State cookie is single-use.
     expect(setCookies(res).some((c) => c.startsWith("shopify_oauth_state=;") && c.includes("Max-Age=0"))).toBe(true);
   });

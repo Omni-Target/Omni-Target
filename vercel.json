@@ -12,7 +12,10 @@
     {
       "path": "/api/cron/capacity",
       "schedule": "15 5 * * *"
+    },
+    {
+      "path": "/api/cron/import-reconcile",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
-

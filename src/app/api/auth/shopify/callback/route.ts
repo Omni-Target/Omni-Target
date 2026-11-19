@@ -30,7 +30,7 @@ import { sealShopCredential } from "@/modules/credentials/shopify";
 import { workspaceCookie } from "@/modules/workspaces/current";
 import { grantFreeCredit, type FreeCreditOutcome } from "@/modules/credits/ledger";
 import { createLogger } from "@/platform/logger";
-import { enqueueShopAccessCheck } from "@/modules/jobs/trigger";
+import { requestShopImportForDomain } from "@/modules/jobs/trigger";
 import { fetchWithRetry } from "@/lib/http";
 import { shopifyAdminRestUrl } from "@/lib/shopify-config";
 import { fetchShopifyStoreLogo } from "@/lib/shopify-store-logo";
@@ -382,9 +382,9 @@ export async function GET(request: Request) {
       }
     }
 
-    // Phase 2: record what the shop granted before anything imports from it.
+    // Phase 2: the initial import (it first records what the shop granted).
     // Never blocks or fails the install (bounded, logged on failure).
-    await enqueueShopAccessCheck({ shopDomain: shop, reason: "install" });
+    await requestShopImportForDomain(shop);
 
     // Onboarding: skip the audit for completed merchants, paid-plan intents,
     // dashboard reconnects and returning "Continue with Shopify" logins.

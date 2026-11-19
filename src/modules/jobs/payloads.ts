@@ -13,3 +13,9 @@ export const shopAccessCheckPayload = z.object({
   reason: z.enum(["install", "reconnect", "import", "manual"]),
 });
 export type ShopAccessCheckPayload = z.infer<typeof shopAccessCheckPayload>;
+
+export const shopImportPayload = z.object({
+  importId: z.uuid(),
+  shopDomain: shopDomainSchema,
+});
+export type ShopImportPayload = z.infer<typeof shopImportPayload>;

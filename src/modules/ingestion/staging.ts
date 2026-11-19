@@ -140,6 +140,32 @@ export async function deleteStaged(store: StagingStore, key: string): Promise<bo
   }
 }
 
+/**
+ * Deletes every staged result of one shop at once (customers/redact, decision
+ * 5): a temporary file may hold the redacted customer, and an import that
+ * needs it again re-runs the bulk operation, whose rows then pass the
+ * suppression check on write.
+ */
+export async function purgeShopStaging(store: StagingStore, shopKey: number): Promise<number> {
+  if (!Number.isSafeInteger(shopKey) || shopKey <= 0) throw new Error("invalid shop key");
+  const prefix = `${STAGING_PREFIX}${shopKey}/`;
+  let token: string | undefined;
+  let deleted = 0;
+  do {
+    const page = (await store.client.send(
+      new ListObjectsV2Command({ Bucket: store.bucket, Prefix: prefix, ContinuationToken: token }),
+    )) as { Contents?: Array<{ Key?: string }>; NextContinuationToken?: string; IsTruncated?: boolean };
+    const keys = (page.Contents ?? []).map((object) => object.Key).filter((key): key is string => Boolean(key));
+    for (let i = 0; i < keys.length; i += 1000) {
+      const slice = keys.slice(i, i + 1000);
+      await store.client.send(new DeleteObjectsCommand({ Bucket: store.bucket, Delete: { Objects: slice.map((Key) => ({ Key })), Quiet: true } }));
+      deleted += slice.length;
+    }
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+  return deleted;
+}
+
 /** Removes staged objects older than the result lifetime; reports what remains under the prefix. */
 export async function sweepStaged(store: StagingStore, now: number = Date.now(), prefix: string = STAGING_PREFIX): Promise<{ deleted: number; remaining: number }> {
   if (!prefix.startsWith(STAGING_PREFIX)) throw new Error("sweep is limited to the staging prefix");

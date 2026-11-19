@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   deleteStaged,
+  purgeShopStaging,
   PART_BYTES,
   shouldStage,
   STAGE_THRESHOLD_BYTES,
@@ -71,6 +72,17 @@ describe("streaming a result into R2", () => {
     const { store, sent } = fakeStore({ UploadPartCommand: () => { throw new Error("network"); } });
     await expect(stageStream(store, "bulk/1/x/orders-1.jsonl", bytes(10, 10))).rejects.toThrow("network");
     expect(sent.map((c) => c.name)).toEqual(["CreateMultipartUploadCommand", "UploadPartCommand", "AbortMultipartUploadCommand"]);
+  });
+});
+
+describe("purging a shop's staging on customers/redact (decision 5)", () => {
+  it("deletes every staged object under the shop's prefix and nothing else", async () => {
+    const { store, sent } = fakeStore({ ListObjectsV2Command: (input) => ({
+      Contents: input.Prefix === "bulk/7/" ? [{ Key: "bulk/7/run/orders-1.jsonl" }, { Key: "bulk/7/run/customers-2.jsonl" }] : [], IsTruncated: false,
+    }) });
+    expect(await purgeShopStaging(store, 7)).toBe(2);
+    expect(sent.find((c) => c.name === "ListObjectsV2Command")?.input.Prefix).toBe("bulk/7/");
+    await expect(purgeShopStaging(store, 0)).rejects.toThrow();
   });
 });
 

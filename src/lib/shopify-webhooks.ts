@@ -3,6 +3,8 @@ import { verifyShopifyHmac } from "@/lib/verify-shopify-hmac";
 import { createLogger } from "@/lib/logger";
 import { captureBackgroundFailure, captureOperationalAlert } from "@/lib/observability/capture";
 import { lifecycleEventKey, parseShopifyShopId, parseTriggeredAt, webhookShopDomain } from "@/modules/workspaces/lifecycle";
+import { shopKeyFor } from "@/modules/ingestion/repository";
+import { purgeShopStaging, r2StagingStore } from "@/modules/ingestion/staging";
 import {
   processUnboundShopRedact,
   processWorkspaceDeletion,
@@ -118,6 +120,8 @@ export async function handleShopifyPrivacyWebhook(
           compliance_request_id: recorded.compliance_request_id ?? null,
         });
       }
+      // Temporary bulk files may hold the redacted customer: purge the shop's staging (decision 5).
+      if (topic === "customers/redact") after(() => purgeStagingFor(shop));
     }
   } catch (error) {
     log.error(`${topic} could not be recorded`, { shop });
@@ -140,6 +144,16 @@ export function complianceSubject(topic: "customers/redact" | "customers/data_re
     customerId: parseShopifyShopId(body.customer?.id),
     orderIds: Array.isArray(named) ? named.map(parseShopifyShopId).filter((id): id is number => id !== null) : [],
   };
+}
+
+/** Deletes the shop's staged bulk results; failures are reported, never raised (the sweep is the backstop). */
+export async function purgeStagingFor(shop: string): Promise<void> {
+  try {
+    const shopKey = await shopKeyFor(shop);
+    if (shopKey !== null) await purgeShopStaging(r2StagingStore(), shopKey);
+  } catch (error) {
+    captureBackgroundFailure("staging-purge", error);
+  }
 }
 
 /**
