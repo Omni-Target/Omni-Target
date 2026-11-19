@@ -144,6 +144,11 @@ describe("customer data requests (task 9, decision 4)", () => {
     const file = fakeFile();
     expect(await record(id, "run_a", file)).toMatchObject({ outcome: "ready", owner_clerk_user_id: s.owner, shop_domain: s.shop });
     expect(await one("select status from public.compliance_requests where id = $1", [id])).toEqual({ status: "open" });
+    // The run emails the owner itself; maintenance retries only a notice still missing after 10 minutes (0038).
+    const actions = async () => (await rowsOf("compliance_exports_due", 900, 10, 1000)).filter((a) => a.request_id === id).map((a) => a.action);
+    expect(await actions()).toEqual([]);
+    await q("update public.compliance_exports set exported_at = now() - interval '11 minutes' where request_id = $1", [id]);
+    expect(await actions()).toEqual(["notify"]);
     expect(await call("mark_compliance_export_notified", id)).toEqual({ outcome: "notified" });
     expect(await one("select status, resolution from public.compliance_requests where id = $1", [id])).toEqual({ status: "completed", resolution: "customer_data_provided" });
 

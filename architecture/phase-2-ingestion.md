@@ -418,6 +418,14 @@ No field was withheld in the sample.
   - the Meta path's redaction check.
 - **Reversibility:** applying 0037 and then rolling it back restores the 0036 schema exactly.
 
+**Live check on staging (2026-11-19).** `data-request.live.test.ts` ran against omni-beta through the Trigger.dev dev worker, for customer 6714200457280 (9 orders). The request was recorded as the webhook records one, with an event key labelled as a live check: Shopify sends real compliance webhooks only to the production app.
+- **Export:** ready in 17 s (9 orders, 15 lines, 15.8 KB).
+- **File:** downloaded from the private bucket, matched its recorded SHA-256, and decrypted to exactly this customer's data. No other customer's order was included.
+- **Maintenance:** completed with no failures.
+- **Defect found:** the export run's own notice and a maintenance run started 4 seconds later both emailed the owner, because maintenance retried any ready export not yet marked as notified.
+- **Fix (migration 0038):** maintenance now retries a notice only after the export has been ready for 10 minutes. The database test pins this; without 0038 it fails.
+- **The live request** remains on staging as a completed request. Its file expires on 2026-12-19 and is then deleted by maintenance.
+
 ## Dependencies outside the code
 
 | Dependency | Needed for | Status |
