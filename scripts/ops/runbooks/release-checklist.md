@@ -86,7 +86,7 @@ copy of staging's.
   - a shop's orders are readable for 60 days only, and Phase 2 imports 60 days and marks the orders domain partial (`orderHistoryWindow`, `src/modules/retention/policy.ts`);
   - the 24-month detailed window and the monthly summaries cover only what was imported.
 
-  Status: **approved internally 2026-11-18** (Phase 2 decision 1). The dev store's installation grants it and reaches orders older than 60 days (Phase 2 task 1).
+  Status: **approved by the CEO** (Phase 2 decision 1). In effect on both test installations, the dev store and omni-beta: each grants all 20 scopes, and the full 24-month order window applies. The dev store reaches orders older than 60 days (Phase 2 task 1; verified 2026-11-19).
 
   At release, confirm Shopify's approval in the Partner Dashboard. Every production installation is checked before its import (`checkShopAccess`, recorded in `shop_access`).
 - **Protected customer data, Level 1** (orders and customers), and whichever Level 2 fields are used: confirm the approvals before Phase 2 reads those fields.

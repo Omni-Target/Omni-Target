@@ -208,7 +208,45 @@ Authorised 2026-11-18. This document maps the Phase 2 requirements onto the Phas
 
 A real result was also staged in R2, read back identically, and deleted with the deletion verified.
 
-**Still to verify with real data.** The dev store's two orders have no customer and no shipping address, so the bulk export of customer references and destinations is unverified. The access probe now reports such fields as unverified rather than available.
+**Still to verify with real data.** The dev store's two orders have no customer and no shipping address, so the bulk export of customer references and destinations is unverified. The access probe now reports such fields as unverified rather than available. (Since verified on omni-beta: see the next section.)
+
+### Real-data export verification (2026-11-19, omni-beta)
+
+omni-beta (`omni-beta.myshopify.com`) is the test store from now on. It was checked with `coverage.live.test.ts`, which combines a bulk export of every domain with a sample of the newest 100 orders through the ordinary API. The ordinary API reports each withheld field, so a field with no value and no denial counts as genuinely empty.
+
+**Effective installation scopes.** All 20 are granted, including `read_orders` and `read_all_orders`; `read_all_orders` is approved by the CEO (decision 1). The order window is the full 24 months, and the oldest reachable order is dated 2026-09-20.
+
+| Field | Result | Detail |
+|---|---|---|
+| Order customer | Present | 150 of 151 orders. All 150 match an exported customer (60 customers). The other order is a guest order |
+| Shipping city, province, country | Present | 150 of 151, the same orders |
+| Order discounts | Empty | No order has a discount; nothing was withheld |
+| Refunds | Empty | None in the store |
+| Returns | Empty | None in the store |
+| Line item product and variant | Present | 265 of 266 lines. Every one resolves to the exported catalog of 100,027 products and 100,036 variants. The other line has no product, as a custom line does |
+| Line item discounts | Empty | None |
+
+No field was withheld in the sample.
+
+**Still to test with real data.** Discounts, refunds and returns are tested only with synthetic data until the store has some.
+
+### Task 5: capacity guard (2026-11-19; migration 0033)
+
+**Projection** (`src/modules/capacity/projection.ts`).
+- **Inputs.** Shopify's counts for the shop: products, variants, customers, orders inside the 24-month window, and orders beyond it.
+- **Sampled ratios.** Metafields per product and inventory levels per variant, from a few of the shop's records; the fixture's ratios when not sampled.
+- **Row costs.** Each count is multiplied by its measured cost on the 0029 schema, indexes included.
+- **Orders beyond 24 months** add summary rows only.
+- **Headroom.** 25% is added.
+- **Accuracy.** All four fixture profiles project within 25% of their measured size. omni-beta projects at about 120 MB, where task 10's flat 4,100 bytes per product gave about 410 MB.
+
+**Reservations** (`capacity_reservations`).
+- **Granting.** `reserve_import_capacity` grants under one database-wide advisory lock, only if current size, plus every active reservation's unwritten bytes, plus the request stays within the critical share (75%) of the quota. Concurrent requests are serialised, so together they can never pass it.
+- **Renewal.** `renew_import_capacity` records bytes written, so they are not counted twice, extends the lease, and returns `over_limit` once the real size passes the limit; the import then stops.
+- **Expiry.** A reservation abandoned by a crashed worker expires and frees its capacity.
+- **Retries.** A retry for the same shop and purpose gets the same reservation back.
+
+**Tests.** Seven database tests: within and beyond the limit, two reservations at the same moment, a retry, progress and `over_limit`, expiry after a crash, release and privileges. Seven projection tests: the four fixture profiles, history beyond the window, a catalog-heavy shop, and invalid counts.
 
 ## Dependencies outside the code
 
