@@ -54,7 +54,7 @@ export async function enqueueShopAccessCheck(payload: ShopAccessCheckPayload): P
  * run id, or null if Trigger.dev could not be reached (the import stays
  * requested and the reconcile job dispatches it later).
  */
-export async function dispatchShopImport(importId: string, shopDomain: string, attempt: number): Promise<string | null> {
+export async function dispatchShopImport(importId: string, shopDomain: string, attempt: number, timeoutMs: number = TRIGGER_TIMEOUT_MS): Promise<string | null> {
   try {
     requireEnv(["TRIGGER_SECRET_KEY"] as const);
     const idempotencyKey = await idempotencyKeys.create(`shop-import:${importId}:${attempt}`, { scope: "global" });
@@ -62,7 +62,7 @@ export async function dispatchShopImport(importId: string, shopDomain: string, a
       tasks.trigger<typeof shopImport>("shop-import", { importId, shopDomain }, {
         idempotencyKey, idempotencyKeyTTL: "1h", concurrencyKey: shopDomain, tags: [`shop:${shopDomain}`, "import:initial"],
       }),
-      TRIGGER_TIMEOUT_MS,
+      timeoutMs,
     );
     await markImportDispatched(importId, handle.id);
     log.info("Shop import dispatched", { shop: shopDomain, importId, attempt, runId: handle.id });

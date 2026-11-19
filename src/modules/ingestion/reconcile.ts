@@ -39,7 +39,8 @@ export async function reconcileImports(): Promise<ReconcileReport> {
       log.warn("Shop import abandoned after repeated dispatches", { shop: item.shop_domain, importId: item.import_id });
       continue;
     }
-    const runId = await dispatchShopImport(item.import_id, item.shop_domain, item.dispatch_attempts + 1);
+    // No user waits here: allow the API time, so an accepted dispatch is not misreported.
+    const runId = await dispatchShopImport(item.import_id, item.shop_domain, item.dispatch_attempts + 1, 15_000);
     if (runId) report.dispatched += 1;
     else report.undispatched += 1;
   }

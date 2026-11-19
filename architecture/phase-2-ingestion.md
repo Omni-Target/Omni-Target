@@ -248,6 +248,29 @@ No field was withheld in the sample.
 
 **Tests.** Seven database tests: within and beyond the limit, two reservations at the same moment, a retry, progress and `over_limit`, expiry after a crash, release and privileges. Seven projection tests: the four fixture profiles, history beyond the window, a catalog-heavy shop, and invalid counts.
 
+### Task 6: initial import (2026-11-19; migration 0034)
+
+**First end-to-end import: omni-beta into staging.** The run went through the Trigger.dev dev worker, started by the reconcile job after a deliberately undispatched request.
+
+| Domain | Records read | Written | Rejected |
+|---|---|---|---|
+| Catalog | 200,074 | 100,027 products, 100,036 variants, 11 metafields | 0 |
+| Inventory | 200,074 | 100,038 levels, 2 locations | 0 |
+| Customers | 60 | 60 | 0 |
+| Orders (window) | 417 | 151 orders, 266 line items | 0 |
+| Returns | 151 | 0 (none in the store) | 0 |
+| History | skipped | no orders before the window | — |
+
+- **Duration.** 590 s in total.
+- **Summaries.** 155 product-months, 3 store months and 3 cohort months; 155 products dated; first and last orders derived for 57 customers.
+- **Capacity.** Reserved 159.8 MB (127.8 MB projected plus 25% headroom). The database grew by 94.9 MB, from 16.4 to 111.3 MB, and the reservation was released as completed.
+- **Reconciliation.** The reconcile job's dispatch reached Trigger.dev and the run imported the shop. However, its 3 s client timeout fired first, so the job reported the import as "undispatched".
+  - The import record stayed correct, because the run's claim marks it running, and a repeat dispatch would have found it busy.
+  - Fix: the reconcile job now allows 15 s; the OAuth callback keeps 3 s, since a user is waiting.
+- **Staging sweep.** It left one object: a 0-byte file from a failed live test before the response-lifetime fix. It is younger than 8 days, so the sweep will remove it then.
+
+**Not yet exercised with real data.** History beyond the window, refunds, returns and discounts: omni-beta has none yet. The database tests cover them with synthetic data.
+
 ## Dependencies outside the code
 
 | Dependency | Needed for | Status |
