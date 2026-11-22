@@ -38,11 +38,23 @@ export async function readShopInsights(shopKey: number): Promise<StoredInsights 
 export const shopsInsightsDue = (maxAgeSeconds: number, limit: number) =>
   rpc<Array<{ shop_domain: string; computed_at: string | null }>>("shops_insights_due", { p_max_age_seconds: maxAgeSeconds, p_limit: limit });
 
-/** Whether the shop's last finished import completed its orders and catalog. */
+/**
+ * Whether the shop's orders and catalog were each completed by the last finished import that covered
+ * them: a scoped import (0039) covers some domains, and leaves the others as an earlier import left them.
+ */
 export async function importComplete(shopId: string): Promise<boolean> {
   const { data, error } = await supabaseAdmin.from("shop_imports").select("coverage").eq("shop_id", shopId)
-    .in("status", ["succeeded", "partial"]).order("finished_at", { ascending: false }).limit(1).maybeSingle();
+    .in("status", ["succeeded", "partial"]).order("finished_at", { ascending: false }).limit(50);
   if (error) throw new Error(`shop_imports read failed: ${error.message}`);
-  const domains = (data?.coverage as { domains?: Record<string, { status?: string }> } | null)?.domains ?? {};
-  return domains.orders?.status === "succeeded" && domains.catalog?.status === "succeeded";
+  return importsComplete((data ?? []).map((row) => row.coverage), ["orders", "catalog"]);
+}
+
+/** Pure: newest first, the first coverage that imported each domain decides it (a scoped import records the rest as skipped). */
+export function importsComplete(coverages: unknown[], domains: string[]): boolean {
+  return domains.every((domain) => {
+    const latest = coverages
+      .map((c) => (c as { domains?: Record<string, { status?: string }> } | null)?.domains?.[domain])
+      .find((entry) => entry && entry.status !== "skipped");
+    return latest?.status === "succeeded";
+  });
 }

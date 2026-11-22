@@ -632,6 +632,58 @@ The user decided that orders and refunds reaching Shopify after their month left
 - decide on the scope for amounts and reasons;
 - verify with a dispute made in Shopify Payments test mode.
 
+### Task 11: read path (2026-11-22; migration 0043)
+
+**Before.** The dashboard, products page and briefs read a store snapshot (the legacy `StoreData` shape). It was built inside HTTP requests from a bounded Shopify REST sync: `/api/store/data` when the snapshot was over an hour old or a refresh was forced, the pixel audit when none existed, and the sync-stores cron.
+
+**Now.**
+- **Built in a worker:** `shop-insights` builds the snapshot from the canonical mirror and stores it in `shop_insights`, one row per shop. Requests only read it.
+- **Same computation:** the computation is unchanged. `computeStoreData` was split from its REST fetching without changing behaviour, and the existing builder tests pass as before.
+- **When it is rebuilt:**
+  - after an import;
+  - after a sync run that changed orders or products, at most once per 15 minutes;
+  - every six hours, for snapshots older than six hours (`insights-refresh`);
+  - when a merchant refreshes.
+- **The route:** `/api/store/data` answers with the stored snapshot. When it is missing, stale or a refresh is forced, the route asks the worker for a new one and marks the answer `refreshing`. The client polls every 5 s, for at most about 5 minutes.
+- **Other readers:** campaign generation and targeting, the pixel audit and the flagged legacy routes read the stored snapshot too. `cron/sync-stores` only dispatches.
+- **Boundary test:** no route or page may call the REST sync. On `staging` it would have flagged the three routes that did.
+
+**Inputs, against the REST path:**
+- **Orders:**
+  - the 50,000 most recent orders in the window, paid or partially refunded (REST took 25,000 paid orders);
+  - dated by `processed_at`, Shopify's sales date (REST used `created_at`).
+- **Products:** the 2,000 most recently updated active products, plus every product the orders reference, as REST did.
+- **Cost and catalog evidence:** for every one of those products, from the mirror's variants and metafields, through the same `productEnrichment` as the live path. REST covered the first 400 active products (ING-03).
+- **Cities:** as normalised at ingest (country-aware, GEO-01), with the country's name, so there is no AI pass.
+- **Not mirrored:**
+  - billing addresses (REST used them when an order had no shipping city);
+  - referring and landing sites (acquisition channels come from `source_name`).
+- **Still read from Shopify, by the worker:** shop details, product images (for the candidate products only) and the pre-spend datasets (markets, shipping, analytics, discounts, marketing, policies, returns evidence). Moving these into the mirror belongs to Phase 3's data model work.
+
+**Verification.**
+- **Unit tests:**
+  - the mapping (sales date, customer, destination with country name, lines without a product, tags, images);
+  - enrichment from the mirror;
+  - paging and truncation;
+  - completeness across scoped imports;
+  - the route: read without syncing, worker requests when stale, missing or forced, the reconnect prompt, scopes known or unknown, and the fix 8.2 cache headers;
+  - the boundary.
+- **Database tests** (`shop-insights.db.test.mjs`): the order page (window, statuses, test and cancelled excluded, keyset paging, lines, customer facts), the catalog size and newest products, products with variants and complete metafields (at most 500), saving per shop only while ingestible, and due shops.
+- **Reversibility:** rolling 0043 back restores the 0042 schema exactly, and reapplying it restores 0043 exactly.
+- **Size:** a snapshot is 3.4 MB for omni-beta. It is deleted with the shop's data.
+
+**Live check on staging (2026-11-22; `equivalence.live.test.ts`, omni-beta).** The REST path took 36 s in a request; the canonical path took 16 to 17 s in the worker. A dispatched `shop-insights` run through the dev worker completed in 17 s.
+- **Fidelity:** the 1,499 orders both paths analyse are identical (totals, customer, destination country, lines), and so are the 672 products both list (price, variants, title).
+- **Every other difference is accounted for:**
+  - **500 orders only on REST:** all dated before the window. They were imported recently with backdated sales dates, and REST counted them as recent.
+  - **58 orders only on the canonical path:** all partially refunded, which REST's paid-only filter (ING-10) dropped.
+  - **Sales dates:** REST put all 1,999 orders in the last 30 days, with the oldest on 2026-11-18. The canonical path has 68 orders in the last 30 days, with the oldest on 2024-11-25. So the 30-day revenue, AOV and repeat figures differ accordingly. This is where the REST snapshot was wrong.
+  - **Cost coverage:** 999 of 1,000 products are complete, against 286 on REST (ING-03).
+  - **Total products:** 100,025 against Shopify's 500,025. This is a staging data gap: the mirror's catalog predates the user's catalog growth, and a full re-import was refused by the capacity guard on the Free staging database, correctly.
+- **Defects the check found, fixed before the final run:**
+  - cities showed the country code ("Lagos, NG");
+  - a false "incomplete data" warning, because a scoped import records the domains it did not import as `skipped`.
+
 ## Dependencies outside the code
 
 | Dependency | Needed for | Status |

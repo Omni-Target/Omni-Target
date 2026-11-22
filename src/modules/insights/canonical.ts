@@ -59,6 +59,16 @@ export interface CanonicalProduct {
 }
 
 const money = (value: number | string | null | undefined) => String(Number(value ?? 0));
+const regions = new Intl.DisplayNames(["en"], { type: "region" });
+/** The country's name, as Shopify REST gives it alongside the code ("Nigeria" for NG). */
+const countryName = (code: string | null) => {
+  if (!code) return undefined;
+  try {
+    return regions.of(code) ?? undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /** A mirrored order in the REST shape the computation reads. */
 export function toShopifyOrder(order: CanonicalOrder): ShopifyOrder {
@@ -71,7 +81,7 @@ export function toShopifyOrder(order: CanonicalOrder): ShopifyOrder {
       ? { id: order.customer_id, ...(order.customer_orders !== null ? { orders_count: order.customer_orders } : {}), ...(order.customer_created_at ? { created_at: order.customer_created_at } : {}) }
       : undefined,
     shipping_address: order.city || order.country_code || order.province_code
-      ? { city: order.city ?? undefined, province_code: order.province_code ?? undefined, country_code: order.country_code ?? undefined }
+      ? { city: order.city ?? undefined, province_code: order.province_code ?? undefined, country_code: order.country_code ?? undefined, country: countryName(order.country_code) }
       : undefined,
     financial_status: order.financial_status ?? "paid",
     source_name: order.source_name ?? "",

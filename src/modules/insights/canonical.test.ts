@@ -38,7 +38,7 @@ describe("the mirror in the snapshot computation's shape (task 11)", () => {
     expect(mapped).toEqual({
       id: 1, total_price: "30", subtotal_price: "25", created_at: "2024-05-20T10:00:00Z",
       customer: { id: 501, orders_count: 3, created_at: "2024-01-02T00:00:00Z" },
-      shipping_address: { city: "Leeds", province_code: "ENG", country_code: "GB" },
+      shipping_address: { city: "Leeds", province_code: "ENG", country_code: "GB", country: "United Kingdom" },
       financial_status: "paid", source_name: "web", referring_site: null, landing_site: null,
       line_items: [{ product_id: 7, variant_id: 70, quantity: 2, price: "12.5" }],
     });
