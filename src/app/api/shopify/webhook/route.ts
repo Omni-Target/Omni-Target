@@ -3,6 +3,9 @@ import { disconnectShopInstallation, legacyShopOwner, markStoreSnapshotStale } f
 import { claimWebhookDelivery } from "@/modules/webhooks/repository";
 import { claimCapiEvent, recordCapiResult } from "@/modules/capi/repository";
 import { redactedSubject } from "@/modules/compliance/redaction-check";
+import { SYNC_TOPICS, thinPayload } from "@/modules/ingestion/sync-events";
+import { recordSyncEvents } from "@/modules/ingestion/sync-repository";
+import { dispatchShopSync, syncBurst } from "@/modules/jobs/trigger";
 import { captureBackgroundFailure } from "@/lib/observability/capture";
 import {
   lifecycleEventKey,
@@ -197,6 +200,28 @@ async function processWebhook(shopDomain: string, topic: string | null, payload:
   );
 }
 
+/**
+ * Incremental sync topics (task 10): recorded thin in the inbox (identifiers and change times only) before
+ * Shopify gets its 200, once per webhook ID, then the shop's sync worker is dispatched. A failure to record
+ * answers 500, so Shopify retries; a failed dispatch is picked up by the sweep.
+ */
+async function handleSyncEvent(request: Request, shopDomain: string, topic: string, payload: unknown, rawBody: string): Promise<Response> {
+  const domain = shopDomain.toLowerCase();
+  const webhookId = request.headers.get("X-Shopify-Webhook-Id") || `body:${createHash("sha256").update(rawBody).digest("hex")}`;
+  try {
+    const result = await recordSyncEvents(domain, [{
+      webhook_id: webhookId, event_id: request.headers.get("X-Shopify-Event-Id"), topic,
+      triggered_at: parseTriggeredAt(request.headers.get("X-Shopify-Triggered-At")), payload: thinPayload(payload),
+    }]);
+    if (result.recorded > 0) after(() => dispatchShopSync(domain, syncBurst()).then(() => undefined));
+    return Response.json({ received: true, recorded: result.recorded }, { status: 200 });
+  } catch (err) {
+    console.error("Sync webhook not recorded:", err instanceof Error ? err.message : "unknown");
+    captureBackgroundFailure("shopify-sync-webhook", err);
+    return new Response("Not recorded", { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
   console.log("Shopify webhook received");
 
@@ -242,6 +267,7 @@ export async function POST(request: Request) {
 
   if (topicHeader === "app/uninstalled") return handleUninstall(request, shopDomain, payload, rawBody);
   if (topicHeader === "shop/update") return handleShopUpdate(payload);
+  if (topicHeader && SYNC_TOPICS.has(topicHeader)) return handleSyncEvent(request, shopDomain, topicHeader, payload, rawBody);
 
   // Repeat delivery of this exact webhook: acknowledge and do nothing.
   const webhookId = request.headers.get("X-Shopify-Webhook-Id");

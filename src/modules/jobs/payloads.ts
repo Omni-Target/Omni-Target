@@ -24,3 +24,8 @@ export const complianceExportPayload = z.object({
   requestId: z.uuid(),
 });
 export type ComplianceExportPayload = z.infer<typeof complianceExportPayload>;
+
+export const shopSyncPayload = z.object({
+  shopDomain: shopDomainSchema,
+});
+export type ShopSyncPayload = z.infer<typeof shopSyncPayload>;

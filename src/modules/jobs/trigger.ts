@@ -3,6 +3,7 @@ import { idempotencyKeys, tasks } from "@trigger.dev/sdk";
 import type { shopAccessCheck } from "@/trigger/shop-access";
 import type { shopImport } from "@/trigger/shop-import";
 import type { complianceExport } from "@/trigger/compliance-export";
+import type { shopSyncEvents } from "@/trigger/sync-shop-events";
 import { markExportDispatched } from "@/modules/compliance/exports-repository";
 import { markImportDispatched, requestImport } from "@/modules/ingestion/imports";
 import { createLogger } from "@/platform/logger";
@@ -124,3 +125,29 @@ export async function dispatchComplianceExport(requestId: string, reason: string
     return null;
   }
 }
+
+/**
+ * Dispatches the shop's sync worker (task 10). The concurrency key keeps one
+ * run per shop, and the run drains everything waiting; the idempotency key
+ * folds a burst of webhooks with the same reason (a 30-second bucket, or one
+ * sweep) into one run. Returns the run id, or null: the sweep tries again.
+ */
+export async function dispatchShopSync(shopDomain: string, reason: string, timeoutMs: number = TRIGGER_TIMEOUT_MS): Promise<string | null> {
+  try {
+    const idempotencyKey = await idempotencyKeys.create(`shop-sync:${shopDomain}:${reason}`, { scope: "global" });
+    const handle = await withTimeout(
+      tasks.trigger<typeof shopSyncEvents>("sync-shop-events", { shopDomain }, {
+        idempotencyKey, idempotencyKeyTTL: "10m", concurrencyKey: shopDomain, tags: [`shop:${shopDomain}`, "sync:events"],
+      }),
+      timeoutMs,
+    );
+    return handle.id;
+  } catch (error) {
+    log.warn("Shop sync not dispatched; the sweep will retry", { shop: shopDomain, reason }, error);
+    return null;
+  }
+}
+
+/** A reason that groups webhooks arriving within the same 30 seconds. */
+export const syncBurst = (at: number = Date.now()) => `burst-${Math.floor(at / 30_000)}`;
+

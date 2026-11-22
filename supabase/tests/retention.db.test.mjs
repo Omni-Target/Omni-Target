@@ -236,10 +236,11 @@ describe("customer compliance against the commerce mirror (task 11 decision 3)",
       order(s, 601, new Date(), { customer: 501, total: 40, city: "Leeds", province: "ENG", country: "GB" }),
       order(s, 602, new Date(), { customer: 502, city: "York", country: "GB" }),
       order(s, 603, new Date(), { city: "Hull", country: "GB" }),
-      inbox(s, "orders/paid", { id: 601, customer: { id: 501 } }),
+      // Inbox events are thin (0040): they name the resource only.
+      inbox(s, "orders/paid", { id: 601 }),
       inbox(s, "orders/updated", { id: 603 }),
       inbox(s, "customers/update", { id: 501 }),
-      inbox(s, "orders/paid", { id: 602, customer: { id: 502 } }),
+      inbox(s, "orders/paid", { id: 602 }),
       customer(other, 501, 601, new Date()),
       order(other, 601, new Date(), { customer: 501, city: "Leeds", country: "GB" }),
     ]);
@@ -257,7 +258,7 @@ describe("customer compliance against the commerce mirror (task 11 decision 3)",
       ]);
     expect(await q("select topic, payload, status, last_error from public.webhook_events where shop_key = $1 order by payload is null, topic", [s.id]))
       .toEqual([
-        { topic: "orders/paid", payload: { id: 602, customer: { id: 502 } }, status: "received", last_error: null },
+        { topic: "orders/paid", payload: { id: 602 }, status: "received", last_error: null },
         { topic: "customers/update", payload: null, status: "ignored", last_error: "customer_redacted" },
         { topic: "orders/paid", payload: null, status: "ignored", last_error: "customer_redacted" },
         { topic: "orders/updated", payload: null, status: "ignored", last_error: "customer_redacted" },

@@ -464,6 +464,54 @@ No field was withheld in the sample.
 
 **Also fixed:** a unit test built a regular expression from random base64 keys. Their `+` and `/` made it match ordinary error text now and then.
 
+### Task 10: incremental sync (2026-11-22; migration 0040)
+
+**Thin webhooks.** Each shop gets GraphQL webhook subscriptions, created on install and reconnect and kept right by the daily reconcile.
+- **Fields:** every subscription asks Shopify for identifiers and a field that changes per delivery only (`includeFields`: `id`, `updated_at`, `status`, and so on). Shopify drops a delivery identical to one it sent moments before, so the changing field matters.
+- **Topics:**
+  - orders: create, updated, cancelled, delete;
+  - refunds: create;
+  - products and customers: create, update, delete;
+  - inventory levels: update;
+  - returns: request, approve, decline, cancel, close, reopen, process, update.
+- **Recording:** the webhook route records each delivery thin in the inbox before answering, once per webhook ID. The inbox constraint (`webhook_events_thin_payload`) refuses any payload with other keys or nested values, so no customer data can be stored whoever writes.
+- **Endpoint:** the delivery address must be HTTPS: `SHOPIFY_WEBHOOK_BASE_URL`, falling back to the app URL. Without one, for example on localhost, subscriptions are skipped.
+- **Unchanged:** `orders/paid`, `app/uninstalled` and `shop/update` stay on their existing REST subscriptions and paths.
+
+**Worker.** `sync-shop-events` runs one per shop at a time and drains the shop's inbox.
+- **Claiming:** it claims events (run-bound, with a 15-minute lease) and groups them by resource.
+- **Fetching:** it fetches each resource's current state from Shopify by ID. The by-ID queries share the bulk queries' Level 1 fields and stay within the cost limit with paged child connections.
+- **Writing:** it maps through the bulk mappers and writes through the ingestion functions.
+- **What follows from fetching current state:**
+  - duplicates are fetched once;
+  - out-of-order deliveries converge on Shopify's state;
+  - redaction digests, the retention window and the `updated_at` guard all still apply.
+- **Deletions:** a resource Shopify no longer has is deleted here. For an order, that includes its lines, refunds and returns; for a product, its variants, metafields and inventory levels.
+- **Failures:** a failed event backs off (30 s doubling, at most an hour) and is dead after eight attempts.
+- **Sweep:** `sync-sweep`, every 10 minutes, dispatches shops with events waiting and reports dead events.
+
+**Daily reconcile.** `sync-reconcile` lists the orders, products and customers updated since each domain's watermark. The first watermark is the last import's start, less an hour of overlap. It records them as events, so a missed webhook is repaired through the worker. The watermark only moves forward and leaves import checkpoints alone.
+
+**Not covered by the reconcile:** deletions, inventory levels and returns. These arrive through webhooks, and a scoped re-import covers what both miss.
+
+**Verification.**
+- **Database tests** (`sync.db.test.mjs`) cover:
+  - thin recording once per delivery, and only for open shops;
+  - the constraint against customer data;
+  - run-bound claims, backoff, dead events and reclaiming a quiet run's events;
+  - deletions with what hangs off them, and changed-month marks;
+  - watermarks.
+- **Mutation checks:** dropping the constraint, the run check or the watermark guard each fails its test.
+- **Unit tests** cover:
+  - out-of-order and duplicate deliveries converging to one fetch of Shopify's state;
+  - deletions;
+  - failed fetches and writes;
+  - the reconcile repairing a missed webhook;
+  - subscriptions (create, correct, leave alone);
+  - the route (thin recording, one dispatch, 500 on failure).
+- **Reversibility:** applying 0040 and then rolling it back restores the 0039 schema exactly.
+- **Test fixtures** that put customer objects in inbox payloads now use thin payloads. Redaction still finds such events by order and customer ID.
+
 ## Dependencies outside the code
 
 | Dependency | Needed for | Status |

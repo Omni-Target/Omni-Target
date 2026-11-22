@@ -83,7 +83,7 @@ async function seededShop() {
   await call("ingest_returns", s.key, json([{ shopify_id: 1202, order_shopify_id: 12, status: "closed", total_quantity: 1, shopify_created_at: recent(8) }]),
     json([{ shopify_id: 1203, return_shopify_id: 1202, line_item_shopify_id: 121, quantity: 1, return_reason: "defective" }]));
   await q(`insert into public.capi_events (shop_domain, shopify_order_id, order_value, currency, status, event_type) values ($1, '11', 25, 'GBP', 'sent', 'Purchase'), ($1, '21', 25, 'GBP', 'sent', 'Purchase')`, [s.shop]);
-  await q(`insert into public.webhook_events (shop_domain, shop_key, webhook_id, topic, payload) values ($1, $2, $3, 'orders/updated', $4)`, [s.shop, s.key, randomUUID(), json({ id: 12, customer: { id: 501 } })]);
+  await q(`insert into public.webhook_events (shop_domain, shop_key, webhook_id, topic, payload) values ($1, $2, $3, 'orders/updated', $4)`, [s.shop, s.key, randomUUID(), json({ id: 12, updated_at: recent(1) })]);
   return s;
 }
 const dataRequest = (s, customer, orders = "{}") =>
@@ -133,7 +133,7 @@ describe("customer data requests (task 9, decision 4)", () => {
 
     const related = await call("compliance_export_related", id, "run_a");
     expect(related.meta_conversion_events).toEqual([expect.objectContaining({ order_id: "11", event_type: "Purchase" })]);
-    expect(related.pending_webhook_payloads).toEqual([expect.objectContaining({ topic: "orders/updated", payload: { id: 12, customer: { id: 501 } } })]);
+    expect(related.pending_webhook_payloads).toEqual([expect.objectContaining({ topic: "orders/updated", payload: expect.objectContaining({ id: 12 }) })]);
   });
 
   it("records the file, completes the request once the owner is told, and lets only the owner download it while it lasts", async () => {

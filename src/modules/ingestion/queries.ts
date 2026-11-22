@@ -16,19 +16,43 @@ export function searchFilter(parts: Array<[field: "processed_at" | "updated_at" 
 
 const withQuery = (connection: string, filter?: string) => (filter ? `${connection}(query: ${JSON.stringify(filter)})` : connection);
 
+// Field selections shared by the bulk queries and the incremental sync's by-ID queries (task 10), so both read
+// exactly the same Level 1 fields.
+const PRODUCT_FIELDS = `id title handle status productType vendor tags isGiftCard publishedAt createdAt updatedAt
+      category { fullName }
+      description(truncateAt: 600)`;
+const VARIANT_FIELDS = `id title sku position price compareAtPrice taxable inventoryPolicy inventoryQuantity createdAt updatedAt
+        selectedOptions { name value }
+        inventoryItem { id tracked requiresShipping countryCodeOfOrigin unitCost { amount currencyCode } measurement { weight { value unit } } }`;
+const METAFIELD_FIELDS = "id namespace key type value updatedAt";
+const INVENTORY_LEVEL_FIELDS = `id updatedAt location { id } quantities(names: ["available", "on_hand"]) { name quantity }`;
+const ORDER_FIELDS = `id name createdAt processedAt cancelledAt updatedAt test sourceName
+      displayFinancialStatus displayFulfillmentStatus currencyCode presentmentCurrencyCode
+      subtotalPriceSet { shopMoney { amount } }
+      totalDiscountsSet { shopMoney { amount } }
+      totalTaxSet { shopMoney { amount } }
+      totalShippingPriceSet { shopMoney { amount } }
+      totalPriceSet { shopMoney { amount } }
+      totalRefundedSet { shopMoney { amount } }
+      customer { id }
+      shippingAddress { city provinceCode countryCodeV2 }`;
+const LINE_ITEM_FIELDS = `id title sku quantity currentQuantity product { id } variant { id }
+        originalUnitPriceSet { shopMoney { amount } } totalDiscountSet { shopMoney { amount } }`;
+const REFUND_FIELDS = "refunds { id createdAt totalRefundedSet { shopMoney { amount currencyCode } } }";
+const CUSTOMER_FIELDS = "id createdAt updatedAt numberOfOrders amountSpent { amount currencyCode }";
+const RETURN_FIELDS = "id name status createdAt closedAt totalQuantity";
+const RETURN_LINE_ITEM_FIELDS = `id quantity returnReasonDefinition { handle }
+          ... on ReturnLineItem { fulfillmentLineItem { lineItem { id } } }`;
+
 export function catalogQuery(filter?: string): string {
   return `{
   ${withQuery("products", filter)} {
     edges { node {
-      id title handle status productType vendor tags isGiftCard publishedAt createdAt updatedAt
-      category { fullName }
-      description(truncateAt: 600)
+      ${PRODUCT_FIELDS}
       variants { edges { node {
-        id title sku position price compareAtPrice taxable inventoryPolicy inventoryQuantity createdAt updatedAt
-        selectedOptions { name value }
-        inventoryItem { id tracked requiresShipping countryCodeOfOrigin unitCost { amount currencyCode } measurement { weight { value unit } } }
+        ${VARIANT_FIELDS}
       } } }
-      metafields { edges { node { id namespace key type value updatedAt } } }
+      metafields { edges { node { ${METAFIELD_FIELDS} } } }
     } }
   }
 }`;
@@ -39,7 +63,7 @@ export function inventoryQuery(filter?: string): string {
   ${withQuery("inventoryItems", filter)} {
     edges { node {
       id
-      inventoryLevels { edges { node { id updatedAt location { id } quantities(names: ["available", "on_hand"]) { name quantity } } } }
+      inventoryLevels { edges { node { ${INVENTORY_LEVEL_FIELDS} } } }
     } }
   }
 }`;
@@ -57,21 +81,11 @@ export function ordersQuery(filter?: string): string {
   return `{
   ${withQuery("orders", filter)} {
     edges { node {
-      id name createdAt processedAt cancelledAt updatedAt test sourceName
-      displayFinancialStatus displayFulfillmentStatus currencyCode presentmentCurrencyCode
-      subtotalPriceSet { shopMoney { amount } }
-      totalDiscountsSet { shopMoney { amount } }
-      totalTaxSet { shopMoney { amount } }
-      totalShippingPriceSet { shopMoney { amount } }
-      totalPriceSet { shopMoney { amount } }
-      totalRefundedSet { shopMoney { amount } }
-      customer { id }
-      shippingAddress { city provinceCode countryCodeV2 }
+      ${ORDER_FIELDS}
       lineItems { edges { node {
-        id title sku quantity currentQuantity product { id } variant { id }
-        originalUnitPriceSet { shopMoney { amount } } totalDiscountSet { shopMoney { amount } }
+        ${LINE_ITEM_FIELDS}
       } } }
-      refunds { id createdAt totalRefundedSet { shopMoney { amount currencyCode } } }
+      ${REFUND_FIELDS}
     } }
   }
 }`;
@@ -80,7 +94,7 @@ export function ordersQuery(filter?: string): string {
 export function customersQuery(filter?: string): string {
   return `{
   ${withQuery("customers", filter)} {
-    edges { node { id createdAt updatedAt numberOfOrders amountSpent { amount currencyCode } } }
+    edges { node { ${CUSTOMER_FIELDS} } }
   }
 }`;
 }
@@ -91,10 +105,9 @@ export function returnsQuery(filter?: string): string {
     edges { node {
       id
       returns { edges { node {
-        id name status createdAt closedAt totalQuantity
+        ${RETURN_FIELDS}
         returnLineItems { edges { node {
-          id quantity returnReasonDefinition { handle }
-          ... on ReturnLineItem { fulfillmentLineItem { lineItem { id } } }
+          ${RETURN_LINE_ITEM_FIELDS}
         } } }
       } } }
     } }
@@ -110,3 +123,51 @@ export const BULK_QUERIES = {
   returns: returnsQuery,
 } as const;
 export type BulkDomain = keyof typeof BULK_QUERIES;
+
+/**
+ * By-ID queries of the incremental sync (task 10): one resource's current state, with the bulk queries' fields.
+ * Each child connection is paged ($after, pageInfo) and bounded so a query stays well under Shopify's
+ * 1,000-point limit (an order with 100 lines costs about 620).
+ */
+const page = "pageInfo { hasNextPage endCursor }";
+export const ORDER_BY_ID = `query OrderById($id: ID!, $after: String) {
+  node(id: $id) { ... on Order {
+    ${ORDER_FIELDS}
+    ${REFUND_FIELDS}
+    lineItems(first: 100, after: $after) { ${page} edges { node { ${LINE_ITEM_FIELDS} } } }
+  } }
+}`;
+export const PRODUCT_BY_ID = `query ProductById($id: ID!) {
+  node(id: $id) { ... on Product {
+    ${PRODUCT_FIELDS}
+    variants(first: 50) { ${page} edges { node { ${VARIANT_FIELDS} } } }
+    metafields(first: 50) { ${page} edges { node { ${METAFIELD_FIELDS} } } }
+  } }
+}`;
+export const PRODUCT_VARIANTS_PAGE = `query ProductVariants($id: ID!, $after: String) {
+  node(id: $id) { ... on Product { id variants(first: 50, after: $after) { ${page} edges { node { ${VARIANT_FIELDS} } } } } }
+}`;
+export const PRODUCT_METAFIELDS_PAGE = `query ProductMetafields($id: ID!, $after: String) {
+  node(id: $id) { ... on Product { id metafields(first: 50, after: $after) { ${page} edges { node { ${METAFIELD_FIELDS} } } } } }
+}`;
+export const CUSTOMERS_BY_ID = `query CustomersById($ids: [ID!]!) {
+  nodes(ids: $ids) { ... on Customer { ${CUSTOMER_FIELDS} } }
+}`;
+export const INVENTORY_ITEM_BY_ID = `query InventoryItemById($id: ID!, $after: String) {
+  node(id: $id) { ... on InventoryItem { id inventoryLevels(first: 50, after: $after) { ${page} edges { node { ${INVENTORY_LEVEL_FIELDS} } } } } }
+}`;
+export const RETURN_BY_ID = `query ReturnById($id: ID!, $after: String) {
+  node(id: $id) { ... on Return {
+    ${RETURN_FIELDS}
+    order { id }
+    returnLineItems(first: 100, after: $after) { ${page} edges { node { ${RETURN_LINE_ITEM_FIELDS} } } }
+  } }
+}`;
+
+/** Resources updated at or after a time, oldest change first (the daily reconcile, task 10). */
+export function updatedSinceQuery(connection: "orders" | "products" | "customers"): string {
+  return `query UpdatedSince($query: String!, $after: String) {
+  ${connection}(first: 250, after: $after, query: $query, sortKey: UPDATED_AT) { ${page} nodes { id updatedAt } }
+}`;
+}
+

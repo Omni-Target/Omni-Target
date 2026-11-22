@@ -70,8 +70,11 @@ copy of staging's.
   - **Schedules.** Two tasks declare their own schedules, created on deploy:
     - `summary-maintenance` (Phase 2 task 8): every six hours at minute 20, with a 30-minute start window;
     - `compliance-maintenance` (task 9): hourly at minute 40, with a 10-minute start window.
+    - `sync-sweep` (task 10): every 10 minutes, with a 2-minute start window;
+    - `sync-reconcile` (task 10): daily at 03:30, with a 30-minute start window.
 
     Confirm in the Production dashboard that both are attached and that their first runs complete. The Free plan allows 10 schedules.
+  - **Incremental sync** (task 10). Shops get GraphQL webhook subscriptions to `${base}/api/shopify/webhook` on install and reconnect, and from the daily reconcile. `base` is `SHOPIFY_WEBHOOK_BASE_URL`, falling back to `NEXT_PUBLIC_APP_URL`, and must be HTTPS; in production, leave the variable unset so the app URL is used. Set the same values in the Trigger.dev Production environment. Check a shop's subscriptions after the first install, and watch `sync-sweep` for dead events.
   - **Customer data requests** (task 9). Vercel production needs the R2 variables too: the download route and the post-redaction cleanup read the private bucket. Exports live under `compliance-exports/` in `R2_JSONL_BUCKET_NAME`. That bucket must keep no expiry rule shorter than 30 days, and today it has none. Deadline escalations reach Sentry with the tag `job:compliance-deadline`: add an alert rule for it.
   - **Plan.** Choose Hobby or Pro from measured run volume, and get it approved before purchase.
   - **Login profile.** Use the `omnitarget` profile; the machine's default profile belongs to another organisation.

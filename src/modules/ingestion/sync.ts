@@ -1,0 +1,248 @@
+import "server-only";
+import { createLogger } from "@/platform/logger";
+import type { Gql } from "./bulk";
+import type { JsonlUnit } from "./jsonl";
+import { mapCustomerUnit, mapInventoryUnit, mapOrderUnit, mapProductUnit, mapReturnsUnit } from "./mappers";
+import {
+  CUSTOMERS_BY_ID, INVENTORY_ITEM_BY_ID, ORDER_BY_ID, PRODUCT_BY_ID, PRODUCT_METAFIELDS_PAGE, PRODUCT_VARIANTS_PAGE, RETURN_BY_ID,
+  searchFilter, updatedSinceQuery,
+} from "./queries";
+import { chunkUnits, groupResources, unitFromNode, type SyncKind, type SyncResource } from "./sync-events";
+import type * as SyncRepository from "./sync-repository";
+import type * as Writes from "./writes";
+
+/**
+ * Incremental sync (Phase 2, task 10).
+ *
+ * processShopEvents drains a shop's inbox: it claims events, groups them by
+ * resource, fetches each resource's current state from Shopify by ID and
+ * writes it through the ingestion functions (which check redaction digests,
+ * the retention window and Shopify's updated_at). A resource Shopify no longer
+ * has is deleted here. So duplicates are fetched once, out-of-order deliveries
+ * converge on Shopify's state, and no customer data travels in the inbox.
+ *
+ * reconcileShopUpdates lists the orders, products and customers updated since
+ * each domain's watermark and records them as events: a missed webhook is
+ * repaired by the same path the next day. Deletions are seen only through
+ * webhooks; a periodic import covers what both miss.
+ */
+const log = createLogger({ module: "incremental-sync" });
+const WRITE_ROWS = 2_000;
+type Raw = Record<string, unknown>;
+
+export interface SyncDeps {
+  shop: (shopDomain: string) => ReturnType<typeof SyncRepository.syncShop>;
+  gql: (shopDomain: string) => Promise<Gql | null>;
+  repo: Pick<typeof SyncRepository, "claimSyncEvents" | "finishSyncEvents" | "deleteSyncedRecords">;
+  writes: Pick<typeof Writes, "writeOrders" | "writeCatalog" | "writeCustomers" | "writeInventory" | "writeReturns">;
+  now?: () => number;
+}
+
+const gid = (type: string, id: number) => `gid://shopify/${type}/${id}`;
+const edgesOf = (node: Raw, field: string) => ((node[field] as Raw | undefined)?.edges as unknown[] | undefined) ?? [];
+const pageOf = (node: Raw, field: string) => ((node[field] as Raw | undefined)?.pageInfo as { hasNextPage?: boolean; endCursor?: string | null } | undefined) ?? {};
+
+/** Follows a connection's later pages into the node (at most 50 more pages). */
+async function allPages(gql: Gql, node: Raw, field: string, query: string, id: string): Promise<void> {
+  let info = pageOf(node, field);
+  for (let page = 0; info.hasNextPage && info.endCursor && page < 50; page++) {
+    const next = (await gql<{ node: Raw | null }>(query, { id, after: info.endCursor })).node;
+    if (!next) break;
+    (edgesOf(node, field) as unknown[]).push(...edgesOf(next, field));
+    info = pageOf(next, field);
+  }
+}
+
+async function fetchOne(gql: Gql, kind: Exclude<SyncKind, "customer">, id: number): Promise<JsonlUnit | null> {
+  if (kind === "order") {
+    const node = (await gql<{ node: Raw | null }>(ORDER_BY_ID, { id: gid("Order", id) })).node;
+    if (!node) return null;
+    await allPages(gql, node, "lineItems", ORDER_BY_ID, gid("Order", id));
+    return unitFromNode(node);
+  }
+  if (kind === "product") {
+    const node = (await gql<{ node: Raw | null }>(PRODUCT_BY_ID, { id: gid("Product", id) })).node;
+    if (!node) return null;
+    await allPages(gql, node, "variants", PRODUCT_VARIANTS_PAGE, gid("Product", id));
+    await allPages(gql, node, "metafields", PRODUCT_METAFIELDS_PAGE, gid("Product", id));
+    return unitFromNode(node);
+  }
+  if (kind === "inventory") {
+    const node = (await gql<{ node: Raw | null }>(INVENTORY_ITEM_BY_ID, { id: gid("InventoryItem", id) })).node;
+    if (!node) return null;
+    await allPages(gql, node, "inventoryLevels", INVENTORY_ITEM_BY_ID, gid("InventoryItem", id));
+    return unitFromNode(node);
+  }
+  const node = (await gql<{ node: Raw | null }>(RETURN_BY_ID, { id: gid("Return", id) })).node;
+  const orderId = (node?.order as Raw | undefined)?.id;
+  if (!node || typeof orderId !== "string") return null;
+  await allPages(gql, node, "returnLineItems", RETURN_BY_ID, gid("Return", id));
+  // As a returns export gives it: the order, its return, and the return's lines.
+  const { order: _order, returnLineItems: _lines, ...fields } = node;
+  void _order; void _lines;
+  const lines = edgesOf(node, "returnLineItems").map((edge) => ({ ...((edge as Raw).node as Raw), __parentId: node.id }));
+  return { root: { id: orderId }, children: [{ ...fields, __parentId: orderId }, ...lines], firstLine: 0, lastLine: 0 };
+}
+
+async function fetchCustomers(gql: Gql, ids: number[]): Promise<Map<number, JsonlUnit | null>> {
+  const found = new Map<number, JsonlUnit | null>();
+  for (let i = 0; i < ids.length; i += 50) {
+    const slice = ids.slice(i, i + 50);
+    const nodes = (await gql<{ nodes: Array<Raw | null> }>(CUSTOMERS_BY_ID, { ids: slice.map((id) => gid("Customer", id)) })).nodes;
+    slice.forEach((id, index) => found.set(id, nodes[index] ? unitFromNode(nodes[index] as Raw) : null));
+  }
+  return found;
+}
+
+async function writeKind(kind: SyncKind, units: JsonlUnit[], shop: { shopKey: number; shopifyShopId: number }, writes: SyncDeps["writes"]): Promise<void> {
+  for (const chunk of chunkUnits(units, WRITE_ROWS)) {
+    if (kind === "order") {
+      const mapped = chunk.map(mapOrderUnit);
+      await writes.writeOrders(shop.shopKey, shop.shopifyShopId, {
+        orders: mapped.flatMap((m) => (m.order ? [m.order] : [])), lineItems: mapped.flatMap((m) => m.lineItems), refunds: mapped.flatMap((m) => m.refunds),
+      });
+    } else if (kind === "product") {
+      const mapped = chunk.map(mapProductUnit);
+      await writes.writeCatalog(shop.shopKey, {
+        products: mapped.flatMap((m) => (m.product ? [m.product] : [])), variants: mapped.flatMap((m) => m.variants), metafields: mapped.flatMap((m) => m.metafields),
+      });
+    } else if (kind === "customer") {
+      await writes.writeCustomers(shop.shopKey, shop.shopifyShopId, chunk.map(mapCustomerUnit).filter((c): c is NonNullable<typeof c> => c !== null));
+    } else if (kind === "inventory") {
+      await writes.writeInventory(shop.shopKey, { locations: [], levels: chunk.flatMap(mapInventoryUnit) });
+    } else {
+      const mapped = chunk.map(mapReturnsUnit);
+      await writes.writeReturns(shop.shopKey, { returns: mapped.flatMap((m) => m.returns), lineItems: mapped.flatMap((m) => m.lineItems) });
+    }
+  }
+}
+
+export interface SyncReport {
+  outcome: "drained" | "budget" | "not_ingestible" | "no_access";
+  events: number;
+  resources: Partial<Record<SyncKind, number>>;
+  deleted: number;
+  processed: number;
+  failed: number;
+  dead: number;
+}
+
+const message = (error: unknown) => (error instanceof Error ? error.message.slice(0, 500) : "unknown");
+
+export async function processShopEvents(shopDomain: string, runId: string, deps: SyncDeps, { budgetMs = 480_000, batchSize = 100 } = {}): Promise<SyncReport> {
+  const now = deps.now ?? Date.now;
+  const started = now();
+  const report: SyncReport = { outcome: "drained", events: 0, resources: {}, deleted: 0, processed: 0, failed: 0, dead: 0 };
+  const shop = await deps.shop(shopDomain);
+  if (!shop) return { ...report, outcome: "not_ingestible" };
+  const gql = await deps.gql(shopDomain);
+  // Without access the events stay as they are and the sweep tries again later.
+  if (!gql) return { ...report, outcome: "no_access" };
+
+  for (;;) {
+    if (now() - started >= budgetMs) {
+      report.outcome = "budget";
+      break;
+    }
+    const events = await deps.repo.claimSyncEvents(shop.shopKey, runId, batchSize);
+    if (!events.length) break;
+    report.events += events.length;
+    const { resources, unusable } = groupResources(events);
+    const processed = [...unusable];
+    const failed: Array<{ id: string; error: string }> = [];
+
+    const byKind = new Map<SyncKind, SyncResource[]>();
+    for (const resource of resources) byKind.set(resource.kind, [...(byKind.get(resource.kind) ?? []), resource]);
+    for (const [kind, group] of byKind) {
+      report.resources[kind] = (report.resources[kind] ?? 0) + group.length;
+      const found: JsonlUnit[] = [];
+      const missing: SyncResource[] = [];
+      const fetched: SyncResource[] = [];
+      try {
+        const customers = kind === "customer" ? await fetchCustomers(gql, group.map((r) => r.id)) : null;
+        for (const resource of group) {
+          try {
+            const unit = customers ? customers.get(resource.id) ?? null : await fetchOne(gql, kind as Exclude<SyncKind, "customer">, resource.id);
+            if (unit) found.push(unit);
+            else missing.push(resource);
+            fetched.push(resource);
+          } catch (error) {
+            for (const id of resource.eventIds) failed.push({ id, error: message(error) });
+          }
+        }
+        if (found.length) await writeKind(kind, found, shop, deps.writes);
+        if (missing.length && (kind === "order" || kind === "product" || kind === "customer")) {
+          report.deleted += (await deps.repo.deleteSyncedRecords(shop.shopKey, kind, missing.map((r) => r.id))).deleted;
+        }
+        for (const resource of fetched) processed.push(...resource.eventIds);
+      } catch (error) {
+        log.warn("Sync write failed", { shop: shopDomain, kind }, error);
+        for (const resource of fetched) for (const id of resource.eventIds) failed.push({ id, error: message(error) });
+      }
+    }
+    const finished = await deps.repo.finishSyncEvents(runId, processed, failed);
+    report.processed += finished.processed;
+    report.failed += finished.failed;
+    report.dead += finished.dead;
+  }
+  if (report.events) log.info("Shop sync events processed", { shop: shopDomain, ...report, resources: JSON.stringify(report.resources) });
+  return report;
+}
+
+export interface ReconcileDeps {
+  shop: SyncDeps["shop"];
+  gql: SyncDeps["gql"];
+  repo: Pick<typeof SyncRepository, "loadSyncWatermark" | "lastImportStart" | "recordSyncEvents" | "saveSyncWatermark">;
+}
+
+const RECONCILED = [
+  { domain: "orders", connection: "orders", topic: "orders/updated", importDomain: "orders" },
+  { domain: "catalog", connection: "products", topic: "products/update", importDomain: "catalog" },
+  { domain: "customers", connection: "customers", topic: "customers/update", importDomain: "customers" },
+] as const;
+
+export type ReconcileReport = Record<(typeof RECONCILED)[number]["domain"], { found: number; recorded: number; watermark: string | null; truncated?: boolean; skipped?: string }>;
+
+export async function reconcileShopUpdates(shopDomain: string, deps: ReconcileDeps, { overlapMs = 3_600_000, maxPerDomain = 10_000 } = {}): Promise<ReconcileReport | { skipped: string }> {
+  const shop = await deps.shop(shopDomain);
+  if (!shop) return { skipped: "not_ingestible" };
+  const gql = await deps.gql(shopDomain);
+  if (!gql) return { skipped: "no_access" };
+  const report = {} as ReconcileReport;
+  for (const spec of RECONCILED) {
+    const from = (await deps.repo.loadSyncWatermark(shop.shopKey, spec.domain)) ?? (await deps.repo.lastImportStart(shop.shopId, spec.importDomain));
+    if (!from) {
+      report[spec.domain] = { found: 0, recorded: 0, watermark: null, skipped: "not_imported" };
+      continue;
+    }
+    const query = searchFilter([["updated_at", ">=", new Date(Date.parse(from) - overlapMs)]]);
+    const found: Array<{ id: number; updatedAt: string }> = [];
+    let after: string | null = null;
+    let truncated = false;
+    for (;;) {
+      const data: { [key: string]: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: Array<{ id: string; updatedAt: string }> } } =
+        await gql(updatedSinceQuery(spec.connection), { query, after });
+      const connection = data[spec.connection];
+      for (const node of connection.nodes) found.push({ id: Number(node.id.split("/").pop()), updatedAt: node.updatedAt });
+      if (!connection.pageInfo.hasNextPage) break;
+      if (found.length >= maxPerDomain) {
+        truncated = true;
+        break;
+      }
+      after = connection.pageInfo.endCursor;
+    }
+    let recorded = 0;
+    for (let i = 0; i < found.length; i += 500) {
+      const events = found.slice(i, i + 500).map((item) => ({
+        webhook_id: `reconcile:${spec.topic}:${item.id}:${item.updatedAt}`, topic: spec.topic, triggered_at: item.updatedAt,
+        payload: { id: item.id, updated_at: item.updatedAt },
+      }));
+      recorded += (await deps.repo.recordSyncEvents(shopDomain, events)).recorded;
+    }
+    // Oldest change first: when truncated, the next run continues from the last change seen.
+    const newest = found.length ? found[found.length - 1].updatedAt : from;
+    const saved = await deps.repo.saveSyncWatermark(shop.shopKey, spec.domain, newest);
+    report[spec.domain] = { found: found.length, recorded, watermark: saved.watermark, ...(truncated ? { truncated } : {}) };
+  }
+  return report;
+}

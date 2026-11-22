@@ -70,6 +70,9 @@ const h = vi.hoisted(() => {
 vi.mock("@/modules/credentials/meta", () => ({ getMetaAccessForShop: h.meta }));
 const redacted = vi.hoisted(() => vi.fn(async () => false));
 vi.mock("@/modules/compliance/redaction-check", () => ({ redactedSubject: redacted }));
+const sync = vi.hoisted(() => ({ record: vi.fn(async () => ({ outcome: "recorded", recorded: 1 })), dispatch: vi.fn(async () => "run_sync") }));
+vi.mock("@/modules/ingestion/sync-repository", () => ({ recordSyncEvents: sync.record }));
+vi.mock("@/modules/jobs/trigger", () => ({ dispatchShopSync: sync.dispatch, syncBurst: () => "burst-1" }));
 
 vi.mock("@/lib/observability/capture", () => ({ captureBackgroundFailure: h.capture }));
 vi.mock("@/modules/workspaces/repository", () => ({
@@ -325,12 +328,15 @@ describe("Shopify order webhook (ING-05)", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not suppress later updates or refunds for the same order", async () => {
+  it("sends later updates and refunds of the order to the sync inbox, and only the purchase to Meta (task 10)", async () => {
+    sync.record.mockClear();
+    sync.record.mockResolvedValue({ outcome: "recorded", recorded: 1 });
     await deliver(order, "orders/paid", "w1");
     await deliver(order, "orders/updated", "w2");
     await deliver({ id: 9, order_id: 1001 }, "refunds/create", "w3");
     await flush();
-    expect(h.state.staleUpdates).toHaveLength(3); // each distinct event was processed
+    expect(h.state.staleUpdates).toHaveLength(1); // the purchase, on the legacy path
+    expect(sync.record.mock.calls.map((call) => ((call as unknown[])[1] as Array<{ topic: string }>)[0].topic)).toEqual(["orders/updated", "refunds/create"]);
     expect(fetchMock).toHaveBeenCalledTimes(1); // only the purchase went to Meta
   });
 
@@ -349,3 +355,44 @@ describe("Shopify order webhook (ING-05)", () => {
     expect(h.state.afterTasks).toHaveLength(0);
   });
 });
+
+describe("incremental sync topics (task 10)", () => {
+  beforeEach(() => {
+    sync.record.mockReset();
+    sync.dispatch.mockClear();
+    h.verify.mockResolvedValue(true);
+  });
+
+  it("records the event thin, never the customer's data, and then dispatches the shop's worker", async () => {
+    sync.record.mockResolvedValue({ outcome: "recorded", recorded: 1 });
+    const response = await deliver({ id: 1001, updated_at: "2026-11-22T10:00:00Z", email: "a@b.co", customer: { email: "a@b.co" }, line_items: [] }, "orders/updated", "w-sync-1");
+    expect(response.status).toBe(200);
+    expect(sync.record).toHaveBeenCalledWith("s.myshopify.com", [expect.objectContaining({
+      webhook_id: "w-sync-1", topic: "orders/updated", payload: { id: 1001, updated_at: "2026-11-22T10:00:00Z" },
+    })]);
+    expect(sync.dispatch).not.toHaveBeenCalled();
+    await flush();
+    expect(sync.dispatch).toHaveBeenCalledWith("s.myshopify.com", "burst-1");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges a repeated delivery without dispatching again", async () => {
+    sync.record.mockResolvedValue({ outcome: "recorded", recorded: 0 });
+    expect((await deliver({ id: 1001 }, "orders/updated", "w-sync-1")).status).toBe(200);
+    await flush();
+    expect(sync.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("answers 500 so Shopify retries when the event cannot be recorded", async () => {
+    sync.record.mockRejectedValue(new Error("db down"));
+    expect((await deliver({ id: 7 }, "products/update", "w-sync-2")).status).toBe(500);
+    expect(h.capture).toHaveBeenCalledWith("shopify-sync-webhook", expect.any(Error));
+  });
+
+  it("keeps orders/paid on the Meta path, outside the inbox", async () => {
+    await deliver(order, "orders/paid", "w-paid-1");
+    await flush();
+    expect(sync.record).not.toHaveBeenCalled();
+  });
+});
+
