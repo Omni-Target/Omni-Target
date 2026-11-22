@@ -512,6 +512,13 @@ No field was withheld in the sample.
 - **Reversibility:** applying 0040 and then rolling it back restores the 0039 schema exactly.
 - **Test fixtures** that put customer objects in inbox payloads now use thin payloads. Redaction still finds such events by order and customer ID.
 
+**Live check on staging (2026-11-22; `sync.live.test.ts`).** A missed order webhook was simulated: omni-beta's most recently updated order was deleted from the mirror, and the orders watermark was moved to just before its update.
+- **Reconcile:** found 2 changed orders and recorded both.
+- **Worker:** the real `sync-shop-events` run completed with 2 events processed and 0 failed. The order came back exactly as Shopify has it (same `updated_at`, same line count).
+- **Scheduled reconcile, run once:** completed in 8 s. It found both orders again within its overlap window and recorded neither (de-duplication), and the watermarks moved only forward.
+- **Ordering:** a `sync-sweep` run that started before 0040 reached staging failed with "function not found". On release, migrations come before the worker deploy.
+- **Not verified live:** real Shopify webhook delivery. Staging has no public HTTPS endpoint, so subscriptions were skipped. It needs `SHOPIFY_WEBHOOK_BASE_URL` pointing at a reachable staging URL or tunnel.
+
 ## Dependencies outside the code
 
 | Dependency | Needed for | Status |
