@@ -607,6 +607,31 @@ The user decided that orders and refunds reaching Shopify after their month left
 - **Unit tests:** the worker passes orders before the window with their refund lines, retries during an import, and looks for history only when the write reports orders beyond the window. Replays are covered too.
 - **Reversibility:** rolling 0042 back restores the 0041 schema exactly, and reapplying it restores 0042 exactly.
 
+**Live check on staging (2026-11-22; `history.live.test.ts` with a replay).** 0042 was applied to staging. The shop's order changes since the simulation (221 orders) were replayed through the running worker.
+- **Replay:** 221 events, 221 orders fetched, 0 failed.
+- **Applied:** the 55 late orders dated before the window (2024-05 to 2024-10), with their refunds, became adjustments to all 6 history months and to 81 product-months.
+- **Equality:** every history month now equals a recomputation from Shopify's raw export (555 orders): 6 store months and 452 product-months, with 0 mismatches.
+- **Unchanged:** no order before the window is held as detail, nothing is left staged, and the 208 history customers' first orders are intact.
+- **Customer counts** in adjusted months stay as summarised, by design. For example, 2024-06 shows 75 against Shopify's 92.
+- **Replayed again under another tag:** nothing was applied twice. The adjustment rows per month were unchanged, and the months still matched.
+
+### Disputes and chargebacks (assessment, 2026-11-22)
+
+**What they are.** In a dispute, a customer's bank asks about a card payment (an inquiry) or reverses it (a chargeback). If the merchant loses, the money and a fee leave the merchant's payouts. Shopify does not record this as a refund, so the order's totals don't change.
+
+**Effect on current data: none.** The summaries match Shopify's sales figures, which don't count chargebacks either.
+
+**Where they matter:** the costs side of Phase 4's contribution margin. Lost chargebacks and their fees are a variable cost, and fraud-prone products or "not received" claims show up in them.
+
+**What is available:**
+- **Order dispute summaries:** each order's `disputes` field (status, and chargeback or inquiry) is readable under the current scopes. Checked on omni-beta, which has no disputes and no Shopify Payments account, so there is no real data to verify against.
+- **Amounts and reasons:** these are on Shopify Payments disputes. Those exist only for Shopify Payments, and probably need the `read_shopify_payments_disputes` scope, which is an app configuration change needing approval.
+
+**Assessment: not needed in Phase 2.** Nothing is lost by waiting: Shopify keeps disputes on the orders, and a scoped orders re-import reads them. When Phase 4 defines the cost:
+- add the order dispute summary to the order queries and the mirror;
+- decide on the scope for amounts and reasons;
+- verify with a dispute made in Shopify Payments test mode.
+
 ## Dependencies outside the code
 
 | Dependency | Needed for | Status |
