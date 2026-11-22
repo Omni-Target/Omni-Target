@@ -13,7 +13,8 @@ export function SyncButton() {
     if (syncing) return;
     setSyncing(true);
     try {
-      const res = await fetch("/api/store/data", { cache: "no-store" });
+      // Asks the worker for a new snapshot (Phase 2, task 11); the reloaded page shows it once built.
+      const res = await fetch("/api/store/data?force=true", { cache: "no-store" });
       if (!res.ok) throw new Error(`Sync failed (${res.status})`);
       window.location.reload();
     } catch (err) {

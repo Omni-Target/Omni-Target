@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { getUserIntegration, logApiUsage } from "@/lib/db";
+import { logApiUsage } from "@/lib/db";
+import { loadStoreSnapshot } from "@/modules/insights/read";
 import { getAdvantagePlusGuidance } from "@/lib/advantage-plus";
 import {
   isTier1Market,
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
       // Body may be empty if relying completely on integration snapshot
     }
 
-    const integration = await getUserIntegration(userId);
+    const integration = { store_snapshot: await loadStoreSnapshot(userId) };
     const storeSnapshot = (body.storeData ||
       integration?.store_snapshot) as StoreData | undefined;
 

@@ -48,3 +48,17 @@ describe("server-only boundaries", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe("no full sync inside a request (Phase 2, task 11)", () => {
+  // The store snapshot is built by the shop-insights worker from the canonical mirror; routes and pages only read it.
+  it("never calls the REST snapshot sync from a route or a page", () => {
+    const offenders = files.filter((file) => file.path.startsWith("app/") && /\b(fetchShopifyStoreData|executeShopifyStoreSync)\b/.test(file.text))
+      .map((file) => file.path);
+    expect(offenders).toEqual([]);
+  });
+
+  it("builds the snapshot only in the worker module", () => {
+    const callers = files.filter((file) => /\bbuildCanonicalStoreData\(/.test(file.text) && !file.path.startsWith("modules/insights/")).map((file) => file.path);
+    expect(callers).toEqual([]);
+  });
+});

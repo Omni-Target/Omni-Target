@@ -4,6 +4,7 @@ import type { shopAccessCheck } from "@/trigger/shop-access";
 import type { shopImport } from "@/trigger/shop-import";
 import type { complianceExport } from "@/trigger/compliance-export";
 import type { shopSyncEvents } from "@/trigger/sync-shop-events";
+import type { shopInsights } from "@/trigger/shop-insights";
 import { markExportDispatched } from "@/modules/compliance/exports-repository";
 import { markImportDispatched, requestImport } from "@/modules/ingestion/imports";
 import { createLogger } from "@/platform/logger";
@@ -150,4 +151,27 @@ export async function dispatchShopSync(shopDomain: string, reason: string, timeo
 
 /** A reason that groups webhooks arriving within the same 30 seconds. */
 export const syncBurst = (at: number = Date.now()) => `burst-${Math.floor(at / 30_000)}`;
+
+/**
+ * Asks for a shop's store snapshot to be rebuilt from the mirror (Phase 2,
+ * task 11). One run per shop at a time; the same reason is dispatched once.
+ */
+export async function dispatchShopInsights(shopDomain: string, reason: string, timeoutMs: number = TRIGGER_TIMEOUT_MS): Promise<string | null> {
+  try {
+    const idempotencyKey = await idempotencyKeys.create(`shop-insights:${shopDomain}:${reason}`, { scope: "global" });
+    const handle = await withTimeout(
+      tasks.trigger<typeof shopInsights>("shop-insights", { shopDomain }, {
+        idempotencyKey, idempotencyKeyTTL: "30m", concurrencyKey: shopDomain, tags: [`shop:${shopDomain}`, "insights"],
+      }),
+      timeoutMs,
+    );
+    return handle.id;
+  } catch (error) {
+    log.warn("Shop insights not dispatched; the refresh schedule will retry", { shop: shopDomain, reason }, error);
+    return null;
+  }
+}
+
+/** A reason that groups requests within the same window (15 minutes by default). */
+export const insightsWindow = (kind: string, at: number = Date.now(), windowMs = 900_000) => `${kind}-${Math.floor(at / windowMs)}`;
 

@@ -1,6 +1,7 @@
 import { logger, schemaTask, wait } from "@trigger.dev/sdk";
 import { shopImportPayload } from "@/modules/jobs/payloads";
 import { runShopImport } from "@/modules/ingestion/workflow";
+import { dispatchShopInsights } from "@/modules/jobs/trigger";
 
 /**
  * The initial import of one shop (Phase 2, task 6). One run per shop at a
@@ -22,6 +23,8 @@ export const shopImport = schemaTask({
     };
     const report = await runShopImport(importId, ctx.run.id, sleep);
     logger.log("Shop import run ended", { shop: shopDomain, outcome: report.outcome });
+    // The store snapshot is built from what the import wrote (task 11).
+    if (report.outcome === "succeeded" || report.outcome === "partial") await dispatchShopInsights(shopDomain, `import-${importId}`);
     return report;
   },
 });

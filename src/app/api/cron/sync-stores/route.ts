@@ -1,95 +1,30 @@
 import { NextResponse } from "next/server";
-import { listStoresDueForSync, updateUserIntegration } from "@/lib/db";
-import { getValidShopifyToken } from "@/lib/shopify-token";
-import { fetchShopifyStoreData } from "@/lib/connectors/shopify";
 import { captureBackgroundFailure } from "@/lib/observability/capture";
+import { safeEqual } from "@/lib/shopify-oauth";
+import { shopsInsightsDue } from "@/modules/insights/repository";
+import { dispatchShopInsights, insightsWindow } from "@/modules/jobs/trigger";
 
-export const maxDuration = 60; // 60 seconds
+export const maxDuration = 60;
 export const runtime = "nodejs";
 
 /**
- * Periodic background store synchronizer. Runs on a scheduled Vercel cron
- * to keep merchant orders, product inventory, and ad-readiness metrics fresh
- * so founders never have to manually click "Sync store data".
+ * Asks the worker to rebuild the store snapshots that are due (Phase 2, task
+ * 11). The insights-refresh schedule does this every six hours; this route is
+ * a manual trigger with CRON_SECRET. It never syncs with Shopify itself.
  */
 export async function GET(request: Request) {
+  const secret = process.env.CRON_SECRET;
+  const auth = request.headers.get("authorization") ?? "";
+  if (!secret || !safeEqual(auth, `Bearer ${secret}`)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-    if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Find stores that have connected Shopify and haven't synced in 4+ hours,
-    // prioritizing the ones that haven't been synced in the longest time.
-    const fourHoursAgo = new Date(Date.now() - 4 * 3600 * 1000);
-
-    let integrations: Awaited<ReturnType<typeof listStoresDueForSync>>;
-    try {
-      // Batch size to stay comfortably within 60s execution window
-      integrations = await listStoresDueForSync(fourHoursAgo, 10);
-    } catch (fetchErr) {
-      console.error("[Cron:sync-stores] Error fetching integrations:", fetchErr instanceof Error ? fetchErr.message : "unknown");
-      return NextResponse.json(
-        { error: "Failed to fetch integrations" },
-        { status: 500 }
-      );
-    }
-
-    let syncedCount = 0;
-    let skippedCount = 0;
-
-    for (const integration of integrations) {
-      const userId = integration.clerk_user_id;
-      if (!userId) {
-        skippedCount++;
-        continue;
-      }
-
-      try {
-        const tokenResult = await getValidShopifyToken(userId);
-        if (tokenResult.status !== "ok") {
-          skippedCount++;
-          continue;
-        }
-
-        const storeData = await fetchShopifyStoreData(
-          tokenResult.shopUrl,
-          tokenResult.accessToken,
-          userId
-        );
-
-        await updateUserIntegration(userId, {
-          store_snapshot: storeData,
-          store_snapshot_at: new Date().toISOString(),
-        });
-
-        syncedCount++;
-        console.log(
-          `[Cron:sync-stores] Successfully auto-synced store for user: ${userId}`
-        );
-      } catch (storeErr) {
-        console.error(
-          `[Cron:sync-stores] Sync failed for user ${userId}:`,
-          storeErr
-        );
-        captureBackgroundFailure("cron-sync-store", storeErr);
-        skippedCount++;
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      processed: integrations.length,
-      synced: syncedCount,
-      skipped: skippedCount,
-    });
-  } catch (err) {
-    console.error("[Cron:sync-stores] Fatal error:", err);
-    captureBackgroundFailure("cron-sync-stores", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Internal error" },
-      { status: 500 }
-    );
+    const due = await shopsInsightsDue(4 * 3_600, 100);
+    let dispatched = 0;
+    for (const shop of due) if (await dispatchShopInsights(shop.shop_domain, insightsWindow("cron"))) dispatched += 1;
+    return NextResponse.json({ due: due.length, dispatched });
+  } catch (error) {
+    captureBackgroundFailure("sync-stores", error);
+    return NextResponse.json({ error: "Snapshot refresh failed" }, { status: 500 });
   }
 }

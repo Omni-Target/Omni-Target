@@ -3,14 +3,14 @@ import { consolidateLocation, consolidateLocationsWithAI, formatCityName } from 
 import { fetchWithRetry } from "../http";
 import { getEffectiveStoreCountry, isSameCountry, lookupCityCountry, normalizeCountry } from "../market-geography";
 import { shopifyAdminRestUrl } from "../shopify-config";
-import { fetchShopifyPrespendIntelligence } from "./shopify-intelligence";
+import { fetchShopifyPrespendIntelligence, type ShopifyIntelligenceResult } from "./shopify-intelligence";
 import { buildProductDecisions } from "../gateway-decision";
 import { summarizeOrderCountries } from "../order-geography";
 import { calculateBuyerOutcomes } from "../buyer-outcomes";
 import { validateGatewaySignal } from "../gateway-validation";
 
 // Shopify API types (subset)
-interface ShopifyShop {
+export interface ShopifyShop {
   name: string;
   domain: string;
   myshopify_domain: string;
@@ -19,7 +19,7 @@ interface ShopifyShop {
   money_format?: string;
 }
 
-interface ShopifyOrder {
+export interface ShopifyOrder {
   id: number;
   total_price: string;
   subtotal_price?: string;
@@ -38,7 +38,7 @@ interface ShopifyOrder {
 import { parseTrafficSource } from "./traffic-source";
 export { parseTrafficSource };
 
-interface ShopifyProduct {
+export interface ShopifyProduct {
   id: number;
   title: string;
   handle: string;
@@ -377,6 +377,35 @@ async function executeShopifyStoreSync(
     ingestionComplete = false;
   }
 
+  return computeStoreData({
+    shopDomain, userId, shop, orders, ordersTruncated, ingestionComplete, intelligence, totalCatalogProductsCount, rawProducts, productsTruncated,
+  });
+}
+
+/**
+ * Everything the snapshot computation reads (Phase 2, task 11): fetched from
+ * Shopify REST above, or read from the canonical mirror (modules/insights).
+ */
+export interface StoreComputeInput {
+  shopDomain: string;
+  userId?: string | null;
+  shop: ShopifyShop;
+  orders: ShopifyOrder[];
+  ordersTruncated: boolean;
+  ingestionComplete: boolean;
+  intelligence: ShopifyIntelligenceResult;
+  totalCatalogProductsCount?: number;
+  rawProducts: ShopifyProduct[];
+  productsTruncated: boolean;
+}
+export interface StoreComputeDeps {
+  /** Names for cities the local dictionary does not know (an AI call). The canonical path normalises cities at ingest. */
+  consolidateLocations?: typeof consolidateLocationsWithAI;
+}
+
+/** The snapshot computation, apart from its fetching; pure except for the optional city consolidation. */
+export async function computeStoreData(input: StoreComputeInput, deps: StoreComputeDeps = {}): Promise<StoreData> {
+  const { shopDomain, userId, shop, orders, ordersTruncated, ingestionComplete, intelligence, totalCatalogProductsCount, rawProducts, productsTruncated } = input;
   // STEP 4 — Process orders into insights
   const thirtyDaysAgoForMetrics = new Date();
   thirtyDaysAgoForMetrics.setDate(thirtyDaysAgoForMetrics.getDate() - 30);
@@ -519,7 +548,7 @@ async function executeShopifyStoreSync(
   let aiMapping: Record<string, string> = {};
   if (unresolvedLocations.length > 0) {
     try {
-      aiMapping = await consolidateLocationsWithAI(unresolvedLocations, userId);
+      aiMapping = await (deps.consolidateLocations ?? consolidateLocationsWithAI)(unresolvedLocations, userId);
     } catch (e) {
       console.error("AI location consolidation failed, using static fallback:", e);
     }

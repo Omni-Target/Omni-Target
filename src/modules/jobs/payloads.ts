@@ -29,3 +29,9 @@ export const shopSyncPayload = z.object({
   shopDomain: shopDomainSchema,
 });
 export type ShopSyncPayload = z.infer<typeof shopSyncPayload>;
+
+/** One shop's store snapshot, built from the mirror (Phase 2, task 11). */
+export const shopInsightsPayload = z.object({
+  shopDomain: shopDomainSchema,
+});
+export type ShopInsightsPayload = z.infer<typeof shopInsightsPayload>;

@@ -2,81 +2,89 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
   auth: vi.fn(),
-  getUserIntegration: vi.fn(),
-  updateUserIntegration: vi.fn(),
-  fetchShopifyStoreData: vi.fn(),
+  loadStoreInsights: vi.fn(),
+  dispatchShopInsights: vi.fn(),
   getValidShopifyToken: vi.fn(),
+  after: vi.fn(),
 }));
+vi.mock("next/server", () => ({ after: m.after }));
 vi.mock("@clerk/nextjs/server", () => ({ auth: m.auth }));
-vi.mock("@/lib/db", () => ({ getUserIntegration: m.getUserIntegration, updateUserIntegration: m.updateUserIntegration }));
-vi.mock("@/lib/connectors/shopify", () => ({ fetchShopifyStoreData: m.fetchShopifyStoreData }));
+vi.mock("@/modules/insights/read", () => ({ loadStoreInsights: m.loadStoreInsights }));
+vi.mock("@/modules/jobs/trigger", () => ({ dispatchShopInsights: m.dispatchShopInsights, insightsWindow: (kind: string) => `${kind}-window` }));
 vi.mock("@/lib/shopify-token", () => ({ getValidShopifyToken: m.getValidShopifyToken }));
 
 import { GET } from "./route";
 
 const snapshot = (label: string) => ({ label, data_quality: { schema_version: 9 }, orders: { orders_last_30_days: 1 }, products: [] });
+const stored = (label: string, ageMs = 0, grantedScopes: string[] = []) => ({
+  connected: true, shopDomain: "s.myshopify.com", shopKey: 2, data: snapshot(label), computedAt: new Date(Date.now() - ageMs).toISOString(), grantedScopes,
+});
 const call = (force = false) => GET(new Request(`https://app.test/api/store/data${force ? "?force=true" : ""}`));
-let n = 0;
-const nextUser = () => `user_${n++}`;
 const cacheControl = (res: Response) => res.headers.get("cache-control") ?? "";
+const dispatched = async () => {
+  for (const [fn] of m.after.mock.calls) await (fn as () => Promise<unknown>)();
+  return m.dispatchShopInsights.mock.calls.map((c) => c[1]);
+};
 
 beforeEach(() => {
   for (const fn of Object.values(m)) fn.mockReset();
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  vi.spyOn(console, "error").mockImplementation(() => {});
-  m.auth.mockResolvedValue({ userId: nextUser() });
-  m.getUserIntegration.mockResolvedValue({ store_snapshot: snapshot("old"), store_snapshot_at: new Date().toISOString(), shopify_scopes: null });
+  m.auth.mockResolvedValue({ userId: "user_1" });
+  m.loadStoreInsights.mockResolvedValue(stored("current"));
   m.getValidShopifyToken.mockResolvedValue({ status: "ok", accessToken: "t", shopUrl: "s.myshopify.com" });
-  m.fetchShopifyStoreData.mockResolvedValue(snapshot("fresh"));
-  m.updateUserIntegration.mockResolvedValue(undefined);
+  m.dispatchShopInsights.mockResolvedValue("run_1");
 });
 
-describe("forced store sync responses are never cacheable (fix 8.2)", () => {
-  it("marks a successful forced sync private and no-store, at the browser and the CDN", async () => {
+describe("the store snapshot is read, never synced, in the request (task 11)", () => {
+  it("answers a fresh snapshot as stored, without asking Shopify or the worker", async () => {
+    const res = await call(false);
+    expect(await res.json()).toMatchObject({ connected: true, data: { label: "current" }, refreshing: false });
+    expect(m.getValidShopifyToken).not.toHaveBeenCalled();
+    expect(await dispatched()).toEqual([]);
+  });
+
+  it("asks the worker for a new snapshot when the stored one is stale, missing or a refresh is forced", async () => {
+    m.loadStoreInsights.mockResolvedValueOnce(stored("old", 2 * 3_600_000));
+    expect(await (await call(false)).json()).toMatchObject({ data: { label: "old" }, refreshing: true });
+    m.loadStoreInsights.mockResolvedValueOnce({ ...stored("none"), data: null, computedAt: null });
+    expect(await (await call(false)).json()).toMatchObject({ connected: true, data: null, refreshing: true });
+    expect(await (await call(true)).json()).toMatchObject({ data: { label: "current" }, refreshing: true });
+    expect(await dispatched()).toEqual(["stale-window", "stale-window", "user-window"]);
+  });
+
+  it("asks the merchant to reconnect when the session is dead, and reports a store not connected", async () => {
+    m.getValidShopifyToken.mockResolvedValueOnce({ status: "reauth_required", shopUrl: "s" });
+    expect(await (await call(true)).json()).toMatchObject({ connected: false, reauthRequired: true });
+    m.loadStoreInsights.mockResolvedValueOnce({ connected: false, shopDomain: null, shopKey: null, data: null, computedAt: null, grantedScopes: [] });
+    expect(await (await call(false)).json()).toMatchObject({ connected: false });
+    expect(await dispatched()).toEqual([]);
+  });
+
+  it("flags missing scopes only once the shop's granted scopes are known", async () => {
+    expect(await (await call(false)).json()).toMatchObject({ needsShopifyReauthorization: false, missingShopifyScopes: [] });
+    m.loadStoreInsights.mockResolvedValueOnce(stored("current", 0, ["read_products"]));
+    const body = await (await call(false)).json();
+    expect(body.needsShopifyReauthorization).toBe(true);
+    expect(body.missingShopifyScopes).toContain("read_all_orders");
+  });
+});
+
+describe("cache headers (fix 8.2)", () => {
+  it("marks a forced refresh private and no-store, at the browser and the CDN, whatever happens", async () => {
     const res = await call(true);
-    expect((await res.json()).data.label).toBe("fresh");
     expect(cacheControl(res)).toBe("private, no-store, max-age=0");
     expect(res.headers.get("cdn-cache-control")).toBe("no-store");
     expect(res.headers.get("vercel-cdn-cache-control")).toBe("no-store");
-    expect(cacheControl(res)).not.toMatch(/max-age=[1-9]|stale-while-revalidate/);
+    m.getValidShopifyToken.mockResolvedValueOnce({ status: "reauth_required", shopUrl: "s" });
+    expect(cacheControl(await call(true))).toBe("private, no-store, max-age=0");
+    m.auth.mockResolvedValueOnce({ userId: null });
+    const signedOut = await call(true);
+    expect(signedOut.status).toBe(401);
+    expect(cacheControl(signedOut)).toBe("private, no-store, max-age=0");
   });
 
-  it.each([
-    ["not connected", () => m.getValidShopifyToken.mockResolvedValue({ status: "not_connected" }), 200],
-    ["reconnect required", () => m.getValidShopifyToken.mockResolvedValue({ status: "reauth_required", shopUrl: "s" }), 200],
-    ["Shopify unavailable, last snapshot shown", () => m.getValidShopifyToken.mockResolvedValue({ status: "temporarily_unavailable", shopUrl: "s" }), 200],
-    ["Shopify unavailable, nothing to show", () => {
-      m.getValidShopifyToken.mockResolvedValue({ status: "temporarily_unavailable", shopUrl: "s" });
-      m.getUserIntegration.mockResolvedValue(null);
-    }, 503],
-    ["sync failed, fallback snapshot", () => m.fetchShopifyStoreData.mockRejectedValue(new Error("timeout")), 200],
-    ["sync failed, nothing to show", () => {
-      m.fetchShopifyStoreData.mockRejectedValue(new Error("timeout"));
-      m.getUserIntegration.mockResolvedValue(null);
-    }, 500],
-    ["signed out", () => m.auth.mockResolvedValue({ userId: null }), 401],
-  ])("keeps a forced response uncacheable when %s", async (_label, arrange, status) => {
-    arrange();
-    const res = await call(true);
-    expect(res.status).toBe(status);
-    expect(cacheControl(res)).toBe("private, no-store, max-age=0");
-  });
-});
-
-describe("ordinary snapshot responses", () => {
-  it("may be stored privately but must be revalidated, and are never cached by the CDN", async () => {
+  it("lets an ordinary read be stored privately but revalidated, and never cached by the CDN", async () => {
     const res = await call(false);
     expect(cacheControl(res)).toBe("private, no-cache");
     expect(res.headers.get("cdn-cache-control")).toBe("no-store");
-  });
-
-  it("never return data older than an explicit forced refresh", async () => {
-    m.auth.mockResolvedValue({ userId: "user_sequence" });
-    expect((await (await call(false)).json()).data.label).toBe("old");
-    expect((await (await call(true)).json()).data.label).toBe("fresh");
-    m.getUserIntegration.mockResolvedValue({ store_snapshot: snapshot("fresh"), store_snapshot_at: new Date().toISOString(), shopify_scopes: null });
-    const after = await call(false);
-    expect((await after.json()).data.label).toBe("fresh");
-    expect(cacheControl(after)).toBe("private, no-cache");
   });
 });

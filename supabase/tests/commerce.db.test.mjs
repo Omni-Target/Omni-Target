@@ -58,6 +58,8 @@ const SUMMARIES = [
   "product_monthly_adjustments", "store_monthly_adjustments", "summary_dirty_months",
   // Late arrivals in history months (0042): what was applied, written only by apply_history_arrivals.
   "history_arrivals",
+  // The read path (0043): the stored store snapshot, written only by save_shop_insights.
+  "shop_insights",
 ];
 /** Every table that mirrors or is derived from one shop's Shopify data. */
 const SYNCED = [
@@ -104,6 +106,7 @@ async function seed({ id, shop }) {
   await q("insert into public.product_monthly_adjustments (shop_key, product_shopify_id, month, calc_version, currency, reason, refunded_units) values ($1, 10, date_trunc('month', now()), 1, 'GBP', 'refund', 1)", [id]);
   await q("insert into public.store_monthly_adjustments (shop_key, month, calc_version, currency, reason, total_refunded) values ($1, date_trunc('month', now()), 1, 'GBP', 'refund', 5)", [id]);
   // summary_dirty_months already holds the orders' month, marked by the order insert above.
+  await q("insert into public.shop_insights (shop_key, schema_version, data) values ($1, 9, jsonb_build_object('orders', 1))", [id]);
   await q("insert into public.history_arrivals (shop_key, subject, digest, month) values ($1, 'order', decode(repeat('ab', 32), 'hex'), date_trunc('month', now()))", [id]);
 }
 const syncedRows = async (shop) => Number((await one("select public.shop_synced_row_count($1) as n", [shop])).n);

@@ -7,7 +7,8 @@ import { NextResponse } from "next/server";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { queryUserIntegrationSelect, logApiUsage, isBriefRegenerationCommitReady, commitBriefGeneration } from "@/lib/db";
+import { logApiUsage, isBriefRegenerationCommitReady, commitBriefGeneration } from "@/lib/db";
+import { loadStoreSnapshot } from "@/modules/insights/read";
 import { getBriefVersions, getCampaign, getGenerationReceipt } from "@/modules/campaigns/repository";
 import { boundBriefEvidence } from "@/modules/briefs/evidence";
 import sharp from "sharp";
@@ -245,7 +246,8 @@ export async function POST(request: Request) {
   });
   if (!limited.ok) return limited.response;
 
-  const integration = await queryUserIntegrationSelect(userId!, "store_snapshot");
+  // The store snapshot as the worker last built it from the mirror (Phase 2, task 11).
+  const integration = { store_snapshot: await loadStoreSnapshot(userId!) };
 
   // Credit gate: the current workspace's balance and unlimited access, from the
   // ledger. The commit below re-checks both under the account lock.

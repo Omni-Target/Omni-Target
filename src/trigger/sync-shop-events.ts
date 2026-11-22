@@ -2,6 +2,7 @@ import { logger, schemaTask } from "@trigger.dev/sdk";
 import { shopSyncPayload } from "@/modules/jobs/payloads";
 import { processShopEvents } from "@/modules/ingestion/sync";
 import { liveSyncDeps } from "@/modules/ingestion/sync-live";
+import { dispatchShopInsights, insightsWindow } from "@/modules/jobs/trigger";
 
 /**
  * Drains one shop's sync inbox (Phase 2, task 10): fetches each changed
@@ -18,6 +19,8 @@ export const shopSyncEvents = schemaTask({
   run: async ({ shopDomain }, { ctx }) => {
     const report = await processShopEvents(shopDomain, ctx.run.id, liveSyncDeps());
     logger.log("Shop sync", { shop: shopDomain, ...report });
+    // Changed orders or products: the store snapshot is rebuilt, at most once per 15 minutes (task 11).
+    if (report.processed > 0 && (report.resources.order || report.resources.product)) await dispatchShopInsights(shopDomain, insightsWindow("sync"));
     return report;
   },
 });

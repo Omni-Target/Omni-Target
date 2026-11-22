@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { getUserIntegration } from "@/lib/db";
+import { loadStoreSnapshot } from "@/modules/insights/read";
 import { generateRecommendations } from "@/lib/insights-engine";
 import { retiredEndpointResponse } from "@/lib/api/retired-endpoint";
 
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
 
   try {
     // Get cached store snapshot
-    const integration = await getUserIntegration(userId);
+    const integration = { store_snapshot: await loadStoreSnapshot(userId) };
 
     if (!integration?.store_snapshot) {
       return Response.json({

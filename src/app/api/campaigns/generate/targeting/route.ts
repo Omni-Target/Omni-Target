@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-import { queryUserIntegrationSelect } from "@/lib/db";
+import { loadStoreSnapshot } from "@/modules/insights/read";
 import { getBriefVersions, getCampaign, saveRecoveredCreativeHooks, tenantFor } from "@/modules/campaigns/repository";
 import { generateCreativeHooksOnly } from "@/lib/insights-engine";
 import type { StoreData, StoreProduct } from "@/lib/store-data";
@@ -70,11 +70,8 @@ export async function POST(request: Request) {
       savedProductPrice = campaign.product_price;
     }
 
-    const integration = await queryUserIntegrationSelect(
-      userId!,
-      "store_snapshot"
-    );
-    const storeSnapshot = integration?.store_snapshot as StoreData | undefined;
+    // The store snapshot as the worker last built it from the mirror (Phase 2, task 11).
+    const storeSnapshot = ((await loadStoreSnapshot(userId!)) ?? undefined) as StoreData | undefined;
 
     if (!storeSnapshot) {
       return NextResponse.json(

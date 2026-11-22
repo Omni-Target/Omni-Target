@@ -1,5 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
-import { getUserIntegration } from "@/lib/db";
+import { after } from "next/server";
+import { loadStoreInsights } from "@/modules/insights/read";
+import { dispatchShopInsights, insightsWindow } from "@/modules/jobs/trigger";
 import { calculateAdReadinessScore } from "@/lib/ad-readiness-score";
 import { compareProductsForTest, selectGatewayTestCandidate } from "@/lib/gateway-decision";
 
@@ -13,7 +15,6 @@ export async function GET() {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const integration = await getUserIntegration(userId!);
   const { hasConnectedShop } = await import("@/modules/workspaces/current");
 
   if (!(await hasConnectedShop(userId))) {
@@ -27,28 +28,12 @@ export async function GET() {
     });
   }
 
-  let snapshot = integration?.store_snapshot;
-
-  if (!snapshot) {
-    try {
-      const { getValidShopifyToken } = await import("@/lib/shopify-token");
-      const tokenResult = await getValidShopifyToken(userId);
-      if (tokenResult.status === "ok") {
-        const { fetchShopifyStoreData } = await import("@/lib/connectors/shopify");
-        const { updateUserIntegration } = await import("@/lib/db");
-        snapshot = await fetchShopifyStoreData(
-          tokenResult.shopUrl,
-          tokenResult.accessToken,
-          userId
-        );
-        await updateUserIntegration(userId, {
-          store_snapshot: snapshot,
-          store_snapshot_at: new Date().toISOString(),
-        });
-      }
-    } catch (fetchErr) {
-      console.warn("Audit on-the-fly snapshot fetch warning:", fetchErr);
-    }
+  // The store snapshot as the worker last built it from the mirror; none yet: ask for one (Phase 2, task 11).
+  const read = await loadStoreInsights(userId);
+  const snapshot = read.data;
+  if (!snapshot && read.shopDomain) {
+    const shopDomain = read.shopDomain;
+    after(() => dispatchShopInsights(shopDomain, insightsWindow("audit")));
   }
 
   if (!snapshot) {

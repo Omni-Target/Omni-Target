@@ -19,7 +19,7 @@ import type {
   StoreShippingZone,
 } from "../store-data";
 
-interface ProductEnrichment {
+export interface ProductEnrichment {
   unitCost: number | null;
   currency?: string;
   costCoverage: "complete" | "partial" | "missing";
@@ -575,28 +575,35 @@ async function fetchProductEnrichment(
     }
   } while (cursor && page < maxPages);
 
-  return Object.fromEntries(products.map((product) => {
-    const costs = product.variants.nodes
-      .map((variant) => variant.inventoryItem.unitCost)
-      .filter((cost): cost is { amount: string; currencyCode: string } => Boolean(cost))
-      .map((cost) => ({ amount: Number(cost.amount), currency: cost.currencyCode }))
-      .filter((cost) => Number.isFinite(cost.amount));
-    const variantCount = product.variants.nodes.length;
-    const averageCost = costs.length
-      ? costs.reduce((total, cost) => total + cost.amount, 0) / costs.length
-      : null;
-    const claims = product.metafields.nodes.flatMap(normalizeMetafieldClaim);
-    return [String(product.legacyResourceId), {
-      unitCost: averageCost,
-      currency: costs[0]?.currency,
-      costCoverage: costs.length === 0
-        ? "missing"
-        : costs.length === variantCount
-          ? "complete"
-          : "partial",
-      claims,
-    } satisfies ProductEnrichment];
-  }));
+  return Object.fromEntries(products.map((product) => [
+    String(product.legacyResourceId),
+    productEnrichment(
+      product.variants.nodes.map((variant) => variant.inventoryItem.unitCost ?? null),
+      product.metafields.nodes,
+    ),
+  ]));
+}
+
+/**
+ * A product's cost and catalog evidence: the average unit cost of its costed
+ * variants, how many variants have one, and claims from its metafields. Shared
+ * by the live enrichment above and the canonical path (modules/insights).
+ */
+export function productEnrichment(
+  variantCosts: Array<{ amount: string | number; currencyCode: string } | null>,
+  metafields: Parameters<typeof normalizeMetafieldClaim>[0][],
+): ProductEnrichment {
+  const costs = variantCosts
+    .filter((cost): cost is { amount: string | number; currencyCode: string } => Boolean(cost))
+    .map((cost) => ({ amount: Number(cost.amount), currency: cost.currencyCode }))
+    .filter((cost) => Number.isFinite(cost.amount));
+  const averageCost = costs.length ? costs.reduce((total, cost) => total + cost.amount, 0) / costs.length : null;
+  return {
+    unitCost: averageCost,
+    currency: costs[0]?.currency,
+    costCoverage: costs.length === 0 ? "missing" : costs.length === variantCosts.length ? "complete" : "partial",
+    claims: metafields.flatMap(normalizeMetafieldClaim),
+  };
 }
 
 function capability(

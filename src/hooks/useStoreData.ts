@@ -14,7 +14,13 @@ export interface StoreDataResponse {
   missingShopifyScopes?: string[];
   reauthRequired?: boolean;
   snapshotAt?: string;
+  /** A newer snapshot is being built by the worker (Phase 2, task 11); `data` is the previous one, or null. */
+  refreshing?: boolean;
 }
+
+// While the worker builds a snapshot, ask again every 5 seconds, for at most about 5 minutes.
+const REFRESH_POLL_MS = 5_000;
+const REFRESH_POLL_LIMIT = 60;
 
 // Shared across dashboard / products / campaigns so navigating between them
 // reads one cached snapshot instead of re-hitting Shopify on every mount.
@@ -72,6 +78,8 @@ export function useStoreData(options?: { enabled?: boolean }) {
     staleTime: 10 * 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: true,
+    refetchInterval: (query) =>
+      query.state.data?.refreshing && query.state.dataUpdateCount < REFRESH_POLL_LIMIT ? REFRESH_POLL_MS : false,
     enabled: options?.enabled ?? true,
   });
 }
