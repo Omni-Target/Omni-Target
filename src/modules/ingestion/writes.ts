@@ -78,10 +78,11 @@ export const saveCheckpoint = (shopKey: number, domain: DataDomain, checkpoint: 
     p_watermark: checkpoint.watermark,
   });
 
-export async function loadCheckpoint(shopKey: number, domain: DataDomain): Promise<Checkpoint | null> {
+/** The domain's last checkpoint, and when it was written (see checkpoint.ts for which may be resumed). */
+export async function loadCheckpoint(shopKey: number, domain: DataDomain): Promise<(Checkpoint & { updatedAt: string | null }) | null> {
   const { data, error } = await supabaseAdmin
     .from("sync_checkpoints")
-    .select("sync_run_id, bulk_operation_id, committed_line, watermark")
+    .select("sync_run_id, bulk_operation_id, committed_line, watermark, updated_at")
     .eq("shop_key", shopKey)
     .eq("domain", domain)
     .maybeSingle();
@@ -92,5 +93,6 @@ export async function loadCheckpoint(shopKey: number, domain: DataDomain): Promi
     bulkOperationId: data.bulk_operation_id === null ? null : Number(data.bulk_operation_id),
     committedLine: Number(data.committed_line),
     watermark: data.watermark,
+    updatedAt: data.updated_at ?? null,
   };
 }

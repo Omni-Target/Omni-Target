@@ -128,7 +128,11 @@ describe("live history check", () => {
 
     const { count: detailBefore } = await supabaseAdmin.from("orders").select("*", { count: "exact", head: true })
       .eq("shop_key", shop.shop_key).lt("processed_at", windowStart.toISOString());
-    const { count: staged } = await supabaseAdmin.from("history_stage_orders").select("*", { count: "exact", head: true });
+    // Staging is not readable by service_role (0034); the import's own record says what it staged and discarded.
+    const { data: lastImport } = await supabaseAdmin.from("shop_imports").select("coverage").eq("shop_id", (await supabaseAdmin.from("shops").select("id").eq("shop_key", shop.shop_key).single()).data!.id)
+      .in("status", ["succeeded", "partial"]).order("finished_at", { ascending: false }).limit(1).single();
+    const historyWritten = ((lastImport?.coverage as { domains?: { history?: { written?: Record<string, number> } } } | null)?.domains?.history?.written) ?? {};
+    const staged = (historyWritten.orders ?? 0) + (historyWritten.lines ?? 0) - (historyWritten.discarded ?? 0);
     const historyCustomers = [...firsts.keys()];
     const { data: customerRows } = await supabaseAdmin.from("customers").select("shopify_id, history_first_order_at")
       .eq("shop_key", shop.shop_key).in("shopify_id", historyCustomers.length ? historyCustomers : [0]);

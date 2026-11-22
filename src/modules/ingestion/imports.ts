@@ -24,6 +24,13 @@ export type Claim =
   | { outcome: "finished" | "busy" | "missing"; status?: string };
 export const claimImport = (importId: string, runId: string) => rpc<Claim>("claim_shop_import", { p_import: importId, p_run_id: runId, p_stale_seconds: 900 });
 
+/** When the import first started (database clock); kept across retries and takeovers. */
+export async function importStartedAt(importId: string): Promise<Date> {
+  const { data, error } = await supabaseAdmin.from("shop_imports").select("started_at").eq("id", importId).single();
+  if (error || !data?.started_at) throw new Error(`shop_imports read failed: ${error?.message ?? "not started"}`);
+  return new Date(data.started_at);
+}
+
 export const importHeartbeat = (importId: string, runId: string, coverage: Json | null = null) =>
   rpc<{ outcome: "ok" | "lost" }>("import_heartbeat", { p_import: importId, p_run_id: runId, p_coverage: coverage });
 

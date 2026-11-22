@@ -7,6 +7,7 @@ import { getShopifyAccessForShop } from "@/modules/credentials/shopify";
 import { refreshSummaryMonth } from "@/modules/retention/repository";
 import { createLogger } from "@/platform/logger";
 import { checkShopAccess } from "./access-check";
+import { resumableCheckpoint } from "./checkpoint";
 import type { DataDomain } from "./access";
 import { bulkPhase, getBulkOperation, openBulkResult, pollDelayMs, ResultUnavailableError, startBulkQuery, type Gql } from "./bulk";
 import { withOrderDigests } from "./digests";
@@ -61,6 +62,8 @@ interface Context {
   shopDomain: string;
   shopifyShopId: number;
   windowStart: Date;
+  /** When the import first started: only checkpoints written since then may be resumed. */
+  startedAt: Date;
   /** The domains this import covers; null: all (0039). */
   scope: ReadonlySet<ImportDomain> | null;
   gql: Gql;
@@ -91,7 +94,7 @@ async function importBulk(
   let rejected = 0;
   let previousFailed = false;
   const saved = checkpointDomain ? await loadCheckpoint(ctx.shopKey, checkpointDomain) : null;
-  let resume = saved?.bulkOperationId ? { operationId: `gid://shopify/BulkOperation/${saved.bulkOperationId}`, line: saved.committedLine } : null;
+  let resume = resumableCheckpoint(saved, ctx.startedAt);
 
   for (let attempt = 0; attempt <= MAX_RERUNS; attempt++) {
     let operationId: string;
@@ -209,7 +212,7 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
 
   const ctx: Context = {
     importId, runId, shopKey: claim.shop_key, shopDomain: claim.shop_domain, shopifyShopId: Number(claim.shopify_shop_id),
-    windowStart: new Date(claim.window_start), scope: claim.domains?.length ? new Set(claim.domains) : null, gql: (q, v) => shopifyGraphql(claim.shop_domain, access.accessToken, q, v), sleep,
+    windowStart: new Date(claim.window_start), startedAt: await imports.importStartedAt(importId), scope: claim.domains?.length ? new Set(claim.domains) : null, gql: (q, v) => shopifyGraphql(claim.shop_domain, access.accessToken, q, v), sleep,
     reservationId: null, rowsWritten: 0, batches: 0, coverage: { started_at: new Date().toISOString() },
   };
 

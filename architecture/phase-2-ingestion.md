@@ -426,6 +426,44 @@ No field was withheld in the sample.
 - **Fix (migration 0038):** maintenance now retries a notice only after the export has been ready for 10 minutes. The database test pins this; without 0038 it fails.
 - **The live request** remains on staging as a completed request. Its file expires on 2026-12-19 and is then deleted by maintenance.
 
+### Real-data check of tasks 7 and 8 (2026-11-22; migration 0039)
+
+**omni-beta has grown into a bulky shop:**
+- 500,027 products and 500,036 variants;
+- 315 customers;
+- 2,000 orders over 31 months: 1,500 inside the window and 500 processed before it. The backdated dates are in `processedAt`, which every filter and summary uses.
+
+**The capacity guard refused a full re-import.** It projected 838.7 MB on top of the 117 MB already used, against 393 MB (75% of the staging Free plan). Nothing was written.
+- This is the guard working on real data: a 500k-product catalog does not fit the Free plan. Supabase Pro is the intended production plan, and nothing is upgraded now.
+- Rows a re-import already holds still count in the projection, because an upsert writes a new row version and the database grows by it until vacuum reclaims the old one.
+
+**Scoped imports (0039).** An import may name its domains: catalog, inventory, customers, orders or returns. None named means all.
+- Domains outside the scope are recorded as `not_in_scope`, and history goes with orders.
+- The reservation projects only the domains in scope (`importCounts`).
+- Task 10's reconciliation uses the same mechanism.
+
+**Defect found and fixed: a re-import could import nothing new.** The first scoped re-import read the orders, customers and returns of the 2026-11-19 import again (151 orders, not 1,500).
+- **Cause:** checkpoints are kept per shop and domain, and a new import resumed the previous import's finished checkpoint while its bulk result was still downloadable (7 days).
+- **Fix:** an import now resumes only checkpoints written since it first started (`resumableCheckpoint`; both times come from the database clock). A takeover keeps the import's start, so retries still resume.
+- **In production** this would have made a re-import, or a reconcile, within a week of the last one silently import nothing while reporting success.
+
+**Real-data result after the fix.** The scoped import of orders, customers and returns succeeded in 78 s:
+- 315 customers;
+- 1,500 window orders with 2,782 lines, 0 rejected;
+- 500 history orders staged, 208 customers given their history first order, and everything staged then discarded;
+- 25 window store months, 1,539 product-months and 20 cohorts;
+- capacity: 1.95 MB reserved against 1.87 MB of growth.
+
+**Independent history check** (`history.live.test.ts`): the shop's 500 pre-window orders, exported read-only from Shopify and summed from the raw order JSON, give exactly the 6 store months and 426 product-months the import wrote, with zero mismatches.
+- No order before the window is held as detail, and nothing is left staged.
+- All 208 history customers have their history first-order date.
+
+**Summary maintenance on real data:** 17 due months in 10 s. 12 final months were unchanged, with no adjustments, and 5 open months were rebuilt.
+
+**Still to exercise on real data:** an adjustment needs an order in a final month (more than 120 days old) to change in Shopify, for example a refund, after its month was finalised. Task 10's sync is the path that will bring such a change in.
+
+**Also fixed:** a unit test built a regular expression from random base64 keys. Their `+` and `/` made it match ordinary error text now and then.
+
 ## Dependencies outside the code
 
 | Dependency | Needed for | Status |
