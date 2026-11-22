@@ -57,6 +57,8 @@ export interface ShopCounts {
   /** Sampled ratios, when known. */
   metafieldsPerProduct?: number;
   inventoryLevelsPerVariant?: number;
+  /** Variants whose inventory levels are written; defaults to every variant. */
+  inventoryVariants?: number;
   lineItemsPerOrder?: number;
 }
 
@@ -90,7 +92,8 @@ export function projectImport(counts: ShopCounts): ImportProjection {
     products: products * ROW_BYTES.product,
     variants: variants * ROW_BYTES.variant,
     metafields: products * count(counts.metafieldsPerProduct ?? DEFAULT_RATIOS.metafieldsPerProduct, "metafieldsPerProduct") * ROW_BYTES.metafield,
-    inventoryLevels: variants * count(counts.inventoryLevelsPerVariant ?? DEFAULT_RATIOS.inventoryLevelsPerVariant, "inventoryLevelsPerVariant") * ROW_BYTES.inventoryLevel,
+    inventoryLevels: count(counts.inventoryVariants ?? variants, "inventoryVariants")
+      * count(counts.inventoryLevelsPerVariant ?? DEFAULT_RATIOS.inventoryLevelsPerVariant, "inventoryLevelsPerVariant") * ROW_BYTES.inventoryLevel,
     customers: customers * ROW_BYTES.customer,
     orders: inWindow * ROW_BYTES.order,
     lineItems: lineItemsInWindow * ROW_BYTES.lineItem,
@@ -103,6 +106,29 @@ export function projectImport(counts: ShopCounts): ImportProjection {
   for (const key of Object.keys(breakdown)) breakdown[key] = Math.ceil(breakdown[key]);
   const rawBytes = Object.values(breakdown).reduce((sum, value) => sum + value, 0);
   return { bytes: Math.ceil(rawBytes * GROWTH_HEADROOM), rawBytes, breakdown };
+}
+
+export type ImportDomain = "catalog" | "inventory" | "customers" | "orders" | "returns";
+
+/**
+ * The counts an import of these domains writes (null: every domain). Rows a
+ * re-import already holds still count in full: an upsert writes a new row
+ * version, and the database grows by it until vacuum reclaims the old one.
+ */
+export function importCounts(counts: ShopCounts, scope: ReadonlySet<ImportDomain> | null): ShopCounts {
+  if (!scope) return counts;
+  const catalog = scope.has("catalog");
+  const orders = scope.has("orders");
+  return {
+    ...counts,
+    products: catalog ? counts.products : 0,
+    variants: catalog ? counts.variants : 0,
+    inventoryVariants: scope.has("inventory") ? counts.inventoryVariants ?? counts.variants : 0,
+    customers: scope.has("customers") ? counts.customers : 0,
+    ordersInWindow: orders ? counts.ordersInWindow : 0,
+    ordersBeyondWindow: orders ? counts.ordersBeyondWindow : 0,
+    monthsOfHistory: orders ? counts.monthsOfHistory : 0,
+  };
 }
 
 /** Sampled ratios from a few records: metafields per product and inventory levels per variant. */

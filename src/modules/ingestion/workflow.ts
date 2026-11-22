@@ -1,7 +1,7 @@
 import "server-only";
 import { collectDeniedFields, shopifyGraphql } from "@/lib/connectors/shopify-graphql";
 import { releaseImportCapacity, renewImportCapacity, reserveImportCapacity } from "@/modules/capacity/service";
-import { sampledRatios } from "@/modules/capacity/projection";
+import { importCounts, sampledRatios, type ImportDomain } from "@/modules/capacity/projection";
 import { suppressionKey } from "@/modules/compliance/suppression";
 import { getShopifyAccessForShop } from "@/modules/credentials/shopify";
 import { refreshSummaryMonth } from "@/modules/retention/repository";
@@ -61,6 +61,8 @@ interface Context {
   shopDomain: string;
   shopifyShopId: number;
   windowStart: Date;
+  /** The domains this import covers; null: all (0039). */
+  scope: ReadonlySet<ImportDomain> | null;
   gql: Gql;
   sleep: (ms: number) => Promise<void>;
   reservationId: string | null;
@@ -207,7 +209,7 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
 
   const ctx: Context = {
     importId, runId, shopKey: claim.shop_key, shopDomain: claim.shop_domain, shopifyShopId: Number(claim.shopify_shop_id),
-    windowStart: new Date(claim.window_start), gql: (q, v) => shopifyGraphql(claim.shop_domain, access.accessToken, q, v), sleep,
+    windowStart: new Date(claim.window_start), scope: claim.domains?.length ? new Set(claim.domains) : null, gql: (q, v) => shopifyGraphql(claim.shop_domain, access.accessToken, q, v), sleep,
     reservationId: null, rowsWritten: 0, batches: 0, coverage: { started_at: new Date().toISOString() },
   };
 
@@ -234,14 +236,18 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
     };
     ctx.coverage.counts = shopCounts;
 
-    const reservation = await reserveImportCapacity(ctx.shopKey, "initial_import", shopCounts);
+    // Only what this import writes is reserved: a scoped re-import of orders does not reserve for the catalog.
+    const reservation = await reserveImportCapacity(ctx.shopKey, "initial_import", importCounts(shopCounts, ctx.scope));
     ctx.coverage.capacity = reservation;
     if (reservation.outcome === "refused") return finish("failed", ctx.coverage, "capacity_refused");
     ctx.reservationId = reservation.reservationId;
 
     const key = suppressionKey();
     const results: Record<string, DomainCoverage> = {};
+    const inScope = (name: string) => !ctx.scope || ctx.scope.has((name === "history" ? "orders" : name) as ImportDomain);
+    ctx.coverage.scope = ctx.scope ? [...ctx.scope] : "all";
     const run = async (name: string, accessible: boolean, step: () => Promise<DomainCoverage>) => {
+      if (!inScope(name)) { results[name] = { status: "skipped", reason: "not_in_scope" }; return; }
       if (!accessible) { results[name] = { status: "skipped", reason: "inaccessible" }; return; }
       try {
         results[name] = await step();
@@ -292,7 +298,7 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
     }));
 
     // History beyond the window: staged, summarised month by month, discarded (decision 3).
-    if (historyAllowed && counts.history.count > 0) {
+    if (historyAllowed && counts.history.count > 0 && inScope("history")) {
       await run("history", domains.orders.status !== "inaccessible", async () => {
         const staged = await importBulk(ctx, null, BULK_QUERIES.orders(historyFilter), async (units) => {
           const mapped = units.map(mapOrderUnit);
@@ -308,7 +314,7 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
         return { ...staged, written: { ...(staged.written ?? {}), ...summarised, discarded } };
       });
     } else {
-      results.history = { status: "skipped", reason: historyAllowed ? "no_orders_before_window" : "read_all_orders_not_granted" };
+      results.history = { status: "skipped", reason: !inScope("history") ? "not_in_scope" : historyAllowed ? "no_orders_before_window" : "read_all_orders_not_granted" };
     }
 
     await run("returns", domains.returns.status !== "inaccessible", () => importBulk(ctx, "returns", BULK_QUERIES.returns(windowFilter), async (units) => {

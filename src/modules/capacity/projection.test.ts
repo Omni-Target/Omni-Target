@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { projectImport, sampledRatios } from "./projection";
+import { importCounts, projectImport, sampledRatios } from "./projection";
 
 const MB = 1024 * 1024;
 const fixtures = JSON.parse(readFileSync("architecture/capacity/fixtures-2026-11-18.json", "utf8")) as {
@@ -55,5 +55,24 @@ describe("import projection (Phase 2 task 5)", () => {
   it("refuses impossible counts", () => {
     expect(() => projectImport({ products: -1, variants: 0, customers: 0, ordersInWindow: 0, ordersBeyondWindow: 0, monthsOfHistory: 0 })).toThrow();
     expect(sampledRatios({ products: 0, metafields: 0, variants: 0, inventoryLevels: 0 })).toEqual({ metafieldsPerProduct: undefined, inventoryLevelsPerVariant: undefined });
+  });
+});
+
+describe("scoped imports (0039)", () => {
+  const shop = { products: 500_000, variants: 500_000, customers: 315, ordersInWindow: 1_500, ordersBeyondWindow: 500, monthsOfHistory: 31 };
+  it("projects only the domains an import covers", () => {
+    const ordersOnly = importCounts(shop, new Set(["orders", "customers", "returns"]));
+    expect(ordersOnly).toMatchObject({ products: 0, variants: 0, inventoryVariants: 0, customers: 315, ordersInWindow: 1_500, ordersBeyondWindow: 500 });
+    const full = projectImport(shop).bytes;
+    const scoped = projectImport(ordersOnly).bytes;
+    expect(scoped).toBeLessThan(full / 50);
+    expect(projectImport(ordersOnly).breakdown.inventoryLevels).toBe(0);
+  });
+
+  it("keeps every count for an unscoped import, and inventory without the catalog when asked", () => {
+    expect(importCounts(shop, null)).toBe(shop);
+    const inventoryOnly = importCounts(shop, new Set(["inventory"]));
+    expect(inventoryOnly).toMatchObject({ products: 0, variants: 0, inventoryVariants: 500_000, ordersInWindow: 0, monthsOfHistory: 0 });
+    expect(projectImport(inventoryOnly).breakdown.inventoryLevels).toBeGreaterThan(0);
   });
 });

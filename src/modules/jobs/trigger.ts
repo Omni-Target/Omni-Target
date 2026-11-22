@@ -7,6 +7,7 @@ import { markExportDispatched } from "@/modules/compliance/exports-repository";
 import { markImportDispatched, requestImport } from "@/modules/ingestion/imports";
 import { createLogger } from "@/platform/logger";
 import { requireEnv } from "@/platform/env";
+import type { ImportDomain } from "@/modules/capacity/projection";
 import type { ShopAccessCheckPayload } from "./payloads";
 
 const log = createLogger({ module: "jobs" });
@@ -76,8 +77,10 @@ export async function dispatchShopImport(importId: string, shopDomain: string, a
 }
 
 /** Records the import first, then dispatches it: a failed dispatch is never lost. */
-export async function requestShopImport(shopKey: number, shopDomain: string): Promise<{ importId: string | null; runId: string | null; outcome: string }> {
-  const requested = await requestImport(shopKey);
+export async function requestShopImport(
+  shopKey: number, shopDomain: string, domains: ImportDomain[] | null = null,
+): Promise<{ importId: string | null; runId: string | null; outcome: string }> {
+  const requested = await requestImport(shopKey, domains);
   if (!requested.import_id) return { importId: null, runId: null, outcome: requested.outcome };
   if (requested.outcome === "existing" && requested.status !== "requested") return { importId: requested.import_id, runId: null, outcome: "already_running" };
   const runId = await dispatchShopImport(requested.import_id, shopDomain, (requested.dispatch_attempts ?? 0) + 1);

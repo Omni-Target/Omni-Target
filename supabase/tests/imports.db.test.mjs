@@ -148,3 +148,20 @@ describe("history beyond the window (decision 3)", () => {
     expect(await json("ingest_orders", s.key, [o(1, early), o(2, before)], [], [])).toMatchObject({ orders: 1, beyond_window: 1 });
   });
 });
+
+describe("scoped imports (0039)", () => {
+  it("records the domains an import covers, returns them to the run, and refuses unknown ones", async () => {
+    const s = await boundShop();
+    const { import_id: id } = await call("request_shop_import", s.key, ["orders", "customers", "returns"]);
+    expect(await one("select domains from public.shop_imports where id = $1", [id])).toEqual({ domains: ["orders", "customers", "returns"] });
+    expect(await call("claim_shop_import", id, "run_scope", 900)).toMatchObject({ outcome: "claimed", domains: ["orders", "customers", "returns"] });
+    // One active import per shop, whatever another request asks for.
+    expect(await call("request_shop_import", s.key, ["catalog"])).toMatchObject({ outcome: "existing", import_id: id });
+    await call("finish_shop_import", id, "run_scope", "succeeded", null, null);
+
+    const { import_id: all } = await call("request_shop_import", s.key);
+    expect(await call("claim_shop_import", all, "run_all", 900)).toMatchObject({ outcome: "claimed", domains: null });
+    await call("finish_shop_import", all, "run_all", "succeeded", null, null);
+    await expect(call("request_shop_import", s.key, ["orders", "payments"])).rejects.toThrow(/check constraint/);
+  });
+});

@@ -10,6 +10,17 @@ import { describe, expect, it } from "vitest";
 
 const STAGING_REF = "eraycbxedmufsdvhtrvk";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** The harness's own calls retry a transient network failure; the import itself retries in the worker. */
+async function retrying<T>(call: () => Promise<T>, attempts = 4): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await call();
+    } catch (error) {
+      if (i >= attempts || !/fetch failed|timeout|ECONNRESET/i.test(String(error))) throw error;
+      await sleep(5_000 * i);
+    }
+  }
+}
 
 describe("live end-to-end import", () => {
   it("imports a shop, recovering a failed dispatch through reconciliation", async () => {
@@ -23,26 +34,32 @@ describe("live end-to-end import", () => {
     const { databaseSizeBytes } = await import("@/modules/capacity/repository");
     const { supabaseAdmin } = await import("@/platform/supabase");
 
-    const shopKey = await shopKeyFor(domain);
+    const shopKey = await retrying(() => shopKeyFor(domain));
     if (shopKey === null) throw new Error("shop not modelled");
-    const sizeBefore = await databaseSizeBytes();
+    const sizeBefore = await retrying(() => databaseSizeBytes());
 
     // A dispatch that never happened: the import is recorded, nothing is sent to Trigger.dev.
-    const requested = await imports.requestImport(shopKey);
+    // LIVE_DOMAINS (comma-separated) scopes the import, e.g. "orders,customers,returns" (0039).
+    const scope = (process.env.LIVE_DOMAINS ?? "").split(",").map((d) => d.trim()).filter(Boolean) as import("@/modules/capacity/projection").ImportDomain[];
+    const requested = await retrying(() => imports.requestImport(shopKey, scope.length ? scope : null));
     expect(requested.outcome).toBe("requested");
     const importId = requested.import_id as string;
     await sleep(125_000);
-    const reconcile = await reconcileImports();
+    const reconcile = await retrying(() => reconcileImports());
 
     const started = Date.now();
     let row: Record<string, unknown> | null = null;
     while (Date.now() - started < 3_300_000) {
-      const { data } = await supabaseAdmin.from("shop_imports").select("status, dispatch_attempts, trigger_run_id, coverage, error, started_at, finished_at").eq("id", importId).single();
+      const { data } = await retrying(async () => {
+        const result = await supabaseAdmin.from("shop_imports").select("status, dispatch_attempts, trigger_run_id, coverage, error, started_at, finished_at").eq("id", importId).single();
+        if (result.error) throw new Error(result.error.message);
+        return result;
+      });
       row = data;
       if (row && ["succeeded", "partial", "failed", "cancelled"].includes(String(row.status))) break;
       await sleep(15_000);
     }
-    const sizeAfter = await databaseSizeBytes();
+    const sizeAfter = await retrying(() => databaseSizeBytes());
     const { data: reservation } = await supabaseAdmin.from("capacity_reservations")
       .select("reserved_bytes, written_bytes, release_reason, projection").order("created_at", { ascending: false }).limit(1).single();
     const counts: Record<string, number> = {};

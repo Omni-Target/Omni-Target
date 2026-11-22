@@ -111,7 +111,8 @@ describe("key configuration", () => {
     try {
       open(seal("shpat_example", aad, v1), aad, keyringFromEnv({ APP_ENCRYPTION_KEY: keyB }));
     } catch (error) {
-      expect(String((error as Error).message)).not.toMatch(new RegExp(`${keyA}|${keyB}|shpat_example`));
+      // Substring checks: base64 keys hold "+" and "/", which a regular expression would read as syntax.
+      for (const material of [keyA, keyB, "shpat_example"]) expect(String((error as Error).message)).not.toContain(material);
     }
   });
 });

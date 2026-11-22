@@ -1,4 +1,5 @@
 import "server-only";
+import type { ImportDomain } from "@/modules/capacity/projection";
 import { supabaseAdmin } from "@/platform/supabase";
 
 /** Shop import records, history staging and summary refreshes (migrations 0030 and 0034). */
@@ -10,13 +11,16 @@ async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
   return data as T;
 }
 
-export const requestImport = (shopKey: number) =>
-  rpc<{ outcome: "requested" | "existing" | "not_ingestible"; import_id?: string; status?: string; dispatch_attempts?: number }>("request_shop_import", { p_shop_key: shopKey });
+/** Records an import of these domains (default: all), unless one is already active for the shop (0039). */
+export const requestImport = (shopKey: number, domains: ImportDomain[] | null = null) =>
+  rpc<{ outcome: "requested" | "existing" | "not_ingestible"; import_id?: string; status?: string; dispatch_attempts?: number }>("request_shop_import", {
+    p_shop_key: shopKey, p_domains: domains && domains.length ? domains : null,
+  });
 
 export const markImportDispatched = (importId: string, runId: string) => rpc<Json>("mark_import_dispatched", { p_import: importId, p_run_id: runId });
 
 export type Claim =
-  | { outcome: "claimed"; shop_key: number; shop_domain: string; shopify_shop_id: number; coverage: Json; window_start: string }
+  | { outcome: "claimed"; shop_key: number; shop_domain: string; shopify_shop_id: number; coverage: Json; window_start: string; domains: ImportDomain[] | null }
   | { outcome: "finished" | "busy" | "missing"; status?: string };
 export const claimImport = (importId: string, runId: string) => rpc<Claim>("claim_shop_import", { p_import: importId, p_run_id: runId, p_stale_seconds: 900 });
 
