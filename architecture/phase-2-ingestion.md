@@ -517,7 +517,52 @@ No field was withheld in the sample.
 - **Worker:** the real `sync-shop-events` run completed with 2 events processed and 0 failed. The order came back exactly as Shopify has it (same `updated_at`, same line count).
 - **Scheduled reconcile, run once:** completed in 8 s. It found both orders again within its overlap window and recorded neither (de-duplication), and the watermarks moved only forward.
 - **Ordering:** a `sync-sweep` run that started before 0040 reached staging failed with "function not found". On release, migrations come before the worker deploy.
-- **Not verified live:** real Shopify webhook delivery. Staging has no public HTTPS endpoint, so subscriptions were skipped. It needs `SHOPIFY_WEBHOOK_BASE_URL` pointing at a reachable staging URL or tunnel.
+- **Real Shopify delivery:** verified separately, below.
+
+**Real webhook delivery (2026-11-22; `webhook-delivery.live.test.ts`).** The staging deployment is the Vercel project `omni-target-staging`, on `staging.app.omnitarget.co`, with staging variables. The check ensures a shop's subscriptions at a given HTTPS base, optionally retires another endpoint's, and then waits for real deliveries and for the worker to settle them.
+- **Subscriptions:**
+  - omni-beta had none.
+  - All 20 were created without errors, including the return topics' `includeFields`.
+  - They were first made at the deployment's `vercel.app` address while DNS was pending, then moved to the domain: 20 created there, 20 retired at the old address.
+  - A repeat run leaves all 20 unchanged.
+- **Deliveries:** the user's simulation (220 backdated orders, each with a refund, plus a refund on an existing order) produced 1,250 deliveries:
+  - 220 `orders/create`, 440 `orders/updated`, 221 `refunds/create`;
+  - 149 `customers/create`, 220 `customers/update`.
+- **What arrived:**
+  - every delivery was signed and recorded thin, with Shopify's webhook and event IDs;
+  - Shopify to inbox took 1.3 to 5 s (1.8 s on average);
+  - nothing failed.
+- **Worker down:** the local worker was stopped while the deliveries arrived. The route's own dispatches expired, and the events waited 2.5 to 3.4 hours.
+- **Recovery:** once the worker restarted, the next `sync-sweep` dispatched the shop. One `sync-shop-events` run drained all 1,250 events in 2 minutes: 231 orders and 213 customers fetched by ID, 0 failed, 0 dead, one attempt each.
+- **Mirror:** the newest order and customer match Shopify.
+  - 165 of the new orders are in the window and are held as detail, with their refunds.
+  - 55 are dated before the window, and are counted as beyond it and not stored.
+- **Still open:** a delivery to the domain itself, after the move. The next change in the shop will show it. The domain serves the same deployment and refuses unsigned requests.
+
+**Late changes on real data (2026-11-22; `summary-adjustments.live.test.ts`).** The deliveries above marked all 25 window months as changed; 20 of them were final. The check snapshots the final summaries and runs the same maintenance the schedule runs. It then compares every window month with a recomputation from Shopify's raw export (1,665 orders), not through the import's mappers.
+- **Maintenance:** 25 months processed: 20 final months adjusted, 5 open months rebuilt, 0 failures.
+- **Final rows untouched:** the 20 store months and 1,216 product-months are byte-identical before and after.
+- **Adjustments:**
+  - store: 20 rows, all `correction`, because each final month gained orders;
+  - product: 228 rows, 227 `correction` and 1 `refund` (the refund on the existing order, on a product whose month had no new orders).
+  - At store level, that refund falls into its month's `correction` row: one row per month and run records the net change.
+- **Equality:** final plus adjustments, or the rebuilt open month, equals the recomputation for all 25 store months and 1,642 product-months.
+- **Idempotence:** a second run checked 17 months (12 unchanged, 5 open) and added nothing.
+- **Customer counts** are not adjusted (by design) and were not compared.
+- **History months are frozen:** months before the window hold no detail, so maintenance cannot recompute them.
+  - The 55 new orders dated before the window (2024-05 to 2024-10) and their refunds are not in those months' summaries.
+  - So `history.live.test.ts` would now report those months as differing from Shopify.
+  - Whether late arrivals before the window should become adjustments is an open decision.
+- **Refund dates:** Shopify keeps a refund's effective date in `processedAt`. The simulation's refunds were created on 2026-11-22 with `processedAt` between 2024-05 and 2026-11. The mirror recorded only `createdAt`, which migration 0041 corrects. Summaries attribute refunds to the order's month, so they don't change.
+
+**Migration 0041: a refund's effective date (2026-11-22).**
+- **Schema:** `refunds.processed_at` (not null). Existing rows take `shopify_created_at`.
+- **Ingestion:** the import and by-ID queries ask for `Refund.processedAt`. The mapper and `ingest_orders` store it, falling back to `createdAt`, the same way orders use `processedAt`.
+- **Verification:**
+  - the database test covers a backdated refund and the fallback;
+  - storing `createdAt` instead fails the test;
+  - rolling 0041 back restores the 0040 schema exactly, and reapplying it restores 0041 exactly.
+- **Staging backfill:** a re-fetch rewrites an order's refunds, because the `updated_at` guard accepts the same version. So one reconcile pass after 0041 fills in the stored refunds' dates.
 
 ## Dependencies outside the code
 
@@ -525,5 +570,5 @@ No field was withheld in the sample.
 |---|---|---|
 | Trigger.dev project (Free plan) with development and staging keys | Running tasks (task 3 onward); code and tests proceed without it | To be created |
 | Shopify Partner Dashboard: `read_all_orders` and Level 1 protected customer data approved for the app | Production imports beyond 60 days; production customer data | `read_all_orders` approved internally. Shopify's grant is verified per installation (task 1) |
-| Webhook subscriptions on the dev store pointing at a reachable staging URL | Live incremental sync tests (task 10) | Local tunnel or the planned staging deployment |
+| Webhook subscriptions on the test store pointing at a reachable staging URL | Live incremental sync tests (task 10) | Done: omni-beta subscribes to `staging.app.omnitarget.co` (Vercel project `omni-target-staging`) |
 | `REDACTION_SUPPRESSION_KEY` and Trigger.dev keys | Tasks 2, 3 and 9 | Staging values generated locally; production values on the release checklist |

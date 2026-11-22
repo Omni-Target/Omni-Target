@@ -38,7 +38,7 @@ const ORDER_FIELDS = `id name createdAt processedAt cancelledAt updatedAt test s
       shippingAddress { city provinceCode countryCodeV2 }`;
 const LINE_ITEM_FIELDS = `id title sku quantity currentQuantity product { id } variant { id }
         originalUnitPriceSet { shopMoney { amount } } totalDiscountSet { shopMoney { amount } }`;
-const REFUND_FIELDS = "refunds { id createdAt totalRefundedSet { shopMoney { amount currencyCode } } }";
+const REFUND_FIELDS = "refunds { id createdAt processedAt totalRefundedSet { shopMoney { amount currencyCode } } }";
 const CUSTOMER_FIELDS = "id createdAt updatedAt numberOfOrders amountSpent { amount currencyCode }";
 const RETURN_FIELDS = "id name status createdAt closedAt totalQuantity";
 const RETURN_LINE_ITEM_FIELDS = `id quantity returnReasonDefinition { handle }

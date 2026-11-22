@@ -112,16 +112,22 @@ describe("orders", () => {
   it("writes orders with lines and refunds, skips orders beyond 24 months, and replaces removed lines", async () => {
     const s = await boundShop();
     const recent = iso(-10);
+    const backdated = iso(-9);
     const result = await ingest("ingest_orders", s.key,
       [order(s, 1, recent), order(s, 2, iso(-800))],
       [line(11, 1), line(12, 1), line(21, 2)],
-      [{ shopify_id: 31, order_shopify_id: 1, shopify_created_at: recent, total_refunded: "5.00", currency: "GBP" }]);
-    expect(result).toMatchObject({ orders: 1, beyond_window: 1, stale: 0, line_items: 2, refunds: 1 });
+      [{ shopify_id: 31, order_shopify_id: 1, shopify_created_at: recent, total_refunded: "5.00", currency: "GBP" },
+       { shopify_id: 32, order_shopify_id: 1, shopify_created_at: iso(-1), processed_at: backdated, total_refunded: "1.00", currency: "GBP" }]);
+    expect(result).toMatchObject({ orders: 1, beyond_window: 1, stale: 0, line_items: 2, refunds: 2 });
     expect(await one("select count(*)::int as n from public.orders where shop_key = $1", [s.key])).toEqual({ n: 1 });
+    // A refund's effective date (0041): processed_at as Shopify has it (backdated here), else its creation time.
+    const refundDates = await q("select shopify_id::int as id, processed_at = $2::timestamptz as backdated, processed_at = shopify_created_at as created from public.refunds where shop_key = $1 order by 1",
+      [s.key, backdated]);
+    expect(refundDates).toEqual([{ id: 31, backdated: false, created: true }, { id: 32, backdated: true, created: false }]);
 
     // An order edit removed line 12.
     const edited = await ingest("ingest_orders", s.key, [order(s, 1, recent, { shopify_updated_at: iso(-1) })], [line(11, 1, { current_quantity: 1, refunded_quantity: 1 })], []);
-    expect(edited).toMatchObject({ orders: 1, line_items: 1, line_items_removed: 1, refunds_removed: 1 });
+    expect(edited).toMatchObject({ orders: 1, line_items: 1, line_items_removed: 1, refunds_removed: 2 });
     expect(await q("select shopify_id::int as id, refunded_quantity from public.order_line_items where shop_key = $1", [s.key])).toEqual([{ id: 11, refunded_quantity: 1 }]);
   });
 });

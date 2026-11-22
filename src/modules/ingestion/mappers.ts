@@ -169,7 +169,8 @@ export interface LineItemRow {
   unit_price: string; total_discount: string;
 }
 export interface RefundRow {
-  shopify_id: number; order_shopify_id: number; shopify_created_at: string; total_refunded: string; currency: string;
+  /** processed_at: when the refund took effect (Shopify's processedAt, else createdAt); differs for refunds recorded after the fact. */
+  shopify_id: number; order_shopify_id: number; shopify_created_at: string; processed_at: string; total_refunded: string; currency: string;
 }
 
 /** The destination as stored: the country-aware metro (GEO-01), with the raw city only when it differs. */
@@ -226,7 +227,10 @@ export function mapOrderUnit(unit: JsonlUnit): { order: OrderRow | null; lineIte
     const money = obj(obj(obj(refund)?.totalRefundedSet)?.shopMoney);
     const total = amount(money?.amount);
     if (refundId === null || !created || total === null) continue;
-    refunds.push({ shopify_id: refundId, order_shopify_id: orderId, shopify_created_at: created, total_refunded: total, currency: currency(money?.currencyCode) ?? shopCurrency });
+    refunds.push({
+      shopify_id: refundId, order_shopify_id: orderId, shopify_created_at: created, processed_at: at(obj(refund)?.processedAt) ?? created,
+      total_refunded: total, currency: currency(money?.currencyCode) ?? shopCurrency,
+    });
   }
 
   // Bulk queries cannot nest a connection (refund line items) inside a list

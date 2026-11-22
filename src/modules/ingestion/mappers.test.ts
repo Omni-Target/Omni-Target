@@ -52,7 +52,10 @@ describe("orders", () => {
     presentmentCurrencyCode: "GBP", subtotalPriceSet: money("45.00"), totalDiscountsSet: money("5.00"), totalTaxSet: money("8.00"),
     totalShippingPriceSet: money("4.99"), totalPriceSet: money("52.99"), totalRefundedSet: money("10.00"), customer: { id: "gid://shopify/Customer/30" },
     shippingAddress: { city: "Leeds", provinceCode: "ENG", countryCodeV2: "GB" },
-    refunds: [{ id: "gid://shopify/Refund/40", createdAt: "2026-03-04T00:00:00Z", totalRefundedSet: money("10.00", "GBP") }],
+    refunds: [
+      { id: "gid://shopify/Refund/40", createdAt: "2026-03-04T00:00:00Z", processedAt: "2026-02-20T09:00:00Z", totalRefundedSet: money("10.00", "GBP") },
+      { id: "gid://shopify/Refund/41", createdAt: "2026-03-05T00:00:00Z", processedAt: null, totalRefundedSet: money("0.00", "GBP") },
+    ],
     ...overrides,
   });
   const lines = [
@@ -70,7 +73,11 @@ describe("orders", () => {
       shopify_id: 21, order_shopify_id: 20, product_shopify_id: 10, variant_shopify_id: 11, title: "Lamp", sku: "L-1",
       quantity: 2, current_quantity: 1, refunded_quantity: 1, unit_price: "25.00", total_discount: "5.00",
     }]);
-    expect(mapped.refunds).toEqual([{ shopify_id: 40, order_shopify_id: 20, shopify_created_at: "2026-03-04T00:00:00Z", total_refunded: "10.00", currency: "GBP" }]);
+    // A refund's effective date is processedAt (backdated refunds), else createdAt.
+    expect(mapped.refunds).toEqual([
+      { shopify_id: 40, order_shopify_id: 20, shopify_created_at: "2026-03-04T00:00:00Z", processed_at: "2026-02-20T09:00:00Z", total_refunded: "10.00", currency: "GBP" },
+      { shopify_id: 41, order_shopify_id: 20, shopify_created_at: "2026-03-05T00:00:00Z", processed_at: "2026-03-05T00:00:00Z", total_refunded: "0.00", currency: "GBP" },
+    ]);
   });
 
   it("stores the presentment currency only when it differs, and a guest order with no customer", () => {

@@ -81,7 +81,7 @@ async function seed({ id, shop }) {
     ["insert into public.customers (shop_key, shopify_id, orders_count) values ($1, 14, 1)", [id]],
     ["insert into public.orders (shop_key, shopify_id, shopify_created_at, processed_at, currency, total_price, customer_shopify_id) values ($1, 15, now(), now(), 'GBP', 25, 14)", [id]],
     ["insert into public.order_line_items (shop_key, shopify_id, order_shopify_id, product_shopify_id, quantity, unit_price) values ($1, 16, 15, 10, 1, 25)", [id]],
-    ["insert into public.refunds (shop_key, shopify_id, order_shopify_id, shopify_created_at, total_refunded, currency) values ($1, 17, 15, now(), 25, 'GBP')", [id]],
+    ["insert into public.refunds (shop_key, shopify_id, order_shopify_id, shopify_created_at, processed_at, total_refunded, currency) values ($1, 17, 15, now(), now(), 25, 'GBP')", [id]],
     ["insert into public.returns (shop_key, shopify_id, order_shopify_id, status) values ($1, 18, 15, 'closed')", [id]],
     ["insert into public.return_line_items (shop_key, shopify_id, return_shopify_id, line_item_shopify_id, quantity, return_reason) values ($1, 19, 18, 16, 1, 'defective')", [id]],
     ["insert into public.metafields (shop_key, owner_type, owner_shopify_id, namespace, key, type, value_excerpt) values ($1, 'product', 10, 'specs', 'wattage', 'number_integer', '40')", [id]],
