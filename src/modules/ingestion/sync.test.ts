@@ -12,7 +12,7 @@ const orderNode = (id: number, total: string, updatedAt: string) => ({
 });
 
 /** A fake Shopify holding current state, and a fake inbox. */
-function harness(shopify: { orders?: Record<number, Raw | Error>; products?: Record<number, Raw>; customers?: Record<number, Raw>; updated?: Record<string, Array<{ id: string; updatedAt: string }>> }) {
+function harness(shopify: { orders?: Record<number, Raw | Error>; products?: Record<number, Raw>; customers?: Record<number, Raw>; updated?: Record<string, Array<{ id: string; updatedAt: string }>>; refundLines?: Record<number, Raw[]> }) {
   const inbox: Array<{ id: string; topic: string; payload: Raw; status: string }> = [];
   const calls: string[] = [];
   const gql = vi.fn(async (query: string, variables: Raw = {}) => {
@@ -22,6 +22,11 @@ function harness(shopify: { orders?: Record<number, Raw | Error>; products?: Rec
       const found = shopify.orders?.[Number(id.split("/").pop())];
       if (found instanceof Error) throw found;
       return { node: found ? structuredClone(found) : null };
+    }
+    if (query.includes("RefundLinesById")) {
+      calls.push(`refund ${id}`);
+      const lines = shopify.refundLines?.[Number(id.split("/").pop())];
+      return { node: lines ? { refundLineItems: conn(lines) } : null };
     }
     if (query.includes("ProductById")) return { node: shopify.products?.[Number(id.split("/").pop())] ?? null };
     if (query.includes("CustomersById")) return { nodes: (variables.ids as string[]).map((gid) => shopify.customers?.[Number(gid.split("/").pop())] ?? null) };
@@ -34,6 +39,8 @@ function harness(shopify: { orders?: Record<number, Raw | Error>; products?: Rec
   const writes = {
     writeOrders: vi.fn(async () => ({})), writeCatalog: vi.fn(async () => ({})), writeCustomers: vi.fn(async () => ({})),
     writeInventory: vi.fn(async () => ({})), writeReturns: vi.fn(async () => ({})),
+    historyWindowStart: vi.fn(async () => Date.parse("2024-11-01T00:00:00Z")),
+    writeHistoryArrivals: vi.fn(async (): Promise<Raw> => ({ history_orders: 1, orders_applied: 0, refunds_applied: 1 })),
   };
   const repo = {
     claimSyncEvents: vi.fn(async () => {
@@ -103,6 +110,47 @@ describe("incremental sync worker (task 10)", () => {
   });
 });
 
+describe("history arrivals (0042)", () => {
+  const refund = { id: "gid://shopify/Refund/91", createdAt: "2026-11-22T09:30:00Z", processedAt: "2024-06-01T00:00:00Z", totalRefundedSet: { shopMoney: { amount: "5.00", currencyCode: "GBP" } } };
+  const oldOrder = (id: number) => ({ ...orderNode(id, "20.00", "2026-11-22T10:00:00Z"), processedAt: "2024-05-20T10:00:00Z", createdAt: "2026-11-22T09:00:00Z", refunds: [refund] });
+  const unit = { quantity: 1, lineItem: { product: { id: "gid://shopify/Product/7" } } };
+  const setup = () => {
+    const t = harness({ orders: { 31: oldOrder(31), 32: orderNode(32, "9.00", "2026-11-22T10:00:00Z") }, refundLines: { 91: [unit] } });
+    t.writes.writeOrders.mockResolvedValueOnce({ beyond_window: 1 } as never);
+    t.push("e1", "refunds/create", { id: 91, order_id: 31, created_at: "2026-11-22T09:30:00Z" });
+    t.push("e2", "orders/updated", { id: 32, updated_at: "2026-11-22T10:00:00Z" });
+    return t;
+  };
+
+  it("passes orders from before the window to the history arrivals, with their refunds' line items", async () => {
+    const t = setup();
+    await processShopEvents("s.myshopify.com", "run_1", t.deps);
+    expect(t.writes.historyWindowStart).toHaveBeenCalledWith(2);
+    expect(t.calls).toContain("refund gid://shopify/Refund/91");
+    const batch = (t.writes.writeHistoryArrivals.mock.calls[0] as unknown[])[2] as { orders: Array<{ shopify_id: number }>; refunds: unknown[]; refundLines: unknown[] };
+    expect(batch.orders.map((o) => o.shopify_id)).toEqual([31]);
+    expect(batch.refunds).toEqual([expect.objectContaining({ shopify_id: 91, processed_at: "2024-06-01T00:00:00Z" })]);
+    expect(batch.refundLines).toEqual([{ refund_shopify_id: 91, product_shopify_id: 7, quantity: 1 }]);
+    expect(t.inbox.every((e) => e.status === "processed")).toBe(true);
+  });
+
+  it("tries a history arrival again while an import is in progress, and finishes the other orders", async () => {
+    const t = setup();
+    t.writes.writeHistoryArrivals.mockResolvedValueOnce({ history_orders: 1, deferred: true });
+    await processShopEvents("s.myshopify.com", "run_1", t.deps);
+    expect(t.inbox.map((e) => [e.id, e.status])).toEqual([["e1", "failed"], ["e2", "processed"]]);
+    expect((t.repo.finishSyncEvents.mock.calls[0] as unknown[])[2]).toEqual([{ id: "e1", error: "history_import_active" }]);
+  });
+
+  it("looks for history only when the write reports orders beyond the window", async () => {
+    const t = harness({ orders: { 32: orderNode(32, "9.00", "2026-11-22T10:00:00Z") } });
+    t.push("e1", "orders/updated", { id: 32 });
+    await processShopEvents("s.myshopify.com", "run_1", t.deps);
+    expect(t.writes.historyWindowStart).not.toHaveBeenCalled();
+    expect(t.writes.writeHistoryArrivals).not.toHaveBeenCalled();
+  });
+});
+
 describe("daily reconcile (task 10)", () => {
   function reconcileHarness(updated: Record<string, Array<{ id: string; updatedAt: string }>>, watermarks: Record<string, string | null> = {}) {
     const t = harness({ updated, orders: { 21: orderNode(21, "12.00", "2026-11-21T09:00:00Z") } });
@@ -140,6 +188,19 @@ describe("daily reconcile (task 10)", () => {
     expect(t.writes.writeOrders).toHaveBeenCalledWith(2, 61555736640, expect.objectContaining({ orders: [expect.objectContaining({ shopify_id: 21 })] }));
     // Seen again next day: recorded once only.
     expect((await reconcileShopUpdates("s.myshopify.com", t.reconcileDeps) as { orders: { recorded: number } }).orders.recorded).toBe(0);
+  });
+
+  it("replays changes since a time under its own event IDs, for the requested domains only", async () => {
+    const t = reconcileHarness({ orders: [{ id: "gid://shopify/Order/21", updatedAt: "2026-11-21T09:00:00Z" }] }, { orders: "2026-11-22T00:00:00Z" });
+    // The daily reconcile saw this change already.
+    t.push("reconcile:orders/updated:21:2026-11-21T09:00:00Z", "orders/updated", { id: 21 });
+    t.inbox[0].status = "processed";
+    const report = await reconcileShopUpdates("s.myshopify.com", t.reconcileDeps, { replay: { since: "2026-11-21T00:00:00Z", tag: "history-0042", domains: ["orders"] } });
+    expect(report).toMatchObject({ orders: { found: 1, recorded: 1 }, catalog: { skipped: "not_requested" }, customers: { skipped: "not_requested" } });
+    // From the replay's time, without the overlap, and recorded under the replay's own ID.
+    expect(String((t.gql.mock.calls.find((call) => String(call[0]).includes("orders(first"))![1] as Raw).query)).toBe("updated_at:>='2026-11-21T00:00:00.000Z'");
+    expect(t.inbox.map((e) => [e.id, e.status])).toContainEqual(["reconcile:history-0042:orders/updated:21:2026-11-21T09:00:00Z", "received"]);
+    await expect(reconcileShopUpdates("s.myshopify.com", t.reconcileDeps, { replay: { since: "2026-11-21T00:00:00Z", tag: "Not a tag" } })).rejects.toThrow("replay");
   });
 
   it("continues from where a truncated run stopped, and skips a domain never imported", async () => {

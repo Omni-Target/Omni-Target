@@ -2,9 +2,9 @@ import "server-only";
 import { createLogger } from "@/platform/logger";
 import type { Gql } from "./bulk";
 import type { JsonlUnit } from "./jsonl";
-import { mapCustomerUnit, mapInventoryUnit, mapOrderUnit, mapProductUnit, mapReturnsUnit } from "./mappers";
+import { mapCustomerUnit, mapInventoryUnit, mapOrderUnit, mapProductUnit, mapRefundLines, mapReturnsUnit, type OrderRow, type RefundLineRow } from "./mappers";
 import {
-  CUSTOMERS_BY_ID, INVENTORY_ITEM_BY_ID, ORDER_BY_ID, PRODUCT_BY_ID, PRODUCT_METAFIELDS_PAGE, PRODUCT_VARIANTS_PAGE, RETURN_BY_ID,
+  CUSTOMERS_BY_ID, INVENTORY_ITEM_BY_ID, ORDER_BY_ID, PRODUCT_BY_ID, PRODUCT_METAFIELDS_PAGE, PRODUCT_VARIANTS_PAGE, REFUND_LINES_BY_ID, RETURN_BY_ID,
   searchFilter, updatedSinceQuery,
 } from "./queries";
 import { chunkUnits, groupResources, unitFromNode, type SyncKind, type SyncResource } from "./sync-events";
@@ -25,6 +25,11 @@ import type * as Writes from "./writes";
  * each domain's watermark and records them as events: a missed webhook is
  * repaired by the same path the next day. Deletions are seen only through
  * webhooks; a periodic import covers what both miss.
+ *
+ * Orders from before the retained window are not held as detail. Those that
+ * arrive late (created, or refunded, after their month's summary closed) are
+ * passed to apply_history_arrivals (0042) with their refunds' line items, and
+ * become adjustments to the history months they belong to.
  */
 const log = createLogger({ module: "incremental-sync" });
 const WRITE_ROWS = 2_000;
@@ -34,7 +39,7 @@ export interface SyncDeps {
   shop: (shopDomain: string) => ReturnType<typeof SyncRepository.syncShop>;
   gql: (shopDomain: string) => Promise<Gql | null>;
   repo: Pick<typeof SyncRepository, "claimSyncEvents" | "finishSyncEvents" | "deleteSyncedRecords">;
-  writes: Pick<typeof Writes, "writeOrders" | "writeCatalog" | "writeCustomers" | "writeInventory" | "writeReturns">;
+  writes: Pick<typeof Writes, "writeOrders" | "writeCatalog" | "writeCustomers" | "writeInventory" | "writeReturns" | "writeHistoryArrivals" | "historyWindowStart">;
   now?: () => number;
 }
 
@@ -94,13 +99,37 @@ async function fetchCustomers(gql: Gql, ids: number[]): Promise<Map<number, Json
   return found;
 }
 
-async function writeKind(kind: SyncKind, units: JsonlUnit[], shop: { shopKey: number; shopifyShopId: number }, writes: SyncDeps["writes"]): Promise<void> {
+/** The line items of each refund, for refunds on orders before the window (rare: one query per refund). */
+async function fetchRefundLines(gql: Gql, refundIds: number[]): Promise<RefundLineRow[]> {
+  const rows: RefundLineRow[] = [];
+  for (const id of refundIds) {
+    const node = (await gql<{ node: Raw | null }>(REFUND_LINES_BY_ID, { id: gid("Refund", id) })).node;
+    if (!node) continue;
+    await allPages(gql, node, "refundLineItems", REFUND_LINES_BY_ID, gid("Refund", id));
+    rows.push(...mapRefundLines(id, edgesOf(node, "refundLineItems").map((edge) => (edge as Raw).node)));
+  }
+  return rows;
+}
+
+/** Writes one kind of fetched resources; returns the orders whose history arrivals must wait for an import to finish. */
+async function writeKind(kind: SyncKind, units: JsonlUnit[], shop: { shopKey: number; shopifyShopId: number }, writes: SyncDeps["writes"], gql: Gql): Promise<Set<number>> {
+  const deferred = new Set<number>();
   for (const chunk of chunkUnits(units, WRITE_ROWS)) {
     if (kind === "order") {
       const mapped = chunk.map(mapOrderUnit);
-      await writes.writeOrders(shop.shopKey, shop.shopifyShopId, {
+      const written = await writes.writeOrders(shop.shopKey, shop.shopifyShopId, {
         orders: mapped.flatMap((m) => (m.order ? [m.order] : [])), lineItems: mapped.flatMap((m) => m.lineItems), refunds: mapped.flatMap((m) => m.refunds),
       });
+      if (!Number(written?.beyond_window ?? 0)) continue;
+      // Orders before the window: late ones become adjustments to their history months (0042).
+      const windowStart = await writes.historyWindowStart(shop.shopKey);
+      const history = mapped.filter((m): m is typeof m & { order: OrderRow } => m.order !== null && Date.parse(m.order.processed_at) < windowStart);
+      if (!history.length) continue;
+      const refundLines = await fetchRefundLines(gql, history.flatMap((m) => m.refunds.map((r) => r.shopify_id)));
+      const result = await writes.writeHistoryArrivals(shop.shopKey, shop.shopifyShopId, {
+        orders: history.map((m) => m.order), lineItems: history.flatMap((m) => m.lineItems), refunds: history.flatMap((m) => m.refunds), refundLines,
+      });
+      if (result.deferred) for (const m of history) deferred.add(m.order.shopify_id);
     } else if (kind === "product") {
       const mapped = chunk.map(mapProductUnit);
       await writes.writeCatalog(shop.shopKey, {
@@ -115,6 +144,7 @@ async function writeKind(kind: SyncKind, units: JsonlUnit[], shop: { shopKey: nu
       await writes.writeReturns(shop.shopKey, { returns: mapped.flatMap((m) => m.returns), lineItems: mapped.flatMap((m) => m.lineItems) });
     }
   }
+  return deferred;
 }
 
 export interface SyncReport {
@@ -170,11 +200,15 @@ export async function processShopEvents(shopDomain: string, runId: string, deps:
             for (const id of resource.eventIds) failed.push({ id, error: message(error) });
           }
         }
-        if (found.length) await writeKind(kind, found, shop, deps.writes);
+        const deferred = found.length ? await writeKind(kind, found, shop, deps.writes, gql) : new Set<number>();
         if (missing.length && (kind === "order" || kind === "product" || kind === "customer")) {
           report.deleted += (await deps.repo.deleteSyncedRecords(shop.shopKey, kind, missing.map((r) => r.id))).deleted;
         }
-        for (const resource of fetched) processed.push(...resource.eventIds);
+        for (const resource of fetched) {
+          // Written, but its history arrival waits for the import in progress: tried again with backoff.
+          if (deferred.has(resource.id)) for (const id of resource.eventIds) failed.push({ id, error: "history_import_active" });
+          else processed.push(...resource.eventIds);
+        }
       } catch (error) {
         log.warn("Sync write failed", { shop: shopDomain, kind }, error);
         for (const resource of fetched) for (const id of resource.eventIds) failed.push({ id, error: message(error) });
@@ -203,19 +237,34 @@ const RECONCILED = [
 
 export type ReconcileReport = Record<(typeof RECONCILED)[number]["domain"], { found: number; recorded: number; watermark: string | null; truncated?: boolean; skipped?: string }>;
 
-export async function reconcileShopUpdates(shopDomain: string, deps: ReconcileDeps, { overlapMs = 3_600_000, maxPerDomain = 10_000 } = {}): Promise<ReconcileReport | { skipped: string }> {
+export interface ReconcileOptions {
+  overlapMs?: number;
+  maxPerDomain?: number;
+  /**
+   * A replay: every change since this time, recorded under the tag's own event IDs, so changes already
+   * processed are processed again (after a fix, for example). The watermarks still only move forward.
+   */
+  replay?: { since: string; tag: string; domains?: ReadonlyArray<(typeof RECONCILED)[number]["domain"]> };
+}
+
+export async function reconcileShopUpdates(shopDomain: string, deps: ReconcileDeps, { overlapMs = 3_600_000, maxPerDomain = 10_000, replay }: ReconcileOptions = {}): Promise<ReconcileReport | { skipped: string }> {
+  if (replay && (!/^[a-z0-9-]{1,40}$/.test(replay.tag) || Number.isNaN(Date.parse(replay.since)))) throw new Error("replay needs a tag (a-z, 0-9, -) and a date");
   const shop = await deps.shop(shopDomain);
   if (!shop) return { skipped: "not_ingestible" };
   const gql = await deps.gql(shopDomain);
   if (!gql) return { skipped: "no_access" };
   const report = {} as ReconcileReport;
   for (const spec of RECONCILED) {
-    const from = (await deps.repo.loadSyncWatermark(shop.shopKey, spec.domain)) ?? (await deps.repo.lastImportStart(shop.shopId, spec.importDomain));
+    if (replay?.domains && !replay.domains.includes(spec.domain)) {
+      report[spec.domain] = { found: 0, recorded: 0, watermark: null, skipped: "not_requested" };
+      continue;
+    }
+    const from = replay?.since ?? (await deps.repo.loadSyncWatermark(shop.shopKey, spec.domain)) ?? (await deps.repo.lastImportStart(shop.shopId, spec.importDomain));
     if (!from) {
       report[spec.domain] = { found: 0, recorded: 0, watermark: null, skipped: "not_imported" };
       continue;
     }
-    const query = searchFilter([["updated_at", ">=", new Date(Date.parse(from) - overlapMs)]]);
+    const query = searchFilter([["updated_at", ">=", new Date(Date.parse(from) - (replay ? 0 : overlapMs))]]);
     const found: Array<{ id: number; updatedAt: string }> = [];
     let after: string | null = null;
     let truncated = false;
@@ -234,7 +283,7 @@ export async function reconcileShopUpdates(shopDomain: string, deps: ReconcileDe
     let recorded = 0;
     for (let i = 0; i < found.length; i += 500) {
       const events = found.slice(i, i + 500).map((item) => ({
-        webhook_id: `reconcile:${spec.topic}:${item.id}:${item.updatedAt}`, topic: spec.topic, triggered_at: item.updatedAt,
+        webhook_id: `reconcile:${replay ? `${replay.tag}:` : ""}${spec.topic}:${item.id}:${item.updatedAt}`, topic: spec.topic, triggered_at: item.updatedAt,
         payload: { id: item.id, updated_at: item.updatedAt },
       }));
       recorded += (await deps.repo.recordSyncEvents(shopDomain, events)).recorded;

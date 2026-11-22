@@ -137,6 +137,12 @@ export const ORDER_BY_ID = `query OrderById($id: ID!, $after: String) {
     lineItems(first: 100, after: $after) { ${page} edges { node { ${LINE_ITEM_FIELDS} } } }
   } }
 }`;
+/** A refund's line items, for refunds on orders before the retained window only (history arrivals, 0042). */
+export const REFUND_LINES_BY_ID = `query RefundLinesById($id: ID!, $after: String) {
+  node(id: $id) { ... on Refund {
+    refundLineItems(first: 100, after: $after) { ${page} edges { node { quantity lineItem { product { id } } } } }
+  } }
+}`;
 export const PRODUCT_BY_ID = `query ProductById($id: ID!) {
   node(id: $id) { ... on Product {
     ${PRODUCT_FIELDS}

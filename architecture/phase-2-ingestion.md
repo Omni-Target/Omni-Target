@@ -552,7 +552,7 @@ No field was withheld in the sample.
 - **History months are frozen:** months before the window hold no detail, so maintenance cannot recompute them.
   - The 55 new orders dated before the window (2024-05 to 2024-10) and their refunds are not in those months' summaries.
   - So `history.live.test.ts` would now report those months as differing from Shopify.
-  - Whether late arrivals before the window should become adjustments is an open decision.
+  - Decided the same day: late arrivals before the window become adjustments (migration 0042, below).
 - **Refund dates:** Shopify keeps a refund's effective date in `processedAt`. The simulation's refunds were created on 2026-11-22 with `processedAt` between 2024-05 and 2026-11. The mirror recorded only `createdAt`, which migration 0041 corrects. Summaries attribute refunds to the order's month, so they don't change.
 
 **Migration 0041: a refund's effective date (2026-11-22).**
@@ -563,6 +563,49 @@ No field was withheld in the sample.
   - storing `createdAt` instead fails the test;
   - rolling 0041 back restores the 0040 schema exactly, and reapplying it restores 0041 exactly.
 - **Staging backfill:** a re-fetch rewrites an order's refunds, because the `updated_at` guard accepts the same version. So one reconcile pass after 0041 fills in the stored refunds' dates.
+
+### Late arrivals in history months (2026-11-22; migration 0042)
+
+The user decided that orders and refunds reaching Shopify after their month left the detailed window are counted, as adjustments, like late changes inside the window.
+
+**When a month closed.** Each history month has the time its summary stopped taking changes:
+- **Summarised from history by an import:** its final row's `finalized_at`.
+- **Inside the window once, then left it:** the day it left (month + 25 months). Until then the detail path covered it.
+- **History month the import found empty:** it has no summary, so nothing in it was counted.
+
+**What is applied.** The incremental sync passes the orders it fetched from before the window to `apply_history_arrivals`.
+- **A late order:** created after its month closed, and not test or cancelled. It becomes a `correction` adjustment to the month's store and product summaries, including the refunds it has at that point.
+- **A late refund:** a refund created after its order's month closed, on an order the summaries count. It becomes a `refund` adjustment: the refunded amount, and units per product from the refund's own line items. The worker fetches those (one query per refund) only for orders before the window.
+- **Not applied:** cancellations of orders already counted, edits to their other figures, and returns. Customer counts are not adjusted, as inside the window.
+
+**Counted once.**
+- **The ledger:** `history_arrivals` records each applied order and refund as a keyed digest (no Shopify IDs, no customer data). Webhooks, the daily reconcile and replays therefore count each one once. The ledger is deleted with the shop's data.
+- **During an import:** arrivals wait. The worker writes the order as usual, fails its event with `history_import_active`, and retries with backoff.
+- **Re-imports:** an import never writes a fresh summary for a month that has adjustments, since it would count them a second time.
+
+**Also fixed.** `store_months_effective` now returns months known only from adjustments, as `product_months_effective` already did. Before, a final month that was empty when finalised and gained orders later was left out of the effective view.
+
+**Replay.** `reconcileShopUpdates` takes a replay: every change since a given time, recorded under the replay's own event IDs (`reconcile:<tag>:…`). Changes already processed then go through the worker again, for example after a fix. The watermarks still only move forward.
+
+**Verification.**
+- **Database tests** (`history-arrivals.db.test.mjs`, 9 tests) cover:
+  - a late order counted once;
+  - an order from before the month closed, with only its later refunds applied;
+  - a late order's refunds at the time, and a refund made later;
+  - an empty history month;
+  - a month that left the window, counted from the day it left;
+  - test, cancelled and in-window orders;
+  - waiting during an import, and nothing before a complete orders import;
+  - re-imports keeping a month's summary;
+  - deletion with the shop.
+- **Mutation checks:** each fails a test:
+  - never treating a month as closed;
+  - not recording a late order's refunds;
+  - removing the re-import guard;
+  - 0036's effective store months;
+  - no waiting during an import.
+- **Unit tests:** the worker passes orders before the window with their refund lines, retries during an import, and looks for history only when the write reports orders beyond the window. Replays are covered too.
+- **Reversibility:** rolling 0042 back restores the 0041 schema exactly, and reapplying it restores 0042 exactly.
 
 ## Dependencies outside the code
 

@@ -168,6 +168,15 @@ export interface LineItemRow {
   title: string | null; sku: string | null; quantity: number; current_quantity: number | null; refunded_quantity: number;
   unit_price: string; total_discount: string;
 }
+/** A refund's units for one product, from the refund's own line items (history arrivals, 0042). */
+export interface RefundLineRow { refund_shopify_id: number; product_shopify_id: number | null; quantity: number }
+export function mapRefundLines(refundId: number, lineNodes: unknown[]): RefundLineRow[] {
+  return lineNodes.flatMap((node) => {
+    const quantity = Number(obj(node)?.quantity);
+    if (!Number.isInteger(quantity) || quantity === 0) return [];
+    return [{ refund_shopify_id: refundId, product_shopify_id: parseGid(obj(obj(obj(node)?.lineItem)?.product)?.id, "Product"), quantity }];
+  });
+}
 export interface RefundRow {
   /** processed_at: when the refund took effect (Shopify's processedAt, else createdAt); differs for refunds recorded after the fact. */
   shopify_id: number; order_shopify_id: number; shopify_created_at: string; processed_at: string; total_refunded: string; currency: string;

@@ -1,12 +1,16 @@
 /**
- * Live check of history beyond the retained window (Phase 2, task 7) after an
- * import. Read-only on Shopify and staging. Exports the shop's orders
- * processed before the window, computes each month's store and product
+ * Live check of history beyond the retained window (Phase 2, task 7; late
+ * arrivals, 0042) after an import. Read-only on Shopify. Exports the shop's
+ * orders processed before the window, computes each month's store and product
  * summary from the raw order JSON (not through the import's mappers), and
- * compares with the summaries the import wrote. Also checks that no order
- * before the window is held as detail, that nothing is left staged, and that
- * every history customer with a customer row has their history first order.
- * Opt-in; see vitest.live.config.mjs. Writes its report to LIVE_OUT.
+ * compares with the effective summaries: the import's final summary plus the
+ * adjustments late arrivals added (customer counts only where a month has no
+ * adjustments, since they are not adjusted). Also checks that no order before
+ * the window is held as detail, that nothing is left staged, and that each
+ * history customer whose first order existed at the import has it recorded.
+ * With LIVE_REPLAY_SINCE (and LIVE_REPLAY_TAG), first replays the shop's order
+ * changes since then through a running worker (`pnpm dev:trigger`), which
+ * writes to staging. Opt-in; see vitest.live.config.mjs. Writes LIVE_OUT.
  */
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -55,6 +59,8 @@ describe("live history check", () => {
     const stores = new Map<string, StoreMonth>();
     const products = new Map<string, ProductMonth>();
     const firsts = new Map<number, string>();
+    // Each customer's first history order with that order's creation time: late arrivals don't change customer facts.
+    const firstsByCreation = new Map<number, { at: string; created: string }>();
     let included = 0;
     let exported = 0;
     if (phase.url) for await (const unit of groupUnits(parseJsonl(await bulk.openBulkResult(phase.url)))) {
@@ -91,37 +97,69 @@ describe("live history check", () => {
       }
       stores.set(month, store);
       if (customer && (!firsts.has(customer) || at < firsts.get(customer)!)) firsts.set(customer, at);
+      if (customer && (!firstsByCreation.has(customer) || at < firstsByCreation.get(customer)!.at)) firstsByCreation.set(customer, { at, created: String(order.createdAt) });
     }
     const newCustomers = new Map<string, number>();
     for (const [, at] of firsts) newCustomers.set(monthOf(at), (newCustomers.get(monthOf(at)) ?? 0) + 1);
 
-    // What the import wrote.
-    const before = windowStart.toISOString().slice(0, 10);
-    const { data: storeRows } = await supabaseAdmin.from("store_monthly_metrics")
-      .select("month, orders, units, subtotal, total_discounts, total_tax, total_shipping, total_price, total_refunded, customers, new_customers, finalized_at")
-      .eq("shop_key", shop.shop_key).lt("month", before).order("month");
-    const { data: productRows } = await supabaseAdmin.from("product_monthly_metrics")
-      .select("month, product_shopify_id, orders, units, gross_sales, discounts, refunded_units, finalized_at")
-      .eq("shop_key", shop.shop_key).lt("month", before).limit(10_000);
+    // Optionally, a replay of the shop's order changes since LIVE_REPLAY_SINCE through the running worker
+    // (0042: late arrivals become adjustments to their history months).
+    let replay: unknown = null;
+    if (process.env.LIVE_REPLAY_SINCE) {
+      const { reconcileShopUpdates } = await import("./sync");
+      const { liveReconcileDeps } = await import("./sync-live");
+      const { dispatchShopSync } = await import("@/modules/jobs/trigger");
+      const { runs } = await import("@trigger.dev/sdk");
+      const tag = process.env.LIVE_REPLAY_TAG ?? `replay-${Date.now()}`;
+      const recorded = await reconcileShopUpdates(domain, liveReconcileDeps(), { replay: { since: process.env.LIVE_REPLAY_SINCE, tag, domains: ["orders"] } });
+      const runId = await dispatchShopSync(domain, tag, 15_000);
+      let run: { status: string; output?: unknown } = { status: "PENDING" };
+      for (let i = 0; runId && i < 300; i++) {
+        run = await runs.retrieve(runId);
+        if (["COMPLETED", "FAILED", "CRASHED", "SYSTEM_FAILURE", "CANCELED", "TIMED_OUT"].includes(run.status)) break;
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+      }
+      replay = { tag, recorded, run: { status: run.status, output: run.output } };
+    }
+
+    // What the summaries say: each history month's final summary plus its adjustments.
+    const before = new Date(windowStart.getTime() - 86_400_000).toISOString().slice(0, 10);
+    const PAGE = 1000;
+    const paged = async <T,>(fn: string): Promise<T[]> => {
+      const all: T[] = [];
+      for (let lo = 0; ; lo += PAGE) {
+        const { data, error } = await supabaseAdmin.rpc(fn, { p_shop_key: shop.shop_key, p_from: "2000-01-01", p_to: before }).range(lo, lo + PAGE - 1);
+        if (error) throw new Error(error.message);
+        all.push(...((data ?? []) as T[]));
+        if ((data ?? []).length < PAGE) return all;
+      }
+    };
+    type Effective = Record<string, unknown> & { month: string; final: boolean; adjustments: number };
+    const storeRows = await paged<Effective>("store_months_effective");
+    const productRows = await paged<Effective & { product_shopify_id: number }>("product_months_effective");
     const scaled = (value: unknown) => Math.round(Number(value) * 10_000);
 
+    // Customer counts are not adjusted (0036, 0042): compared only for months without adjustments.
     const storeMismatches: unknown[] = [];
+    const customersNotAdjusted: unknown[] = [];
     for (const [month, expected] of stores) {
-      const row = (storeRows ?? []).find((r) => r.month === month);
+      const row = storeRows.find((r) => r.month === month);
+      const adjusted = Boolean(row && row.adjustments > 0);
       const actual = row && {
         orders: row.orders, units: row.units, subtotal: scaled(row.subtotal), discounts: scaled(row.total_discounts), tax: scaled(row.total_tax),
-        shipping: scaled(row.total_shipping), total: scaled(row.total_price), refunded: scaled(row.total_refunded), customers: row.customers,
-        new_customers: row.new_customers, final: row.finalized_at !== null,
+        shipping: scaled(row.total_shipping), total: scaled(row.total_price), refunded: scaled(row.total_refunded),
+        ...(adjusted ? {} : { customers: row.customers, new_customers: row.new_customers }), final: row.final,
       };
       const { customers, ...sums } = expected;
-      const wanted = { ...sums, customers: customers.size, new_customers: newCustomers.get(month) ?? 0, final: true };
+      const wanted = { ...sums, ...(adjusted ? {} : { customers: customers.size, new_customers: newCustomers.get(month) ?? 0 }), final: true };
+      if (adjusted) customersNotAdjusted.push({ month, adjustments: row!.adjustments, customers: row!.customers, shopifyCustomers: customers.size });
       if (JSON.stringify(actual) !== JSON.stringify(wanted)) storeMismatches.push({ month, expected: wanted, actual });
     }
     const productMismatches: unknown[] = [];
     for (const [key, expected] of products) {
       const [month, product] = key.split("|");
-      const row = (productRows ?? []).find((r) => r.month === month && Number(r.product_shopify_id) === Number(product));
-      const actual = row && { orders: row.orders, units: row.units, gross: scaled(row.gross_sales), discounts: scaled(row.discounts), refunded: row.refunded_units, final: row.finalized_at !== null };
+      const row = productRows.find((r) => r.month === month && Number(r.product_shopify_id) === Number(product));
+      const actual = row && { orders: row.orders, units: row.units, gross: scaled(row.gross_sales), discounts: scaled(row.discounts), refunded: row.refunded_units, final: row.final };
       const wanted = { orders: expected.orders.size, units: expected.units, gross: expected.gross, discounts: expected.discounts, refunded: expected.refunded, final: true };
       if (JSON.stringify(actual) !== JSON.stringify(wanted)) productMismatches.push({ month, product, expected: wanted, actual });
     }
@@ -129,20 +167,23 @@ describe("live history check", () => {
     const { count: detailBefore } = await supabaseAdmin.from("orders").select("*", { count: "exact", head: true })
       .eq("shop_key", shop.shop_key).lt("processed_at", windowStart.toISOString());
     // Staging is not readable by service_role (0034); the import's own record says what it staged and discarded.
-    const { data: lastImport } = await supabaseAdmin.from("shop_imports").select("coverage").eq("shop_id", (await supabaseAdmin.from("shops").select("id").eq("shop_key", shop.shop_key).single()).data!.id)
+    const { data: lastImport } = await supabaseAdmin.from("shop_imports").select("coverage, started_at").eq("shop_id", (await supabaseAdmin.from("shops").select("id").eq("shop_key", shop.shop_key).single()).data!.id)
       .in("status", ["succeeded", "partial"]).order("finished_at", { ascending: false }).limit(1).single();
     const historyWritten = ((lastImport?.coverage as { domains?: { history?: { written?: Record<string, number> } } } | null)?.domains?.history?.written) ?? {};
     const staged = (historyWritten.orders ?? 0) + (historyWritten.lines ?? 0) - (historyWritten.discarded ?? 0);
-    const historyCustomers = [...firsts.keys()];
+    // The import staged each customer's first history order; checked for customers whose first order existed then.
+    const importStarted = Date.parse(String(lastImport?.started_at));
+    const historyCustomers = [...firstsByCreation.entries()].filter(([, f]) => Date.parse(f.created) < importStarted).map(([id]) => id);
     const { data: customerRows } = await supabaseAdmin.from("customers").select("shopify_id, history_first_order_at")
       .eq("shop_key", shop.shop_key).in("shopify_id", historyCustomers.length ? historyCustomers : [0]);
     const missingHistoryFirst = (customerRows ?? []).filter((c) => !c.history_first_order_at
       || new Date(c.history_first_order_at).getTime() !== new Date(firsts.get(Number(c.shopify_id))!).getTime()).length;
 
     const report = {
-      windowStart: windowStart.toISOString(), exported, included, months: stores.size, productMonths: products.size,
-      summaries: { storeMonths: storeRows?.length ?? 0, productMonths: productRows?.length ?? 0 },
-      storeMismatches, productMismatches: productMismatches.slice(0, 10), productMismatchCount: productMismatches.length,
+      windowStart: windowStart.toISOString(), exported, included, months: stores.size, productMonths: products.size, replay,
+      summaries: { storeMonths: storeRows.length, productMonths: productRows.length,
+        adjustedStoreMonths: storeRows.filter((r) => r.adjustments > 0).length, adjustedProductMonths: productRows.filter((r) => r.adjustments > 0).length },
+      storeMismatches, productMismatches: productMismatches.slice(0, 10), productMismatchCount: productMismatches.length, customersNotAdjusted,
       detailOrdersBeforeWindow: detailBefore, stagedRows: staged,
       historyCustomers: historyCustomers.length, historyCustomersWithRow: customerRows?.length ?? 0, missingHistoryFirst,
       totals: { orders: [...stores.values()].reduce((n, s) => n + s.orders, 0), revenue: [...stores.values()].reduce((n, s) => n + s.total, 0) / 10_000 },
@@ -151,8 +192,8 @@ describe("live history check", () => {
     if (process.env.LIVE_OUT) writeFileSync(process.env.LIVE_OUT, JSON.stringify(report, null, 1));
     expect(storeMismatches).toEqual([]);
     expect(productMismatches).toEqual([]);
-    expect(storeRows?.length).toBe(stores.size);
-    expect(productRows?.length).toBe(products.size);
+    expect(storeRows.length).toBe(stores.size);
+    expect(productRows.length).toBe(products.size);
     expect(detailBefore).toBe(0);
     expect(staged).toBe(0);
     expect(missingHistoryFirst).toBe(0);

@@ -31,7 +31,10 @@ export function suppressionKey(value: string | undefined = process.env.REDACTION
   return key;
 }
 
-export function subjectDigest(key: Buffer, shopifyShopId: number, type: SubjectType, shopifyId: number): Buffer {
+/** What a digest can name: a suppressed subject, or a refund (0042's ledger of history arrivals). */
+export type DigestSubject = SubjectType | "refund";
+
+export function subjectDigest(key: Buffer, shopifyShopId: number, type: DigestSubject, shopifyId: number): Buffer {
   return createHmac("sha256", key).update(`${shopifyShopId}:${type}:${shopifyId}`).digest();
 }
 

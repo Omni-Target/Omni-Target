@@ -1,10 +1,10 @@
 import "server-only";
 import { suppressionKey } from "@/modules/compliance/suppression";
 import { supabaseAdmin } from "@/platform/supabase";
-import { withCustomerDigests, withOrderDigests } from "./digests";
+import { withCustomerDigests, withOrderDigests, withRefundDigests } from "./digests";
 import type { DataDomain } from "./access";
 import type {
-  CustomerRow, InventoryLevelRow, LineItemRow, LocationRow, MetafieldRow, OrderRow, ProductRow, RefundRow,
+  CustomerRow, InventoryLevelRow, LineItemRow, LocationRow, MetafieldRow, OrderRow, ProductRow, RefundLineRow, RefundRow,
   ReturnLineItemRow, ReturnRow, VariantRow,
 } from "./mappers";
 
@@ -49,6 +49,33 @@ export const writeOrders = (
     p_orders: withOrderDigests(batch.orders, key, shopifyShopId),
     p_line_items: batch.lineItems,
     p_refunds: batch.refunds,
+  });
+
+/** The shop's retained window start (pinned while an import runs), in milliseconds. */
+export const historyWindowStart = async (shopKey: number): Promise<number> =>
+  Date.parse(String(await rpc<string>("shop_window_start", { p_shop_key: shopKey })));
+
+export interface HistoryArrivalResult {
+  history_orders: number;
+  orders_applied?: number;
+  refunds_applied?: number;
+  /** An import is in progress: nothing was applied, and the caller tries again later. */
+  deferred?: boolean;
+  skipped?: string;
+}
+/** Late arrivals among orders from before the window (0042): adjustments to the history months they belong to. */
+export const writeHistoryArrivals = (
+  shopKey: number,
+  shopifyShopId: number,
+  batch: { orders: OrderRow[]; lineItems: LineItemRow[]; refunds: RefundRow[]; refundLines: RefundLineRow[] },
+  key: Buffer = suppressionKey(),
+) =>
+  rpc<HistoryArrivalResult>("apply_history_arrivals", {
+    p_shop_key: shopKey,
+    p_orders: withOrderDigests(batch.orders, key, shopifyShopId),
+    p_line_items: batch.lineItems,
+    p_refunds: withRefundDigests(batch.refunds, key, shopifyShopId),
+    p_refund_lines: batch.refundLines,
   });
 
 export const writeCustomers = (shopKey: number, shopifyShopId: number, customers: CustomerRow[], key: Buffer = suppressionKey()) =>
