@@ -71,6 +71,7 @@ copy of staging's.
     - `summary-maintenance` (Phase 2 task 8): every six hours at minute 20, with a 30-minute start window;
     - `compliance-maintenance` (task 9): hourly at minute 40, with a 10-minute start window.
     - `sync-sweep` (task 10): every 10 minutes, with a 2-minute start window;
+    - `import-reconcile` (task 6): every 10 minutes, with a 2-minute start window. Vercel's Hobby plan allows only daily cron jobs, so the 10-minute reconcile runs here; `vercel.json` keeps the Vercel route as a daily backstop (04:45).
     - `sync-reconcile` (task 10): daily at 03:30, with a 30-minute start window.
 
     Confirm in the Production dashboard that both are attached and that their first runs complete. The Free plan allows 10 schedules.

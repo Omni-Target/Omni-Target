@@ -15,7 +15,7 @@
     },
     {
       "path": "/api/cron/import-reconcile",
-      "schedule": "*/10 * * * *"
+      "schedule": "45 4 * * *"
     }
   ]
 }
