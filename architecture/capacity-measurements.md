@@ -170,5 +170,5 @@ Anything that functionality, filtering, analytics or intelligence needs stays. S
 
 **Task 4 (0047, returns and restrictions).**
 - A refund line item takes 78 bytes.
-- An order grows by about 2 bytes for the Collective flag, return status and restrictions; omni-beta's orders read with these fields average 198 bytes against 176. The difference includes fields that changed since the last import.
+- An order grows by about 12 bytes (a flag and a short return status); omni-beta's orders read with these fields average 198 bytes against 176, a difference that also includes fields changed since the last import. Each order line grows by about 4 bytes for its restrictions.
 - A shop with 500k orders and 5% of them refunded (one line each) adds about 2 MB of refund lines.
