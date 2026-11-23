@@ -119,6 +119,7 @@ beforeEach(() => {
   process.env.SHOPIFY_CLIENT_SECRET = SECRET;
   process.env.SHOPIFY_CLIENT_ID = "client-id";
   process.env.NEXT_PUBLIC_APP_URL = APP;
+  delete process.env.SHOPIFY_WEBHOOK_BASE_URL;
   for (const fn of Object.values(m)) fn.mockReset();
   m.auth.mockResolvedValue({ userId: null });
   m.getUserIdsLinkedToStore.mockResolvedValue([]);
@@ -209,6 +210,27 @@ describe("Shopify OAuth callback — legitimate flows", () => {
     expect(m.enqueueAccessCheck).toHaveBeenCalledWith(SHOP);
     // State cookie is single-use.
     expect(setCookies(res).some((c) => c.startsWith("shopify_oauth_state=;") && c.includes("Max-Age=0"))).toBe(true);
+  });
+
+  it("registers webhooks at the one public HTTPS endpoint, and none from a local environment (Phase 3, task 1)", async () => {
+    const addresses = () => (vi.mocked(fetch).mock.calls as unknown as Array<[string, RequestInit?]>)
+      .filter(([url]) => url.includes("webhooks.json"))
+      .map(([, init]) => JSON.parse(String(init?.body)).webhook as { topic: string; address: string });
+    m.auth.mockResolvedValue({ userId: "user_a" });
+
+    process.env.SHOPIFY_WEBHOOK_BASE_URL = "https://staging.example.com";
+    let flow = stateCookie({ from: "onboarding", uid: "user_a" });
+    await GET(signedCallback({ state: flow.nonce, cookie: flow.cookie }));
+    expect(addresses().map((w) => w.topic).sort()).toEqual(["app/uninstalled", "orders/paid", "shop/update"]);
+    expect(new Set(addresses().map((w) => w.address))).toEqual(new Set(["https://staging.example.com/api/shopify/webhook"]));
+
+    vi.mocked(fetch).mockClear();
+    delete process.env.SHOPIFY_WEBHOOK_BASE_URL;
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+    flow = stateCookie({ from: "onboarding", uid: "user_a" });
+    const res = await GET(signedCallback({ state: flow.nonce, cookie: flow.cookie }));
+    expect(res.status).toBe(302);
+    expect(addresses()).toEqual([]);
   });
 
   it("signed-out Continue with Shopify for a store linked to exactly one account signs in that account", async () => {

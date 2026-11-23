@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { assertLevel1Query } from "./access";
 import { CUSTOMERS_BY_ID, INVENTORY_ITEM_BY_ID, ORDER_BY_ID, PRODUCT_BY_ID, PRODUCT_METAFIELDS_PAGE, PRODUCT_VARIANTS_PAGE, RETURN_BY_ID, updatedSinceQuery } from "./queries";
-import { ensureSyncSubscriptions, SYNC_SUBSCRIPTIONS, syncWebhookEndpoint } from "./subscriptions";
+import { ensureSyncSubscriptions, LIFECYCLE_SUBSCRIPTIONS, SYNC_SUBSCRIPTIONS, syncWebhookEndpoint } from "./subscriptions";
 import { SYNC_TOPICS, THIN_KEYS } from "./sync-events";
 
 const ENDPOINT = "https://app.example.com/api/shopify/webhook";
@@ -43,9 +43,26 @@ describe("sync subscriptions (task 10)", () => {
     expect(report.created).toContain("ORDERS_UPDATED");
     expect(report.created).not.toContain("ORDERS_CREATE");
     expect(report.failed).toEqual([{ topic: "RETURNS_PROCESS", error: "Topic is not supported" }]);
-    expect(report.created.length + report.updated.length + report.unchanged + report.failed.length).toBe(SYNC_SUBSCRIPTIONS.length);
+    expect(report.created.length + report.updated.length + report.unchanged + report.failed.length).toBe(SYNC_SUBSCRIPTIONS.length + LIFECYCLE_SUBSCRIPTIONS.length);
     const created = gql.mock.calls.find((call) => (call[1] as { topic?: string } | undefined)?.topic === "ORDERS_UPDATED")![1] as { subscription: unknown };
     expect(created.subscription).toEqual({ uri: ENDPOINT, format: "JSON", includeFields: ["id", "updated_at"] });
+  });
+
+  it("keeps the uninstall and shop-update topics at the same endpoint, with their full payload (Phase 3, task 1)", async () => {
+    expect(LIFECYCLE_SUBSCRIPTIONS.map((s) => s.topic)).toEqual(["APP_UNINSTALLED", "SHOP_UPDATE"]);
+    const gql = vi.fn(async (query: string, variables: Record<string, unknown> = {}) => {
+      if (query.includes("SyncSubscriptions")) {
+        // Registered at install through REST: same endpoint, all fields.
+        return { webhookSubscriptions: { nodes: [{ id: "gid://shopify/WebhookSubscription/7", topic: "SHOP_UPDATE", uri: ENDPOINT, includeFields: [] }] } };
+      }
+      return { webhookSubscriptionCreate: { webhookSubscription: { id: `gid://shopify/WebhookSubscription/${variables.topic}` }, userErrors: [] } };
+    });
+    const report = await ensureSyncSubscriptions(gql as never, ENDPOINT);
+    expect(report.created).toContain("APP_UNINSTALLED");
+    expect(report.created).not.toContain("SHOP_UPDATE");
+    expect(report.updated).toEqual([]);
+    const uninstall = gql.mock.calls.find((call) => (call[1] as { topic?: string } | undefined)?.topic === "APP_UNINSTALLED")![1] as { subscription: unknown };
+    expect(uninstall.subscription).toEqual({ uri: ENDPOINT, format: "JSON" });
   });
 });
 

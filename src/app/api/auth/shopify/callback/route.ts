@@ -33,6 +33,7 @@ import { createLogger } from "@/platform/logger";
 import { requestShopImportForDomain } from "@/modules/jobs/trigger";
 import { fetchWithRetry } from "@/lib/http";
 import { shopifyAdminRestUrl } from "@/lib/shopify-config";
+import { syncWebhookEndpoint } from "@/modules/ingestion/subscriptions";
 import { fetchShopifyStoreLogo } from "@/lib/shopify-store-logo";
 import { normalizeStoreLogoUrl } from "@/lib/store-logo-url";
 import { safeInternalPath } from "@/lib/safe-redirect";
@@ -340,9 +341,12 @@ export async function GET(request: Request) {
     }
 
     // Register the orders/paid webhook so confirmed purchases
-    // are forwarded to Meta CAPI for attribution
-    const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/shopify/webhook`;
-    try {
+    // are forwarded to Meta CAPI for attribution. Every subscription uses one
+    // endpoint rule (SHOPIFY_WEBHOOK_BASE_URL, else the app URL; HTTPS only),
+    // the same as the sync subscriptions (Phase 3, task 1).
+    const webhookUrl = syncWebhookEndpoint();
+    if (!webhookUrl) console.warn("Webhook registration skipped: no public HTTPS endpoint in this environment.");
+    else try {
       const webhookRes = await fetch(shopifyAdminRestUrl(shop, "webhooks.json"), {
         method: "POST",
         headers: {
@@ -365,7 +369,7 @@ export async function GET(request: Request) {
 
     // SEC-09: revoke stored access as soon as the app is removed. shop/update
     // lets a myshopify domain change be followed by shop id (task 3.1).
-    for (const topic of ["app/uninstalled", "shop/update"]) {
+    for (const topic of webhookUrl ? ["app/uninstalled", "shop/update"] : []) {
       try {
         await fetch(shopifyAdminRestUrl(shop, "webhooks.json"), {
           method: "POST",

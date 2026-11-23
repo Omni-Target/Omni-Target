@@ -25,6 +25,16 @@ export const SYNC_SUBSCRIPTIONS: ReadonlyArray<{ topic: string; includeFields: s
   })),
 ];
 
+/**
+ * Lifecycle topics the webhook route handles outside the sync inbox (Phase 3, task 1): uninstall revokes access,
+ * shop/update follows a renamed shop. They need the full payload (no includeFields), and are kept at the same
+ * endpoint as the sync topics, so the daily reconcile repairs them too.
+ */
+export const LIFECYCLE_SUBSCRIPTIONS: ReadonlyArray<{ topic: string; includeFields: string[] }> = [
+  { topic: "APP_UNINSTALLED", includeFields: [] },
+  { topic: "SHOP_UPDATE", includeFields: [] },
+];
+
 /** Where Shopify delivers: an HTTPS base URL (SHOPIFY_WEBHOOK_BASE_URL, else the app URL), or none. */
 export function syncWebhookEndpoint(env: Record<string, string | undefined> = process.env): string | null {
   const base = (env.SHOPIFY_WEBHOOK_BASE_URL || env.NEXT_PUBLIC_APP_URL || "").trim().replace(/\/+$/, "");
@@ -57,8 +67,8 @@ export async function ensureSyncSubscriptions(gql: Gql, endpoint: string): Promi
   const report: SubscriptionReport = { endpoint, created: [], updated: [], unchanged: 0, failed: [] };
   const existing = (await gql<{ webhookSubscriptions: { nodes: Array<{ id: string; topic: string; uri: string; includeFields: string[] }> } }>(LIST, { uri: endpoint }))
     .webhookSubscriptions.nodes.filter((node) => node.uri === endpoint);
-  for (const wanted of SYNC_SUBSCRIPTIONS) {
-    const subscription = { uri: endpoint, format: "JSON", includeFields: wanted.includeFields };
+  for (const wanted of [...SYNC_SUBSCRIPTIONS, ...LIFECYCLE_SUBSCRIPTIONS]) {
+    const subscription = { uri: endpoint, format: "JSON", ...(wanted.includeFields.length ? { includeFields: wanted.includeFields } : {}) };
     const current = existing.find((node) => node.topic === wanted.topic);
     try {
       if (current && sameFields(current.includeFields ?? [], wanted.includeFields)) {
