@@ -48,14 +48,18 @@ const ORDER_FIELDS = `id name createdAt processedAt cancelledAt updatedAt test s
       totalPriceSet { shopMoney { amount } }
       totalRefundedSet { shopMoney { amount } }
       customer { id }
-      shippingAddress { city provinceCode countryCodeV2 }`;
+      shippingAddress { city provinceCode countryCodeV2 }
+      productNetwork returnStatus`;
 const LINE_ITEM_FIELDS = `id title sku quantity currentQuantity product { id } variant { id }
-        originalUnitPriceSet { shopMoney { amount } } totalDiscountSet { shopMoney { amount } }`;
+        originalUnitPriceSet { shopMoney { amount } } totalDiscountSet { shopMoney { amount } }
+        restockable nonFulfillableQuantity requiresShipping isGiftCard`;
 const REFUND_FIELDS = "refunds { id createdAt processedAt totalRefundedSet { shopMoney { amount currencyCode } } }";
 const CUSTOMER_FIELDS = "id createdAt updatedAt numberOfOrders amountSpent { amount currencyCode }";
-const RETURN_FIELDS = "id name status createdAt closedAt totalQuantity";
-const RETURN_LINE_ITEM_FIELDS = `id quantity returnReasonDefinition { handle }
-          ... on ReturnLineItem { fulfillmentLineItem { lineItem { id } } }`;
+// Phase 3 (task 4): the decline reason (never its note), approval time, processed quantities, the reason's name and
+// restocking fees. Customer and staff free-text notes are not read.
+const RETURN_FIELDS = "id name status createdAt closedAt totalQuantity requestApprovedAt decline { reason }";
+const RETURN_LINE_ITEM_FIELDS = `id quantity processedQuantity refundedQuantity unprocessedQuantity returnReasonDefinition { handle name }
+          ... on ReturnLineItem { fulfillmentLineItem { lineItem { id } } restockingFee { percentage amountSet { shopMoney { amount } } } }`;
 
 export function catalogQuery(filter?: string): string {
   return `{
@@ -123,6 +127,7 @@ export function returnsQuery(filter?: string): string {
         returnLineItems { edges { node {
           ${RETURN_LINE_ITEM_FIELDS}
         } } }
+        refunds { edges { node { id } } }
       } } }
     } }
   }
@@ -150,6 +155,17 @@ export const ORDER_BY_ID = `query OrderById($id: ID!, $after: String) {
     ${REFUND_FIELDS}
     lineItems(first: 100, after: $after) { ${page} edges { node { ${LINE_ITEM_FIELDS} } } }
   } }
+}`;
+/**
+ * Refunds with their line items (Phase 3, task 4): a bulk export cannot nest a refund's lines, so they are read
+ * by ID after the order, 10 refunds a call; a refund with more than 50 lines is paged by REFUND_LINE_ITEMS_PAGE.
+ */
+const REFUND_LINE_FIELDS = "id quantity restockType lineItem { id } subtotalSet { shopMoney { amount } }";
+export const REFUNDS_BY_ID = `query RefundsById($ids: [ID!]!) {
+  nodes(ids: $ids) { ... on Refund { id return { id } refundLineItems(first: 50) { ${page} edges { node { ${REFUND_LINE_FIELDS} } } } } }
+}`;
+export const REFUND_LINE_ITEMS_PAGE = `query RefundLineItems($id: ID!, $after: String) {
+  node(id: $id) { ... on Refund { id refundLineItems(first: 100, after: $after) { ${page} edges { node { ${REFUND_LINE_FIELDS} } } } } }
 }`;
 /** A refund's line items, for refunds on orders before the retained window only (history arrivals, 0042). */
 export const REFUND_LINES_BY_ID = `query RefundLinesById($id: ID!, $after: String) {
@@ -190,6 +206,7 @@ export const RETURN_BY_ID = `query ReturnById($id: ID!, $after: String) {
     ${RETURN_FIELDS}
     order { id }
     returnLineItems(first: 100, after: $after) { ${page} edges { node { ${RETURN_LINE_ITEM_FIELDS} } } }
+    refunds(first: 20) { edges { node { id } } }
   } }
 }`;
 

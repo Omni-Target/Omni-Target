@@ -2,7 +2,7 @@ import {
   computeStoreData, type ShopifyOrder, type ShopifyProduct, type ShopifyShop,
 } from "@/lib/connectors/shopify";
 import { productEnrichment, type ShopifyIntelligenceResult } from "@/lib/connectors/shopify-intelligence";
-import type { StoreCatalogClaim, StoreData } from "@/lib/store-data";
+import type { StoreCatalogClaim, StoreData, StoreProductReturnEvidence, StoreReturnSignal } from "@/lib/store-data";
 import { metaobjectReferenceIds } from "@/modules/ingestion/mappers";
 
 /**
@@ -79,6 +79,28 @@ export interface CanonicalMetaobject {
   definition_name?: string | null;
 }
 const MAX_VARIANT_VALUES = 10;
+
+/** product_return_evidence's rows (0047). */
+export interface MirrorReturnEvidence {
+  product_id: number; eligible_units: number; processed_return_units: number | null; refunded_units: number | null;
+  processed_return_rate: number | string | null; primary_reason: string | null; risk: StoreProductReturnEvidence["risk"]; complete: boolean;
+}
+/** product_return_signals's rows (0047). */
+export interface MirrorReturnSignal extends StoreReturnSignal { product_id: number }
+
+/** Mirror evidence in the snapshot's shape. */
+export function toReturnEvidence(rows: MirrorReturnEvidence[]): Record<string, StoreProductReturnEvidence> {
+  return Object.fromEntries(rows.map((row) => [String(row.product_id), {
+    eligible_units: Number(row.eligible_units),
+    processed_return_units: row.processed_return_units === null ? null : Number(row.processed_return_units),
+    refunded_units: row.refunded_units === null ? null : Number(row.refunded_units),
+    processed_return_rate: row.processed_return_rate === null ? null : Number(row.processed_return_rate),
+    ...(row.primary_reason ? { primary_reason: row.primary_reason } : {}),
+    risk: row.risk,
+    window_days: 365,
+    maturity_days: 60,
+  } satisfies StoreProductReturnEvidence]));
+}
 
 const money = (value: number | string | null | undefined) => String(Number(value ?? 0));
 const regions = new Intl.DisplayNames(["en"], { type: "region" });
@@ -187,6 +209,11 @@ export interface CanonicalInsightsDeps {
   images: (productIds: number[]) => Promise<Map<number, string>>;
   /** Stored metaobjects by ID (0044). */
   metaobjects: (ids: number[]) => Promise<CanonicalMetaobject[]>;
+  /** Return evidence and return signals from the mirror (0047), at most 500 products a call. */
+  returnEvidence: (productIds: number[], asOf: string) => Promise<MirrorReturnEvidence[]>;
+  returnSignals: (productIds: number[]) => Promise<MirrorReturnSignal[]>;
+  /** Whether the shop's returns were imported: without them, return evidence is unavailable, not zero. */
+  returnsImported: () => Promise<boolean>;
   ingestionComplete: () => Promise<boolean>;
   now?: () => number;
 }
@@ -209,7 +236,7 @@ export async function buildCanonicalStoreData(
   const now = deps.now ?? Date.now;
   const started = now();
   // Shopify reads run alongside the mirror reads.
-  const live = Promise.all([deps.shop(), deps.intelligence(), deps.ingestionComplete()]);
+  const live = Promise.all([deps.shop(), deps.intelligence(), deps.ingestionComplete(), deps.returnsImported()]);
 
   const orders: CanonicalOrder[] = [];
   let ordersTruncated = false;
@@ -239,7 +266,19 @@ export async function buildCanonicalStoreData(
   const referenced = referencedMetaobjectIds(products);
   for (let i = 0; i < referenced.length; i += PRODUCT_PAGE) for (const o of await deps.metaobjects(referenced.slice(i, i + PRODUCT_PAGE))) metaobjects.set(o.id, o);
 
-  const [shop, intelligence, ingestionComplete] = await live;
+  const [shop, intelligence, ingestionComplete, returnsImported] = await live;
+  // Return evidence and signals from the mirror (task 4), in place of the live fetch.
+  const asOf = new Date(now()).toISOString();
+  const evidenceRows: MirrorReturnEvidence[] = [];
+  const signalRows: MirrorReturnSignal[] = [];
+  for (let i = 0; i < products.length; i += PRODUCT_PAGE) {
+    const page = products.slice(i, i + PRODUCT_PAGE).map((p) => p.id);
+    if (returnsImported) evidenceRows.push(...(await deps.returnEvidence(page, asOf)));
+    signalRows.push(...(await deps.returnSignals(page)));
+  }
+  const returnCapability = returnsImported
+    ? { status: "available" as const, required_scopes: ["read_orders", "read_returns"], detail: "From the stored orders, refunds and returns" }
+    : { status: "missing_scope" as const, required_scopes: ["read_orders", "read_returns"], detail: "Returns not imported" };
   const data = await computeStoreData({
     shopDomain,
     userId: null,
@@ -247,11 +286,23 @@ export async function buildCanonicalStoreData(
     orders: orders.map(toShopifyOrder),
     ordersTruncated,
     ingestionComplete,
-    intelligence: { ...intelligence, products: canonicalEnrichment(products, metaobjects) },
+    intelligence: {
+      ...intelligence,
+      prespend: { ...intelligence.prespend, capabilities: { ...intelligence.prespend.capabilities, return_evidence: returnCapability } },
+      products: canonicalEnrichment(products, metaobjects),
+      returns: returnsImported ? toReturnEvidence(evidenceRows) : {},
+    },
     totalCatalogProductsCount: catalog.active || undefined,
     rawProducts: products.map((p) => toShopifyProduct(p, images.get(p.id))),
     productsTruncated: catalog.active > catalogLimit,
   }, { consolidateLocations: async () => ({}) });
+
+  const signals = new Map<string, StoreReturnSignal[]>();
+  for (const { product_id, ...signal } of signalRows) signals.set(String(product_id), [...(signals.get(String(product_id)) ?? []), signal]);
+  for (const product of data.products) {
+    const found = signals.get(String(product.id));
+    if (found) product.return_signals = found;
+  }
 
   return {
     data,

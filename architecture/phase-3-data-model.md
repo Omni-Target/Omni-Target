@@ -420,3 +420,71 @@ The bulk query stays within Shopify's limits (4 connections, nested 2 deep). In 
 - omni-beta's other levels keep their Phase 2 quantities until they change.
 - Order-level fulfilment routing needs scopes the app does not hold.
 - Collective supplier names are only in merchant tags; they are not read as a separate field.
+
+### Task 4: returns and restrictions (2026-11-23; migration 0047)
+
+**What is read and stored:**
+- **Orders:** the Shopify Collective flag (`productNetwork`: the order holds products a supplier fulfils) and the order's return status.
+- **Order lines:** restockable, non-fulfillable quantity, requires shipping, gift card.
+- **Refunds:**
+  - the return each refund settles, from both sides: `Refund.return`, and each return's refunds in the returns export;
+  - their line items (order line, quantity, restock type: return, cancel, legacy restock or no restock; subtotal) in the new `refund_line_items` table.
+  - A bulk export cannot nest a refund's lines, so stored refunds are read by ID, 10 a call, after the orders import, after order webhooks and daily. Each refund is marked read, and one Shopify no longer has is marked read with no lines.
+  - Refunded units no longer rest only on quantity less current quantity, which also counts order edits.
+- **Returns:**
+  - the decline reason (`FINAL_SALE`, `RETURN_PERIOD_ENDED`, `OTHER`) and the approval time;
+  - return lines' processed, refunded and unprocessed quantities, the reason's name and any restocking fee;
+  - the RMA identifier, Shopify's return name (for example `#1001-R1`), was already stored.
+  - Customer and staff free-text notes are never read, since they may hold personal data.
+
+**Return eligibility (`product_return_signals`).** Each signal carries its source and how far it can be trusted:
+
+| Signal | Trust | Source |
+|---|---|---|
+| Gift card | verified | Shopify's gift-card flag |
+| Declined as final sale | observed | A return of the product the shop declined with `FINAL_SALE` |
+| Tag | unverified | Merchant tag saying final sale, non-returnable or no returns |
+| Metafield | unverified | Merchant metafield saying so |
+
+No signal is not proof that a product is returnable. Shopify has no product-level final-sale field, and the refund-policy text is read in task 5.
+
+**Return evidence from the mirror (`product_return_evidence`):**
+- **Rules:** the live computation's rules: rates only from 30 eligible units, a reason only from 3 units, risk `review` from a 15% processed return rate.
+- **Window:** a year less 60 days, by processed date. This corrects the live fetch, which used the creation date, wrong for imported orders (task 11's finding).
+- **Never guessed:**
+  - while any refund in the cohort has unread lines, refunded units are withheld (null);
+  - while any return was stored before these fields, processed units and the rate are withheld and the risk is `incomplete`.
+- **Read path:**
+  - the worker no longer fetches return evidence live (up to 25 pages of orders);
+  - evidence is used only when the shop's returns were imported; otherwise it is unavailable, not zero;
+  - each product carries its return signals.
+
+**Fixed in passing (task 2 gap):** a product deleted in Shopify left its variants' metafields behind. `delete_synced_records` now removes them.
+
+**Results:**
+
+| Check | Result |
+|---|---|
+| omni-beta refund lines (daily read, first run) | 166 refunds, 231 lines: lines, quantities, restock types and return links identical to Shopify (`returns.live.test.ts`) |
+| omni-beta orders re-read by ID | 60 orders: Collective flag and return status identical; 116 lines' restrictions identical |
+| Return evidence, mirror against Shopify | 691 orders in the window, 303 products (57 with refunds): eligible, returned and refunded units, rates, reasons and risks identical to the computation over Shopify's own orders |
+| Inferred against actual refunded units, omni-beta | Equal for all 231 refunded lines (no order edits there); all refunded without restocking |
+| Migration round trip | Up and down on a fresh database |
+
+**Synthetic coverage** (the test stores have refunds but no returns, declines or non-returnable products). The database test `returns-restrictions.db.test.mjs` (5 tests) covers:
+- restrictions;
+- refund lines read, replaced, kept on later order writes, deleted with their order, and restock type checked;
+- return declines, processed quantities, restocking fees and refund–return links;
+- every return signal, and none for an ordinary product;
+- evidence: window and maturity, cancelled and test orders excluded, the 30-unit rule, the main reason, review risk, refunded units withheld while lines are unread, and incomplete returns;
+- variant metafields deleted with their product;
+- grants.
+
+**Other tests:**
+- the Phase 2 ingest test follows the new returns signature, and `commerce.db.test.mjs` registers `refund_line_items` for deletion;
+- unit tests: the mappers (new order, line and return fields; notes never stored; refund nodes), refund lines (batches of ten, paging, deletions, no rereads, the write bound, heartbeat), the sync (refund lines after order writes, failure kept apart), and canonical evidence and signals.
+
+**Limits:**
+- Exchanges and reverse fulfilment orders are not read.
+- Return evidence covers the retained window only.
+- Returns on the test stores: none. Real returns, declines and final-sale products would let the live check cover them too.

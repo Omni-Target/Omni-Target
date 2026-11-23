@@ -64,7 +64,7 @@ const SUMMARIES = [
 /** Every table that mirrors or is derived from one shop's Shopify data. */
 const SYNCED = [
   "products", "product_variants", "inventory_locations", "inventory_levels", "customers", "orders", "order_line_items",
-  "refunds", "returns", "return_line_items", "metafields", "metafield_definitions", "metaobject_definitions", "metaobjects", "shop_settings",
+  "refunds", "refund_line_items", "returns", "return_line_items", "metafields", "metafield_definitions", "metaobject_definitions", "metaobjects", "shop_settings",
   "shop_access", "sync_runs", "sync_checkpoints", "webhook_events", "product_metrics", "store_metrics", ...SUMMARIES,
 ];
 /** Tables that name a shop but hold ownership, billing, credentials or history, which redaction handles separately. */
@@ -86,6 +86,7 @@ async function seed({ id, shop }) {
     ["insert into public.orders (shop_key, shopify_id, shopify_created_at, processed_at, currency, total_price, customer_shopify_id) values ($1, 15, now(), now(), 'GBP', 25, 14)", [id]],
     ["insert into public.order_line_items (shop_key, shopify_id, order_shopify_id, product_shopify_id, quantity, unit_price) values ($1, 16, 15, 10, 1, 25)", [id]],
     ["insert into public.refunds (shop_key, shopify_id, order_shopify_id, shopify_created_at, processed_at, total_refunded, currency) values ($1, 17, 15, now(), now(), 25, 'GBP')", [id]],
+    ["insert into public.refund_line_items (shop_key, shopify_id, refund_shopify_id, line_item_shopify_id, quantity, restock_type) values ($1, 23, 17, 16, 1, 'return')", [id]],
     ["insert into public.returns (shop_key, shopify_id, order_shopify_id, status) values ($1, 18, 15, 'closed')", [id]],
     ["insert into public.return_line_items (shop_key, shopify_id, return_shopify_id, line_item_shopify_id, quantity, return_reason) values ($1, 19, 18, 16, 1, 'defective')", [id]],
     ["insert into public.metafields (shop_key, owner_type, owner_shopify_id, namespace, key, type, value_excerpt) values ($1, 'product', 10, 'specs', 'wattage', 'number_integer', '40')", [id]],

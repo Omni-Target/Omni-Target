@@ -47,6 +47,8 @@ export interface StoreProduct {
   unit_cost_coverage?: "complete" | "partial" | "missing";
   price_less_unit_cost?: number | null;
   catalog_claims?: StoreCatalogClaim[];
+  /** Phase 3, task 4: signals that the product may not be returnable; none is not proof that it is. */
+  return_signals?: StoreReturnSignal[];
   high_value_entry?: StoreHighValueEntryEvidence;
   post_entry_bridge?: StorePostEntryBridgeEvidence;
   return_evidence?: StoreProductReturnEvidence;
@@ -77,13 +79,24 @@ export interface StorePostEntryBridgeEvidence {
 
 export interface StoreProductReturnEvidence {
   eligible_units: number;
-  processed_return_units: number;
-  refunded_units: number;
+  /** Null when some of the cohort's returns were read before their processed quantities were (Phase 3, task 4). */
+  processed_return_units: number | null;
+  /** Null when some of the cohort's refunds have not had their line items read yet (Phase 3, task 4). */
+  refunded_units: number | null;
   processed_return_rate: number | null;
   primary_reason?: string;
-  risk: "observed" | "review" | "insufficient_data";
+  /** "incomplete": the mirror holds returns not yet read with Phase 3's fields; no rate is given. */
+  risk: "observed" | "review" | "insufficient_data" | "incomplete";
   window_days: 365;
   maturity_days: 60;
+}
+
+/** Why a product may not be returnable (Phase 3, task 4), with its source and how far it can be trusted. */
+export interface StoreReturnSignal {
+  signal: "gift_card" | "declined_final_sale" | "tag" | "metafield";
+  trust: "verified" | "observed" | "unverified";
+  source: string;
+  detail: string | null;
 }
 
 export interface StoreGatewaySignalValidation {

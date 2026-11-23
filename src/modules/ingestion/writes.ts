@@ -5,7 +5,7 @@ import { withCustomerDigests, withOrderDigests, withRefundDigests } from "./dige
 import type { DataDomain } from "./access";
 import type {
   CustomerRow, InventoryLevelRow, LineItemRow, LocationRow, MetafieldDefinitionRow, MetafieldRow, MetaobjectDefinitionRow, MetaobjectRow,
-  OrderRow, ProductRow, RefundLineRow, RefundRow, ReturnLineItemRow, ReturnRow, VariantRow,
+  OrderRow, ProductRow, RefundLineItemRow, RefundLineRow, RefundRow, ReturnLineItemRow, ReturnRefundRow, ReturnRow, VariantRow,
 } from "./mappers";
 
 /**
@@ -125,8 +125,18 @@ export const writeHistoryArrivals = (
 export const writeCustomers = (shopKey: number, shopifyShopId: number, customers: CustomerRow[], key: Buffer = suppressionKey()) =>
   rpc<Record<string, number>>("ingest_customers", { p_shop_key: shopKey, p_customers: withCustomerDigests(customers, key, shopifyShopId) });
 
-export const writeReturns = (shopKey: number, batch: { returns: ReturnRow[]; lineItems: ReturnLineItemRow[] }) =>
-  rpc<Record<string, number>>("ingest_returns", { p_shop_key: shopKey, p_returns: batch.returns, p_return_line_items: batch.lineItems });
+export const writeReturns = (shopKey: number, batch: { returns: ReturnRow[]; lineItems: ReturnLineItemRow[]; returnRefunds?: ReturnRefundRow[] }) =>
+  rpc<Record<string, number>>("ingest_returns", {
+    p_shop_key: shopKey, p_returns: batch.returns, p_return_line_items: batch.lineItems, p_return_refunds: batch.returnRefunds ?? [],
+  });
+
+/** Refunds read by ID with their line items (0047): each refund's lines replaced, its return recorded, marked read. */
+export const writeRefundLines = (shopKey: number, refunds: Array<{ shopify_id: number; return_shopify_id: number | null }>, lines: RefundLineItemRow[]) =>
+  rpc<Record<string, number>>("ingest_refund_lines", { p_shop_key: shopKey, p_refunds: refunds, p_lines: lines });
+
+/** Refunds whose line items are not read yet (0047). */
+export const refundLinesDue = async (shopKey: number, limit = 100): Promise<number[]> =>
+  (await rpc<Array<number | string>>("refund_lines_due", { p_shop_key: shopKey, p_limit: limit })).map(Number);
 
 /** One batch of customers' first and last orders; call again with next_after until it is null. */
 export const deriveCustomerFacts = (shopKey: number, after = 0, limit = 2_000) =>

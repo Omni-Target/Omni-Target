@@ -13,6 +13,7 @@ import {
   mapOrderUnit,
   metaobjectReferenceIds,
   mapProductUnit,
+  mapRefundNode,
   mapReturnsUnit,
 } from "./mappers";
 
@@ -159,7 +160,10 @@ describe("orders", () => {
     expect(mapped.lineItems).toEqual([{
       shopify_id: 21, order_shopify_id: 20, product_shopify_id: 10, variant_shopify_id: 11, title: "Lamp", sku: "L-1",
       quantity: 2, current_quantity: 1, refunded_quantity: 1, unit_price: "25.00", total_discount: "5.00",
+      restockable: null, non_fulfillable_quantity: null, requires_shipping: null, is_gift_card: null,
     }]);
+    // Not read: null, never a default (task 4).
+    expect(mapped.order).toMatchObject({ product_network: null, return_status: null });
     // A refund's effective date is processedAt (backdated refunds), else createdAt.
     expect(mapped.refunds).toEqual([
       { shopify_id: 40, order_shopify_id: 20, shopify_created_at: "2026-03-04T00:00:00Z", processed_at: "2026-02-20T09:00:00Z", total_refunded: "10.00", currency: "GBP" },
@@ -226,14 +230,46 @@ describe("customers, inventory, locations and returns", () => {
     ])).map((l) => [l.shopify_id, l.name, l.fulfills_online_orders])).toEqual([[53, "New store", false]]);
   });
 
-  it("maps returns and their lines from an order's descendants", () => {
+  it("maps returns, their lines and their refunds from an order's descendants, with Phase 3's fields (task 4)", () => {
     const mapped = mapReturnsUnit(unit({ id: "gid://shopify/Order/20" }, [
-      { id: "gid://shopify/Return/60", __parentId: "gid://shopify/Order/20", name: "#1001-R1", status: "CLOSED", totalQuantity: 1, createdAt: "2026-03-10T00:00:00Z", closedAt: "2026-03-15T00:00:00Z" },
-      { id: "gid://shopify/ReturnLineItem/61", __parentId: "gid://shopify/Return/60", quantity: 1, returnReasonDefinition: { handle: "size-too-small" },
-        fulfillmentLineItem: { lineItem: { id: "gid://shopify/LineItem/21" } } },
+      { id: "gid://shopify/Return/60", __parentId: "gid://shopify/Order/20", name: "#1001-R1", status: "CLOSED", totalQuantity: 1, createdAt: "2026-03-10T00:00:00Z",
+        closedAt: "2026-03-15T00:00:00Z", requestApprovedAt: "2026-03-11T00:00:00Z", decline: null },
+      { id: "gid://shopify/ReturnLineItem/61", __parentId: "gid://shopify/Return/60", quantity: 1, processedQuantity: 1, refundedQuantity: 1, unprocessedQuantity: 0,
+        returnReasonDefinition: { handle: "size-too-small", name: "Size too small" }, customerNote: "never stored",
+        fulfillmentLineItem: { lineItem: { id: "gid://shopify/LineItem/21" } }, restockingFee: { percentage: 10, amountSet: { shopMoney: { amount: "2.50" } } } },
+      { id: "gid://shopify/Refund/40", __parentId: "gid://shopify/Return/60" },
+      { id: "gid://shopify/Return/62", __parentId: "gid://shopify/Order/20", name: "#1001-R2", status: "DECLINED", decline: { reason: "FINAL_SALE", note: "never stored" } },
+      { id: "gid://shopify/UnverifiedReturnLineItem/63", __parentId: "gid://shopify/Return/62", quantity: 2, processedQuantity: 0 },
     ]));
-    expect(mapped.returns).toEqual([{ shopify_id: 60, order_shopify_id: 20, name: "#1001-R1", status: "closed", total_quantity: 1, shopify_created_at: "2026-03-10T00:00:00Z", closed_at: "2026-03-15T00:00:00Z" }]);
-    expect(mapped.lineItems).toEqual([{ shopify_id: 61, return_shopify_id: 60, line_item_shopify_id: 21, quantity: 1, return_reason: "size_too_small" }]);
+    expect(mapped.returns).toEqual([
+      { shopify_id: 60, order_shopify_id: 20, name: "#1001-R1", status: "closed", total_quantity: 1, shopify_created_at: "2026-03-10T00:00:00Z", closed_at: "2026-03-15T00:00:00Z",
+        fields_version: 2, decline_reason: null, request_approved_at: "2026-03-11T00:00:00Z" },
+      { shopify_id: 62, order_shopify_id: 20, name: "#1001-R2", status: "declined", total_quantity: null, shopify_created_at: null, closed_at: null,
+        fields_version: 2, decline_reason: "final_sale", request_approved_at: null },
+    ]);
+    expect(mapped.lineItems).toEqual([
+      { shopify_id: 61, return_shopify_id: 60, line_item_shopify_id: 21, quantity: 1, return_reason: "size_too_small", processed_quantity: 1, refunded_quantity: 1,
+        unprocessed_quantity: 0, return_reason_name: "Size too small", restocking_fee_amount: "2.50", restocking_fee_percentage: 10 },
+      { shopify_id: 63, return_shopify_id: 62, line_item_shopify_id: null, quantity: 2, return_reason: null, processed_quantity: 0, refunded_quantity: null,
+        unprocessed_quantity: null, return_reason_name: null, restocking_fee_amount: null, restocking_fee_percentage: null },
+    ]);
+    expect(mapped.returnRefunds).toEqual([{ return_shopify_id: 60, refund_shopify_id: 40 }]);
+    expect(JSON.stringify(mapped)).not.toContain("never stored");
+  });
+
+  it("maps a refund read by ID with its lines, restock types and return (task 4)", () => {
+    expect(mapRefundNode({ id: "gid://shopify/Refund/40", return: { id: "gid://shopify/Return/60" } }, [
+      { id: "gid://shopify/RefundLineItem/70", quantity: 1, restockType: "RETURN", lineItem: { id: "gid://shopify/LineItem/21" }, subtotalSet: { shopMoney: { amount: "25.00" } } },
+      { id: "gid://shopify/RefundLineItem/71", quantity: 2, restockType: "SOMETHING_NEW", lineItem: null },
+      { id: "gid://shopify/LineItem/9", quantity: 1 },
+    ])).toEqual({
+      refund: { shopify_id: 40, return_shopify_id: 60 },
+      lines: [
+        { shopify_id: 70, refund_shopify_id: 40, line_item_shopify_id: 21, quantity: 1, restock_type: "return", subtotal: "25.00" },
+        { shopify_id: 71, refund_shopify_id: 40, line_item_shopify_id: null, quantity: 2, restock_type: null, subtotal: null },
+      ],
+    });
+    expect(mapRefundNode({ id: "gid://shopify/Order/1" }, [])).toBeNull();
   });
 
   it("normalises Shopify enumerations or drops ones that cannot be stored", () => {

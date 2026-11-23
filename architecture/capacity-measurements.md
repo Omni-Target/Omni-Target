@@ -167,3 +167,8 @@ Anything that functionality, filtering, analytics or intelligence needs stays. S
 **Task 3 (0046, inventory and fulfilment).**
 - An inventory level grows from 76 to 101 bytes with every quantity state stored. That is about +10 MB for the incident-scale shop's 420k levels (under 2%).
 - Locations add a few bytes each, and shops have few.
+
+**Task 4 (0047, returns and restrictions).**
+- A refund line item takes 78 bytes.
+- An order grows by about 2 bytes for the Collective flag, return status and restrictions; omni-beta's orders read with these fields average 198 bytes against 176. The difference includes fields that changed since the last import.
+- A shop with 500k orders and 5% of them refunded (one line each) adds about 2 MB of refund lines.

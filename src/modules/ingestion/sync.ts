@@ -41,6 +41,8 @@ export interface SyncDeps {
   gql: (shopDomain: string) => Promise<Gql | null>;
   /** After products are written: reads the metaobjects they newly reference (Phase 3, task 2). */
   references?: (gql: Gql, shopKey: number) => Promise<unknown>;
+  /** After orders are written: reads the line items of their new refunds (Phase 3, task 4). */
+  refundLines?: (gql: Gql, shopKey: number) => Promise<unknown>;
   repo: Pick<typeof SyncRepository, "claimSyncEvents" | "finishSyncEvents" | "deleteSyncedRecords">;
   writes: Pick<typeof Writes, "writeOrders" | "writeCatalog" | "writeCustomers" | "writeInventory" | "writeReturns" | "writeHistoryArrivals" | "historyWindowStart">;
   now?: () => number;
@@ -90,11 +92,12 @@ async function fetchOne(gql: Gql, kind: Exclude<SyncKind, "customer">, id: numbe
   const orderId = (node?.order as Raw | undefined)?.id;
   if (!node || typeof orderId !== "string") return null;
   await allPages(gql, node, "returnLineItems", RETURN_BY_ID, gid("Return", id));
-  // As a returns export gives it: the order, its return, and the return's lines.
-  const { order: _order, returnLineItems: _lines, ...fields } = node;
-  void _order; void _lines;
+  // As a returns export gives it: the order, its return, the return's lines and its refunds (task 4).
+  const { order: _order, returnLineItems: _lines, refunds: _refunds, ...fields } = node;
+  void _order; void _lines; void _refunds;
   const lines = edgesOf(node, "returnLineItems").map((edge) => ({ ...((edge as Raw).node as Raw), __parentId: node.id }));
-  return { root: { id: orderId }, children: [{ ...fields, __parentId: orderId }, ...lines], firstLine: 0, lastLine: 0 };
+  const refunds = edgesOf(node, "refunds").map((edge) => ({ ...((edge as Raw).node as Raw), __parentId: node.id }));
+  return { root: { id: orderId }, children: [{ ...fields, __parentId: orderId }, ...lines, ...refunds], firstLine: 0, lastLine: 0 };
 }
 
 async function fetchCustomers(gql: Gql, ids: number[]): Promise<Map<number, JsonlUnit | null>> {
@@ -155,7 +158,9 @@ async function writeKind(kind: SyncKind, units: JsonlUnit[], shop: { shopKey: nu
       await writes.writeInventory(shop.shopKey, { locations, levels: chunk.flatMap(mapInventoryUnit), completeItems });
     } else {
       const mapped = chunk.map(mapReturnsUnit);
-      await writes.writeReturns(shop.shopKey, { returns: mapped.flatMap((m) => m.returns), lineItems: mapped.flatMap((m) => m.lineItems) });
+      await writes.writeReturns(shop.shopKey, {
+        returns: mapped.flatMap((m) => m.returns), lineItems: mapped.flatMap((m) => m.lineItems), returnRefunds: mapped.flatMap((m) => m.returnRefunds),
+      });
     }
   }
   return deferred;
@@ -215,6 +220,10 @@ export async function processShopEvents(shopDomain: string, runId: string, deps:
           }
         }
         const deferred = found.length ? await writeKind(kind, found, shop, deps.writes, gql) : new Set<number>();
+        if (kind === "order" && found.length && deps.refundLines) {
+          // Refunds' lines are read again daily if this fails; the orders themselves are written.
+          await deps.refundLines(gql, shop.shopKey).catch((error) => log.warn("Refund lines not read", { shop: shopDomain }, error));
+        }
         if (kind === "product" && found.length && deps.references) {
           // References are repaired daily if this fails; the products themselves are written.
           await deps.references(gql, shop.shopKey).catch((error) => log.warn("Catalog references not read", { shop: shopDomain }, error));

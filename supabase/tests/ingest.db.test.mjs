@@ -198,7 +198,7 @@ describe("inventory, returns and checkpoints", () => {
     await ingest("ingest_returns", s.key, [{ shopify_id: 60, order_shopify_id: 20, status: "open" }],
       [{ shopify_id: 61, return_shopify_id: 60, quantity: 1, return_reason: "defective" }, { shopify_id: 62, return_shopify_id: 60, quantity: 1 }]);
     expect(await ingest("ingest_returns", s.key, [{ shopify_id: 60, order_shopify_id: 20, status: "closed" }], [{ shopify_id: 61, return_shopify_id: 60, quantity: 1 }]))
-      .toEqual({ returns: 1, return_line_items: 1, return_line_items_removed: 1 });
+      .toEqual({ returns: 1, return_line_items: 1, return_line_items_removed: 1, refunds_linked: 0 });
   });
 
   it("keeps a checkpoint moving forward within one bulk operation, and resets it for a new one", async () => {
@@ -215,7 +215,7 @@ describe("privileges", () => {
   it("lets only service_role call the write functions", async () => {
     for (const fn of [
       "ingest_catalog(integer, jsonb, jsonb, jsonb)", "ingest_inventory(integer, jsonb, jsonb, bigint[])", "ingest_orders(integer, jsonb, jsonb, jsonb)",
-      "ingest_customers(integer, jsonb)", "derive_customer_order_facts(integer, bigint, integer)", "ingest_returns(integer, jsonb, jsonb)",
+      "ingest_customers(integer, jsonb)", "derive_customer_order_facts(integer, bigint, integer)", "ingest_returns(integer, jsonb, jsonb, jsonb)",
       "save_sync_checkpoint(integer, text, uuid, bigint, bigint, timestamptz)",
     ]) {
       const row = await one(

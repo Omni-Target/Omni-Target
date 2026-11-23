@@ -1,7 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "@/platform/supabase";
 import type { StoreData } from "@/lib/store-data";
-import type { CanonicalInputsReport, CanonicalMetaobject, CanonicalOrder, CanonicalProduct } from "./canonical";
+import type { CanonicalInputsReport, CanonicalMetaobject, CanonicalOrder, CanonicalProduct, MirrorReturnEvidence, MirrorReturnSignal } from "./canonical";
 
 /** The mirror reads and the stored snapshot of the read path (migration 0043). */
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
@@ -21,6 +21,12 @@ export const insightProducts = (shopKey: number, ids: number[]) =>
 
 export const insightMetaobjects = (shopKey: number, ids: number[]) =>
   rpc<CanonicalMetaobject[]>("insight_metaobjects", { p_shop_key: shopKey, p_ids: ids });
+
+export const insightReturnEvidence = (shopKey: number, ids: number[], asOf: string) =>
+  rpc<MirrorReturnEvidence[]>("product_return_evidence", { p_shop_key: shopKey, p_product_ids: ids, p_as_of: asOf });
+
+export const insightReturnSignals = (shopKey: number, ids: number[]) =>
+  rpc<MirrorReturnSignal[]>("product_return_signals", { p_shop_key: shopKey, p_product_ids: ids });
 
 export const saveShopInsights = (shopKey: number, data: StoreData, inputs: CanonicalInputsReport) =>
   rpc<{ saved: boolean; bytes: number }>("save_shop_insights", {
@@ -45,11 +51,11 @@ export const shopsInsightsDue = (maxAgeSeconds: number, limit: number) =>
  * Whether the shop's orders and catalog were each completed by the last finished import that covered
  * them: a scoped import (0039) covers some domains, and leaves the others as an earlier import left them.
  */
-export async function importComplete(shopId: string): Promise<boolean> {
+export async function importComplete(shopId: string, domains: string[] = ["orders", "catalog"]): Promise<boolean> {
   const { data, error } = await supabaseAdmin.from("shop_imports").select("coverage").eq("shop_id", shopId)
     .in("status", ["succeeded", "partial"]).order("finished_at", { ascending: false }).limit(50);
   if (error) throw new Error(`shop_imports read failed: ${error.message}`);
-  return importsComplete((data ?? []).map((row) => row.coverage), ["orders", "catalog"]);
+  return importsComplete((data ?? []).map((row) => row.coverage), domains);
 }
 
 /** Pure: newest first, the first coverage that imported each domain decides it (a scoped import records the rest as skipped). */

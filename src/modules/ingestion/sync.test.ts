@@ -144,6 +144,20 @@ describe("incremental sync worker (task 10)", () => {
     expect(t.inbox.every((e) => e.status === "processed")).toBe(true);
   });
 
+  it("reads new refunds' line items after writing orders, and keeps the orders when that fails (Phase 3, task 4)", async () => {
+    const t = harness({ orders: { 11: orderNode(11, "30.00", "2026-11-22T10:05:00Z") } });
+    const refundLines = vi.fn(async () => ({}));
+    t.push("e1", "refunds/create", { order_id: 11, created_at: "2026-11-22T10:05:00Z" });
+    await processShopEvents("s.myshopify.com", "run_1", { ...t.deps, refundLines });
+    expect(refundLines).toHaveBeenCalledWith(expect.any(Function), 2);
+    expect(t.writes.writeOrders).toHaveBeenCalled();
+
+    const u = harness({ orders: { 11: orderNode(11, "30.00", "2026-11-22T10:05:00Z") } });
+    u.push("e1", "orders/updated", { id: 11 });
+    await processShopEvents("s.myshopify.com", "run_1", { ...u.deps, refundLines: async () => { throw new Error("throttled"); } });
+    expect(u.inbox[0].status).toBe("processed");
+  });
+
   it("leaves the inbox alone without access, and stops at its time budget", async () => {
     const t = harness({});
     t.push("e1", "orders/updated", { id: 11 });

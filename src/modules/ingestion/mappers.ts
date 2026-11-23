@@ -306,11 +306,14 @@ export interface OrderRow {
   subtotal: string; total_discounts: string; total_tax: string; total_shipping: string; total_price: string; total_refunded: string;
   customer_shopify_id: number | null; ship_country_code: string | null; ship_province_code: string | null;
   ship_city: string | null; ship_city_raw: string | null; source_name: string | null; is_test: boolean; shopify_updated_at: string | null;
+  /** Shopify Collective: the order holds products a supplier fulfils (task 4). */
+  product_network: boolean | null; return_status: string | null;
 }
 export interface LineItemRow {
   shopify_id: number; order_shopify_id: number; product_shopify_id: number | null; variant_shopify_id: number | null;
   title: string | null; sku: string | null; quantity: number; current_quantity: number | null; refunded_quantity: number;
   unit_price: string; total_discount: string;
+  restockable: boolean | null; non_fulfillable_quantity: number | null; requires_shipping: boolean | null; is_gift_card: boolean | null;
 }
 /** A refund's units for one product, from the refund's own line items (history arrivals, 0042). */
 export interface RefundLineRow { refund_shopify_id: number; product_shopify_id: number | null; quantity: number }
@@ -371,6 +374,8 @@ export function mapOrderUnit(unit: JsonlUnit): { order: OrderRow | null; lineIte
     source_name: str(root.sourceName, 64),
     is_test: bool(root.test) ?? false,
     shopify_updated_at: at(root.updatedAt),
+    product_network: bool(root.productNetwork),
+    return_status: enumValue(root.returnStatus),
   };
 
   const refunds: RefundRow[] = [];
@@ -408,6 +413,10 @@ export function mapOrderUnit(unit: JsonlUnit): { order: OrderRow | null; lineIte
       refunded_quantity: current === null ? 0 : Math.max(0, quantity - Math.min(current, quantity)),
       unit_price: shopMoney(child.originalUnitPriceSet) ?? "0",
       total_discount: shopMoney(child.totalDiscountSet) ?? "0",
+      restockable: bool(child.restockable),
+      non_fulfillable_quantity: nonNegativeInt(child.nonFulfillableQuantity),
+      requires_shipping: bool(child.requiresShipping),
+      is_gift_card: bool(child.isGiftCard),
     });
   }
   return { order, lineItems, refunds };
@@ -520,20 +529,29 @@ export function mapLocation(node: unknown): LocationRow | null {
   };
 }
 
+/** The return field set (returns.fields_version, 0047): 2 adds the decline reason, approval time and processed quantities. */
+export const RETURN_FIELDS_VERSION = 2;
+const DECLINE_REASONS = new Set(["return_period_ended", "final_sale", "other"]);
 export interface ReturnRow {
   shopify_id: number; order_shopify_id: number; name: string | null; status: string; total_quantity: number | null;
   shopify_created_at: string | null; closed_at: string | null;
+  fields_version: number; decline_reason: "return_period_ended" | "final_sale" | "other" | null; request_approved_at: string | null;
 }
 export interface ReturnLineItemRow {
   shopify_id: number; return_shopify_id: number; line_item_shopify_id: number | null; quantity: number; return_reason: string | null;
+  processed_quantity: number | null; refunded_quantity: number | null; unprocessed_quantity: number | null; return_reason_name: string | null;
+  restocking_fee_amount: string | null; restocking_fee_percentage: number | null;
 }
+/** A refund that settles a return, from the return's side. */
+export interface ReturnRefundRow { return_shopify_id: number; refund_shopify_id: number }
 
-/** A returns unit is an order (id only) with its returns and their line items as descendants. */
-export function mapReturnsUnit(unit: JsonlUnit): { returns: ReturnRow[]; lineItems: ReturnLineItemRow[] } {
+/** A returns unit is an order (id only) with its returns, their line items and their refunds as descendants. */
+export function mapReturnsUnit(unit: JsonlUnit): { returns: ReturnRow[]; lineItems: ReturnLineItemRow[]; returnRefunds: ReturnRefundRow[] } {
   const orderId = parseGid(unit.root.id, "Order");
-  if (orderId === null) return { returns: [], lineItems: [] };
+  if (orderId === null) return { returns: [], lineItems: [], returnRefunds: [] };
   const returns: ReturnRow[] = [];
   const lineItems: ReturnLineItemRow[] = [];
+  const returnRefunds: ReturnRefundRow[] = [];
   for (const child of unit.children) {
     const type = gidType(child.id);
     if (type === "Return") {
@@ -547,6 +565,12 @@ export function mapReturnsUnit(unit: JsonlUnit): { returns: ReturnRow[]; lineIte
         total_quantity: nonNegativeInt(child.totalQuantity),
         shopify_created_at: at(child.createdAt),
         closed_at: at(child.closedAt),
+        fields_version: RETURN_FIELDS_VERSION,
+        decline_reason: (() => {
+          const reason = enumValue(obj(child.decline)?.reason);
+          return reason && DECLINE_REASONS.has(reason) ? (reason as ReturnRow["decline_reason"]) : null;
+        })(),
+        request_approved_at: at(child.requestApprovedAt),
       });
     } else if (type === "ReturnLineItem" || type === "UnverifiedReturnLineItem") {
       const id = parseGid(child.id);
@@ -559,8 +583,46 @@ export function mapReturnsUnit(unit: JsonlUnit): { returns: ReturnRow[]; lineIte
         line_item_shopify_id: parseGid(obj(obj(child.fulfillmentLineItem)?.lineItem)?.id, "LineItem"),
         quantity,
         return_reason: enumValue(obj(child.returnReasonDefinition)?.handle),
+        processed_quantity: nonNegativeInt(child.processedQuantity),
+        refunded_quantity: nonNegativeInt(child.refundedQuantity),
+        unprocessed_quantity: nonNegativeInt(child.unprocessedQuantity),
+        return_reason_name: str(obj(child.returnReasonDefinition)?.name, 255),
+        restocking_fee_amount: amount(obj(obj(obj(child.restockingFee)?.amountSet)?.shopMoney)?.amount),
+        restocking_fee_percentage: (() => {
+          const pct = obj(child.restockingFee)?.percentage;
+          return typeof pct === "number" && pct >= 0 && pct <= 100 ? pct : null;
+        })(),
       });
+    } else if (type === "Refund") {
+      const refundId = parseGid(child.id, "Refund");
+      const returnId = parseGid(child.__parentId, "Return");
+      if (refundId !== null && returnId !== null) returnRefunds.push({ return_shopify_id: returnId, refund_shopify_id: refundId });
     }
   }
-  return { returns, lineItems };
+  return { returns, lineItems, returnRefunds };
+}
+
+export interface RefundLineItemRow {
+  shopify_id: number; refund_shopify_id: number; line_item_shopify_id: number | null; quantity: number;
+  restock_type: "return" | "cancel" | "legacy_restock" | "no_restock" | null; subtotal: string | null;
+}
+const RESTOCK_TYPES = new Set(["return", "cancel", "legacy_restock", "no_restock"]);
+/** A refund read by ID (task 4): the return it settles, and its line items. */
+export function mapRefundNode(node: unknown, lineNodes: unknown[]): { refund: { shopify_id: number; return_shopify_id: number | null }; lines: RefundLineItemRow[] } | null {
+  const refundId = parseGid(obj(node)?.id, "Refund");
+  if (refundId === null) return null;
+  const lines: RefundLineItemRow[] = [];
+  for (const raw of lineNodes) {
+    const line = obj(raw);
+    const id = parseGid(line?.id, "RefundLineItem");
+    const quantity = nonNegativeInt(line?.quantity);
+    if (id === null || quantity === null) continue;
+    const restock = enumValue(line?.restockType);
+    lines.push({
+      shopify_id: id, refund_shopify_id: refundId, line_item_shopify_id: parseGid(obj(line?.lineItem)?.id, "LineItem"), quantity,
+      restock_type: restock && RESTOCK_TYPES.has(restock) ? (restock as RefundLineItemRow["restock_type"]) : null,
+      subtotal: shopMoney(line?.subtotalSet),
+    });
+  }
+  return { refund: { shopify_id: refundId, return_shopify_id: parseGid(obj(obj(node)?.return)?.id, "Return") }, lines };
 }

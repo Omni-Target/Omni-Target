@@ -7,6 +7,7 @@ vi.mock("@/lib/db", () => ({ logApiUsage: vi.fn() }));
 import type { ShopifyIntelligenceResult } from "@/lib/connectors/shopify-intelligence";
 import {
   buildCanonicalStoreData, canonicalEnrichment, toShopifyOrder, toShopifyProduct, type CanonicalInsightsDeps, type CanonicalOrder, type CanonicalProduct,
+  type MirrorReturnEvidence, type MirrorReturnSignal,
 } from "./canonical";
 
 const order = (id: number, at: string, lines: CanonicalOrder["lines"], extra: Partial<CanonicalOrder> = {}): CanonicalOrder => ({
@@ -106,6 +107,14 @@ describe("buildCanonicalStoreData (task 11)", () => {
       intelligence: vi.fn(async () => intelligence()),
       images: vi.fn(async (ids: number[]) => new Map(ids.map((id) => [id, `https://cdn.example/${id}.jpg`]))),
       metaobjects: vi.fn(async (ids: number[]) => ids.map((id) => ({ id, type: "shopify--size", display_name: `Size ${id}`, fields: { label: `L${id}` } }))),
+      returnEvidence: vi.fn(async (ids: number[]): Promise<MirrorReturnEvidence[]> => ids.filter((id) => id === 7).map((id) => ({
+        product_id: id, eligible_units: 40, processed_return_units: 8, refunded_units: null, processed_return_rate: "0.2000", primary_reason: "Size too small",
+        risk: "review" as const, complete: false,
+      }))),
+      returnSignals: vi.fn(async (ids: number[]): Promise<MirrorReturnSignal[]> => ids.filter((id) => id === 8).map((id) => ({
+        product_id: id, signal: "tag" as const, trust: "unverified" as const, source: "merchant_tag", detail: "final-sale",
+      }))),
+      returnsImported: vi.fn(async () => true),
       ingestionComplete: vi.fn(async () => true),
     } satisfies CanonicalInsightsDeps;
     return d;
@@ -147,6 +156,25 @@ describe("buildCanonicalStoreData (task 11)", () => {
       { key: "shopify--size.label", value: "L41", source: "referenced_metaobject" },
       { key: "shopify--size.label", value: "L42", source: "referenced_metaobject" },
     ]);
+  });
+
+  it("takes return evidence and return signals from the mirror, never refunded units it has not read (task 4)", async () => {
+    const d = deps(many(3), [7, 8]);
+    const { data } = await buildCanonicalStoreData("s.myshopify.com", d);
+    expect(d.intelligence).toHaveBeenCalled();
+    const lamp = data.products.find((p) => p.id === "7");
+    expect(lamp?.return_evidence ?? lamp?.product_decision?.return_evidence).toMatchObject({
+      eligible_units: 40, processed_return_units: 8, refunded_units: null, processed_return_rate: 0.2, primary_reason: "Size too small", risk: "review",
+    });
+    expect(data.products.find((p) => p.id === "8")?.return_signals).toEqual([{ signal: "tag", trust: "unverified", source: "merchant_tag", detail: "final-sale" }]);
+    expect(lamp?.return_signals).toBeUndefined();
+
+    // Returns not imported: evidence is unavailable, not zero.
+    const u = deps(many(3), [7, 8]);
+    u.returnsImported.mockResolvedValue(false);
+    const without = await buildCanonicalStoreData("s.myshopify.com", u);
+    expect(u.returnEvidence).not.toHaveBeenCalled();
+    expect(without.data.products.find((p) => p.id === "7")?.return_evidence).toBeUndefined();
   });
 
   it("reads orders newest first in pages, and reports truncation only when more remain", async () => {

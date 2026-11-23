@@ -232,6 +232,10 @@ export async function startFakeShopify(options: FakeShopifyOptions): Promise<Fak
         id: gid("Location", i + 1), name: `Location ${i + 1}`, isActive: true, fulfillsOnlineOrders: true, isFulfillmentService: false, address: { countryCode: "GB", provinceCode: "ENG" },
       })), pageInfo: { hasNextPage: false, endCursor: null } } };
     }
+    // Refunds read by ID (Phase 3, task 4): the fake's refunds carry no line items.
+    if (query.includes("RefundsById")) {
+      return { nodes: ((variables?.ids as string[]) ?? []).map((id) => ({ id, return: null, refundLineItems: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } } })) };
+    }
     // Catalog references (Phase 3): the fake catalog defines none and references none.
     if (query.includes("metafieldDefinitions(")) return { metafieldDefinitions: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } };
     if (query.includes("metaobjectDefinitions(")) return { metaobjectDefinitions: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } };

@@ -7,6 +7,7 @@ import * as repo from "./sync-repository";
 import { ensureSyncSubscriptions, syncWebhookEndpoint, type SubscriptionReport } from "./subscriptions";
 import { syncCatalogReferences, syncReferencedMetaobjects } from "./catalog-references";
 import { fetchLocations } from "./locations";
+import { syncRefundLines } from "./refund-lines";
 import * as writes from "./writes";
 
 /** The incremental sync's live dependencies: the staging or production database, and Shopify. */
@@ -19,6 +20,7 @@ async function shopGql(shopDomain: string): Promise<Gql | null> {
 export const liveSyncDeps = (): SyncDeps => ({
   shop: repo.syncShop, gql: shopGql, repo, writes,
   references: (gql, shopKey) => syncReferencedMetaobjects(gql, shopKey, writes, { maxBatches: 5 }),
+  refundLines: (gql, shopKey) => syncRefundLines(gql, shopKey, writes, { maxBatches: 5 }),
 });
 export const liveReconcileDeps = (): ReconcileDeps => ({ shop: repo.syncShop, gql: shopGql, repo });
 
@@ -48,4 +50,13 @@ export async function refreshLocations(shopDomain: string) {
   if (!gql) return { skipped: "no_access" as const };
   const locations = await fetchLocations(gql);
   return writes.writeInventory(shop.shopKey, { locations, levels: [] });
+}
+
+/** Daily: line items of refunds not read yet, at most 10,000 refunds a day besides those webhooks bring (Phase 3, task 4). */
+export async function refreshRefundLines(shopDomain: string) {
+  const shop = await repo.syncShop(shopDomain);
+  if (!shop) return { skipped: "not_ingestible" as const };
+  const gql = await shopGql(shopDomain);
+  if (!gql) return { skipped: "no_access" as const };
+  return syncRefundLines(gql, shop.shopKey, writes, { maxBatches: 100 });
 }

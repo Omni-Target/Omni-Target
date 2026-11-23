@@ -18,11 +18,12 @@ import { BULK_QUERIES, searchFilter } from "./queries";
 import { deleteStaged, openStaged, r2StagingStore, shouldStage, stageStream, stagingKey } from "./staging";
 import { IncompleteResultError, streamImport } from "./stream-import";
 import {
-  catalogReferenceIds, deriveCustomerFacts, loadCheckpoint, metaobjectDisplayKeys, refreshMirrorStatistics, saveCheckpoint, writeCatalog,
-  writeCatalogDefinitions, writeCustomers, writeInventory, writeMetaobjects, writeOrders, writeReturns,
+  catalogReferenceIds, deriveCustomerFacts, loadCheckpoint, metaobjectDisplayKeys, refreshMirrorStatistics, refundLinesDue, saveCheckpoint, writeCatalog,
+  writeCatalogDefinitions, writeCustomers, writeInventory, writeMetaobjects, writeOrders, writeRefundLines, writeReturns,
 } from "./writes";
 import { syncCatalogReferences, type ReferenceWrites } from "./catalog-references";
 import { fetchLocations } from "./locations";
+import { syncRefundLines, type RefundLineWrites } from "./refund-lines";
 
 /**
  * The initial import of one shop (Phase 2, task 6), run by the shop-import
@@ -33,6 +34,7 @@ import { fetchLocations } from "./locations";
  */
 const log = createLogger({ module: "shop-import" });
 const referenceWrites: ReferenceWrites = { catalogReferenceIds, metaobjectDisplayKeys, writeCatalogDefinitions, writeMetaobjects };
+const refundLineWrites: RefundLineWrites = { refundLinesDue, writeRefundLines };
 
 /** Units per write batch; a unit is a record with its children. */
 const BATCH_ROWS = 1_000;
@@ -350,11 +352,22 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
 
     await run("returns", domains.returns.status !== "inaccessible", () => importBulk(ctx, "returns", BULK_QUERIES.returns(windowFilter), async (units) => {
       const mapped = units.map(mapReturnsUnit);
-      const batch = { returns: mapped.flatMap((m) => m.returns), lineItems: mapped.flatMap((m) => m.lineItems) };
+      const batch = { returns: mapped.flatMap((m) => m.returns), lineItems: mapped.flatMap((m) => m.lineItems), returnRefunds: mapped.flatMap((m) => m.returnRefunds) };
       if (!batch.returns.length) return { rows: 0, rejected: 0 };
       const stats = await writeReturns(ctx.shopKey, batch);
       return { rows: batch.returns.length + batch.lineItems.length, rejected: 0, stats };
     }));
+
+    // Refunds' line items, read by ID (task 4): never fatal, the daily reconcile reads what is left.
+    if (results.orders?.status === "succeeded") {
+      try {
+        ctx.coverage.refund_lines = await syncRefundLines(ctx.gql, ctx.shopKey, refundLineWrites, { maxBatches: 10_000, onBatch: () => keepAlive(ctx) });
+      } catch (error) {
+        if (error instanceof ImportStopped) throw error;
+        log.warn("Refund lines not read", { shop: ctx.shopDomain }, error);
+        ctx.coverage.refund_lines = { error: error instanceof Error ? error.message.slice(0, 200) : "unknown" };
+      }
+    }
 
     // Statistics that know this shop's rows (0045): a new shop is otherwise planned as a single row, and
     // the per-shop statements below go quadratic once other shops fill the tables.

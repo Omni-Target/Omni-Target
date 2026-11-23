@@ -5,7 +5,9 @@ import type { ShopifyShop } from "@/lib/connectors/shopify";
 import { getShopifyAccessForShop } from "@/modules/credentials/shopify";
 import { syncShop } from "@/modules/ingestion/sync-repository";
 import { buildCanonicalStoreData, type CanonicalInputsReport } from "./canonical";
-import { importComplete, insightCatalog, insightMetaobjects, insightOrdersPage, insightProducts, saveShopInsights } from "./repository";
+import {
+  importComplete, insightCatalog, insightMetaobjects, insightOrdersPage, insightProducts, insightReturnEvidence, insightReturnSignals, saveShopInsights,
+} from "./repository";
 
 /**
  * The worker side of the read path (Phase 2, task 11): builds a shop's store
@@ -59,9 +61,12 @@ export async function computeShopInsights(shopDomain: string): Promise<ShopInsig
     catalog: (limit) => insightCatalog(shop.shopKey, limit),
     products: (ids) => insightProducts(shop.shopKey, ids),
     shop: () => fetchShop(gql, shopDomain),
-    intelligence: () => fetchShopifyPrespendIntelligence(shopDomain, access.accessToken),
+    intelligence: () => fetchShopifyPrespendIntelligence(shopDomain, access.accessToken, { returnEvidence: false }),
     images: (ids) => fetchImages(gql, ids),
     metaobjects: (ids) => insightMetaobjects(shop.shopKey, ids),
+    returnEvidence: (ids, asOf) => insightReturnEvidence(shop.shopKey, ids, asOf),
+    returnSignals: (ids) => insightReturnSignals(shop.shopKey, ids),
+    returnsImported: () => importComplete(shop.shopId, ["returns"]),
     ingestionComplete: () => importComplete(shop.shopId),
   });
   const saved = await saveShopInsights(shop.shopKey, data, inputs);

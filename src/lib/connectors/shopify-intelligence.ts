@@ -616,7 +616,9 @@ function capability(
 
 export async function fetchShopifyPrespendIntelligence(
   shopDomain: string,
-  accessToken: string
+  accessToken: string,
+  /** returnEvidence: false skips the live return-evidence fetch (the worker reads it from the mirror, Phase 3 task 4). */
+  { returnEvidence = true }: { returnEvidence?: boolean } = {},
 ): Promise<ShopifyIntelligenceResult> {
   let grantedScopes: string[] = [];
   const warnings: string[] = [];
@@ -651,7 +653,7 @@ export async function fetchShopifyPrespendIntelligence(
     },
   } as const;
 
-  const entries = Object.entries(tasks);
+  const entries = Object.entries(tasks).filter(([name]) => returnEvidence || name !== "return_evidence");
   const settled = await Promise.all(entries.map(async ([name, task]) => {
     const missing = task.scopes.filter((scope) => grantedScopes.length > 0 && !granted.has(scope));
     if (missing.length) return [name, { missing, value: undefined }] as const;
@@ -689,6 +691,7 @@ export async function fetchShopifyPrespendIntelligence(
   }
 
   const policyValue = result.policies.value as Awaited<ReturnType<typeof fetchPoliciesAndLocales>> | undefined;
+  result.return_evidence ??= { missing: [] };
   return {
     prespend: {
       granted_scopes: grantedScopes,
