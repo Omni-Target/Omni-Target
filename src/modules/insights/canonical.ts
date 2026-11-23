@@ -22,13 +22,14 @@ import { metaobjectReferenceIds } from "@/modules/ingestion/mappers";
  *  - cost and catalog evidence for every one of those products, from the
  *    mirror (REST covered the first 400 active products, ING-03);
  *  - cities as normalised at ingest (country-aware, GEO-01), so no AI pass;
- *  - product images from the mirror (Phase 3, task 2); only products not yet
- *    read with Phase 3's fields (fields_version null) still have theirs read
- *    from Shopify by the worker;
+ *  - product images from the mirror (Phase 3, tasks 2 and 5): a product not yet
+ *    read with Phase 3's fields (fields_version null) has none until it is;
  *  - catalog claims from product and variant metafields, with referenced
  *    metaobjects resolved from the mirror (Phase 3, task 2);
- *  - shop details and the pre-spend reads (markets, shipping, analytics,
- *    policies, returns) still come from Shopify, read by the worker.
+ *  - shop details and the pre-spend datasets (markets, shipping, analytics,
+ *    policies, discounts, marketing) from the stored shop context (task 5),
+ *    return evidence and signals from the mirror (task 4): nothing is read
+ *    from Shopify here.
  */
 export const ORDER_LIMIT = 50_000;
 export const ORDER_PAGE = 2_000;
@@ -205,8 +206,6 @@ export interface CanonicalInsightsDeps {
   /** Read from Shopify by the worker. */
   shop: () => Promise<ShopifyShop>;
   intelligence: () => Promise<ShopifyIntelligenceResult>;
-  /** From Shopify, only for products not yet read with Phase 3's fields. */
-  images: (productIds: number[]) => Promise<Map<number, string>>;
   /** Stored metaobjects by ID (0044). */
   metaobjects: (ids: number[]) => Promise<CanonicalMetaobject[]>;
   /** Return evidence and return signals from the mirror (0047), at most 500 products a call. */
@@ -258,10 +257,9 @@ export async function buildCanonicalStoreData(
   const ids = [...new Set([...catalog.ids, ...orders.flatMap((o) => o.lines.map((l) => l.product_id).filter((id): id is number => id !== null))])];
   const products: CanonicalProduct[] = [];
   for (let i = 0; i < ids.length; i += PRODUCT_PAGE) products.push(...(await deps.products(ids.slice(i, i + PRODUCT_PAGE))));
+  // Images from the mirror only (task 5): a product not yet read with Phase 3's fields has none until it is.
   const images = new Map<number, string>();
   for (const p of products) if (p.image_url) images.set(p.id, p.image_url);
-  const unread = products.filter((p) => p.fields_version === null || p.fields_version === undefined).map((p) => p.id);
-  if (unread.length) for (const [id, url] of await deps.images(unread)) images.set(id, url);
   const metaobjects = new Map<number, CanonicalMetaobject>();
   const referenced = referencedMetaobjectIds(products);
   for (let i = 0; i < referenced.length; i += PRODUCT_PAGE) for (const o of await deps.metaobjects(referenced.slice(i, i + PRODUCT_PAGE))) metaobjects.set(o.id, o);

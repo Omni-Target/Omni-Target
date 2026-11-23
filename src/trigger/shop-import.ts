@@ -2,6 +2,7 @@ import { logger, schemaTask, wait } from "@trigger.dev/sdk";
 import { shopImportPayload } from "@/modules/jobs/payloads";
 import { runShopImport } from "@/modules/ingestion/workflow";
 import { dispatchShopInsights } from "@/modules/jobs/trigger";
+import { syncShopContext } from "@/modules/insights/context-sync";
 
 /**
  * The initial import of one shop (Phase 2, task 6). One run per shop at a
@@ -23,8 +24,12 @@ export const shopImport = schemaTask({
     };
     const report = await runShopImport(importId, ctx.run.id, sleep);
     logger.log("Shop import run ended", { shop: shopDomain, outcome: report.outcome });
-    // The store snapshot is built from what the import wrote (task 11).
-    if (report.outcome === "succeeded" || report.outcome === "partial") await dispatchShopInsights(shopDomain, `import-${importId}`);
+    // The shop's context (Phase 3, task 5), then the store snapshot from what the import wrote (task 11).
+    if (report.outcome === "succeeded" || report.outcome === "partial") {
+      const context = await syncShopContext(shopDomain).catch((error) => ({ outcome: "failed", error: error instanceof Error ? error.message.slice(0, 200) : "unknown" }));
+      logger.log("Shop context after import", { shop: shopDomain, ...context });
+      await dispatchShopInsights(shopDomain, `import-${importId}`);
+    }
     return report;
   },
 });

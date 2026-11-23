@@ -488,3 +488,57 @@ No signal is not proof that a product is returnable. Shopify has no product-leve
 - Exchanges and reverse fulfilment orders are not read.
 - Return evidence covers the retained window only.
 - Returns on the test stores: none. Real returns, declines and final-sale products would let the live check cover them too.
+
+### Task 5: shop context in the database (2026-11-23; migration 0048)
+
+**No Shopify request builds or renders the store snapshot.**
+- `computeShopInsights` reads only the database:
+  - orders, products, images, costs, references, inventory, return evidence and signals from the mirror;
+  - shop details and the pre-spend datasets from the stored shop context.
+- It imports no Shopify client. A boundary test keeps it that way, and keeps every page and layout under `src/app` free of Shopify reads. The test would have failed on the previous code: six Shopify calls in the worker, two in the settings page.
+
+**The background sync (`syncShopContext`) reads and stores:**
+- **`shop_settings`** (created empty in 0024):
+  - name and primary domain;
+  - currency and money format;
+  - timezone;
+  - country and province, from the shop's own address as REST gave it (the worker had used the billing address);
+  - plan (display name, Plus, development);
+  - weight unit and taxes included;
+  - the storefront logo;
+  - locales, markets, delivery zones and policies (each policy's text bounded to 2,000 characters, marked when cut).
+- **`shop_context`** (new):
+  - the ShopifyQL analytics snapshot;
+  - active discounts and recent marketing history;
+  - all locales;
+  - each dataset's status (available, partial, missing scope, error);
+  - the warnings the read produced, and when it was read.
+- **From the mirror, not this sync:** locations (task 3), granted scopes (Phase 2's access check), product evidence (Phase 2 task 11) and return evidence (task 4).
+
+**When it runs:**
+- after each import, before the snapshot is requested;
+- daily: the new `shop-context-refresh` schedule (04:20) takes shops whose context is over 20 hours old;
+- in `shop-insights`, whenever the context is missing or over a day old.
+- A snapshot built from a context over 48 hours old carries a warning with its age. Without any stored context, no snapshot is built (`no_context`), rather than one without shop details.
+
+**Pages:**
+- The settings page used to fetch the storefront logo while the merchant waited (finding FE-11), when Clerk had none cached. It now reads the logo the sync stored.
+- The explicit "sync logo" action and the install flow still read Shopify, as user-initiated or install-time requests, not page renders.
+- Product images for products not yet read with Phase 3's fields are no longer fetched live: they have none until read.
+
+**Results:**
+
+| Check | Dev store | omni-beta |
+|---|---|---|
+| Context sync (`context.live.test.ts`) | 6 datasets available; 2 markets, 2 delivery zones, 1 policy, 1 discount, analytics; 4.4 s | 6 datasets available; 2 markets, 1 zone, 1 policy, 2 discounts, analytics; 4.3 s |
+| Stored against Shopify: name, currency, timezone, country, plan, primary domain, markets, policy types, locales | Identical | Identical |
+| Snapshot from the database alone | Saved, 1.6 s; carries the stored currency, markets, policies and discounts | Saved, 10.5 s (1,557 orders, 2,000 products) |
+| Read-path equivalence (dev store) | Unchanged against the REST computation | — |
+| Storefront logo | None found (development store) | None found |
+
+**Tests:**
+- `shop-context.db.test.mjs` (4): saved together and read back with locations and scopes; a missing logo keeps the last one; bounds; not ingestible; due shops; access.
+- `commerce.db.test.mjs`: `shop_context` registered for deletion, writable only by its function.
+- Unit tests: `context.test.ts` (bounds, mirror datasets excluded, round trip, staleness), the canonical builder, and the boundary tests.
+
+**Release checklist:** the `shop-context-refresh` schedule is added, with a first run before `insights-refresh` at release (seven schedules in all).

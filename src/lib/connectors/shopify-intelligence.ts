@@ -617,8 +617,11 @@ function capability(
 export async function fetchShopifyPrespendIntelligence(
   shopDomain: string,
   accessToken: string,
-  /** returnEvidence: false skips the live return-evidence fetch (the worker reads it from the mirror, Phase 3 task 4). */
-  { returnEvidence = true }: { returnEvidence?: boolean } = {},
+  /**
+   * Datasets the mirror provides (Phase 3): returnEvidence (task 4), productEvidence (task 11) and locations
+   * (task 3). false skips the live read; the background context sync skips all three.
+   */
+  { returnEvidence = true, productEvidence = true, locations = true }: { returnEvidence?: boolean; productEvidence?: boolean; locations?: boolean } = {},
 ): Promise<ShopifyIntelligenceResult> {
   let grantedScopes: string[] = [];
   const warnings: string[] = [];
@@ -653,7 +656,8 @@ export async function fetchShopifyPrespendIntelligence(
     },
   } as const;
 
-  const entries = Object.entries(tasks).filter(([name]) => returnEvidence || name !== "return_evidence");
+  const skipped = new Set([...(returnEvidence ? [] : ["return_evidence"]), ...(productEvidence ? [] : ["product_evidence"]), ...(locations ? [] : ["locations"])]);
+  const entries = Object.entries(tasks).filter(([name]) => !skipped.has(name));
   const settled = await Promise.all(entries.map(async ([name, task]) => {
     const missing = task.scopes.filter((scope) => grantedScopes.length > 0 && !granted.has(scope));
     if (missing.length) return [name, { missing, value: undefined }] as const;
@@ -691,7 +695,7 @@ export async function fetchShopifyPrespendIntelligence(
   }
 
   const policyValue = result.policies.value as Awaited<ReturnType<typeof fetchPoliciesAndLocales>> | undefined;
-  result.return_evidence ??= { missing: [] };
+  for (const name of skipped) result[name] ??= { missing: [] };
   return {
     prespend: {
       granted_scopes: grantedScopes,

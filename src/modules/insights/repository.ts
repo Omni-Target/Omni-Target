@@ -2,6 +2,7 @@ import "server-only";
 import { supabaseAdmin } from "@/platform/supabase";
 import type { StoreData } from "@/lib/store-data";
 import type { CanonicalInputsReport, CanonicalMetaobject, CanonicalOrder, CanonicalProduct, MirrorReturnEvidence, MirrorReturnSignal } from "./canonical";
+import type { StoredShopContext } from "./context";
 
 /** The mirror reads and the stored snapshot of the read path (migration 0043). */
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
@@ -27,6 +28,31 @@ export const insightReturnEvidence = (shopKey: number, ids: number[], asOf: stri
 
 export const insightReturnSignals = (shopKey: number, ids: number[]) =>
   rpc<MirrorReturnSignal[]>("product_return_signals", { p_shop_key: shopKey, p_product_ids: ids });
+
+/** Shop context (0048): stored by the background sync, read by the insights worker. */
+export const saveShopContext = (shopKey: number, settings: Record<string, unknown>, context: Record<string, unknown>) =>
+  rpc<{ saved: boolean }>("save_shop_context", { p_shop_key: shopKey, p_settings: settings, p_context: context });
+
+export const insightShopContext = (shopKey: number) => rpc<StoredShopContext>("insight_shop_context", { p_shop_key: shopKey });
+
+export async function shopContextSyncedAt(shopKey: number): Promise<string | null> {
+  const { data, error } = await supabaseAdmin.from("shop_context").select("synced_at").eq("shop_key", shopKey).maybeSingle();
+  if (error) throw new Error(`shop_context read failed: ${error.message}`);
+  return data ? String(data.synced_at) : null;
+}
+
+export const shopsContextDue = (maxAgeSeconds: number, limit: number) =>
+  rpc<Array<{ shop_domain: string; synced_at: string | null }>>("shops_context_due", { p_max_age_seconds: maxAgeSeconds, p_limit: limit });
+
+/** The storefront logo the context sync stored for a shop, if any. */
+export async function storedShopLogo(shopDomain: string): Promise<string | null> {
+  const { data: shop, error } = await supabaseAdmin.from("shops").select("shop_key").eq("myshopify_domain", shopDomain).maybeSingle();
+  if (error) throw new Error(`shops read failed: ${error.message}`);
+  if (!shop) return null;
+  const { data, error: settingsError } = await supabaseAdmin.from("shop_settings").select("logo_url").eq("shop_key", shop.shop_key).maybeSingle();
+  if (settingsError) throw new Error(`shop_settings read failed: ${settingsError.message}`);
+  return (data?.logo_url as string | null | undefined) ?? null;
+}
 
 export const saveShopInsights = (shopKey: number, data: StoreData, inputs: CanonicalInputsReport) =>
   rpc<{ saved: boolean; bytes: number }>("save_shop_insights", {

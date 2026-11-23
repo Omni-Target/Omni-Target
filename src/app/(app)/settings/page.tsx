@@ -13,6 +13,7 @@ import { CustomerDataRequests, IntegrationCard } from "@/components/settings";
 import { SyncButton } from "@/components/SyncButton";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
 import { normalizeStoreLogoUrl } from "@/lib/store-logo-url";
+import { storedShopLogo } from "@/modules/insights/repository";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,13 +42,10 @@ export default async function SettingsPage() {
     "your store";
 
   let storeLogo = normalizeStoreLogoUrl(metadata.storeLogoUrl);
-  if (!storeLogo && integration?.shopify_store_url) {
-    const { fetchShopifyStoreLogo } = await import("@/lib/shopify-store-logo");
-    storeLogo = await fetchShopifyStoreLogo(
-      integration.shopify_store_url,
-      integration.shopify_custom_domain
-    );
-    if (storeLogo || metadata.storeLogoUrl) {
+  // The logo the background shop-context sync stored (Phase 3, task 5): the page never fetches it from the storefront.
+  if (!storeLogo && workspace?.shop_domain) {
+    storeLogo = normalizeStoreLogoUrl(await storedShopLogo(workspace.shop_domain).catch(() => null));
+    if (storeLogo) {
       clerk.users
         .updateUserMetadata(userId, {
           publicMetadata: { storeLogoUrl: storeLogo ?? null },

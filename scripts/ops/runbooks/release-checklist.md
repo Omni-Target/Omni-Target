@@ -72,12 +72,15 @@ copy of staging's.
     - `compliance-maintenance` (task 9): hourly at minute 40, with a 10-minute start window.
     - `sync-sweep` (task 10): every 10 minutes, with a 2-minute start window;
     - `import-reconcile` (task 6): every 10 minutes, with a 2-minute start window. Vercel's Hobby plan allows only daily cron jobs, so the 10-minute reconcile runs here; `vercel.json` keeps the Vercel route as a daily backstop (04:45).
-    - `sync-reconcile` (task 10): daily at 03:30, with a 30-minute start window.
+    - `sync-reconcile` (task 10): daily at 03:30, with a 30-minute start window. Since Phase 3 it also refreshes catalog definitions and referenced metaobjects, locations and refunds' line items.
     - `insights-refresh` (task 11): every six hours at minute 50, with a 30-minute start window. It rebuilds store snapshots older than six hours.
+    - `shop-context-refresh` (Phase 3 task 5): daily at 04:20, with a 30-minute start window. It reads shop details, markets, delivery zones, policies, locales, analytics, discounts, marketing history and the storefront logo for shops whose stored context is over 20 hours old.
 
     The store snapshot itself is the `shop-insights` task (task 11), on a `small-2x` machine. It is requested after imports, after sync runs that changed orders or products, by `insights-refresh`, and when a merchant refreshes. The dashboard shows no store data for a shop until its first snapshot exists. After the release, run `insights-refresh` once from the dashboard, so every connected shop gets one without waiting six hours.
 
-    Confirm in the Production dashboard that all six are attached and that their first runs complete. The Free plan allows 10 schedules.
+    The shop context is also read after each import and by `shop-insights` when it is missing or over a day old. After the release, run `shop-context-refresh` once before `insights-refresh`, so every connected shop's snapshot has its context.
+
+    Confirm in the Production dashboard that all seven are attached and that their first runs complete. The Free plan allows 10 schedules.
   - **Incremental sync** (task 10). Shops get GraphQL webhook subscriptions to `${base}/api/shopify/webhook` on install and reconnect, and from the daily reconcile. Since Phase 3 task 1 these include `app/uninstalled` and `shop/update`, and the install-time REST registrations (`orders/paid` and the same two) use the same endpoint rule. `base` is `SHOPIFY_WEBHOOK_BASE_URL`, falling back to `NEXT_PUBLIC_APP_URL`, and must be HTTPS; in production, leave the variable unset so the app URL is used. Set the same values in the Trigger.dev Production environment. Check a shop's subscriptions after the first install, and watch `sync-sweep` for dead events.
   - **Customer data requests** (task 9). Vercel production needs the R2 variables too: the download route and the post-redaction cleanup read the private bucket. Exports live under `compliance-exports/` in `R2_JSONL_BUCKET_NAME`. That bucket must keep no expiry rule shorter than 30 days, and today it has none. Deadline escalations reach Sentry with the tag `job:compliance-deadline`: add an alert rule for it.
   - **Plan.** Choose Hobby or Pro from measured run volume, and get it approved before purchase.

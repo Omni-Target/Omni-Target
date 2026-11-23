@@ -102,10 +102,9 @@ describe("buildCanonicalStoreData (task 11)", () => {
         return sorted.slice(start, start + limit);
       }),
       catalog: vi.fn(async () => ({ active, ids: catalogIds })),
-      products: vi.fn(async (ids: number[]) => ids.map((id) => product(id))),
+      products: vi.fn(async (ids: number[]) => ids.map((id) => product(id, { fields_version: 2, image_url: `https://cdn.example/${id}.jpg` }))),
       shop: vi.fn(async () => ({ name: "Shop", domain: "shop.example", myshopify_domain: "s.myshopify.com", currency: "GBP", country_code: "GB" })),
       intelligence: vi.fn(async () => intelligence()),
-      images: vi.fn(async (ids: number[]) => new Map(ids.map((id) => [id, `https://cdn.example/${id}.jpg`]))),
       metaobjects: vi.fn(async (ids: number[]) => ids.map((id) => ({ id, type: "shopify--size", display_name: `Size ${id}`, fields: { label: `L${id}` } }))),
       returnEvidence: vi.fn(async (ids: number[]): Promise<MirrorReturnEvidence[]> => ids.filter((id) => id === 7).map((id) => ({
         product_id: id, eligible_units: 40, processed_return_units: 8, refunded_units: null, processed_return_rate: "0.2000", primary_reason: "Size too small",
@@ -134,12 +133,12 @@ describe("buildCanonicalStoreData (task 11)", () => {
     expect(lamp).toMatchObject({ image_url: "https://cdn.example/7.jpg", unit_cost: 5 });
   });
 
-  it("takes images from the mirror, reading from Shopify only products not yet read with Phase 3's fields (task 2)", async () => {
+  it("takes images from the mirror only: a product not yet read with Phase 3's fields has none, never a Shopify read (tasks 2 and 5)", async () => {
     const d = deps(many(2), [7, 9]);
     d.products.mockImplementation(async (ids: number[]) => ids.map((id) => product(id, id === 9 ? {} : { fields_version: 2, image_url: id === 7 ? "https://cdn.mirror/7.jpg" : null })));
     const { data, inputs } = await buildCanonicalStoreData("s.myshopify.com", d);
-    expect(d.images).toHaveBeenCalledWith([9]);
-    expect(inputs.productsWithImages).toBe(2);
+    expect(inputs.productsWithImages).toBe(1);
+    expect(data.products.find((p) => p.id === "9")?.image_url).toBe("");
     expect(data.products.find((p) => p.id === "7")).toMatchObject({ image_url: "https://cdn.mirror/7.jpg" });
     // Read with Phase 3's fields and without an image: none, not a Shopify read.
     expect(data.products.find((p) => p.id === "8")?.image_url).toBe("");

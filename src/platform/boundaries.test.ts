@@ -61,4 +61,18 @@ describe("no full sync inside a request (Phase 2, task 11)", () => {
     const callers = files.filter((file) => /\bbuildCanonicalStoreData\(/.test(file.text) && !file.path.startsWith("modules/insights/")).map((file) => file.path);
     expect(callers).toEqual([]);
   });
+
+  // Phase 3, task 5: Shopify is read only by background syncs. The snapshot is built, and pages render, from the database.
+  const SHOPIFY_READS = /\b(shopifyGraphql|fetchShopifyPrespendIntelligence|fetchShopifyReturnEvidence|fetchShopifyStoreData|fetchShopifyStoreLogo|getShopifyAccessForShop|shopifyAdminRestUrl)\b/;
+  it("builds and reads the store snapshot without any Shopify request", () => {
+    const worker = ["modules/insights/live.ts", "modules/insights/canonical.ts", "modules/insights/read.ts", "modules/insights/context.ts", "modules/insights/repository.ts"];
+    expect(files.filter((file) => worker.includes(file.path)).map((file) => file.path).sort()).toEqual([...worker].sort());
+    expect(files.filter((file) => worker.includes(file.path) && SHOPIFY_READS.test(file.text)).map((file) => file.path)).toEqual([]);
+  });
+
+  it("renders no page or layout from a Shopify request", () => {
+    const offenders = files.filter((file) => file.path.startsWith("app/") && /\/(page|layout)\.tsx?$/.test(file.path) && SHOPIFY_READS.test(file.text))
+      .map((file) => file.path);
+    expect(offenders).toEqual([]);
+  });
 });
