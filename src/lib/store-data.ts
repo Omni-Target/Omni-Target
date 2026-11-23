@@ -168,7 +168,7 @@ export interface ProductDecisionEvidence {
 export interface StoreCatalogClaim {
   key: string;
   value: string;
-  source: "product_metafield" | "referenced_metaobject";
+  source: "product_metafield" | "referenced_metaobject" | "variant_metafield";
 }
 
 export interface StoreAnalytics {

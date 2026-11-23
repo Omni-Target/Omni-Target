@@ -5,13 +5,14 @@ import type { ShopifyShop } from "@/lib/connectors/shopify";
 import { getShopifyAccessForShop } from "@/modules/credentials/shopify";
 import { syncShop } from "@/modules/ingestion/sync-repository";
 import { buildCanonicalStoreData, type CanonicalInputsReport } from "./canonical";
-import { importComplete, insightCatalog, insightOrdersPage, insightProducts, saveShopInsights } from "./repository";
+import { importComplete, insightCatalog, insightMetaobjects, insightOrdersPage, insightProducts, saveShopInsights } from "./repository";
 
 /**
  * The worker side of the read path (Phase 2, task 11): builds a shop's store
  * snapshot from the mirror and stores it. The few reads that still go to
- * Shopify (shop details, product images, the pre-spend datasets) are bounded
- * GraphQL calls made here, never in a request.
+ * Shopify (shop details, images of products not yet read with Phase 3's
+ * fields, the pre-spend datasets) are bounded GraphQL calls made here, never
+ * in a request.
  */
 type Gql = <T>(query: string, variables?: Record<string, unknown>) => Promise<T>;
 
@@ -60,6 +61,7 @@ export async function computeShopInsights(shopDomain: string): Promise<ShopInsig
     shop: () => fetchShop(gql, shopDomain),
     intelligence: () => fetchShopifyPrespendIntelligence(shopDomain, access.accessToken),
     images: (ids) => fetchImages(gql, ids),
+    metaobjects: (ids) => insightMetaobjects(shop.shopKey, ids),
     ingestionComplete: () => importComplete(shop.shopId),
   });
   const saved = await saveShopInsights(shop.shopKey, data, inputs);

@@ -18,12 +18,21 @@ const withQuery = (connection: string, filter?: string) => (filter ? `${connecti
 
 // Field selections shared by the bulk queries and the incremental sync's by-ID queries (task 10), so both read
 // exactly the same Level 1 fields.
+// Phase 3 (task 2) adds the catalog fields below the first line of each. The description excerpt stays at 600
+// characters (the storage review's decision, architecture/storage-optimisation.md); truncation is now recorded.
+export const DESCRIPTION_LIMIT = 600;
 const PRODUCT_FIELDS = `id title handle status productType vendor tags isGiftCard publishedAt createdAt updatedAt
-      category { fullName }
-      description(truncateAt: 600)`;
+      category { id fullName }
+      description(truncateAt: ${DESCRIPTION_LIMIT})
+      options { name }
+      hasOnlyDefaultVariant requiresSellingPlan hasVariantsThatRequiresComponents combinedListingRole onlineStoreUrl
+      featuredMedia { preview { image { url altText width height } } }
+      mediaCount { count }`;
 const VARIANT_FIELDS = `id title sku position price compareAtPrice taxable inventoryPolicy inventoryQuantity createdAt updatedAt
+        barcode availableForSale requiresComponents
+        unitPriceMeasurement { measuredType quantityUnit quantityValue referenceUnit referenceValue }
         selectedOptions { name value }
-        inventoryItem { id tracked requiresShipping countryCodeOfOrigin unitCost { amount currencyCode } measurement { weight { value unit } } }`;
+        inventoryItem { id tracked requiresShipping countryCodeOfOrigin provinceCodeOfOrigin harmonizedSystemCode unitCost { amount currencyCode } measurement { weight { value unit } } }`;
 const METAFIELD_FIELDS = "id namespace key type value updatedAt";
 const INVENTORY_LEVEL_FIELDS = `id updatedAt location { id } quantities(names: ["available", "on_hand"]) { name quantity }`;
 const ORDER_FIELDS = `id name createdAt processedAt cancelledAt updatedAt test sourceName
@@ -51,6 +60,7 @@ export function catalogQuery(filter?: string): string {
       ${PRODUCT_FIELDS}
       variants { edges { node {
         ${VARIANT_FIELDS}
+        metafields { edges { node { ${METAFIELD_FIELDS} } } }
       } } }
       metafields { edges { node { ${METAFIELD_FIELDS} } } }
     } }
@@ -143,15 +153,21 @@ export const REFUND_LINES_BY_ID = `query RefundLinesById($id: ID!, $after: Strin
     refundLineItems(first: 100, after: $after) { ${page} edges { node { quantity lineItem { product { id } } } } }
   } }
 }`;
+// Variants come with their first 10 metafields; a variant with more is paged by VARIANT_METAFIELDS_PAGE.
+const VARIANT_WITH_METAFIELDS = `${VARIANT_FIELDS}
+        metafields(first: 10) { ${page} edges { node { ${METAFIELD_FIELDS} } } }`;
 export const PRODUCT_BY_ID = `query ProductById($id: ID!) {
   node(id: $id) { ... on Product {
     ${PRODUCT_FIELDS}
-    variants(first: 50) { ${page} edges { node { ${VARIANT_FIELDS} } } }
+    variants(first: 25) { ${page} edges { node { ${VARIANT_WITH_METAFIELDS} } } }
     metafields(first: 50) { ${page} edges { node { ${METAFIELD_FIELDS} } } }
   } }
 }`;
 export const PRODUCT_VARIANTS_PAGE = `query ProductVariants($id: ID!, $after: String) {
-  node(id: $id) { ... on Product { id variants(first: 50, after: $after) { ${page} edges { node { ${VARIANT_FIELDS} } } } } }
+  node(id: $id) { ... on Product { id variants(first: 25, after: $after) { ${page} edges { node { ${VARIANT_WITH_METAFIELDS} } } } } }
+}`;
+export const VARIANT_METAFIELDS_PAGE = `query VariantMetafields($id: ID!, $after: String) {
+  node(id: $id) { ... on ProductVariant { id metafields(first: 50, after: $after) { ${page} edges { node { ${METAFIELD_FIELDS} } } } } }
 }`;
 export const PRODUCT_METAFIELDS_PAGE = `query ProductMetafields($id: ID!, $after: String) {
   node(id: $id) { ... on Product { id metafields(first: 50, after: $after) { ${page} edges { node { ${METAFIELD_FIELDS} } } } } }
@@ -168,6 +184,25 @@ export const RETURN_BY_ID = `query ReturnById($id: ID!, $after: String) {
     order { id }
     returnLineItems(first: 100, after: $after) { ${page} edges { node { ${RETURN_LINE_ITEM_FIELDS} } } }
   } }
+}`;
+
+/**
+ * Catalog references (Phase 3, task 2). Definitions are few and listed in full; metaobjects are read by
+ * ID, only those the catalog references. A metaobject's display name is its definition's display-name
+ * field, so it is derived from the fields rather than requested.
+ */
+export const METAFIELD_DEFINITIONS = `query MetafieldDefinitions($ownerType: MetafieldOwnerType!, $after: String) {
+  metafieldDefinitions(ownerType: $ownerType, first: 250, after: $after) {
+    ${page} nodes { id namespace key name description type { name } }
+  }
+}`;
+export const METAOBJECT_DEFINITIONS = `query MetaobjectDefinitions($after: String) {
+  metaobjectDefinitions(first: 100, after: $after) {
+    ${page} nodes { id type name displayNameKey fieldDefinitions { key name type { name } } }
+  }
+}`;
+export const METAOBJECTS_BY_ID = `query MetaobjectsById($ids: [ID!]!) {
+  nodes(ids: $ids) { ... on Metaobject { id type handle updatedAt fields { key type value } } }
 }`;
 
 /** Resources updated at or after a time, oldest change first (the daily reconcile, task 10). */

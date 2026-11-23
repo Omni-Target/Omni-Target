@@ -147,3 +147,19 @@ Anything that functionality, filtering, analytics or intelligence needs stays. S
   - Monitoring (task 10) alerts at 60% and 75% of whatever quota applies.
   - The import pre-flight check refuses a full import that would pass 75%.
 - **Decided: Pro is the intended production starting plan (ADR 0002).** The upgrade is approved separately during the production release. Nothing is upgraded before then.
+
+## Phase 3 additions (measured on staging)
+
+**Task 2 (0044, catalog completeness).** Average row sizes on staging, for rows read with Phase 3's fields against the same shop's older rows:
+
+| | Before 0044 | With 0044's fields |
+|---|---|---|
+| omni-beta product (no images, not on the Online Store) | 503 bytes | 657 bytes |
+| Dev-store product (most with an image) | — | 577 bytes |
+| omni-beta variant | 196 bytes | 211 bytes |
+
+- **Per product:** the new fields cost about 150 bytes without an image and about 300 bytes with one. The image URL, alt text and Online Store URL take most of it.
+- **Incident-scale shop (70k products, 210k variants):** about +21 MB for products and +5 MB for variants, roughly 4% of the 643.5 MB measured after the storage review.
+- **Description:** the excerpt stays at 600 characters (storage review).
+- **Metafields:** variant metafields add rows only where a shop defines them.
+- **Metaobjects:** only those referenced are stored, each capped at 6 KB of field values. Shops typically have hundreds, not millions.

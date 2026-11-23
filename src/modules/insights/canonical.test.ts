@@ -58,6 +58,23 @@ describe("the mirror in the snapshot computation's shape (task 11)", () => {
       8: { unitCost: 5, currency: "GBP", costCoverage: "partial", claims: [{ key: "specs.material", value: "Oak", source: "product_metafield" }] },
     });
   });
+
+  it("claims a referenced metaobject's fields, never its IDs, and each distinct variant value once (task 2)", () => {
+    const sized = product(9, { metafields: [
+      { owner: "product", namespace: "shopify", key: "material", type: "metaobject_reference", value: "gid://shopify/Metaobject/5" },
+      { owner: "product", namespace: "shopify", key: "color", type: "list.metaobject_reference", value: '["gid://shopify/Metaobject/6"]' },
+      { owner: "variant", namespace: "specs", key: "length", type: "dimension", value: '{"value":150,"unit":"cm"}' },
+      { owner: "variant", namespace: "specs", key: "length", type: "dimension", value: '{"value":150,"unit":"cm"}' },
+      { owner: "variant", namespace: "specs", key: "length", type: "dimension", value: '{"value":160,"unit":"cm"}' },
+      { owner: "variant", namespace: "specs", key: "fits", type: "list.product_reference", value: '["gid://shopify/Product/1"]' },
+    ] });
+    const metaobjects = new Map([[5, { id: 5, type: "shopify--material", display_name: "Oak", fields: { label: "Oak", taxonomy_reference: "gid://shopify/TaxonomyValue/1" } }]]);
+    expect(canonicalEnrichment([sized], metaobjects)[9].claims).toEqual([
+      { key: "shopify--material.label", value: "Oak", source: "referenced_metaobject" },
+      { key: "specs.length", value: '{"value":150,"unit":"cm"}', source: "variant_metafield" },
+      { key: "specs.length", value: '{"value":160,"unit":"cm"}', source: "variant_metafield" },
+    ]);
+  });
 });
 
 describe("buildCanonicalStoreData (task 11)", () => {
@@ -73,6 +90,7 @@ describe("buildCanonicalStoreData (task 11)", () => {
       shop: vi.fn(async () => ({ name: "Shop", domain: "shop.example", myshopify_domain: "s.myshopify.com", currency: "GBP", country_code: "GB" })),
       intelligence: vi.fn(async () => intelligence()),
       images: vi.fn(async (ids: number[]) => new Map(ids.map((id) => [id, `https://cdn.example/${id}.jpg`]))),
+      metaobjects: vi.fn(async (ids: number[]) => ids.map((id) => ({ id, type: "shopify--size", display_name: `Size ${id}`, fields: { label: `L${id}` } }))),
       ingestionComplete: vi.fn(async () => true),
     } satisfies CanonicalInsightsDeps;
     return d;
@@ -90,6 +108,30 @@ describe("buildCanonicalStoreData (task 11)", () => {
     expect(d.products).toHaveBeenCalledWith([7, 9, 8]);
     const lamp = data.products.find((p) => p.id === "7");
     expect(lamp).toMatchObject({ image_url: "https://cdn.example/7.jpg", unit_cost: 5 });
+  });
+
+  it("takes images from the mirror, reading from Shopify only products not yet read with Phase 3's fields (task 2)", async () => {
+    const d = deps(many(2), [7, 9]);
+    d.products.mockImplementation(async (ids: number[]) => ids.map((id) => product(id, id === 9 ? {} : { fields_version: 2, image_url: id === 7 ? "https://cdn.mirror/7.jpg" : null })));
+    const { data, inputs } = await buildCanonicalStoreData("s.myshopify.com", d);
+    expect(d.images).toHaveBeenCalledWith([9]);
+    expect(inputs.productsWithImages).toBe(2);
+    expect(data.products.find((p) => p.id === "7")).toMatchObject({ image_url: "https://cdn.mirror/7.jpg" });
+    // Read with Phase 3's fields and without an image: none, not a Shopify read.
+    expect(data.products.find((p) => p.id === "8")?.image_url).toBe("");
+  });
+
+  it("resolves the metaobjects products reference from the mirror (task 2)", async () => {
+    const d = deps(many(1), [7]);
+    d.products.mockImplementation(async (ids: number[]) => ids.map((id) => product(id, {
+      fields_version: 2, metafields: [{ owner: "product", namespace: "shopify", key: "size", type: "list.metaobject_reference", value: '["gid://shopify/Metaobject/41","gid://shopify/Metaobject/42"]' }],
+    })));
+    const { data } = await buildCanonicalStoreData("s.myshopify.com", d);
+    expect(d.metaobjects).toHaveBeenCalledWith([41, 42]);
+    expect(data.products.find((p) => p.id === "7")?.catalog_claims).toEqual([
+      { key: "shopify--size.label", value: "L41", source: "referenced_metaobject" },
+      { key: "shopify--size.label", value: "L42", source: "referenced_metaobject" },
+    ]);
   });
 
   it("reads orders newest first in pages, and reports truncation only when more remain", async () => {

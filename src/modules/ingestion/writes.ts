@@ -4,8 +4,8 @@ import { supabaseAdmin } from "@/platform/supabase";
 import { withCustomerDigests, withOrderDigests, withRefundDigests } from "./digests";
 import type { DataDomain } from "./access";
 import type {
-  CustomerRow, InventoryLevelRow, LineItemRow, LocationRow, MetafieldRow, OrderRow, ProductRow, RefundLineRow, RefundRow,
-  ReturnLineItemRow, ReturnRow, VariantRow,
+  CustomerRow, InventoryLevelRow, LineItemRow, LocationRow, MetafieldDefinitionRow, MetafieldRow, MetaobjectDefinitionRow, MetaobjectRow,
+  OrderRow, ProductRow, RefundLineRow, RefundRow, ReturnLineItemRow, ReturnRow, VariantRow,
 } from "./mappers";
 
 /**
@@ -34,6 +34,28 @@ export const writeCatalog = (shopKey: number, batch: { products: ProductRow[]; v
   rpc<Record<string, number>>("ingest_catalog", {
     p_shop_key: shopKey, p_products: batch.products, p_variants: batch.variants, p_metafields: batch.metafields,
   });
+
+/** The shop's metafield and metaobject definitions, replacing what is stored (0044). */
+export const writeCatalogDefinitions = (shopKey: number, batch: { metafieldDefinitions: MetafieldDefinitionRow[]; metaobjectDefinitions: MetaobjectDefinitionRow[] }) =>
+  rpc<Record<string, number>>("replace_catalog_definitions", {
+    p_shop_key: shopKey, p_metafield_definitions: batch.metafieldDefinitions, p_metaobject_definitions: batch.metaobjectDefinitions,
+  });
+
+/** Referenced metaobjects as read, and those Shopify no longer has (0044). */
+export const writeMetaobjects = (shopKey: number, metaobjects: MetaobjectRow[], deleted: number[]) =>
+  rpc<Record<string, number>>("ingest_metaobjects", { p_shop_key: shopKey, p_metaobjects: metaobjects, p_deleted: deleted });
+
+/** Referenced metaobjects not stored yet, or read before staleBefore (0044). */
+export const catalogReferenceIds = async (shopKey: number, staleBefore: Date | null, limit = 250): Promise<number[]> =>
+  (await rpc<Array<number | string>>("catalog_reference_ids", { p_shop_key: shopKey, p_stale_before: staleBefore?.toISOString() ?? null, p_limit: limit }))
+    .map(Number);
+
+/** Each stored metaobject definition's display-name field, by type. */
+export async function metaobjectDisplayKeys(shopKey: number): Promise<Map<string, string | null>> {
+  const { data, error } = await supabaseAdmin.from("metaobject_definitions").select("type, display_name_key").eq("shop_key", shopKey).limit(1000);
+  if (error) throw new IngestWriteError("metaobject_definitions", error.message);
+  return new Map((data ?? []).map((d) => [String(d.type), (d.display_name_key as string | null) ?? null]));
+}
 
 export const writeInventory = (shopKey: number, batch: { locations: LocationRow[]; levels: InventoryLevelRow[] }) =>
   rpc<Record<string, number>>("ingest_inventory", { p_shop_key: shopKey, p_locations: batch.locations, p_levels: batch.levels });

@@ -6,7 +6,11 @@ import {
   mapCustomerUnit,
   mapInventoryUnit,
   mapLocation,
+  mapMetafieldDefinition,
+  mapMetaobject,
+  mapMetaobjectDefinition,
   mapOrderUnit,
+  metaobjectReferenceIds,
   mapProductUnit,
   mapReturnsUnit,
 } from "./mappers";
@@ -42,6 +46,88 @@ describe("catalog", () => {
 
   it("drops a record of the wrong type rather than storing a wrong ID", () => {
     expect(mapProductUnit(unit({ id: "gid://shopify/Collection/1" })).product).toBeNull();
+  });
+
+  it("maps Phase 3's product and variant fields, and keeps absent values null (task 2)", () => {
+    const description = `${"d".repeat(597)}...`;
+    const mapped = mapProductUnit(unit(
+      { id: "gid://shopify/Product/20", title: "Tee", status: "ACTIVE", description, category: { id: "gid://shopify/TaxonomyCategory/aa-1-13-8", fullName: "Apparel > T-Shirts" },
+        options: [{ name: "Size" }, { name: "Colour" }], hasOnlyDefaultVariant: false, requiresSellingPlan: false, hasVariantsThatRequiresComponents: true,
+        combinedListingRole: "PARENT", onlineStoreUrl: "https://shop.example/products/tee", mediaCount: { count: 3 },
+        featuredMedia: { preview: { image: { url: "https://cdn.shopify.com/tee.jpg", altText: "A tee,\n  folded", width: 1075, height: 1200 } } } },
+      [{ id: "gid://shopify/ProductVariant/21", __parentId: "gid://shopify/Product/20", price: "10", barcode: "5012345678900", availableForSale: true,
+        requiresComponents: true, unitPriceMeasurement: { measuredType: "WEIGHT", quantityValue: 250, quantityUnit: "G", referenceValue: 100, referenceUnit: "G" },
+        inventoryItem: { id: "gid://shopify/InventoryItem/22", harmonizedSystemCode: "610910", provinceCodeOfOrigin: "ON" } }],
+    ));
+    expect(mapped.product).toMatchObject({
+      fields_version: 2, description_excerpt: description, description_truncated: true, category_id: "aa-1-13-8", option_names: ["Size", "Colour"],
+      has_only_default_variant: false, requires_selling_plan: false, is_bundle: true, combined_listing_role: "parent",
+      featured_image_url: "https://cdn.shopify.com/tee.jpg", featured_image_alt: "A tee, folded", featured_image_width: 1075, featured_image_height: 1200,
+      media_count: 3, online_store_url: "https://shop.example/products/tee",
+    });
+    expect(mapped.variants[0]).toMatchObject({
+      barcode: "5012345678900", available_for_sale: true, requires_components: true, harmonized_system_code: "610910", province_of_origin: "ON",
+      unit_price_measurement: { measured_type: "weight", quantity_value: 250, quantity_unit: "g", reference_value: 100, reference_unit: "g" },
+    });
+
+    // Nothing Shopify did not give is filled in: no image, no category, no measurement (Shopify sends zeros and no type).
+    const bare = mapProductUnit(unit({ id: "gid://shopify/Product/30", title: "Plain", status: "ACTIVE", description: "", featuredMedia: null, mediaCount: { count: 0 } },
+      [{ id: "gid://shopify/ProductVariant/31", __parentId: "gid://shopify/Product/30", price: "5", barcode: null,
+        unitPriceMeasurement: { measuredType: null, quantityValue: 0, quantityUnit: null, referenceValue: 0, referenceUnit: null } }]));
+    expect(bare.product).toMatchObject({
+      description_excerpt: null, description_truncated: false, category_id: null, featured_image_url: null, featured_image_alt: null, media_count: 0,
+      combined_listing_role: null, online_store_url: null, option_names: [],
+    });
+    expect(bare.variants[0]).toMatchObject({ barcode: null, unit_price_measurement: null, available_for_sale: null });
+    // A description read without the field (not requested) is unknown, not "not truncated".
+    expect(mapProductUnit(unit({ id: "gid://shopify/Product/40", title: "Old", status: "ACTIVE" })).product?.description_truncated).toBeNull();
+    // Empty alt text is Shopify's answer, kept as empty.
+    expect(mapProductUnit(unit({ id: "gid://shopify/Product/41", title: "Img", status: "ACTIVE",
+      featuredMedia: { preview: { image: { url: "https://cdn.shopify.com/x.jpg", altText: "" } } } })).product?.featured_image_alt).toBe("");
+  });
+
+  it("maps variant metafields under their variant, and drops those of a variant it could not map (task 2)", () => {
+    const mapped = mapProductUnit(unit({ id: "gid://shopify/Product/50", title: "Board", status: "ACTIVE" }, [
+      { id: "gid://shopify/ProductVariant/51", __parentId: "gid://shopify/Product/50", price: "300" },
+      { id: "gid://shopify/Metafield/52", __parentId: "gid://shopify/ProductVariant/51", namespace: "specs", key: "length", type: "dimension", value: '{"value":150,"unit":"CENTIMETERS"}' },
+      { id: "gid://shopify/ProductVariant/53", __parentId: "gid://shopify/Product/50" }, // no price: not stored
+      { id: "gid://shopify/Metafield/54", __parentId: "gid://shopify/ProductVariant/53", namespace: "specs", key: "length", type: "dimension", value: "{}" },
+      { id: "gid://shopify/Metafield/55", __parentId: "gid://shopify/Product/50", namespace: "shopify", key: "size", type: "list.metaobject_reference", value: '["gid://shopify/Metaobject/7"]' },
+    ]));
+    expect(mapped.metafields.map((m) => [m.owner_type, m.owner_shopify_id, m.product_shopify_id, m.key])).toEqual([
+      ["variant", 51, 50, "length"], ["product", 50, 50, "size"],
+    ]);
+  });
+
+  it("reads metaobject references from reference metafields only", () => {
+    expect(metaobjectReferenceIds("list.metaobject_reference", '["gid://shopify/Metaobject/7","gid://shopify/Metaobject/8"]')).toEqual([7, 8]);
+    expect(metaobjectReferenceIds("metaobject_reference", "gid://shopify/Metaobject/9")).toEqual([9]);
+    expect(metaobjectReferenceIds("mixed_reference", "gid://shopify/Metaobject/10")).toEqual([10]);
+    expect(metaobjectReferenceIds("single_line_text_field", "gid://shopify/Metaobject/9")).toEqual([]);
+    expect(metaobjectReferenceIds("list.product_reference", '["gid://shopify/Product/1"]')).toEqual([]);
+    expect(metaobjectReferenceIds("metaobject_reference", null)).toEqual([]);
+  });
+
+  it("maps definitions and metaobjects within their bounds; a metaobject's display name is its definition's display field", () => {
+    expect(mapMetafieldDefinition({ id: "gid://shopify/MetafieldDefinition/1", namespace: "test_data", key: "snowboard_length", name: "Snowboard length",
+      description: null, type: { name: "dimension" } }, "product")).toEqual({
+      owner_type: "product", namespace: "test_data", key: "snowboard_length", shopify_id: 1, name: "Snowboard length", type: "dimension", description: null });
+    expect(mapMetafieldDefinition({ id: "gid://shopify/MetafieldDefinition/2", namespace: "x", key: "y", type: { name: "boolean" } }, "variant")).toBeNull();
+    expect(mapMetaobjectDefinition({ id: "gid://shopify/MetaobjectDefinition/3", type: "shopify--size", name: "Size", displayNameKey: "label",
+      fieldDefinitions: [{ key: "label", name: "Label", type: { name: "single_line_text_field" } }] })).toEqual({
+      shopify_id: 3, type: "shopify--size", name: "Size", display_name_key: "label", field_definitions: [{ key: "label", name: "Label", type: "single_line_text_field" }] });
+
+    const size = mapMetaobject({ id: "gid://shopify/Metaobject/4", type: "shopify--size", handle: "small", updatedAt: "2026-11-01T00:00:00Z",
+      fields: [{ key: "label", value: "Small" }, { key: "taxonomy_reference", value: "gid://shopify/TaxonomyValue/17" }, { key: "empty", value: null }] }, "label");
+    expect(size).toEqual({ shopify_id: 4, type: "shopify--size", handle: "small", display_name: "Small",
+      fields: { label: "Small", taxonomy_reference: "gid://shopify/TaxonomyValue/17" }, fields_truncated: false, shopify_updated_at: "2026-11-01T00:00:00Z" });
+    expect(mapMetaobject({ id: "gid://shopify/Metaobject/5", type: "t", handle: "h", fields: [] }, null)?.display_name).toBe("h");
+    // Long values are cut at 500 characters and the whole stays within 6 KB, marked truncated.
+    const big = mapMetaobject({ id: "gid://shopify/Metaobject/6", type: "t", fields: Array.from({ length: 20 }, (_, i) => ({ key: `f${i}`, value: "v".repeat(600) })) }, null)!;
+    expect(big.fields_truncated).toBe(true);
+    expect(JSON.stringify(big.fields).length).toBeLessThanOrEqual(6_000);
+    expect(Object.values(big.fields).every((v) => v.length === 500)).toBe(true);
+    expect(mapMetaobject({ id: "gid://shopify/Product/1", type: "t" }, null)).toBeNull();
   });
 });
 

@@ -2,7 +2,8 @@ import {
   computeStoreData, type ShopifyOrder, type ShopifyProduct, type ShopifyShop,
 } from "@/lib/connectors/shopify";
 import { productEnrichment, type ShopifyIntelligenceResult } from "@/lib/connectors/shopify-intelligence";
-import type { StoreData } from "@/lib/store-data";
+import type { StoreCatalogClaim, StoreData } from "@/lib/store-data";
+import { metaobjectReferenceIds } from "@/modules/ingestion/mappers";
 
 /**
  * The store snapshot from the canonical mirror (Phase 2, task 11).
@@ -21,8 +22,13 @@ import type { StoreData } from "@/lib/store-data";
  *  - cost and catalog evidence for every one of those products, from the
  *    mirror (REST covered the first 400 active products, ING-03);
  *  - cities as normalised at ingest (country-aware, GEO-01), so no AI pass;
- *  - shop details, images and the pre-spend reads (markets, shipping,
- *    analytics, policies, returns) still come from Shopify, read by the worker.
+ *  - product images from the mirror (Phase 3, task 2); only products not yet
+ *    read with Phase 3's fields (fields_version null) still have theirs read
+ *    from Shopify by the worker;
+ *  - catalog claims from product and variant metafields, with referenced
+ *    metaobjects resolved from the mirror (Phase 3, task 2);
+ *  - shop details and the pre-spend reads (markets, shipping, analytics,
+ *    policies, returns) still come from Shopify, read by the worker.
  */
 export const ORDER_LIMIT = 50_000;
 export const ORDER_PAGE = 2_000;
@@ -55,8 +61,20 @@ export interface CanonicalProduct {
   status: string;
   created_at: string | null;
   variants: Array<{ id: number; title: string | null; price: number | string; inventory_quantity: number | null; unit_cost: number | string | null; unit_cost_currency: string | null }>;
-  metafields: Array<{ namespace: string; key: string; type: string; value: string | null }>;
+  /** Product metafields, and (0044) its variants' (owner "variant"), each with its definition's name when the shop defines one. */
+  metafields: Array<{ owner?: "product" | "variant"; namespace: string; key: string; type: string; value: string | null; name?: string | null }>;
+  /** The featured image (0044); null when there is none, or when the row predates 0044 (fields_version null). */
+  image_url?: string | null;
+  fields_version?: number | null;
 }
+export interface CanonicalMetaobject {
+  id: number;
+  type: string;
+  display_name: string | null;
+  fields: Record<string, string>;
+  definition_name?: string | null;
+}
+const MAX_VARIANT_VALUES = 10;
 
 const money = (value: number | string | null | undefined) => String(Number(value ?? 0));
 const regions = new Intl.DisplayNames(["en"], { type: "region" });
@@ -111,15 +129,43 @@ export function toShopifyProduct(product: CanonicalProduct, imageUrl?: string | 
   };
 }
 
-/** Cost and catalog evidence for every product, as the live enrichment computes it. */
-export function canonicalEnrichment(products: CanonicalProduct[]): ShopifyIntelligenceResult["products"] {
-  return Object.fromEntries(products.map((product) => [
-    String(product.id),
-    productEnrichment(
+/** Every metaobject the products' metafields reference. */
+export const referencedMetaobjectIds = (products: CanonicalProduct[]): number[] =>
+  [...new Set(products.flatMap((p) => p.metafields.flatMap((m) => metaobjectReferenceIds(m.type, m.value))))];
+
+/**
+ * Cost and catalog evidence for every product, as the live enrichment computes it, plus what Phase 3 reads:
+ * a reference metafield gives a claim per field of each metaobject it references (single or list, as the
+ * live path did for single references; Shopify IDs are not claims), and variant metafields give claims of
+ * their own, one per distinct value.
+ */
+export function canonicalEnrichment(products: CanonicalProduct[], metaobjects: ReadonlyMap<number, CanonicalMetaobject> = new Map()): ShopifyIntelligenceResult["products"] {
+  return Object.fromEntries(products.map((product) => {
+    const productFields = product.metafields.filter((m) => (m.owner ?? "product") === "product" && m.value !== null).flatMap((m) => {
+      const ids = metaobjectReferenceIds(m.type, m.value);
+      if (!ids.length) return [{ namespace: m.namespace, key: m.key, type: m.type, value: m.value as string }];
+      return ids.flatMap((id) => {
+        const target = metaobjects.get(id);
+        if (!target) return [];
+        const fields = Object.entries(target.fields).filter(([, value]) => !value.startsWith("gid://")).map(([key, value]) => ({ key, value }));
+        return [{ namespace: m.namespace, key: m.key, type: "metaobject_reference", value: `gid://shopify/Metaobject/${id}`, reference: { type: target.type, fields } }];
+      });
+    });
+    const enrichment = productEnrichment(
       product.variants.map((v) => (v.unit_cost === null || !v.unit_cost_currency ? null : { amount: v.unit_cost, currencyCode: v.unit_cost_currency })),
-      product.metafields.flatMap((m) => (m.value === null ? [] : [{ namespace: m.namespace, key: m.key, type: m.type, value: m.value }])),
-    ),
-  ]));
+      productFields,
+    );
+    const variantValues = new Map<string, Set<string>>();
+    for (const m of product.metafields) {
+      if (m.owner !== "variant" || m.value === null || m.value.length > 1_000 || m.type.includes("reference")) continue;
+      const key = `${m.namespace}.${m.key}`;
+      const values = variantValues.get(key) ?? new Set<string>();
+      if (values.size < MAX_VARIANT_VALUES) values.add(m.value);
+      variantValues.set(key, values);
+    }
+    const variantClaims: StoreCatalogClaim[] = [...variantValues].flatMap(([key, values]) => [...values].map((value) => ({ key, value, source: "variant_metafield" as const })));
+    return [String(product.id), { ...enrichment, claims: [...enrichment.claims, ...variantClaims] }];
+  }));
 }
 
 export interface CanonicalInsightsDeps {
@@ -129,7 +175,10 @@ export interface CanonicalInsightsDeps {
   /** Read from Shopify by the worker. */
   shop: () => Promise<ShopifyShop>;
   intelligence: () => Promise<ShopifyIntelligenceResult>;
+  /** From Shopify, only for products not yet read with Phase 3's fields. */
   images: (productIds: number[]) => Promise<Map<number, string>>;
+  /** Stored metaobjects by ID (0044). */
+  metaobjects: (ids: number[]) => Promise<CanonicalMetaobject[]>;
   ingestionComplete: () => Promise<boolean>;
   now?: () => number;
 }
@@ -174,7 +223,13 @@ export async function buildCanonicalStoreData(
   const ids = [...new Set([...catalog.ids, ...orders.flatMap((o) => o.lines.map((l) => l.product_id).filter((id): id is number => id !== null))])];
   const products: CanonicalProduct[] = [];
   for (let i = 0; i < ids.length; i += PRODUCT_PAGE) products.push(...(await deps.products(ids.slice(i, i + PRODUCT_PAGE))));
-  const images = await deps.images(products.map((p) => p.id));
+  const images = new Map<number, string>();
+  for (const p of products) if (p.image_url) images.set(p.id, p.image_url);
+  const unread = products.filter((p) => p.fields_version === null || p.fields_version === undefined).map((p) => p.id);
+  if (unread.length) for (const [id, url] of await deps.images(unread)) images.set(id, url);
+  const metaobjects = new Map<number, CanonicalMetaobject>();
+  const referenced = referencedMetaobjectIds(products);
+  for (let i = 0; i < referenced.length; i += PRODUCT_PAGE) for (const o of await deps.metaobjects(referenced.slice(i, i + PRODUCT_PAGE))) metaobjects.set(o.id, o);
 
   const [shop, intelligence, ingestionComplete] = await live;
   const data = await computeStoreData({
@@ -184,7 +239,7 @@ export async function buildCanonicalStoreData(
     orders: orders.map(toShopifyOrder),
     ordersTruncated,
     ingestionComplete,
-    intelligence: { ...intelligence, products: canonicalEnrichment(products) },
+    intelligence: { ...intelligence, products: canonicalEnrichment(products, metaobjects) },
     totalCatalogProductsCount: catalog.active || undefined,
     rawProducts: products.map((p) => toShopifyProduct(p, images.get(p.id))),
     productsTruncated: catalog.active > catalogLimit,

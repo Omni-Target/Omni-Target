@@ -28,7 +28,11 @@ function harness(shopify: { orders?: Record<number, Raw | Error>; products?: Rec
       const lines = shopify.refundLines?.[Number(id.split("/").pop())];
       return { node: lines ? { refundLineItems: conn(lines) } : null };
     }
-    if (query.includes("ProductById")) return { node: shopify.products?.[Number(id.split("/").pop())] ?? null };
+    if (query.includes("ProductById")) return { node: shopify.products?.[Number(id.split("/").pop())] ? structuredClone(shopify.products[Number(id.split("/").pop())]) : null };
+    if (query.includes("VariantMetafields")) {
+      calls.push(`variant metafields ${id} after ${String(variables.after)}`);
+      return { node: { id, metafields: { pageInfo: { hasNextPage: false, endCursor: null }, edges: [{ node: { id: "gid://shopify/Metafield/99", namespace: "specs", key: "late", type: "single_line_text_field", value: "page 2" } }] } } };
+    }
     if (query.includes("CustomersById")) return { nodes: (variables.ids as string[]).map((gid) => shopify.customers?.[Number(gid.split("/").pop())] ?? null) };
     if (query.includes("UpdatedSince")) {
       const connection = ["orders", "products", "customers"].find((name) => query.includes(`${name}(first`))!;
@@ -97,6 +101,27 @@ describe("incremental sync worker (task 10)", () => {
     u.push("e2", "refunds/create", { order_id: 11 });
     await processShopEvents("s.myshopify.com", "run_1", u.deps);
     expect(u.inbox.map((e) => e.status)).toEqual(["failed", "failed"]);
+  });
+
+  it("reads a product's variant metafields beyond the first page, writes them under the variant, then resolves new references (Phase 3, task 2)", async () => {
+    const variant = {
+      id: "gid://shopify/ProductVariant/71", price: "10",
+      metafields: { pageInfo: { hasNextPage: true, endCursor: "c1" }, edges: [{ node: { id: "gid://shopify/Metafield/98", namespace: "specs", key: "length", type: "dimension", value: "{}" } }] },
+    };
+    const t = harness({ products: { 7: { id: "gid://shopify/Product/7", title: "Board", status: "ACTIVE", variants: conn([variant]), metafields: conn([]) } } });
+    const references = vi.fn(async () => ({}));
+    t.push("e1", "products/update", { id: 7 });
+    await processShopEvents("s.myshopify.com", "run_1", { ...t.deps, references });
+    expect(t.calls).toEqual(["variant metafields gid://shopify/ProductVariant/71 after c1"]);
+    const batch = (t.writes.writeCatalog.mock.calls[0] as unknown[])[1] as { metafields: Array<{ owner_type: string; owner_shopify_id: number; key: string }> };
+    expect(batch.metafields.map((m) => [m.owner_type, m.owner_shopify_id, m.key])).toEqual([["variant", 71, "length"], ["variant", 71, "late"]]);
+    expect(references).toHaveBeenCalledWith(expect.any(Function), 2);
+
+    // A failure to read references leaves the product's events processed: the daily reconcile repairs references.
+    const u = harness({ products: { 7: { id: "gid://shopify/Product/7", title: "Board", status: "ACTIVE", variants: conn([]), metafields: conn([]) } } });
+    u.push("e1", "products/update", { id: 7 });
+    await processShopEvents("s.myshopify.com", "run_1", { ...u.deps, references: async () => { throw new Error("throttled"); } });
+    expect(u.inbox[0].status).toBe("processed");
   });
 
   it("leaves the inbox alone without access, and stops at its time budget", async () => {

@@ -1,7 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "@/platform/supabase";
 import type { StoreData } from "@/lib/store-data";
-import type { CanonicalInputsReport, CanonicalOrder, CanonicalProduct } from "./canonical";
+import type { CanonicalInputsReport, CanonicalMetaobject, CanonicalOrder, CanonicalProduct } from "./canonical";
 
 /** The mirror reads and the stored snapshot of the read path (migration 0043). */
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
@@ -18,6 +18,9 @@ export const insightCatalog = (shopKey: number, limit: number) =>
 
 export const insightProducts = (shopKey: number, ids: number[]) =>
   rpc<CanonicalProduct[]>("insight_products", { p_shop_key: shopKey, p_ids: ids });
+
+export const insightMetaobjects = (shopKey: number, ids: number[]) =>
+  rpc<CanonicalMetaobject[]>("insight_metaobjects", { p_shop_key: shopKey, p_ids: ids });
 
 export const saveShopInsights = (shopKey: number, data: StoreData, inputs: CanonicalInputsReport) =>
   rpc<{ saved: boolean; bytes: number }>("save_shop_insights", {

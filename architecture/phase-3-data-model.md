@@ -21,7 +21,7 @@ Phase 3 also works within the **20 scopes the app already holds**. Adding a scop
 ## Review of the starting point
 
 **What the mirror already holds** (migrations 0024–0043):
-- **Products:** title, handle, status, type, vendor, category name, tags, a 1,000-character description excerpt (the bulk query truncates it at 600), gift-card flag, publication date and first/last sold dates.
+- **Products:** title, handle, status, type, vendor, category name, tags, a 600-character description excerpt, gift-card flag, publication date and first/last sold dates.
 - **Variants:** SKU, options, price, compare-at price, taxable, inventory item, tracked, inventory policy, quantity, requires shipping, weight, unit cost with currency, and country of origin. A `fulfillment_service` column exists but is never filled.
 - **Product metafields:** value excerpts up to 1,000 characters. Variant metafields aren't imported.
 - **Empty tables** created in 0024 and never filled: `metaobjects`, `metaobject_definitions` and `shop_settings` (currency, timezone, country, locales, plan, markets, delivery summary and policies).
@@ -80,7 +80,7 @@ Migration numbers are provisional. Each task ships its own migration with a `.do
   - product media metadata: featured image URL, alt text, dimensions and media count;
   - the taxonomy category ID;
   - bundle, combined-listing and selling-plan flags;
-  - the description length and a truncation flag.
+  - a truncation flag for the description (the excerpt stays at 600 characters, the storage review's decision).
 - Metafields gain `owner_type = 'variant'`, and reference metafields keep their referenced GIDs.
 - Metaobjects referenced by product or variant metafields, and their definitions, are imported:
   - by ID in batches after the catalog import;
@@ -276,3 +276,70 @@ Staging holds 3 `user_integrations` rows, 2 with a snapshot (183 KB in total, ne
 Steps 2–4 change stored data and wait for explicit approval.
 
 **Schema probe** (`schema-probe.live.test.ts`): introspection only, used for the field review above. It is run with `LIVE_TYPES` and `LIVE_OUT`.
+
+### Task 2: product and variant completeness (2026-11-23; migration 0044)
+
+**What is read.** The bulk catalog query and the by-ID product queries now add:
+- **Products:**
+  - the taxonomy category ID;
+  - option names;
+  - default-variant, selling-plan, bundle and combined-listing flags;
+  - featured image URL, alt text and size;
+  - media count;
+  - Online Store URL;
+  - a description-truncation flag.
+- **Variants:** barcode, available for sale, bundle components, unit-price measurement, harmonized system code and province of origin.
+- **Variant metafields.**
+
+The bulk query stays within Shopify's limits (4 connections, nested 2 deep). In the by-ID path, variants come 25 at a time with their first 10 metafields; a variant with more has them paged.
+
+**Field-set marker.** `products.fields_version` records which field set a row was last read with. It is null for rows read before 0044, so a missing value there means "not read yet", never "empty", which task 6's data-quality flags rely on.
+
+**What is still not filled in:**
+- An unset unit-price measurement (Shopify answers with zeros and no type) is stored as null.
+- An image's empty alt text is kept as empty, because Shopify confirms there is none.
+- Specifications are only what the shop's metafields and metaobjects hold; nothing is inferred from titles or tags.
+
+**Specifications and compatibility:**
+- **Definitions.** Metafield definitions for products and variants (name, type, description) go in the new `metafield_definitions` table. Metaobject definitions, with their display-name field, go in `metaobject_definitions`. Shopify lists both in full, and they are replaced as a whole.
+- **Referenced metaobjects.** Metaobjects referenced by product or variant metafields are found from the reference metafields' values, by `catalog_reference_ids` with a partial index, and read 100 at a time by ID. They are stored with field values capped at 500 characters and 6 KB. Newer wins, and a metaobject Shopify no longer has is deleted.
+- **When it runs:**
+  - after the catalog import;
+  - after product webhooks, for missing references only;
+  - in the daily reconcile, for definitions and references read more than 20 hours ago.
+- A failure here never fails the products themselves: it is recorded, and the next daily run repairs it.
+- A metaobject's display name comes from its definition's display field, because the Level 1 guard refuses the `displayName` token in any query.
+
+**Read path:**
+- `insight_products` returns the image, field set and variant metafields with definition names; `insight_metaobjects` resolves references.
+- Catalog claims now include each referenced metaobject's fields (single and list references; Shopify IDs are not claims), and each distinct variant metafield value, as `variant_metafield`.
+- Product images come from the mirror. Only products not yet read with Phase 3's fields still have their image read from Shopify by the worker. Task 5 removes the remaining live reads.
+
+**Results:**
+
+| Check | Result |
+|---|---|
+| Dev store, catalog-scoped import (bulk path) | 19 products, 32 variants, 13 metafields, 3 referenced metaobjects (`shopify--size`); stored values identical to Shopify's raw answer for every field checked (`catalog-fields.live.test.ts`) |
+| omni-beta, 100 products re-read through the by-ID sync path | 100 products, 109 variants, 11 metafields identical to Shopify; 60 s |
+| Definitions after the daily refresh | omni-beta 2 metafield definitions + 1 metaobject definition; dev store 3 + 2; identical to Shopify |
+| Read path (task 11 equivalence check, dev store) | Orders, products and figures identical to the REST computation; 16 of 17 products with images, now from the mirror |
+| Migration round trip | Down restores staging's 0043 schema exactly (76 tables, 184 functions, 171 indexes) |
+
+**Tests:**
+- Database (`catalog-completeness.db.test.mjs`, 6 tests):
+  - new fields and the field-set marker;
+  - variant metafields replaced with their product, removed with their variant, untouched by an older copy;
+  - definitions replaced in full;
+  - references found from reference types only, missing or stale;
+  - newer-wins metaobjects and deletion;
+  - the read path's products and metaobjects;
+  - ingestibility and grants.
+- `commerce.db.test.mjs` registers the new table for deletion.
+- Unit tests: mappers (new fields, nulls for absent values, variant metafields, references, definitions, metaobject bounds), by-ID variant metafield paging and reference resolution in the sync, catalog-references (batches, deletions, no rereads, bounds, Level 1), and canonical claims and images.
+
+**Capacity:** see `capacity-measurements.md`, "Phase 3 additions". It is about +4% for the incident-scale shop.
+
+**Limits:**
+- omni-beta's other 99,900 mirrored products keep their Phase 2 fields until Shopify changes them or a catalog import runs; a full re-import is refused on staging's Free plan.
+- Metaobjects that reference other metaobjects are resolved one level deep.
+- Metaobjects no longer referenced stay stored until the shop's data is deleted (small).

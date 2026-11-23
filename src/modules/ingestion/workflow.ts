@@ -17,7 +17,11 @@ import { mapCustomerUnit, mapInventoryUnit, mapLocation, mapOrderUnit, mapProduc
 import { BULK_QUERIES, LOCATIONS_QUERY, searchFilter } from "./queries";
 import { deleteStaged, openStaged, r2StagingStore, shouldStage, stageStream, stagingKey } from "./staging";
 import { IncompleteResultError, streamImport } from "./stream-import";
-import { deriveCustomerFacts, loadCheckpoint, saveCheckpoint, writeCatalog, writeCustomers, writeInventory, writeOrders, writeReturns } from "./writes";
+import {
+  catalogReferenceIds, deriveCustomerFacts, loadCheckpoint, metaobjectDisplayKeys, saveCheckpoint, writeCatalog, writeCatalogDefinitions, writeCustomers,
+  writeInventory, writeMetaobjects, writeOrders, writeReturns,
+} from "./writes";
+import { syncCatalogReferences, type ReferenceWrites } from "./catalog-references";
 
 /**
  * The initial import of one shop (Phase 2, task 6), run by the shop-import
@@ -27,6 +31,7 @@ import { deriveCustomerFacts, loadCheckpoint, saveCheckpoint, writeCatalog, writ
  * checkpoint while the same bulk operation's result is still available.
  */
 const log = createLogger({ module: "shop-import" });
+const referenceWrites: ReferenceWrites = { catalogReferenceIds, metaobjectDisplayKeys, writeCatalogDefinitions, writeMetaobjects };
 
 /** Units per write batch; a unit is a record with its children. */
 const BATCH_ROWS = 1_000;
@@ -278,12 +283,23 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
       await keepAlive(ctx);
     };
 
-    await run("catalog", domains.catalog.status !== "inaccessible", () => importBulk(ctx, "catalog", BULK_QUERIES.catalog(), async (units) => {
-      const mapped = units.map(mapProductUnit);
-      const batch = { products: mapped.flatMap((m) => (m.product ? [m.product] : [])), variants: mapped.flatMap((m) => m.variants), metafields: mapped.flatMap((m) => m.metafields) };
-      const stats = await writeCatalog(ctx.shopKey, batch);
-      return { rows: batch.products.length + batch.variants.length + batch.metafields.length, rejected: units.length - batch.products.length, stats };
-    }));
+    await run("catalog", domains.catalog.status !== "inaccessible", async () => {
+      const result = await importBulk(ctx, "catalog", BULK_QUERIES.catalog(), async (units) => {
+        const mapped = units.map(mapProductUnit);
+        const batch = { products: mapped.flatMap((m) => (m.product ? [m.product] : [])), variants: mapped.flatMap((m) => m.variants), metafields: mapped.flatMap((m) => m.metafields) };
+        const stats = await writeCatalog(ctx.shopKey, batch);
+        return { rows: batch.products.length + batch.variants.length + batch.metafields.length, rejected: units.length - batch.products.length, stats };
+      });
+      if (result.status !== "succeeded") return result;
+      // Definitions and referenced metaobjects (Phase 3, task 2). A failure is recorded, not fatal: the daily reconcile repairs it.
+      try {
+        const references = await syncCatalogReferences(ctx.gql, ctx.shopKey, referenceWrites);
+        return { ...result, written: { ...(result.written ?? {}), metaobjects: references.metaobjects.written, metaobject_reads: references.metaobjects.read } };
+      } catch (error) {
+        log.warn("Catalog references not read", { shop: ctx.shopDomain }, error);
+        return { ...result, reason: `references: ${error instanceof Error ? error.message.slice(0, 200) : "unknown"}` };
+      }
+    });
 
     await run("inventory", domains.inventory.status !== "inaccessible", async () => {
       const locations = [];

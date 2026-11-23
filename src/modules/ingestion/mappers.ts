@@ -13,6 +13,7 @@
 import { consolidateLocation } from "@/lib/location-rules";
 import { gidType, parseGid } from "./gid";
 import type { JsonlUnit } from "./jsonl";
+import { DESCRIPTION_LIMIT } from "./queries";
 
 type Json = Record<string, unknown>;
 
@@ -51,10 +52,20 @@ export function enumValue(value: unknown): string | null {
 const currency = (value: unknown): string | null => (typeof value === "string" && /^[A-Z]{3}$/.test(value) ? value : null);
 const country = (value: unknown): string | null => (typeof value === "string" && /^[A-Z]{2}$/.test(value) ? value : null);
 
+/** The catalog field set rows are read with (products.fields_version, 0044): 2 is Phase 3's; null rows predate it. */
+export const CATALOG_FIELDS_VERSION = 2;
+
 export interface ProductRow {
   shopify_id: number; title: string; handle: string | null; status: string; product_type: string | null; vendor: string | null;
   category: string | null; tags: string[]; description_excerpt: string | null; is_gift_card: boolean; published_at: string | null;
   shopify_created_at: string | null; shopify_updated_at: string | null;
+  fields_version: number; description_truncated: boolean | null; category_id: string | null; option_names: string[];
+  has_only_default_variant: boolean | null; requires_selling_plan: boolean | null; is_bundle: boolean | null;
+  combined_listing_role: "parent" | "child" | null; featured_image_url: string | null; featured_image_alt: string | null;
+  featured_image_width: number | null; featured_image_height: number | null; media_count: number | null; online_store_url: string | null;
+}
+export interface UnitPriceMeasurement {
+  measured_type: string; quantity_value: number | null; quantity_unit: string | null; reference_value: number | null; reference_unit: string | null;
 }
 export interface VariantRow {
   shopify_id: number; product_shopify_id: number; title: string | null; sku: string | null; position: number | null;
@@ -62,13 +73,54 @@ export interface VariantRow {
   inventory_item_id: number | null; tracked: boolean | null; inventory_policy: string | null; inventory_quantity: number | null;
   requires_shipping: boolean | null; weight: string | null; weight_unit: string | null; unit_cost: string | null;
   unit_cost_currency: string | null; country_of_origin: string | null; shopify_created_at: string | null; shopify_updated_at: string | null;
+  barcode: string | null; available_for_sale: boolean | null; requires_components: boolean | null;
+  unit_price_measurement: UnitPriceMeasurement | null; harmonized_system_code: string | null; province_of_origin: string | null;
 }
 export interface MetafieldRow {
-  owner_type: "product"; owner_shopify_id: number; namespace: string; key: string; type: string;
-  value_excerpt: string | null; value_truncated: boolean; shopify_updated_at: string | null;
+  owner_type: "product" | "variant"; owner_shopify_id: number;
+  /** The product the owner belongs to: the batch applies a product's metafields only with the product. Not stored. */
+  product_shopify_id: number;
+  namespace: string; key: string; type: string; value_excerpt: string | null; value_truncated: boolean; shopify_updated_at: string | null;
 }
 
 const SELECTED_OPTIONS_BYTES = 1800;
+const METAFIELD_VALUE_CHARS = 1000;
+const positiveInt = (value: unknown): number | null => {
+  const n = int(value);
+  return n !== null && n > 0 ? n : null;
+};
+const collapse = (value: unknown, max: number): string | null => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : null);
+
+/** Shopify's unit-price measurement, or null when the variant has none (Shopify then returns zeros and no type). */
+function unitPriceMeasurement(value: unknown): UnitPriceMeasurement | null {
+  const m = obj(value);
+  const measuredType = enumValue(m?.measuredType);
+  if (!m || !measuredType) return null;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
+  return {
+    measured_type: measuredType, quantity_value: num(m.quantityValue), quantity_unit: enumValue(m.quantityUnit),
+    reference_value: num(m.referenceValue), reference_unit: enumValue(m.referenceUnit),
+  };
+}
+
+function mapMetafield(child: Json, owner: { type: "product" | "variant"; id: number }, productId: number): MetafieldRow | null {
+  const namespace = str(child.namespace, 255);
+  const key = str(child.key, 64);
+  const kind = str(child.type, 64);
+  if (!namespace || !key || !kind) return null;
+  const value = typeof child.value === "string" ? child.value : null;
+  return {
+    owner_type: owner.type,
+    owner_shopify_id: owner.id,
+    product_shopify_id: productId,
+    namespace,
+    key,
+    type: kind,
+    value_excerpt: value === null ? null : value.slice(0, METAFIELD_VALUE_CHARS),
+    value_truncated: value !== null && value.length > METAFIELD_VALUE_CHARS,
+    shopify_updated_at: at(child.updatedAt),
+  };
+}
 
 export function mapProductUnit(unit: JsonlUnit): { product: ProductRow | null; variants: VariantRow[]; metafields: MetafieldRow[] } {
   const root = unit.root;
@@ -84,11 +136,25 @@ export function mapProductUnit(unit: JsonlUnit): { product: ProductRow | null; v
     vendor: str(root.vendor, 255),
     category: str(obj(root.category)?.fullName, 512),
     tags,
-    description_excerpt: str(root.description, 1000),
+    description_excerpt: str(root.description, DESCRIPTION_LIMIT),
     is_gift_card: bool(root.isGiftCard) ?? false,
     published_at: at(root.publishedAt),
     shopify_created_at: at(root.createdAt),
     shopify_updated_at: at(root.updatedAt),
+    fields_version: CATALOG_FIELDS_VERSION,
+    // truncateAt returns at most DESCRIPTION_LIMIT characters, ending "..." when it cut the text.
+    description_truncated: typeof root.description === "string"
+      ? root.description.length >= DESCRIPTION_LIMIT && root.description.endsWith("...")
+      : null,
+    category_id: str(String(obj(root.category)?.id ?? "").replace(/^gid:\/\/shopify\/TaxonomyCategory\//, ""), 64),
+    option_names: (Array.isArray(root.options) ? root.options : []).map((o) => str(obj(o)?.name, 255)).filter((n): n is string => Boolean(n)).slice(0, 10),
+    has_only_default_variant: bool(root.hasOnlyDefaultVariant),
+    requires_selling_plan: bool(root.requiresSellingPlan),
+    is_bundle: bool(root.hasVariantsThatRequiresComponents),
+    combined_listing_role: root.combinedListingRole === "PARENT" ? "parent" : root.combinedListingRole === "CHILD" ? "child" : null,
+    ...featuredImage(root.featuredMedia),
+    media_count: nonNegativeInt(obj(root.mediaCount)?.count),
+    online_store_url: str(root.onlineStoreUrl, 1024),
   };
 
   const variants: VariantRow[] = [];
@@ -134,26 +200,102 @@ export function mapProductUnit(unit: JsonlUnit): { product: ProductRow | null; v
         country_of_origin: country(item?.countryCodeOfOrigin),
         shopify_created_at: at(child.createdAt),
         shopify_updated_at: at(child.updatedAt),
+        barcode: str(child.barcode, 255),
+        available_for_sale: bool(child.availableForSale),
+        requires_components: bool(child.requiresComponents),
+        unit_price_measurement: unitPriceMeasurement(child.unitPriceMeasurement),
+        harmonized_system_code: str(item?.harmonizedSystemCode, 32),
+        province_of_origin: str(item?.provinceCodeOfOrigin, 16),
       });
     } else if (type === "Metafield") {
-      const namespace = str(child.namespace, 255);
-      const key = str(child.key, 64);
-      const kind = str(child.type, 64);
-      if (!namespace || !key || !kind) continue;
-      const value = typeof child.value === "string" ? child.value : null;
-      metafields.push({
-        owner_type: "product",
-        owner_shopify_id: productId,
-        namespace,
-        key,
-        type: kind,
-        value_excerpt: value === null ? null : value.slice(0, 1000),
-        value_truncated: value !== null && value.length > 1000,
-        shopify_updated_at: at(child.updatedAt),
-      });
+      // A product's own metafield, or one of its variant's (bulk and by-ID units both name the parent).
+      const parentVariant = gidType(child.__parentId) === "ProductVariant" ? parseGid(child.__parentId, "ProductVariant") : null;
+      const row = mapMetafield(child, parentVariant === null ? { type: "product", id: productId } : { type: "variant", id: parentVariant }, productId);
+      if (row) metafields.push(row);
     }
   }
-  return { product, variants, metafields };
+  // A variant's metafields are kept only with the variant.
+  const variantIds = new Set(variants.map((v) => v.shopify_id));
+  return { product, variants, metafields: metafields.filter((m) => m.owner_type === "product" || variantIds.has(m.owner_shopify_id)) };
+}
+
+function featuredImage(media: unknown): Pick<ProductRow, "featured_image_url" | "featured_image_alt" | "featured_image_width" | "featured_image_height"> {
+  const image = obj(obj(obj(media)?.preview)?.image);
+  const url = str(image?.url, 1024);
+  if (!url) return { featured_image_url: null, featured_image_alt: null, featured_image_width: null, featured_image_height: null };
+  // Empty alt text is kept as empty: Shopify confirms there is none.
+  return { featured_image_url: url, featured_image_alt: collapse(image?.altText, 512), featured_image_width: positiveInt(image?.width), featured_image_height: positiveInt(image?.height) };
+}
+
+/** Metaobject IDs a reference metafield's value names (a GID, or a JSON list of GIDs). */
+export function metaobjectReferenceIds(type: string, value: string | null): number[] {
+  if (!value || !/metaobject_reference|mixed_reference/.test(type)) return [];
+  return [...value.matchAll(/gid:\/\/shopify\/Metaobject\/(\d{1,18})/g)].map((m) => Number(m[1]));
+}
+
+export interface MetafieldDefinitionRow {
+  owner_type: "product" | "variant"; namespace: string; key: string; shopify_id: number; name: string; type: string; description: string | null;
+}
+export function mapMetafieldDefinition(node: unknown, ownerType: "product" | "variant"): MetafieldDefinitionRow | null {
+  const d = obj(node);
+  const id = parseGid(d?.id, "MetafieldDefinition");
+  const namespace = str(d?.namespace, 255);
+  const key = str(d?.key, 64);
+  const name = str(d?.name, 255);
+  const type = str(obj(d?.type)?.name, 64);
+  if (id === null || !namespace || !key || !name || !type) return null;
+  return { owner_type: ownerType, namespace, key, shopify_id: id, name, type, description: str(d?.description, 500) };
+}
+
+export interface MetaobjectDefinitionRow {
+  shopify_id: number; type: string; name: string | null; display_name_key: string | null;
+  field_definitions: Array<{ key: string; name: string | null; type: string | null }>;
+}
+const FIELD_DEFINITIONS_BYTES = 15_000;
+export function mapMetaobjectDefinition(node: unknown): MetaobjectDefinitionRow | null {
+  const d = obj(node);
+  const id = parseGid(d?.id, "MetaobjectDefinition");
+  const type = str(d?.type, 255);
+  if (id === null || !type) return null;
+  const fields: MetaobjectDefinitionRow["field_definitions"] = [];
+  for (const f of Array.isArray(d?.fieldDefinitions) ? d.fieldDefinitions : []) {
+    const key = str(obj(f)?.key, 64);
+    if (!key) continue;
+    const entry = { key, name: str(obj(f)?.name, 255), type: str(obj(obj(f)?.type)?.name, 64) };
+    if (JSON.stringify([...fields, entry]).length > FIELD_DEFINITIONS_BYTES) break;
+    fields.push(entry);
+  }
+  return { shopify_id: id, type, name: str(d?.name, 255), display_name_key: str(d?.displayNameKey, 64), field_definitions: fields };
+}
+
+export interface MetaobjectRow {
+  shopify_id: number; type: string; handle: string | null; display_name: string | null; fields: Record<string, string>;
+  fields_truncated: boolean; shopify_updated_at: string | null;
+}
+const METAOBJECT_FIELD_CHARS = 500;
+const METAOBJECT_FIELDS_BYTES = 6_000;
+/** A metaobject with its field values (each at most 500 characters, 6 KB in all); its display name is its definition's display field. */
+export function mapMetaobject(node: unknown, displayNameKey: string | null): MetaobjectRow | null {
+  const o = obj(node);
+  const id = parseGid(o?.id, "Metaobject");
+  const type = str(o?.type, 255);
+  if (id === null || !type) return null;
+  const fields: Record<string, string> = {};
+  let truncated = false;
+  for (const f of Array.isArray(o?.fields) ? o.fields : []) {
+    const key = str(obj(f)?.key, 64);
+    const value = obj(f)?.value;
+    if (!key || typeof value !== "string") continue;
+    if (value.length > METAOBJECT_FIELD_CHARS) truncated = true;
+    const next = { ...fields, [key]: value.slice(0, METAOBJECT_FIELD_CHARS) };
+    if (JSON.stringify(next).length > METAOBJECT_FIELDS_BYTES) { truncated = true; break; }
+    Object.assign(fields, next);
+  }
+  return {
+    shopify_id: id, type, handle: str(o?.handle, 255),
+    display_name: (displayNameKey ? str(fields[displayNameKey], 255) : null) ?? str(o?.handle, 255),
+    fields, fields_truncated: truncated, shopify_updated_at: at(o?.updatedAt),
+  };
 }
 
 export interface OrderRow {

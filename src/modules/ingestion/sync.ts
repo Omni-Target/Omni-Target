@@ -5,6 +5,7 @@ import type { JsonlUnit } from "./jsonl";
 import { mapCustomerUnit, mapInventoryUnit, mapOrderUnit, mapProductUnit, mapRefundLines, mapReturnsUnit, type OrderRow, type RefundLineRow } from "./mappers";
 import {
   CUSTOMERS_BY_ID, INVENTORY_ITEM_BY_ID, ORDER_BY_ID, PRODUCT_BY_ID, PRODUCT_METAFIELDS_PAGE, PRODUCT_VARIANTS_PAGE, REFUND_LINES_BY_ID, RETURN_BY_ID,
+  VARIANT_METAFIELDS_PAGE,
   searchFilter, updatedSinceQuery,
 } from "./queries";
 import { chunkUnits, groupResources, unitFromNode, type SyncKind, type SyncResource } from "./sync-events";
@@ -38,6 +39,8 @@ type Raw = Record<string, unknown>;
 export interface SyncDeps {
   shop: (shopDomain: string) => ReturnType<typeof SyncRepository.syncShop>;
   gql: (shopDomain: string) => Promise<Gql | null>;
+  /** After products are written: reads the metaobjects they newly reference (Phase 3, task 2). */
+  references?: (gql: Gql, shopKey: number) => Promise<unknown>;
   repo: Pick<typeof SyncRepository, "claimSyncEvents" | "finishSyncEvents" | "deleteSyncedRecords">;
   writes: Pick<typeof Writes, "writeOrders" | "writeCatalog" | "writeCustomers" | "writeInventory" | "writeReturns" | "writeHistoryArrivals" | "historyWindowStart">;
   now?: () => number;
@@ -70,6 +73,11 @@ async function fetchOne(gql: Gql, kind: Exclude<SyncKind, "customer">, id: numbe
     if (!node) return null;
     await allPages(gql, node, "variants", PRODUCT_VARIANTS_PAGE, gid("Product", id));
     await allPages(gql, node, "metafields", PRODUCT_METAFIELDS_PAGE, gid("Product", id));
+    // A variant's metafields beyond its first page (Phase 3, task 2).
+    for (const edge of edgesOf(node, "variants")) {
+      const variant = (edge as Raw | null)?.node as Raw | undefined;
+      if (variant && typeof variant.id === "string") await allPages(gql, variant, "metafields", VARIANT_METAFIELDS_PAGE, variant.id);
+    }
     return unitFromNode(node);
   }
   if (kind === "inventory") {
@@ -201,6 +209,10 @@ export async function processShopEvents(shopDomain: string, runId: string, deps:
           }
         }
         const deferred = found.length ? await writeKind(kind, found, shop, deps.writes, gql) : new Set<number>();
+        if (kind === "product" && found.length && deps.references) {
+          // References are repaired daily if this fails; the products themselves are written.
+          await deps.references(gql, shop.shopKey).catch((error) => log.warn("Catalog references not read", { shop: shopDomain }, error));
+        }
         if (missing.length && (kind === "order" || kind === "product" || kind === "customer")) {
           report.deleted += (await deps.repo.deleteSyncedRecords(shop.shopKey, kind, missing.map((r) => r.id))).deleted;
         }

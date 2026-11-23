@@ -64,7 +64,7 @@ const SUMMARIES = [
 /** Every table that mirrors or is derived from one shop's Shopify data. */
 const SYNCED = [
   "products", "product_variants", "inventory_locations", "inventory_levels", "customers", "orders", "order_line_items",
-  "refunds", "returns", "return_line_items", "metafields", "metaobject_definitions", "metaobjects", "shop_settings",
+  "refunds", "returns", "return_line_items", "metafields", "metafield_definitions", "metaobject_definitions", "metaobjects", "shop_settings",
   "shop_access", "sync_runs", "sync_checkpoints", "webhook_events", "product_metrics", "store_metrics", ...SUMMARIES,
 ];
 /** Tables that name a shop but hold ownership, billing, credentials or history, which redaction handles separately. */
@@ -89,6 +89,7 @@ async function seed({ id, shop }) {
     ["insert into public.returns (shop_key, shopify_id, order_shopify_id, status) values ($1, 18, 15, 'closed')", [id]],
     ["insert into public.return_line_items (shop_key, shopify_id, return_shopify_id, line_item_shopify_id, quantity, return_reason) values ($1, 19, 18, 16, 1, 'defective')", [id]],
     ["insert into public.metafields (shop_key, owner_type, owner_shopify_id, namespace, key, type, value_excerpt) values ($1, 'product', 10, 'specs', 'wattage', 'number_integer', '40')", [id]],
+    ["insert into public.metafield_definitions (shop_key, owner_type, namespace, key, shopify_id, name, type) values ($1, 'product', 'specs', 'wattage', 22, 'Wattage', 'number_integer')", [id]],
     ["insert into public.metaobject_definitions (shop_key, shopify_id, type) values ($1, 20, 'material')", [id]],
     ["insert into public.metaobjects (shop_key, shopify_id, type, fields) values ($1, 21, 'material', '{\"name\": \"Brass\"}')", [id]],
     ["insert into public.shop_settings (shop_key, currency, timezone) values ($1, 'GBP', 'Europe/London')", [id]],
