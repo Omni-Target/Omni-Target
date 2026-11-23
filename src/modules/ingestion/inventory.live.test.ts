@@ -95,8 +95,9 @@ describe("live inventory", () => {
     for (let i = 0; i < items.length; i += 50) {
       const slice = items.slice(i, i + 50);
       const { nodes } = await gql<{ nodes: Array<Raw | null> }>(RAW_ITEMS, { ids: slice.map((id) => `gid://shopify/InventoryItem/${id}`) });
-      const { data: stored } = await supabaseAdmin.from("inventory_levels").select(`inventory_item_id, location_shopify_id, is_active, ${NAMES.join(", ")}`)
-        .eq("shop_key", shop.shop_key).in("inventory_item_id", slice);
+      const columns: string = `inventory_item_id, location_shopify_id, is_active, ${NAMES.join(", ")}`;
+      const { data: storedRows } = await supabaseAdmin.from("inventory_levels").select(columns).eq("shop_key", shop.shop_key).in("inventory_item_id", slice);
+      const stored = (storedRows ?? []) as unknown as Array<Record<string, unknown>>;
       const { data: variants } = await supabaseAdmin.from("product_variants").select("shopify_id, inventory_item_id, tracked").eq("shop_key", shop.shop_key).in("inventory_item_id", slice);
       const variantIds = (variants ?? []).map((v) => Number(v.shopify_id));
       const { data: availability } = await supabaseAdmin.rpc("inventory_availability", { p_shop_key: shop.shop_key, p_variant_ids: variantIds });
@@ -107,10 +108,10 @@ describe("live inventory", () => {
           location: idOf((n.location as Raw).id), active: n.isActive,
           q: Object.fromEntries(((n.quantities as Raw[]) ?? []).map((x) => [x.name, x.quantity])),
         }));
-        const mine = (stored ?? []).filter((l) => Number(l.inventory_item_id) === item);
+        const mine = stored.filter((l) => Number(l.inventory_item_id) === item);
         differ(`item ${item} locations`, rawLevels.map((l) => l.location).sort(), mine.map((l) => Number(l.location_shopify_id)).sort());
         for (const r of rawLevels) {
-          const s = mine.find((l) => Number(l.location_shopify_id) === r.location) as Record<string, unknown> | undefined;
+          const s = mine.find((l) => Number(l.location_shopify_id) === r.location);
           if (!s) continue;
           levelsChecked += 1;
           differ(`item ${item} location ${r.location}`, [r.active, ...NAMES.map((n) => r.q[n])], [s.is_active, ...NAMES.map((n) => s[n])]);
