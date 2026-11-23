@@ -343,3 +343,25 @@ The bulk query stays within Shopify's limits (4 connections, nested 2 deep). In 
 - omni-beta's other 99,900 mirrored products keep their Phase 2 fields until Shopify changes them or a catalog import runs; a full re-import is refused on staging's Free plan.
 - Metaobjects that reference other metaobjects are resolved one level deep.
 - Metaobjects no longer referenced stay stored until the shop's data is deleted (small).
+
+### Fix: planner statistics after an import (2026-11-23; migration 0045)
+
+**Found by** Task 2's run of the Phase 2 scale harness (the small scenario, on a database already holding 1M orders from earlier runs). A Phase 2 defect, independent of Task 2.
+
+**What happened.**
+- An import summarises a new shop's months straight after its bulk writes, before autovacuum has analysed the tables.
+- The planner's statistics listed every existing shop among `shop_key`'s most common values, so it estimated a shop it had never seen at one row.
+- The sale-date update in `summarise_detail_month` then chose nested loops that filter joins row by row.
+- One month of a 1,500-order shop took 2 min 7 s and failed against the 8 s statement timeout.
+- After `ANALYZE`, the same call took 0.07 s.
+- This is most likely on a database with few shops, which is staging and early production. omni-beta's real import was not affected, because its statistics were current.
+
+**Fix.**
+- `refresh_mirror_statistics(table)` analyses one table from a fixed list of mirror and history-staging tables. It is service role only.
+- The import calls it for the staged history before summarising history months, and for the mirror tables before deriving customer facts and summarising the window.
+- It is never fatal; timings are recorded in the import's coverage.
+
+**Verified:**
+- Without the fix, the small scenario failed on every new shop (3 runs).
+- With it, the scenario passes: catalog, inventory, orders, 200 history orders over 24 months and returns, with the customers domain denied by design.
+- Database test `import-statistics.db.test.mjs`: each listed table is analysed; other tables and inputs are refused, as are other roles.

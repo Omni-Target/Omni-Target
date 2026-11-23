@@ -57,6 +57,22 @@ export async function metaobjectDisplayKeys(shopKey: number): Promise<Map<string
   return new Map((data ?? []).map((d) => [String(d.type), (d.display_name_key as string | null) ?? null]));
 }
 
+/**
+ * Refreshes the planner's statistics of mirror tables an import has just written (0045), one table per call,
+ * so a new shop's per-shop statements are planned for its real size. Never fatal: autovacuum catches up later.
+ */
+export async function refreshMirrorStatistics(tables: readonly string[]): Promise<Record<string, number | string>> {
+  const out: Record<string, number | string> = {};
+  for (const table of tables) {
+    try {
+      out[table] = Number((await rpc<{ ms: number }>("refresh_mirror_statistics", { p_table: table })).ms);
+    } catch (error) {
+      out[table] = error instanceof Error ? error.message.slice(0, 120) : "failed";
+    }
+  }
+  return out;
+}
+
 export const writeInventory = (shopKey: number, batch: { locations: LocationRow[]; levels: InventoryLevelRow[] }) =>
   rpc<Record<string, number>>("ingest_inventory", { p_shop_key: shopKey, p_locations: batch.locations, p_levels: batch.levels });
 

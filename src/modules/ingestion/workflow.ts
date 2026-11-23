@@ -18,8 +18,8 @@ import { BULK_QUERIES, LOCATIONS_QUERY, searchFilter } from "./queries";
 import { deleteStaged, openStaged, r2StagingStore, shouldStage, stageStream, stagingKey } from "./staging";
 import { IncompleteResultError, streamImport } from "./stream-import";
 import {
-  catalogReferenceIds, deriveCustomerFacts, loadCheckpoint, metaobjectDisplayKeys, saveCheckpoint, writeCatalog, writeCatalogDefinitions, writeCustomers,
-  writeInventory, writeMetaobjects, writeOrders, writeReturns,
+  catalogReferenceIds, deriveCustomerFacts, loadCheckpoint, metaobjectDisplayKeys, refreshMirrorStatistics, saveCheckpoint, writeCatalog,
+  writeCatalogDefinitions, writeCustomers, writeInventory, writeMetaobjects, writeOrders, writeReturns,
 } from "./writes";
 import { syncCatalogReferences, type ReferenceWrites } from "./catalog-references";
 
@@ -342,6 +342,8 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
           return { rows: 0, rejected: units.length - orders.length, stats };
         });
         if (staged.status !== "succeeded") return staged;
+        // Statistics that know this import's staged rows, so each month is planned for its size (0045).
+        ctx.coverage.history_statistics = await refreshMirrorStatistics(["history_stage_orders", "history_stage_lines"]);
         const summarised: Stats = {};
         for (const { month } of await imports.historyMonths(ctx.importId)) add(summarised, await imports.summariseHistoryMonth(ctx.importId, ctx.runId, month));
         const discarded = await imports.discardHistory(ctx.importId, ctx.runId);
@@ -359,6 +361,9 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
       return { rows: batch.returns.length + batch.lineItems.length, rejected: 0, stats };
     }));
 
+    // Statistics that know this shop's rows (0045): a new shop is otherwise planned as a single row, and
+    // the per-shop statements below go quadratic once other shops fill the tables.
+    ctx.coverage.statistics = await refreshMirrorStatistics(["orders", "order_line_items", "refunds", "customers", "products", "returns", "return_line_items"]);
     // Customers' first and last orders, then the retained window's summaries, one month per call.
     const facts: Stats = {};
     for (let after = 0, i = 0; i < 1_000; i++) {

@@ -686,6 +686,8 @@ The user decided that orders and refunds reaching Shopify after their month left
 
 ### Task 12: scale and recovery verification (2026-11-23)
 
+> **Correction (Phase 3, 2026-11-23).** Rerunning the small scenario on the same database later showed a defect this verification missed: a new shop's month summaries could exceed the statement timeout before autovacuum analysed its rows. Fixed by migration 0045; see `phase-3-data-model.md`, "Fix: planner statistics after an import".
+
 **How it was run.** `src/modules/ingestion/scale/` runs the real import workflow (`runShopImport`).
 - **Fake Shopify:** a local server generates the bulk results deterministically, in the exact JSONL the bulk queries produce. It can refuse a domain, expire a result URL once, or report a file size that triggers R2 staging. The workflow takes it through a new optional dependency argument; live imports are unchanged.
 - **Database:** writes go to a local Supabase database, migrations 0001 to 0043, behind PostgREST. It has Supabase's 8 s statement timeout and 1,000-row limit, with every database call timed.
