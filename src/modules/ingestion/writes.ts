@@ -73,8 +73,14 @@ export async function refreshMirrorStatistics(tables: readonly string[]): Promis
   return out;
 }
 
-export const writeInventory = (shopKey: number, batch: { locations: LocationRow[]; levels: InventoryLevelRow[] }) =>
-  rpc<Record<string, number>>("ingest_inventory", { p_shop_key: shopKey, p_locations: batch.locations, p_levels: batch.levels });
+/**
+ * Locations and inventory levels. completeItems: items whose full, current list of levels the batch holds (a
+ * by-ID read), so levels at locations they no longer stock are removed (0046). A bulk export never passes it.
+ */
+export const writeInventory = (shopKey: number, batch: { locations: LocationRow[]; levels: InventoryLevelRow[]; completeItems?: number[] }) =>
+  rpc<Record<string, number>>("ingest_inventory", {
+    p_shop_key: shopKey, p_locations: batch.locations, p_levels: batch.levels, p_complete_items: batch.completeItems ?? null,
+  });
 
 export const writeOrders = (
   shopKey: number,

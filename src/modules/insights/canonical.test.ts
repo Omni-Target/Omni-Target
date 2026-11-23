@@ -59,6 +59,21 @@ describe("the mirror in the snapshot computation's shape (task 11)", () => {
     });
   });
 
+  it("passes tracking and policy on, and counts what the online locations hold when levels are stored (task 3)", () => {
+    const mapped = toShopifyProduct(product(5, { variants: [
+      { id: 51, title: "Untracked", price: "10", inventory_quantity: 0, unit_cost: null, unit_cost_currency: null, tracked: false, inventory_policy: "deny", available_online: null },
+      { id: 52, title: "Online stock", price: "10", inventory_quantity: 9, unit_cost: null, unit_cost_currency: null, tracked: true, inventory_policy: "deny", available_online: "4" },
+      { id: 53, title: "Keeps selling", price: "10", inventory_quantity: 0, unit_cost: null, unit_cost_currency: null, tracked: true, inventory_policy: "continue", available_online: 0 },
+      { id: 54, title: "Read before 0046", price: "10", inventory_quantity: 3, unit_cost: null, unit_cost_currency: null },
+    ] }));
+    expect(mapped.variants).toEqual([
+      { id: 51, title: "Untracked", price: "10", inventory_quantity: 0, inventory_management: null, inventory_policy: "deny" },
+      { id: 52, title: "Online stock", price: "10", inventory_quantity: 4, inventory_management: "shopify", inventory_policy: "deny" },
+      { id: 53, title: "Keeps selling", price: "10", inventory_quantity: 0, inventory_management: "shopify", inventory_policy: "continue" },
+      { id: 54, title: "Read before 0046", price: "10", inventory_quantity: 3 },
+    ]);
+  });
+
   it("claims a referenced metaobject's fields, never its IDs, and each distinct variant value once (task 2)", () => {
     const sized = product(9, { metafields: [
       { owner: "product", namespace: "shopify", key: "material", type: "metaobject_reference", value: "gid://shopify/Metaobject/5" },

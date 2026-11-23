@@ -34,7 +34,11 @@ const VARIANT_FIELDS = `id title sku position price compareAtPrice taxable inven
         selectedOptions { name value }
         inventoryItem { id tracked requiresShipping countryCodeOfOrigin provinceCodeOfOrigin harmonizedSystemCode unitCost { amount currencyCode } measurement { weight { value unit } } }`;
 const METAFIELD_FIELDS = "id namespace key type value updatedAt";
-const INVENTORY_LEVEL_FIELDS = `id updatedAt location { id } quantities(names: ["available", "on_hand"]) { name quantity }`;
+// Every quantity state Shopify reports (Phase 3, task 3); "unavailable" is damaged + quality_control + reserved + safety_stock.
+export const INVENTORY_QUANTITY_NAMES = ["available", "committed", "incoming", "on_hand", "reserved", "damaged", "safety_stock", "quality_control"] as const;
+const INVENTORY_LEVEL_FIELDS = `id updatedAt isActive location { id } quantities(names: ${JSON.stringify(INVENTORY_QUANTITY_NAMES)}) { name quantity }`;
+const LOCATION_FIELDS = `id name isActive fulfillsOnlineOrders isFulfillmentService shipsInventory hasActiveInventory deactivatedAt
+      address { countryCode provinceCode } fulfillmentService { handle serviceName type inventoryManagement }`;
 const ORDER_FIELDS = `id name createdAt processedAt cancelledAt updatedAt test sourceName
       displayFinancialStatus displayFulfillmentStatus currencyCode presentmentCurrencyCode
       subtotalPriceSet { shopMoney { amount } }
@@ -79,10 +83,10 @@ export function inventoryQuery(filter?: string): string {
 }`;
 }
 
-/** Not a bulk query: shops have few locations. */
+/** Not a bulk query: shops have few locations. Legacy fulfilment-service locations are listed too (task 3): levels are held there. */
 export const LOCATIONS_QUERY = `query Locations($after: String) {
-  locations(first: 250, after: $after, includeInactive: true) {
-    nodes { id name isActive fulfillsOnlineOrders isFulfillmentService address { countryCode provinceCode } }
+  locations(first: 250, after: $after, includeInactive: true, includeLegacy: true) {
+    nodes { ${LOCATION_FIELDS} }
     pageInfo { hasNextPage endCursor }
   }
 }`;
@@ -175,8 +179,11 @@ export const PRODUCT_METAFIELDS_PAGE = `query ProductMetafields($id: ID!, $after
 export const CUSTOMERS_BY_ID = `query CustomersById($ids: [ID!]!) {
   nodes(ids: $ids) { ... on Customer { ${CUSTOMER_FIELDS} } }
 }`;
+// Each level names its location in full, so a location the mirror has not seen yet is stored with it (task 3).
 export const INVENTORY_ITEM_BY_ID = `query InventoryItemById($id: ID!, $after: String) {
-  node(id: $id) { ... on InventoryItem { id inventoryLevels(first: 50, after: $after) { ${page} edges { node { ${INVENTORY_LEVEL_FIELDS} } } } } }
+  node(id: $id) { ... on InventoryItem { id inventoryLevels(first: 50, after: $after) { ${page} edges { node {
+    ${INVENTORY_LEVEL_FIELDS.replace("location { id }", `location { ${LOCATION_FIELDS} }`)}
+  } } } } }
 }`;
 export const RETURN_BY_ID = `query ReturnById($id: ID!, $after: String) {
   node(id: $id) { ... on Return {

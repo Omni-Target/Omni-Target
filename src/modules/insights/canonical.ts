@@ -60,7 +60,11 @@ export interface CanonicalProduct {
   vendor: string | null;
   status: string;
   created_at: string | null;
-  variants: Array<{ id: number; title: string | null; price: number | string; inventory_quantity: number | null; unit_cost: number | string | null; unit_cost_currency: string | null }>;
+  variants: Array<{
+    id: number; title: string | null; price: number | string; inventory_quantity: number | null; unit_cost: number | string | null; unit_cost_currency: string | null;
+    /** 0046: tracking, policy, and the sum available at active locations that fulfil online orders (null: no level stored). */
+    tracked?: boolean | null; inventory_policy?: string | null; available_online?: number | string | null;
+  }>;
   /** Product metafields, and (0044) its variants' (owner "variant"), each with its definition's name when the shop defines one. */
   metafields: Array<{ owner?: "product" | "variant"; namespace: string; key: string; type: string; value: string | null; name?: string | null }>;
   /** The featured image (0044); null when there is none, or when the row predates 0044 (fields_version null). */
@@ -123,7 +127,11 @@ export function toShopifyProduct(product: CanonicalProduct, imageUrl?: string | 
     vendor: product.vendor ?? "",
     created_at: product.created_at ?? "",
     variants: product.variants.map((variant) => ({
-      id: variant.id, title: variant.title ?? "", price: money(variant.price), inventory_quantity: variant.inventory_quantity ?? 0,
+      id: variant.id, title: variant.title ?? "", price: money(variant.price),
+      // What the shop can sell online: the online locations' stock when levels are stored (task 3), else Shopify's variant count.
+      inventory_quantity: variant.available_online !== null && variant.available_online !== undefined ? Number(variant.available_online) : (variant.inventory_quantity ?? 0),
+      ...(variant.tracked === true ? { inventory_management: "shopify" } : variant.tracked === false ? { inventory_management: null } : {}),
+      ...(variant.inventory_policy ? { inventory_policy: variant.inventory_policy } : {}),
     })),
     images: imageUrl ? [{ src: imageUrl }] : [],
   };

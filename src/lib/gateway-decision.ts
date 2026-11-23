@@ -7,6 +7,7 @@ import type {
   StoreVariantStockCoverage,
 } from "./store-data";
 import type { BuyerOutcomes } from "./buyer-outcomes";
+import { variantSellable } from "./inventory";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SIXTY_DAYS_MS = 60 * DAY_MS;
@@ -36,6 +37,8 @@ export interface DecisionProduct {
     title?: string;
     price?: string | number;
     inventory_quantity: number;
+    inventory_management?: string | null;
+    inventory_policy?: string | null;
   }>;
   unit_cost_coverage?: "complete" | "partial" | "missing";
 }
@@ -415,7 +418,7 @@ export function buildProductDecisions(
 
     // ─── 3. Demand-Weighted Variant Readiness (Size-Curve Protection) ───
     const variants = product.variants || [];
-    const inStock = variants.filter((variant) => variant.inventory_quantity > 0).length;
+    const inStock = variants.filter(variantSellable).length;
     const unweightedStockShare = variants.length > 0 ? round2(inStock / variants.length) : 0;
 
     const prodVariantSales = variantSalesByProduct.get(product.id);
@@ -428,14 +431,14 @@ export function buildProductDecisions(
         if (variant.id == null) continue;
         const soldUnits = prodVariantSales.get(variant.id) || 0;
         totalTrackedUnits += soldUnits;
-        if (variant.inventory_quantity > 0) {
+        if (variantSellable(variant)) {
           inStockTrackedUnits += soldUnits;
         }
       }
       if (totalTrackedUnits >= 3) {
         demandWeightedStockShare = rate(inStockTrackedUnits, totalTrackedUnits);
         for (const variant of variants) {
-          if (variant.id == null || variant.inventory_quantity > 0) continue;
+          if (variant.id == null || variantSellable(variant)) continue;
           const soldUnits = prodVariantSales.get(variant.id) || 0;
           if (soldUnits / totalTrackedUnits >= 0.25) {
             stockedOutCoreVariants.push(variant.title || `Variant #${variant.id}`);

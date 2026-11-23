@@ -2,7 +2,7 @@ import "server-only";
 import { createLogger } from "@/platform/logger";
 import type { Gql } from "./bulk";
 import type { JsonlUnit } from "./jsonl";
-import { mapCustomerUnit, mapInventoryUnit, mapOrderUnit, mapProductUnit, mapRefundLines, mapReturnsUnit, type OrderRow, type RefundLineRow } from "./mappers";
+import { mapCustomerUnit, mapInventoryLocations, mapInventoryUnit, mapOrderUnit, mapProductUnit, mapRefundLines, mapReturnsUnit, type OrderRow, type RefundLineRow } from "./mappers";
 import {
   CUSTOMERS_BY_ID, INVENTORY_ITEM_BY_ID, ORDER_BY_ID, PRODUCT_BY_ID, PRODUCT_METAFIELDS_PAGE, PRODUCT_VARIANTS_PAGE, REFUND_LINES_BY_ID, RETURN_BY_ID,
   VARIANT_METAFIELDS_PAGE,
@@ -146,7 +146,13 @@ async function writeKind(kind: SyncKind, units: JsonlUnit[], shop: { shopKey: nu
     } else if (kind === "customer") {
       await writes.writeCustomers(shop.shopKey, shop.shopifyShopId, chunk.map(mapCustomerUnit).filter((c): c is NonNullable<typeof c> => c !== null));
     } else if (kind === "inventory") {
-      await writes.writeInventory(shop.shopKey, { locations: [], levels: chunk.flatMap(mapInventoryUnit) });
+      // A by-ID read is the item's current, complete list of levels, with their locations in full (task 3).
+      const locations = [...new Map(chunk.flatMap(mapInventoryLocations).map((l) => [l.shopify_id, l])).values()];
+      const completeItems = chunk.flatMap((unit) => {
+        const id = Number(String(unit.root.id ?? "").split("/").pop());
+        return Number.isSafeInteger(id) && id > 0 ? [id] : [];
+      });
+      await writes.writeInventory(shop.shopKey, { locations, levels: chunk.flatMap(mapInventoryUnit), completeItems });
     } else {
       const mapped = chunk.map(mapReturnsUnit);
       await writes.writeReturns(shop.shopKey, { returns: mapped.flatMap((m) => m.returns), lineItems: mapped.flatMap((m) => m.lineItems) });

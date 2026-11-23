@@ -54,6 +54,8 @@ const country = (value: unknown): string | null => (typeof value === "string" &&
 
 /** The catalog field set rows are read with (products.fields_version, 0044): 2 is Phase 3's; null rows predate it. */
 export const CATALOG_FIELDS_VERSION = 2;
+/** The location field set (inventory_locations.fields_version, 0046): 2 adds fulfilment-service details. */
+export const LOCATION_FIELDS_VERSION = 2;
 
 export interface ProductRow {
   shopify_id: number; title: string; handle: string | null; status: string; product_type: string | null; vendor: string | null;
@@ -435,6 +437,8 @@ export function mapCustomerUnit(unit: JsonlUnit): CustomerRow | null {
 
 export interface InventoryLevelRow {
   inventory_item_id: number; location_shopify_id: number; available: number | null; on_hand: number | null; shopify_updated_at: string | null;
+  committed: number | null; incoming: number | null; reserved: number | null; damaged: number | null; safety_stock: number | null;
+  quality_control: number | null; is_active: boolean | null;
 }
 
 export function mapInventoryUnit(unit: JsonlUnit): InventoryLevelRow[] {
@@ -450,27 +454,53 @@ export function mapInventoryUnit(unit: JsonlUnit): InventoryLevelRow[] {
       const name = str(obj(q)?.name);
       if (name) quantities.set(name, int(obj(q)?.quantity));
     }
+    const quantity = (name: string) => quantities.get(name) ?? null;
     rows.push({
       inventory_item_id: itemId,
       location_shopify_id: locationId,
-      available: quantities.get("available") ?? null,
-      on_hand: quantities.get("on_hand") ?? null,
+      available: quantity("available"),
+      on_hand: quantity("on_hand"),
       shopify_updated_at: at(child.updatedAt),
+      committed: quantity("committed"),
+      incoming: quantity("incoming"),
+      reserved: quantity("reserved"),
+      damaged: quantity("damaged"),
+      safety_stock: quantity("safety_stock"),
+      quality_control: quantity("quality_control"),
+      is_active: bool(child.isActive),
     });
   }
   return rows;
 }
 
+/** Locations a by-ID inventory read names in full (Phase 3, task 3): stored with the levels, once each. */
+export function mapInventoryLocations(unit: JsonlUnit): LocationRow[] {
+  const seen = new Map<number, LocationRow>();
+  for (const child of unit.children) {
+    const location = obj(child.location);
+    if (!location || typeof location.name !== "string") continue;
+    const row = mapLocation(location);
+    if (row) seen.set(row.shopify_id, row);
+  }
+  return [...seen.values()];
+}
+
 export interface LocationRow {
   shopify_id: number; name: string; country_code: string | null; province_code: string | null; is_active: boolean;
   fulfills_online_orders: boolean | null; is_fulfillment_service: boolean;
+  fields_version: number; ships_inventory: boolean | null; has_active_inventory: boolean | null; deactivated_at: string | null;
+  fulfillment_service_handle: string | null; fulfillment_service_name: string | null;
+  fulfillment_service_type: "manual" | "third_party" | "gift_card" | null; fulfillment_service_inventory: boolean | null;
 }
+const FULFILLMENT_SERVICE_TYPES = new Set(["manual", "third_party", "gift_card"]);
 
 export function mapLocation(node: unknown): LocationRow | null {
   const location = obj(node);
   const id = parseGid(location?.id, "Location");
   if (!location || id === null) return null;
   const address = obj(location.address);
+  const service = obj(location.fulfillmentService);
+  const serviceType = enumValue(service?.type);
   return {
     shopify_id: id,
     name: str(location.name, 255) ?? "(unnamed)",
@@ -479,6 +509,14 @@ export function mapLocation(node: unknown): LocationRow | null {
     is_active: bool(location.isActive) ?? true,
     fulfills_online_orders: bool(location.fulfillsOnlineOrders),
     is_fulfillment_service: bool(location.isFulfillmentService) ?? false,
+    fields_version: LOCATION_FIELDS_VERSION,
+    ships_inventory: bool(location.shipsInventory),
+    has_active_inventory: bool(location.hasActiveInventory),
+    deactivated_at: at(location.deactivatedAt),
+    fulfillment_service_handle: str(service?.handle, 255),
+    fulfillment_service_name: str(service?.serviceName, 255),
+    fulfillment_service_type: serviceType && FULFILLMENT_SERVICE_TYPES.has(serviceType) ? (serviceType as LocationRow["fulfillment_service_type"]) : null,
+    fulfillment_service_inventory: bool(service?.inventoryManagement),
   };
 }
 

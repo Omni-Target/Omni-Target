@@ -6,6 +6,7 @@ import type { ReconcileDeps, SyncDeps } from "./sync";
 import * as repo from "./sync-repository";
 import { ensureSyncSubscriptions, syncWebhookEndpoint, type SubscriptionReport } from "./subscriptions";
 import { syncCatalogReferences, syncReferencedMetaobjects } from "./catalog-references";
+import { fetchLocations } from "./locations";
 import * as writes from "./writes";
 
 /** The incremental sync's live dependencies: the staging or production database, and Shopify. */
@@ -37,4 +38,14 @@ export async function refreshCatalogReferences(shopDomain: string, now = Date.no
   const gql = await shopGql(shopDomain);
   if (!gql) return { skipped: "no_access" as const };
   return syncCatalogReferences(gql, shop.shopKey, writes, { staleBefore: new Date(now - 20 * 3_600_000) });
+}
+
+/** Daily: the shop's locations in full, with their fulfilment services (Phase 3, task 3). */
+export async function refreshLocations(shopDomain: string) {
+  const shop = await repo.syncShop(shopDomain);
+  if (!shop) return { skipped: "not_ingestible" as const };
+  const gql = await shopGql(shopDomain);
+  if (!gql) return { skipped: "no_access" as const };
+  const locations = await fetchLocations(gql);
+  return writes.writeInventory(shop.shopKey, { locations, levels: [] });
 }

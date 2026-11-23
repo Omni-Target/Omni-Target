@@ -4,6 +4,7 @@ import {
   destination,
   enumValue,
   mapCustomerUnit,
+  mapInventoryLocations,
   mapInventoryUnit,
   mapLocation,
   mapMetafieldDefinition,
@@ -189,16 +190,40 @@ describe("customers, inventory, locations and returns", () => {
       .toEqual({ shopify_id: 30, orders_count: 3, amount_spent: "120.50", amount_spent_currency: "GBP", shopify_created_at: "2025-01-01T00:00:00Z", shopify_updated_at: "2026-01-01T00:00:00Z" });
   });
 
-  it("maps inventory levels per location from named quantities", () => {
+  it("maps inventory levels per location from every named quantity, and leaves unread ones null (task 3)", () => {
+    const quantities = [["available", 4], ["committed", 2], ["incoming", 10], ["on_hand", 6], ["reserved", 1], ["damaged", 1], ["safety_stock", 0], ["quality_control", 0]];
     expect(mapInventoryUnit(unit({ id: "gid://shopify/InventoryItem/12" }, [
-      { id: "gid://shopify/InventoryLevel/1?inventory_item_id=12", __parentId: "gid://shopify/InventoryItem/12", updatedAt: "2026-03-01T00:00:00Z",
-        location: { id: "gid://shopify/Location/50" }, quantities: [{ name: "available", quantity: 4 }, { name: "on_hand", quantity: 6 }] },
-    ]))).toEqual([{ inventory_item_id: 12, location_shopify_id: 50, available: 4, on_hand: 6, shopify_updated_at: "2026-03-01T00:00:00Z" }]);
+      { id: "gid://shopify/InventoryLevel/1?inventory_item_id=12", __parentId: "gid://shopify/InventoryItem/12", updatedAt: "2026-03-01T00:00:00Z", isActive: true,
+        location: { id: "gid://shopify/Location/50" }, quantities: quantities.map(([name, quantity]) => ({ name, quantity })) },
+      { id: "gid://shopify/InventoryLevel/2?inventory_item_id=12", __parentId: "gid://shopify/InventoryItem/12",
+        location: { id: "gid://shopify/Location/51" }, quantities: [{ name: "available", quantity: 0 }] },
+    ]))).toEqual([
+      { inventory_item_id: 12, location_shopify_id: 50, available: 4, on_hand: 6, shopify_updated_at: "2026-03-01T00:00:00Z",
+        committed: 2, incoming: 10, reserved: 1, damaged: 1, safety_stock: 0, quality_control: 0, is_active: true },
+      { inventory_item_id: 12, location_shopify_id: 51, available: 0, on_hand: null, shopify_updated_at: null,
+        committed: null, incoming: null, reserved: null, damaged: null, safety_stock: null, quality_control: null, is_active: null },
+    ]);
   });
 
-  it("maps a location", () => {
+  it("maps a location with its fulfilment service (task 3)", () => {
     expect(mapLocation({ id: "gid://shopify/Location/50", name: "Warehouse", isActive: true, fulfillsOnlineOrders: true, isFulfillmentService: false, address: { countryCode: "GB", provinceCode: "ENG" } }))
-      .toEqual({ shopify_id: 50, name: "Warehouse", country_code: "GB", province_code: "ENG", is_active: true, fulfills_online_orders: true, is_fulfillment_service: false });
+      .toEqual({ shopify_id: 50, name: "Warehouse", country_code: "GB", province_code: "ENG", is_active: true, fulfills_online_orders: true, is_fulfillment_service: false,
+        fields_version: 2, ships_inventory: null, has_active_inventory: null, deactivated_at: null, fulfillment_service_handle: null,
+        fulfillment_service_name: null, fulfillment_service_type: null, fulfillment_service_inventory: null });
+    expect(mapLocation({ id: "gid://shopify/Location/51", name: "ShipBob", isActive: true, fulfillsOnlineOrders: true, isFulfillmentService: true,
+      shipsInventory: true, hasActiveInventory: true, fulfillmentService: { handle: "shipbob", serviceName: "ShipBob", type: "THIRD_PARTY", inventoryManagement: true } }))
+      .toMatchObject({ is_fulfillment_service: true, fulfillment_service_handle: "shipbob", fulfillment_service_name: "ShipBob",
+        fulfillment_service_type: "third_party", fulfillment_service_inventory: true, ships_inventory: true });
+    expect(mapLocation({ id: "gid://shopify/Location/52", name: "X", fulfillmentService: { type: "SOMETHING_NEW" } })?.fulfillment_service_type).toBeNull();
+  });
+
+  it("takes the locations a by-ID inventory read names in full, once each, and none from a bulk export (task 3)", () => {
+    const location = { id: "gid://shopify/Location/53", name: "New store", isActive: true, fulfillsOnlineOrders: false, isFulfillmentService: false };
+    expect(mapInventoryLocations(unit({ id: "gid://shopify/InventoryItem/12" }, [
+      { id: "gid://shopify/InventoryLevel/3", location, quantities: [] },
+      { id: "gid://shopify/InventoryLevel/4", location, quantities: [] },
+      { id: "gid://shopify/InventoryLevel/5", location: { id: "gid://shopify/Location/50" }, quantities: [] },
+    ])).map((l) => [l.shopify_id, l.name, l.fulfills_online_orders])).toEqual([[53, "New store", false]]);
   });
 
   it("maps returns and their lines from an order's descendants", () => {

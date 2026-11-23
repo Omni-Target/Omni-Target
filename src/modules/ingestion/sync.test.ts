@@ -12,7 +12,7 @@ const orderNode = (id: number, total: string, updatedAt: string) => ({
 });
 
 /** A fake Shopify holding current state, and a fake inbox. */
-function harness(shopify: { orders?: Record<number, Raw | Error>; products?: Record<number, Raw>; customers?: Record<number, Raw>; updated?: Record<string, Array<{ id: string; updatedAt: string }>>; refundLines?: Record<number, Raw[]> }) {
+function harness(shopify: { orders?: Record<number, Raw | Error>; products?: Record<number, Raw>; customers?: Record<number, Raw>; updated?: Record<string, Array<{ id: string; updatedAt: string }>>; refundLines?: Record<number, Raw[]>; inventory?: Record<number, Raw> }) {
   const inbox: Array<{ id: string; topic: string; payload: Raw; status: string }> = [];
   const calls: string[] = [];
   const gql = vi.fn(async (query: string, variables: Raw = {}) => {
@@ -33,6 +33,7 @@ function harness(shopify: { orders?: Record<number, Raw | Error>; products?: Rec
       calls.push(`variant metafields ${id} after ${String(variables.after)}`);
       return { node: { id, metafields: { pageInfo: { hasNextPage: false, endCursor: null }, edges: [{ node: { id: "gid://shopify/Metafield/99", namespace: "specs", key: "late", type: "single_line_text_field", value: "page 2" } }] } } };
     }
+    if (query.includes("InventoryItemById")) return { node: shopify.inventory?.[Number(id.split("/").pop())] ?? null };
     if (query.includes("CustomersById")) return { nodes: (variables.ids as string[]).map((gid) => shopify.customers?.[Number(gid.split("/").pop())] ?? null) };
     if (query.includes("UpdatedSince")) {
       const connection = ["orders", "products", "customers"].find((name) => query.includes(`${name}(first`))!;
@@ -122,6 +123,25 @@ describe("incremental sync worker (task 10)", () => {
     u.push("e1", "products/update", { id: 7 });
     await processShopEvents("s.myshopify.com", "run_1", { ...u.deps, references: async () => { throw new Error("throttled"); } });
     expect(u.inbox[0].status).toBe("processed");
+  });
+
+  it("writes an inventory item's levels as its complete list, with any location named in full (Phase 3, task 3)", async () => {
+    const level = (location: Raw, available: number) => ({ id: `gid://shopify/InventoryLevel/${available}`, isActive: true, updatedAt: "2026-11-22T10:00:00Z", location,
+      quantities: [{ name: "available", quantity: available }, { name: "committed", quantity: 1 }, { name: "on_hand", quantity: available + 1 }] });
+    const t = harness({ inventory: { 12: { id: "gid://shopify/InventoryItem/12", inventoryLevels: conn([
+      level({ id: "gid://shopify/Location/50", name: "Warehouse", isActive: true, fulfillsOnlineOrders: true, isFulfillmentService: false }, 4),
+      level({ id: "gid://shopify/Location/53", name: "3PL", isActive: true, fulfillsOnlineOrders: true, isFulfillmentService: true,
+        fulfillmentService: { handle: "shipbob", serviceName: "ShipBob", type: "THIRD_PARTY", inventoryManagement: true } }, 7),
+    ]) } } });
+    t.push("e1", "inventory_levels/update", { inventory_item_id: 12, location_id: 50, updated_at: "2026-11-22T10:00:00Z" });
+    t.push("e2", "inventory_levels/update", { inventory_item_id: 12, location_id: 53, updated_at: "2026-11-22T10:00:00Z" });
+    await processShopEvents("s.myshopify.com", "run_1", t.deps);
+    expect(t.writes.writeInventory).toHaveBeenCalledTimes(1);
+    const batch = (t.writes.writeInventory.mock.calls[0] as unknown[])[1] as { locations: Array<{ shopify_id: number; fulfillment_service_type: string | null }>; levels: Array<{ location_shopify_id: number; committed: number }>; completeItems: number[] };
+    expect(batch.completeItems).toEqual([12]);
+    expect(batch.levels.map((l) => [l.location_shopify_id, l.committed])).toEqual([[50, 1], [53, 1]]);
+    expect(batch.locations.map((l) => [l.shopify_id, l.fulfillment_service_type])).toEqual([[50, null], [53, "third_party"]]);
+    expect(t.inbox.every((e) => e.status === "processed")).toBe(true);
   });
 
   it("leaves the inbox alone without access, and stops at its time budget", async () => {

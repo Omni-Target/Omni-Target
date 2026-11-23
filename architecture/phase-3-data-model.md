@@ -365,3 +365,58 @@ The bulk query stays within Shopify's limits (4 connections, nested 2 deep). In 
 - Without the fix, the small scenario failed on every new shop (3 runs).
 - With it, the scenario passes: catalog, inventory, orders, 200 history orders over 24 months and returns, with the customers domain denied by design.
 - Database test `import-statistics.db.test.mjs`: each listed table is analysed; other tables and inputs are refused, as are other roles.
+
+### Task 3: inventory and fulfilment (2026-11-23; migration 0046)
+
+**What is read and stored:**
+- **Inventory levels:** every quantity state Shopify reports (available, committed, incoming, on hand, reserved, damaged, safety stock, quality control) and whether the level is active.
+- **"Unavailable"** is computed as Shopify defines it: damaged + quality control + reserved + safety stock.
+- **Null means not read.** Rows written before 0046 hold available and on hand only, with the other quantities null.
+- **Locations** (`includeLegacy` too, see below):
+  - fulfilment-service handle, name and type (merchant-managed `manual`, `third_party`, `gift_card`), and whether the service manages inventory;
+  - whether the location ships inventory or has active inventory;
+  - when it was deactivated;
+  - the field set it was read with.
+- **When locations are read:**
+  - at import;
+  - daily (`sync-reconcile`);
+  - whenever an inventory webhook names a location, because by-ID inventory reads now return each level's location in full.
+- **Levels at locations an item no longer stocks** are removed when a by-ID read gives the item's complete current list (`ingest_inventory`'s `p_complete_items`). A bulk export is never treated as complete, since it may be older than a level a webhook wrote meanwhile.
+
+**Availability (`inventory_availability`):**
+- **Per variant:** levels by location; totals over the locations that are active and fulfil online orders (the shop's sellable stock); and totals over all active locations.
+- **Unknown locations:** levels at a location the mirror does not know are counted apart, never in a total.
+- **State:** `untracked`, `unknown` (tracked, no level stored), `in_stock`, `oversell_allowed` (none available, keeps selling) or `out_of_stock`.
+- **Who fulfils it:** merchant, third party or other service.
+- **Shopify Collective:** whether it is a Collective product, from Shopify's own tag.
+- **The shop total is never one location's stock.** Stock held only at a location that does not fulfil online orders leaves the variant out of stock online (tested).
+
+**Sellable, not merely counted (Phase 0 finding ING-09):**
+- `variantSellable` treats untracked variants, and variants whose policy is to keep selling, as sellable whatever their quantity. Variants of unknown tracking keep the quantity rule, so nothing changes without evidence.
+- The read path passes each variant's tracking and policy on, and its quantity is now the online locations' stock when levels are stored.
+- The snapshot's stock flags and the gateway decisions' stock hold both use the rule.
+- **Effect on omni-beta:** 98,667 of its 100,027 products had no variant with a positive count and so read as out of stock. 98,596 of them are sellable, because Shopify does not track their inventory.
+
+**Shopify Collective and third-party fulfilment:**
+- **Collective products** carry Shopify's "Shopify Collective" tag, which is reported per variant. The order-level flag (`Order.productNetwork`) arrives with task 4's order changes.
+- **Third-party fulfilment, real data.** Both test stores have a legacy third-party fulfilment-service location, "Snow City Warehouse" (`snow-city-warehouse`). It holds stock that the mirror stored but could not place, because `locations` omits legacy fulfilment-service locations unless asked (`includeLegacy: true`). It is now stored with its service details on both stores.
+- **Fulfillment orders** (which location fulfils an order) need scopes the app does not hold (`read_*_fulfillment_orders`), so order-level routing stays unavailable. Adding them would change the live app configuration, which needs approval.
+
+**Results:**
+
+| Check | Result |
+|---|---|
+| Dev store, inventory-scoped import | 32 items, 40 levels: every quantity state, level activity and location identical to Shopify; online totals recomputed from Shopify's own data identical (`inventory.live.test.ts`) |
+| Locations after the refresh | Dev store and omni-beta: 3 each, including the third-party warehouse, identical to Shopify |
+| omni-beta, 100 inventory events re-read by ID | 98 items, 100 levels identical; online totals identical |
+| Read path (equivalence check, dev store) | Unchanged against the REST computation |
+| Migration round trip | Up and down on a fresh database |
+
+**Tests:**
+- Database (`inventory-fulfilment.db.test.mjs`, 4 tests): quantities and fulfilment services; complete-item replacement, never from a bulk batch, newer wins; availability by location, online-only totals, unknown and inactive locations, every state, Collective; grants. The Phase 2 ingest test follows the new signature.
+- Unit tests: `variantSellable`; the gateway decision no longer holds an untracked or keep-selling product (fails on the old rule); the canonical variant mapping; the mappers (every quantity, locations with services, locations from by-ID reads); the sync's complete-item write.
+
+**Limits:**
+- omni-beta's other levels keep their Phase 2 quantities until they change.
+- Order-level fulfilment routing needs scopes the app does not hold.
+- Collective supplier names are only in merchant tags; they are not read as a separate field.

@@ -13,8 +13,8 @@ import { bulkPhase, getBulkOperation, openBulkResult, pollDelayMs, ResultUnavail
 import { withOrderDigests } from "./digests";
 import * as imports from "./imports";
 import type { JsonlUnit } from "./jsonl";
-import { mapCustomerUnit, mapInventoryUnit, mapLocation, mapOrderUnit, mapProductUnit, mapReturnsUnit } from "./mappers";
-import { BULK_QUERIES, LOCATIONS_QUERY, searchFilter } from "./queries";
+import { mapCustomerUnit, mapInventoryUnit, mapOrderUnit, mapProductUnit, mapReturnsUnit } from "./mappers";
+import { BULK_QUERIES, searchFilter } from "./queries";
 import { deleteStaged, openStaged, r2StagingStore, shouldStage, stageStream, stagingKey } from "./staging";
 import { IncompleteResultError, streamImport } from "./stream-import";
 import {
@@ -22,6 +22,7 @@ import {
   writeCatalogDefinitions, writeCustomers, writeInventory, writeMetaobjects, writeOrders, writeReturns,
 } from "./writes";
 import { syncCatalogReferences, type ReferenceWrites } from "./catalog-references";
+import { fetchLocations } from "./locations";
 
 /**
  * The initial import of one shop (Phase 2, task 6), run by the shop-import
@@ -302,13 +303,7 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
     });
 
     await run("inventory", domains.inventory.status !== "inaccessible", async () => {
-      const locations = [];
-      for (let after: string | null = null, page = 0; page < 40; page++) {
-        const data: { locations: { nodes: unknown[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await ctx.gql(LOCATIONS_QUERY, { after });
-        locations.push(...data.locations.nodes.map(mapLocation).filter((l): l is NonNullable<typeof l> => l !== null));
-        if (!data.locations.pageInfo.hasNextPage) break;
-        after = data.locations.pageInfo.endCursor;
-      }
+      const locations = await fetchLocations(ctx.gql);
       await writeInventory(ctx.shopKey, { locations, levels: [] });
       const result = await importBulk(ctx, "inventory", BULK_QUERIES.inventory(), async (units) => {
         const levels = units.flatMap(mapInventoryUnit);

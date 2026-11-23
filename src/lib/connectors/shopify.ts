@@ -36,6 +36,7 @@ export interface ShopifyOrder {
 }
 
 import { parseTrafficSource } from "./traffic-source";
+import { variantSellable } from "../inventory";
 export { parseTrafficSource };
 
 export interface ShopifyProduct {
@@ -52,6 +53,10 @@ export interface ShopifyProduct {
     title: string;
     price: string;
     inventory_quantity: number;
+    /** "shopify" when Shopify tracks the variant's inventory, null when it does not; absent when unknown. */
+    inventory_management?: string | null;
+    /** "deny" stops selling when out of stock, "continue" keeps selling; absent when unknown. */
+    inventory_policy?: string | null;
   }[];
   images: { src: string }[];
 }
@@ -755,15 +760,10 @@ export async function computeStoreData(input: StoreComputeInput, deps: StoreComp
     const firstVariant = variants[0];
     const price = firstVariant ? parseFloat(firstVariant.price) : 0;
     const unitsSold = productSalesMap[product.id] || 0;
-    const allOutOfStock = variants.length === 0 || variants.every(
-      (v) => v.inventory_quantity <= 0
-    );
-    const anyInStock = variants.some(
-      (v) => v.inventory_quantity > 0
-    );
-    const inStockVariants = variants.filter(
-      (v) => v.inventory_quantity > 0
-    );
+    // Sellable, not merely a positive count: untracked and keep-selling variants sell without stock (ING-09).
+    const allOutOfStock = variants.length === 0 || variants.every((v) => !variantSellable(v));
+    const anyInStock = variants.some(variantSellable);
+    const inStockVariants = variants.filter(variantSellable);
     const totalVariants = variants.length;
     const hasPartialStock = 
       inStockVariants.length > 0 && 

@@ -192,7 +192,7 @@ describe("inventory, returns and checkpoints", () => {
     await ingest("ingest_inventory", s.key, [{ shopify_id: 50, name: "Warehouse", country_code: "GB", is_active: true }],
       [{ inventory_item_id: 12, location_shopify_id: 50, available: 4, on_hand: 6, shopify_updated_at: iso(-1) }]);
     expect(await ingest("ingest_inventory", s.key, [], [{ inventory_item_id: 12, location_shopify_id: 50, available: 1, shopify_updated_at: iso(-2) }]))
-      .toEqual({ locations: 0, levels: 0 });
+      .toEqual({ locations: 0, levels: 0, levels_removed: 0 });
     expect(await one("select available from public.inventory_levels where shop_key = $1", [s.key])).toEqual({ available: 4 });
 
     await ingest("ingest_returns", s.key, [{ shopify_id: 60, order_shopify_id: 20, status: "open" }],
@@ -214,7 +214,7 @@ describe("inventory, returns and checkpoints", () => {
 describe("privileges", () => {
   it("lets only service_role call the write functions", async () => {
     for (const fn of [
-      "ingest_catalog(integer, jsonb, jsonb, jsonb)", "ingest_inventory(integer, jsonb, jsonb)", "ingest_orders(integer, jsonb, jsonb, jsonb)",
+      "ingest_catalog(integer, jsonb, jsonb, jsonb)", "ingest_inventory(integer, jsonb, jsonb, bigint[])", "ingest_orders(integer, jsonb, jsonb, jsonb)",
       "ingest_customers(integer, jsonb)", "derive_customer_order_facts(integer, bigint, integer)", "ingest_returns(integer, jsonb, jsonb)",
       "save_sync_checkpoint(integer, text, uuid, bigint, bigint, timestamptz)",
     ]) {

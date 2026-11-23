@@ -163,3 +163,7 @@ Anything that functionality, filtering, analytics or intelligence needs stays. S
 - **Description:** the excerpt stays at 600 characters (storage review).
 - **Metafields:** variant metafields add rows only where a shop defines them.
 - **Metaobjects:** only those referenced are stored, each capped at 6 KB of field values. Shops typically have hundreds, not millions.
+
+**Task 3 (0046, inventory and fulfilment).**
+- An inventory level grows from 76 to 101 bytes with every quantity state stored. That is about +10 MB for the incident-scale shop's 420k levels (under 2%).
+- Locations add a few bytes each, and shops have few.

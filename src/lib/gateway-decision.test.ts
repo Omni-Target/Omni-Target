@@ -52,6 +52,22 @@ describe("product gateway decisions", () => {
     expect(decisions.get(3)?.test_readiness).toBe("review");
   });
 
+  it("does not hold a product as out of stock when Shopify does not track it or keeps selling it (ING-09)", () => {
+    const untracked = products.map((product) => product.id === 1
+      ? { ...product, variants: [{ inventory_quantity: 0, inventory_management: null }] }
+      : product);
+    expect(buildProductDecisions(orders, untracked, { asOf, ingestionComplete: true }).get(1)?.test_readiness).not.toBe("hold");
+    const continuing = products.map((product) => product.id === 1
+      ? { ...product, variants: [{ inventory_quantity: 0, inventory_management: "shopify", inventory_policy: "continue" }] }
+      : product);
+    expect(buildProductDecisions(orders, continuing, { asOf, ingestionComplete: true }).get(1)?.test_readiness).not.toBe("hold");
+    // Tracked and stopping at zero: still held.
+    const tracked = products.map((product) => product.id === 1
+      ? { ...product, variants: [{ inventory_quantity: 0, inventory_management: "shopify", inventory_policy: "deny" }] }
+      : product);
+    expect(buildProductDecisions(orders, tracked, { asOf, ingestionComplete: true }).get(1)?.test_readiness).toBe("hold");
+  });
+
   it("excludes immature cohorts and guest orders, and withholds role on incomplete sync", () => {
     const extraOrders = [
       ...orders,
