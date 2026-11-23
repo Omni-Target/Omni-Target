@@ -49,6 +49,8 @@ export interface StoreProduct {
   catalog_claims?: StoreCatalogClaim[];
   /** Phase 3, task 4: signals that the product may not be returnable; none is not proof that it is. */
   return_signals?: StoreReturnSignal[];
+  /** Phase 3, task 6: each field's data-quality state and its reason (modules/quality/rules.ts). */
+  quality?: StoreProductQuality;
   high_value_entry?: StoreHighValueEntryEvidence;
   post_entry_bridge?: StorePostEntryBridgeEvidence;
   return_evidence?: StoreProductReturnEvidence;
@@ -89,6 +91,18 @@ export interface StoreProductReturnEvidence {
   risk: "observed" | "review" | "insufficient_data" | "incomplete";
   window_days: 365;
   maturity_days: 60;
+}
+
+/** A field's data-quality state (Phase 3, task 6): present, empty (none needed), missing (not set), unavailable (not readable), unverified. */
+export interface StoreQualityFlag {
+  state: "present" | "empty" | "missing" | "unavailable" | "unverified";
+  reason: string;
+  detail?: string;
+}
+export interface StoreProductQuality {
+  calc_version: number;
+  flags: Record<string, StoreQualityFlag>;
+  counts: Record<string, number>;
 }
 
 /** Why a product may not be returnable (Phase 3, task 4), with its source and how far it can be trusted. */

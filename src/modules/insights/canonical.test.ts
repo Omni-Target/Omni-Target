@@ -114,6 +114,14 @@ describe("buildCanonicalStoreData (task 11)", () => {
         product_id: id, signal: "tag" as const, trust: "unverified" as const, source: "merchant_tag", detail: "final-sale",
       }))),
       returnsImported: vi.fn(async () => true),
+      qualityFacts: vi.fn(async (ids: number[]) => ids.map((id) => ({
+        product_id: id, status: "active", fields_version: 2, is_gift_card: false, collective: false, has_description: true, description_truncated: false,
+        has_category: false, has_image: true, media_count: 1, variants: 1, zero_price: 0, with_cost: id === 7 ? 1 : 0, cost_currencies: id === 7 ? ["GBP"] : [],
+        shipped: 1, shipped_without_weight: 0, shipping_unknown: 0, with_barcode: 0, with_compare_at: 0, compare_at_not_above: 0, with_hs_code: 0, with_origin: 0,
+        tracked: 1, untracked: 0, keep_selling: 0, tracked_with_levels: 1, levels: 1, levels_unknown_location: 0, levels_partial_quantities: 0,
+        levels_third_party: 0, metafields: 1, metafields_defined: 0, metafields_truncated: 0, references: 0, references_unresolved: 0,
+      }))),
+      inventoryImported: vi.fn(async () => true),
       ingestionComplete: vi.fn(async () => true),
     } satisfies CanonicalInsightsDeps;
     return d;
@@ -174,6 +182,16 @@ describe("buildCanonicalStoreData (task 11)", () => {
     const without = await buildCanonicalStoreData("s.myshopify.com", u);
     expect(u.returnEvidence).not.toHaveBeenCalled();
     expect(without.data.products.find((p) => p.id === "7")?.return_evidence).toBeUndefined();
+  });
+
+  it("gives each product its data-quality flags, with the return signal for return eligibility (task 6)", async () => {
+    const d = deps(many(2), [7, 8]);
+    const { data } = await buildCanonicalStoreData("s.myshopify.com", d);
+    const lamp = data.products.find((p) => p.id === "7")?.quality;
+    expect(lamp?.flags.unit_cost).toEqual({ state: "present", reason: "set" });
+    expect(lamp?.flags.category).toEqual({ state: "missing", reason: "uncategorised" });
+    expect(data.products.find((p) => p.id === "8")?.quality?.flags.unit_cost).toEqual({ state: "missing", reason: "not_set" });
+    expect(data.products.find((p) => p.id === "8")?.quality?.flags.return_eligibility).toEqual({ state: "unverified", reason: "tag", detail: "final-sale" });
   });
 
   it("reads orders newest first in pages, and reports truncation only when more remain", async () => {

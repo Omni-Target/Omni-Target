@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/platform/supabase";
 import type { StoreData } from "@/lib/store-data";
 import type { CanonicalInputsReport, CanonicalMetaobject, CanonicalOrder, CanonicalProduct, MirrorReturnEvidence, MirrorReturnSignal } from "./canonical";
 import type { StoredShopContext } from "./context";
+import type { ProductQualityFacts } from "@/modules/quality/rules";
 
 /** The mirror reads and the stored snapshot of the read path (migration 0043). */
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
@@ -25,6 +26,9 @@ export const insightMetaobjects = (shopKey: number, ids: number[]) =>
 
 export const insightReturnEvidence = (shopKey: number, ids: number[], asOf: string) =>
   rpc<MirrorReturnEvidence[]>("product_return_evidence", { p_shop_key: shopKey, p_product_ids: ids, p_as_of: asOf });
+
+export const insightQualityFacts = (shopKey: number, ids: number[]) =>
+  rpc<ProductQualityFacts[]>("product_quality_facts", { p_shop_key: shopKey, p_product_ids: ids });
 
 export const insightReturnSignals = (shopKey: number, ids: number[]) =>
   rpc<MirrorReturnSignal[]>("product_return_signals", { p_shop_key: shopKey, p_product_ids: ids });

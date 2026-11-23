@@ -3,8 +3,8 @@ import { syncShop } from "@/modules/ingestion/sync-repository";
 import { buildCanonicalStoreData, type CanonicalInputsReport } from "./canonical";
 import { fromStoredContext } from "./context";
 import {
-  importComplete, insightCatalog, insightMetaobjects, insightOrdersPage, insightProducts, insightReturnEvidence, insightReturnSignals, insightShopContext,
-  saveShopInsights,
+  importComplete, insightCatalog, insightMetaobjects, insightOrdersPage, insightProducts, insightQualityFacts, insightReturnEvidence, insightReturnSignals,
+  insightShopContext, saveShopInsights,
 } from "./repository";
 
 /**
@@ -35,6 +35,8 @@ export async function computeShopInsights(shopDomain: string): Promise<ShopInsig
     returnEvidence: (ids, asOf) => insightReturnEvidence(shop.shopKey, ids, asOf),
     returnSignals: (ids) => insightReturnSignals(shop.shopKey, ids),
     returnsImported: () => importComplete(shop.shopId, ["returns"]),
+    qualityFacts: (ids) => insightQualityFacts(shop.shopKey, ids),
+    inventoryImported: () => importComplete(shop.shopId, ["inventory"]),
     ingestionComplete: () => importComplete(shop.shopId),
   });
   const saved = await saveShopInsights(shop.shopKey, data, inputs);

@@ -4,6 +4,7 @@ import {
 import { productEnrichment, type ShopifyIntelligenceResult } from "@/lib/connectors/shopify-intelligence";
 import type { StoreCatalogClaim, StoreData, StoreProductReturnEvidence, StoreReturnSignal } from "@/lib/store-data";
 import { metaobjectReferenceIds } from "@/modules/ingestion/mappers";
+import { evaluateProductQuality, type ProductQualityFacts, type ShopQualityContext } from "@/modules/quality/rules";
 
 /**
  * The store snapshot from the canonical mirror (Phase 2, task 11).
@@ -213,6 +214,9 @@ export interface CanonicalInsightsDeps {
   returnSignals: (productIds: number[]) => Promise<MirrorReturnSignal[]>;
   /** Whether the shop's returns were imported: without them, return evidence is unavailable, not zero. */
   returnsImported: () => Promise<boolean>;
+  /** Data-quality facts (0049) and what the shop allows to be known (task 6). */
+  qualityFacts: (productIds: number[]) => Promise<ProductQualityFacts[]>;
+  inventoryImported: () => Promise<boolean>;
   ingestionComplete: () => Promise<boolean>;
   now?: () => number;
 }
@@ -235,7 +239,7 @@ export async function buildCanonicalStoreData(
   const now = deps.now ?? Date.now;
   const started = now();
   // Shopify reads run alongside the mirror reads.
-  const live = Promise.all([deps.shop(), deps.intelligence(), deps.ingestionComplete(), deps.returnsImported()]);
+  const live = Promise.all([deps.shop(), deps.intelligence(), deps.ingestionComplete(), deps.returnsImported(), deps.inventoryImported()]);
 
   const orders: CanonicalOrder[] = [];
   let ordersTruncated = false;
@@ -264,15 +268,17 @@ export async function buildCanonicalStoreData(
   const referenced = referencedMetaobjectIds(products);
   for (let i = 0; i < referenced.length; i += PRODUCT_PAGE) for (const o of await deps.metaobjects(referenced.slice(i, i + PRODUCT_PAGE))) metaobjects.set(o.id, o);
 
-  const [shop, intelligence, ingestionComplete, returnsImported] = await live;
+  const [shop, intelligence, ingestionComplete, returnsImported, inventoryImported] = await live;
   // Return evidence and signals from the mirror (task 4), in place of the live fetch.
   const asOf = new Date(now()).toISOString();
   const evidenceRows: MirrorReturnEvidence[] = [];
   const signalRows: MirrorReturnSignal[] = [];
+  const qualityRows: ProductQualityFacts[] = [];
   for (let i = 0; i < products.length; i += PRODUCT_PAGE) {
     const page = products.slice(i, i + PRODUCT_PAGE).map((p) => p.id);
     if (returnsImported) evidenceRows.push(...(await deps.returnEvidence(page, asOf)));
     signalRows.push(...(await deps.returnSignals(page)));
+    qualityRows.push(...(await deps.qualityFacts(page)));
   }
   const returnCapability = returnsImported
     ? { status: "available" as const, required_scopes: ["read_orders", "read_returns"], detail: "From the stored orders, refunds and returns" }
@@ -297,9 +303,14 @@ export async function buildCanonicalStoreData(
 
   const signals = new Map<string, StoreReturnSignal[]>();
   for (const { product_id, ...signal } of signalRows) signals.set(String(product_id), [...(signals.get(String(product_id)) ?? []), signal]);
+  // Data-quality flags (task 6), from the facts, the return signals and what the shop allows to be known.
+  const qualityShop: ShopQualityContext = { currency: shop.currency, scopes: intelligence.prespend.granted_scopes, inventoryImported, returnsImported };
+  const quality = new Map(qualityRows.map((f) => [String(f.product_id), evaluateProductQuality(f, signals.get(String(f.product_id)) ?? [], qualityShop)]));
   for (const product of data.products) {
     const found = signals.get(String(product.id));
     if (found) product.return_signals = found;
+    const flags = quality.get(String(product.id));
+    if (flags) product.quality = flags;
   }
 
   return {

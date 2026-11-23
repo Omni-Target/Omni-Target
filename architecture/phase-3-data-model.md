@@ -542,3 +542,35 @@ No signal is not proof that a product is returnable. Shopify has no product-leve
 - Unit tests: `context.test.ts` (bounds, mirror datasets excluded, round trip, staleness), the canonical builder, and the boundary tests.
 
 **Release checklist:** the `shop-context-refresh` schedule is added, with a first run before `insights-refresh` at release (seven schedules in all).
+
+### Task 6: product data-quality flags (2026-11-23; migration 0049)
+
+**States.** For each of 13 fields Phase 4 relies on, every product in the snapshot carries a state and the reason for it (`StoreProduct.quality`, `calc_version` 1):
+
+| State | Meaning | Examples (reason) |
+|---|---|---|
+| `present` | Stored as Shopify gives it | `set`, `levels`, `third_party`, `shopify_collective`, `declined_final_sale` |
+| `empty` | Shopify confirms there is none, and none is needed | `not_on_sale` (compare-at), `not_shipped` (weight), `untracked` (inventory), `gift_card`, `none_defined` (specifications) |
+| `missing` | Readable, but the merchant has not set it | `not_set` / `partial` (unit cost, barcode, weight), `uncategorised`, `no_featured` (image) |
+| `unavailable` | Could not be read | `scope_missing`, `inventory_not_imported`, `returns_not_imported`, `no_level_stored`, `not_read` (row predates Phase 3's fields), `no_product_rule` (Shopify has no product-level return rule) |
+| `unverified` | Present, but rests on merchant free text, is incomplete or contradicts itself | `tag` / `metafield` (return signals), `currency_differs` (unit cost), `zero_price`, `not_above_price`, `reference_unresolved`, `no_definitions`, `quantities_partial`, `unknown_location` |
+
+The fields are price, compare-at price, unit cost, weight, inventory, fulfilment, return eligibility, specifications, description, images, category, barcode and customs (HS code and origin).
+
+**How it works:**
+- **Facts in the database.** `product_quality_facts` (0049) gathers per product, at most 500 a call, what the rules judge: counts over variants, inventory levels, metafields and references, and which field set the product was read with.
+- **Rules in code.** `evaluateProductQuality` (`src/modules/quality/rules.ts`) is pure and versioned. It also takes the return signals and what the shop allows to be known: currency, granted scopes, and which domains were imported.
+- **Computed when the snapshot is built, not stored.** Flags are always current, cost no storage (a stored copy would take about 10 MB for an incident-scale catalog), and changing a rule needs no migration.
+- **Never filled in.** A property test over 2,000 random products checks that no field is ever `present` without its value, and that a field Phase 3 added, on a product read before it, is `unavailable` and never `missing`.
+
+**Results** (`quality.live.test.ts`). Each snapshot product's flags are hand-checked against states derived from Shopify's raw data for the same products, not from the mirror:
+
+| Shop | Sampled | Result |
+|---|---|---|
+| Dev store | 17 products, 7 fields each | Identical. A real mix: unit cost missing on all 17; category present 3 / missing 14; description present 4 / empty 13; weight present 4 / missing 12 / empty 1 (gift card); compare-at empty 16 / present 1; images present 16 / empty 1; barcode missing 16 / empty 1 (gift card) |
+| omni-beta | 100 products, 5 fields (+ images and barcode for the 16 read with Phase 3's fields) | Identical: unit cost present, category missing, description present, weight missing, not on sale, images present, barcodes missing |
+
+**Tests:**
+- `product-quality.db.test.mjs` (2): every fact counted on a product with mixed variants, levels at known, unknown and third-party locations, partial quantities, defined, truncated and unresolved metafields, plus a gift card; grants.
+- `rules.test.ts` (6): golden cases for each state and the property test.
+- The canonical builder attaches flags with the return signals.
