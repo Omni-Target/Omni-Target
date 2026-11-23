@@ -199,11 +199,26 @@ export interface ImportReport {
   coverage?: Record<string, unknown>;
 }
 
-export async function runShopImport(importId: string, runId: string, sleep: (ms: number) => Promise<void>): Promise<ImportReport> {
+/**
+ * How an import reaches Shopify: the live session, GraphQL client and access check by default. The
+ * scale verification (task 12) passes a fake Shopify serving generated bulk results instead.
+ */
+export interface ImportDeps {
+  access: typeof getShopifyAccessForShop;
+  gql: (shopDomain: string, accessToken: string) => Gql;
+  checkAccess: (shopDomain: string) => ReturnType<typeof checkShopAccess>;
+}
+const liveImportDeps: ImportDeps = {
+  access: getShopifyAccessForShop,
+  gql: (shopDomain, accessToken) => (query, variables) => shopifyGraphql(shopDomain, accessToken, query, variables),
+  checkAccess: (shopDomain) => checkShopAccess(shopDomain),
+};
+
+export async function runShopImport(importId: string, runId: string, sleep: (ms: number) => Promise<void>, deps: ImportDeps = liveImportDeps): Promise<ImportReport> {
   const claim = await imports.claimImport(importId, runId);
   if (claim.outcome !== "claimed") return { outcome: claim.outcome };
 
-  const access = await getShopifyAccessForShop(claim.shop_domain);
+  const access = await deps.access(claim.shop_domain);
   const finish = async (status: "succeeded" | "partial" | "failed", coverage: Record<string, unknown>, error: string | null) => {
     await imports.finishImport(importId, runId, status, coverage, error);
     return { outcome: status, coverage } as ImportReport;
@@ -212,12 +227,12 @@ export async function runShopImport(importId: string, runId: string, sleep: (ms:
 
   const ctx: Context = {
     importId, runId, shopKey: claim.shop_key, shopDomain: claim.shop_domain, shopifyShopId: Number(claim.shopify_shop_id),
-    windowStart: new Date(claim.window_start), startedAt: await imports.importStartedAt(importId), scope: claim.domains?.length ? new Set(claim.domains) : null, gql: (q, v) => shopifyGraphql(claim.shop_domain, access.accessToken, q, v), sleep,
+    windowStart: new Date(claim.window_start), startedAt: await imports.importStartedAt(importId), scope: claim.domains?.length ? new Set(claim.domains) : null, gql: deps.gql(claim.shop_domain, access.accessToken), sleep,
     reservationId: null, rowsWritten: 0, batches: 0, coverage: { started_at: new Date().toISOString() },
   };
 
   try {
-    const accessCheck = await checkShopAccess(ctx.shopDomain);
+    const accessCheck = await deps.checkAccess(ctx.shopDomain);
     if (accessCheck.outcome !== "checked") return finish("failed", ctx.coverage, `access_check:${accessCheck.outcome}`);
     const domains = accessCheck.report.domains;
     const historyAllowed = domains.orders.history?.basis === "retention_window";

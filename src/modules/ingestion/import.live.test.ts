@@ -72,5 +72,6 @@ describe("live end-to-end import", () => {
     if (process.env.LIVE_OUT) writeFileSync(process.env.LIVE_OUT, JSON.stringify(report, null, 1));
     expect(reconcile.dispatched).toBeGreaterThanOrEqual(1);
     expect(["succeeded", "partial"]).toContain(row?.status);
-  });
+    // It waits up to 55 minutes for the import (the live config default would stop it after two).
+  }, 3_600_000);
 });

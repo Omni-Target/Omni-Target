@@ -684,6 +684,41 @@ The user decided that orders and refunds reaching Shopify after their month left
   - cities showed the country code ("Lagos, NG");
   - a false "incomplete data" warning, because a scoped import records the domains it did not import as `skipped`.
 
+### Task 12: scale and recovery verification (2026-11-23)
+
+**How it was run.** `src/modules/ingestion/scale/` runs the real import workflow (`runShopImport`).
+- **Fake Shopify:** a local server generates the bulk results deterministically, in the exact JSONL the bulk queries produce. It can refuse a domain, expire a result URL once, or report a file size that triggers R2 staging. The workflow takes it through a new optional dependency argument; live imports are unchanged.
+- **Database:** writes go to a local Supabase database, migrations 0001 to 0043, behind PostgREST. It has Supabase's 8 s statement timeout and 1,000-row limit, with every database call timed.
+- **R2:** staging uses the staging bucket.
+- **Opt-in:** never in CI.
+
+**Very large profile.** This is the incident shop of Phase 0: 70,000 products, 210,000 variants, 140,000 metafields, 420,000 inventory levels, 200,000 customers, 500,000 orders in the window (750,000 lines, 25,000 refunds, 10,000 returns) and 20,000 orders before it.
+- **Result:** succeeded in 207 s, writing 2,335,000 rows (about 11,300 per second). Every table holds exactly what the profile defines.
+- **Memory:** peak memory was 401 MB. The results stream; nothing holds a whole file.
+- **Statement timeout:** no database call came near 8 s.
+  - slowest: `summarise_history_month` at 1.3 s (one history month), then `refresh_summary_month` at 0.9 s and `ingest_orders` at 0.86 s (p95 49 ms over 1,250 batches);
+  - no call failed.
+- **Capacity:** the database grew by 717 MB. The capacity reservation was 946 MB, conservative by about a third.
+
+**Kill and resume.**
+- **Kill:** the same import ran in its own process and was killed with SIGKILL 421,000 lines into the orders result, with 168,800 orders and 253,200 lines written.
+- **Resume:** once the dead run's lease had lapsed, a new run took the import over in 131 s. It resumed orders from the checkpoint on the same bulk result, without a new export. Only the domains not yet started (history, returns) ran fresh, and the import succeeded.
+- **Integrity:** all 13 tables equal the clean run's, in row counts and checksums. There are no duplicates and no gaps.
+
+**Expired URL, R2 staging, denied fields** (a small profile):
+- **Expired URL:** the catalog's result URL answered 403 once. The importer re-ran the operation, staged the new result in R2, imported it, and deleted the staged object. A sweep of the import's prefix found nothing left.
+- **Denied domain:** the customers query failed with `ACCESS_DENIED`. That domain was recorded as failed (`access_denied`), every other domain was imported in full, and the import is `partial`, not failed.
+- **The staging bucket's sweep:** it has reported one remaining object since 2026-11-18. It is an empty object from Task 4's bucket check (shop key 0). The sweep removes staged objects after eight days, so it goes on 2026-11-26.
+
+**Dev store end to end (staging, real Shopify, the Trigger.dev worker).**
+- **Import:** omni-dev-zyvisrxh's first import ran through the reconcile and the worker, and succeeded in 55 s. The mirror matches Shopify's counts:
+  - 19 products, 32 variants, 3 customers and 2 orders in the window;
+  - every domain succeeded, and history was skipped because no orders precede the window.
+- **Snapshot:** the import then dispatched `shop-insights`, which built the store snapshot from the mirror in 6 s: 2 orders, and 17 active products (16 with images).
+- **Fix:** `import.live.test.ts` now has a timeout matching its 55-minute wait.
+
+**Acceptance.** Imports at the incident scale complete within the database limits. A killed worker resumes with no duplicates or gaps. An expired URL re-runs the operation. A denied field yields a partial result. Staged objects are deleted. The dev store imports end to end.
+
 ## Dependencies outside the code
 
 | Dependency | Needed for | Status |
