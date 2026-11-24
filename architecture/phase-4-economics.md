@@ -486,3 +486,52 @@ Recommendations are computed on demand for a brief or a portfolio run, at most 2
 ### Task 1: audit and reference implementations (2026-11-24; no migration)
 
 Recorded above: "Task 1: how budgets are produced today". The reference implementations and their tests are `src/modules/economics/legacy/`.
+
+### Task 2: policy and merchant inputs (2026-11-24; migration 0052)
+
+**Tables:**
+- **`economics_policies`:**
+  - versioned;
+  - a written version never changes (a trigger refuses it); only its status and approval move;
+  - exactly one version is active (unique partial index);
+  - every setting is checked for presence and range by `economics_policy_settings_valid`, which also keeps test sizes, confidence thresholds and test lengths in order.
+- **Version 1** holds the 32 defaults in "Policy defaults", each with its rationale stored beside it, and `approval = 'pending'` until the CEO decides.
+- **`economics_input_keys`:** the catalogue of 17 merchant inputs.
+  - Each key records its kind (rate, money or flag), where it may be set (shop, product or both), the states it may take and its range.
+  - For example, `expected_*` rates can only be estimates; spending limits can only be entered; `landed_cost_per_unit` only per product.
+- **`merchant_economics_inputs`:** one row per value, shop-wide (`product_shopify_id = 0`) or a product override.
+  - Each row keeps its state (`merchant_entered`, `confirmed_none`, `merchant_estimate`), its currency for money, who entered it and when.
+  - `confirmed_none` must be 0.
+  - A missing row is unknown.
+
+**Functions (service role only):**
+- `save_economics_inputs` saves and clears in one transaction, all or none.
+  - It refuses unknown keys, wrong scopes, wrong states, out-of-range values, non-numbers, money before the shop's currency is known, more than 500 changes or 20,000 rows, and shops not bound to an active workspace.
+- `economics_inputs` returns the currency with the shop-wide values and the overrides for the products asked about.
+- `economics_policy` returns a version or the active one.
+- Shop deletion and redaction (`delete_shop_synced_data`, `shop_synced_row_count`) include the inputs. The policy and catalogue are global.
+
+**Code** (`src/modules/economics/`):
+- `policy.ts` checks a version with the database's rules before the engine uses it. The engine carries no defaults of its own.
+- `inputs.ts` resolves one product's inputs:
+  - its override, else the shop's value, else `missing`, never 0;
+  - money entered under a previous shop currency becomes missing (`currency_changed`);
+  - values older than `merchant_inputs_stale_days` are marked stale.
+- `repository.ts` reads and saves through the functions.
+
+**Tests:**
+- `economics-inputs.db.test.mjs` (6):
+  - the active version and its rationale;
+  - immutability, invalid settings, one active version, approval needing its date;
+  - provenance on save, replacement and clearing;
+  - every catalogue rule;
+  - all-or-none batches;
+  - currency and binding requirements;
+  - function-only access.
+- `commerce.db.test.mjs` now classifies the inputs table as deleted with the shop.
+- Unit (`policy.test.ts`, `inputs.test.ts`):
+  - the test fixture equals version 1 as the migration writes it;
+  - the parser refuses what the database refuses;
+  - override precedence, currency change, staleness.
+
+**Staging:** 0052 applied. The active policy has version 1, 32 settings, approval pending. There are 17 input keys. Both test stores' currencies are known (USD, NGN), and no inputs have been entered yet.
