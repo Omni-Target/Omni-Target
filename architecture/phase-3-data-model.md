@@ -657,3 +657,38 @@ The fields are price, compare-at price, unit cost, weight, inventory, fulfilment
 **For Phase 5:**
 - Channel fit can use the stored channel, UTM and first or last visit.
 - The order index separates new from returning buyers per order, without customer data.
+
+### Task 9: verification and completion report (2026-11-24; no migration)
+
+**Final verification.** Every Phase 3 live check was re-run against `staging` at b4ab62e (migrations through 0051), on omni-beta and the dev store:
+
+| Check | Store | Result |
+|---|---|---|
+| Order reconciliation (`order-reconciliation.live.test.ts`) | omni-beta | Pass |
+| Webhook destinations (`webhook-destinations.live.test.ts`) | both | **1 finding:** the dev store still holds one `ORDERS_PAID` subscription to production, left in place for a decision. Both stores hold 22 subscriptions at staging |
+| Catalog completeness (`catalog-fields.live.test.ts`) | both | Pass |
+| Inventory by location (`inventory.live.test.ts`) | both | Pass |
+| Returns and refund lines (`returns.live.test.ts`) | omni-beta | Pass |
+| Acquisition attribution (`attribution.live.test.ts`) | omni-beta | Pass |
+| Shop context (`context.live.test.ts`) | both | Pass |
+| Data-quality flags (`quality.live.test.ts`) | both | Pass |
+| Read-path equivalence (`equivalence.live.test.ts`) | dev store | Pass |
+| Historical adjustments (`summary-adjustments.live.test.ts`) | omni-beta | Pass |
+| History arrivals (`history.live.test.ts`) | omni-beta | Pass |
+
+- **Scale harness, small scenario** (a full import against a simulated shop) at 0051: passes. The outcome is partial by design, and every domain succeeds.
+- **Incremental, reconcile and redaction paths** for every new field are covered by the database suite that CI runs on each pull request:
+  - `ingest`, `history-arrivals` and `summary-maintenance`;
+  - `commerce`, whose deletion lists include `metafield_definitions`, `refund_line_items` and `shop_context`.
+- **Synthetic fixtures** are used only where the test stores have no data, and are labelled as synthetic in each test:
+  - real returns;
+  - customer visits;
+  - old cancellations;
+  - fulfilment-service quantity states.
+
+**Open decisions:**
+1. Approve Phase 4.
+2. Whether to remove the dev store's production `orders/paid` subscription.
+3. Steps 2–4 of the legacy-snapshot cleanup.
+4. Whether to add the optional fulfilment-order scopes, which change the app configuration.
+5. Whether to create extra test data on the dev store (returns, visits).
