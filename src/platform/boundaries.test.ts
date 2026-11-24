@@ -76,3 +76,12 @@ describe("no full sync inside a request (Phase 2, task 11)", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe("frozen budget engines stay out of the app (Phase 4, task 1)", () => {
+  // src/modules/economics/legacy/ holds copies of the old budget formulas for the before-and-after comparison only.
+  it("imports the legacy reference implementations only from the economics module", () => {
+    const offenders = files.filter((file) => /economics\/legacy\//.test(file.text) && !file.path.startsWith("modules/economics/"))
+      .map((file) => file.path);
+    expect(offenders).toEqual([]);
+  });
+});
