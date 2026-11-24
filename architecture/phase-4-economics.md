@@ -208,8 +208,8 @@ Property tests check each of these rules.
 
 | Metric | Definition |
 |---|---|
-| Break-even CPA | contribution before advertising per acquired order: what one sale can pay for its acquisition without losing money |
-| Maximum viable CPA | break-even CPA recomputed with the uncertain inputs at the unfavourable end of their range: observed rates at their 90% upper bound, proxies and merchant estimates at their stated values. Never above break-even |
+| Break-even CPA | contribution before advertising per acquired order: what one sale can pay for its acquisition without losing money. Ad platforms count orders when they are placed, so where some orders are never paid (cash on delivery, voided), break-even is contribution × the share of orders paid (`UNPAID_ORDERS_ADJUSTED`) |
+| Maximum viable CPA | break-even CPA recomputed with the uncertain inputs at the unfavourable end of their range: the observed refund and return incidence at their 90% upper bounds, the observed restock rate and paid share at their 90% lower bounds (Wilson). The discount rate, a ratio of amounts, is used as measured; proxies and merchant estimates at their stated values. Never above break-even |
 | Target CPA | min(break-even CPA × (1 − contribution reserve), maximum viable CPA) |
 | Expected CPA | only from measured campaign results (spend ÷ matured attributed conversions), with an interval. Never assumed |
 | Break-even ROAS | net revenue per order ÷ break-even CPA = 1 ÷ contribution margin |
@@ -270,7 +270,7 @@ Evaluated in this order. The first match wins, and every reason found is kept.
 | GO | economics confidence High or Medium; acquisition Proven; expected CPA ≤ target and its 90% upper bound ≤ break-even | controlled test, or a scaling step when a campaign is running |
 | PILOT | positive contribution with complete inputs, but acquisition not proven, or expected CPA between target and break-even | small pilot, only within limits the merchant has set |
 
-**Reason codes** (initial catalogue; the list is versioned):
+**Reason codes.** The full, versioned catalogue, with the plain-language text the brief shows, is `src/modules/economics/reasons.ts`. Task 4 added `SHOP_CURRENCY_UNKNOWN`, `PRICE_UNKNOWN`, `UNIT_COST_ZERO`, `LANDED_COST_UNCONFIRMED` and `TAX_RATE_UNKNOWN` to the missing inputs, and further evidence notes. The initial list:
 - **Restrictions:** `PRODUCT_NOT_ACTIVE`, `GIFT_CARD`, `ZERO_PRICE`, `OUT_OF_STOCK`, `TARGET_MARKET_NOT_SERVICED`, `MERCHANT_EXCLUDED`.
 - **Missing data:**
   - costs: `UNIT_COST_MISSING`, `UNIT_COST_PARTIAL`, `UNIT_COST_CURRENCY_MISMATCH`, `PAYMENT_FEES_MISSING`, `SHIPPING_COST_MISSING`, `FULFILMENT_COST_MISSING`, `SELLING_FEES_UNCONFIRMED`, `RETURN_COST_MISSING`;
@@ -592,3 +592,45 @@ Recorded above: "Task 1: how budgets are produced today". The reference implemen
 **Inventory freshness:**
 - omni-beta's inventory checkpoint dates from 2026-11-19, because staging's worker runs only while the development machine does.
 - The engine will mark it stale (more than 48 hours old) and cap confidence at Medium, as designed.
+
+### Task 4: contribution engine (2026-11-24; no migration)
+
+**`computeProductEconomics`** (`src/modules/economics/contribution.ts`, calculation version `econ-1.0.0`). It is pure: evidence, the merchant's inputs and a policy version go in, and one product's economics come out.
+
+**What it produces:**
+- every line in the contribution table, each with its source (`observed`, `merchant_entered`, `confirmed_none`, `store_proxy`, `merchant_estimate`, `missing`, or `derived` for computed figures and stated conservative assumptions) and a basis in words;
+- net revenue, variable costs, contribution and margin;
+- the amount charged per order;
+- break-even, maximum viable and target CPA;
+- break-even, target and platform-basis ROAS.
+
+**How it handles uncertainty:**
+- **Rates** come from the product's own history, else the store's (a labelled proxy), else the merchant's estimate, else they are unknown.
+- **Withheld refund evidence** is never used. It falls back to the store or merchant figure, with a note.
+- **Missing essential inputs:** no contribution and no CPA. An upper bound from what is known is reported instead: known revenue − known costs. Missing costs can only lower it, so a bound ≤ 0 proves the product unviable regardless.
+- **Money** is whole minor units (ISO 4217 exponents): revenue rounds down; costs and reductions round up; ceilings round down; no −0.
+- **Rates** keep full precision; rounding one first would move a cost by a cent.
+
+**Choices made while building** (documented above):
+- the share of orders paid enters break-even (`UNPAID_ORDERS_ADJUSTED`);
+- a unit cost of zero on a selling variant counts as unreliable (`UNIT_COST_ZERO`);
+- landed costs must be entered or confirmed as already in the unit cost;
+- when prices include tax and no order shows how much, the tax is unknown;
+- the payment-fee base uses the shipping counted as revenue (shipping on refunded orders is left out), which slightly understates fees on refunded orders.
+
+**Statistics** (`stats.ts`): Wilson score bounds; exact Poisson (Garwood) bounds through the regularised incomplete gamma, for task 7. All are checked against published tables.
+
+**Tests (36 unit):**
+- **The golden case**, the illustrative $80 product:
+  - gross $80 → discounts $4 → refunds $4 → **net revenue $72**;
+  - costs $42 (product $30, shipping $7, fulfilment $2, payment fees $2.20, returns $0.80);
+  - **contribution $30**, margin 41.67%;
+  - **break-even $30, target $21**, maximum viable $26.11;
+  - ROAS 2.40 break-even, 3.43 target, 3.62 on the platform's basis.
+- **Each missing or unreliable input** is named and yields no number.
+- **Each component counted once:** tax inside prices against on top; shipping revenue against cost; restocks recover cost while refunds reduce revenue once; unpaid orders; negative contribution.
+- **Properties over 500 seeded random products:**
+  - lines add up exactly;
+  - target ≤ maximum viable ≤ break-even ≤ contribution;
+  - contribution never rises when any of 13 costs, rates or reductions rises;
+  - refunds never touch product cost, and restocks never touch revenue.
