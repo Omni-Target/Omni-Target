@@ -634,3 +634,85 @@ Recorded above: "Task 1: how budgets are produced today". The reference implemen
   - target ≤ maximum viable ≤ break-even ≤ contribution;
   - contribution never rises when any of 13 costs, rates or reductions rises;
   - refunds never touch product cost, and restocks never touch revenue.
+
+### Task 5: verdicts, confidence and budget (2026-11-24; no migration)
+
+**`recommendProduct`** (`src/modules/economics/recommend.ts`) is pure. It takes Task 4's economics, plus:
+- the merchant's limits;
+- stock;
+- the portfolio's allowance (Task 6);
+- campaign results (Task 7);
+- whether the target market is served.
+
+It returns the verdict, the reasons, the notes, the confidence and the budget.
+
+**Confidence.** Each class records why.
+- **Economics:**
+  - low below 10 product orders;
+  - high with ≥ 30 orders and nothing downgrading;
+  - medium otherwise.
+  - Downgrades: a store proxy or merchant estimate, stale cost inputs, stale stock, an unobserved paid share.
+- **Acquisition:**
+  - proven: ≥ 20 matured campaign sales;
+  - indicative: 1–19;
+  - established demand: ≥ 10 orders in 180 days;
+  - unproven otherwise.
+- **Overall:**
+  - high only when economics are high and acquisition is proven;
+  - medium when economics are at least medium and there is some acquisition or demand evidence;
+  - low otherwise.
+
+**Verdicts, in order:**
+1. **BLOCKED:** restrictions (not active, gift card, zero price, out of stock everywhere online with overselling off, market not served, excluded by the merchant).
+2. **DO NOT LAUNCH:** contribution ≤ 0, or the upper bound ≤ 0 even with inputs missing, or a proven CPA whose lower bound exceeds break-even.
+3. **INSUFFICIENT DATA:** missing inputs.
+4. **GO:** proven acquisition with economics at least medium, CPA ≤ target and its upper bound ≤ break-even.
+5. **PILOT:** otherwise, with `CPA_ABOVE_TARGET` or `INSUFFICIENT_CONVERSION_EVIDENCE` and `NO_SALES_HISTORY`.
+
+**Budget** = the smallest of these ceilings, with the binding one named:
+- **Merchant:** the test limit and the loss limit.
+- **Inventory:** online stock, less organic demand reserved for the test (the higher of the 30-day and 180-day rates), in whole orders at the target CPA.
+  - Untracked stock is not capped.
+  - Stock that Shopify tracks but nobody has read counts as none (`INVENTORY_UNKNOWN`).
+- **Portfolio.**
+- **Policy:** a pilot of 10 sales, or a controlled test of 20, at the target CPA.
+
+**Budget outcomes:**
+- **Blocked and unviable products:** exactly 0.
+- **Missing data:** no amounts.
+- **No merchant limit:** no amount, but the other ceilings are shown (`awaiting_authority`).
+- **Below the minimum test** (5 sales at the target CPA): 0.
+- **When the daily limit binds:** the test lengthens in whole days up to 30, and the test budget is exactly daily × days.
+
+**Tests (15, plus 2 properties over 1,000 random products):**
+
+| Scenario | Verdict | Budget (illustrative) |
+|---|---|---|
+| A: healthy, 40 sales at $17 | GO, confidence high | $420 controlled test (20 × $21, policy binding), $30/day × 14, loss limit $600 |
+| B: unit cost missing | INSUFFICIENT DATA (`UNIT_COST_MISSING`) | no amounts |
+| C: costs above revenue | DO NOT LAUNCH (`NEGATIVE_CONTRIBUTION_MARGIN`) | $0 |
+| D: 20 units in stock | GO | $252: (20 − 8 reserved) × $21, inventory binding |
+| E: new, no sales, estimates only | PILOT, confidence low | $150, the merchant's own limit, $10.71/day |
+| F: 30 sales at $25 | PILOT (`CPA_ABOVE_TARGET`) | $210 pilot |
+
+**Further cases:**
+- every restriction gives exactly 0;
+- a proven CPA above break-even;
+- unviable economics settled despite a missing cost;
+- a missing merchant limit;
+- the daily limit stretching a test (21 days) and capping it (30 days, $300);
+- below the minimum test;
+- the portfolio binding;
+- stale, untracked and unknown stock.
+
+**Properties:**
+- zero for blocked and unviable products, no amounts for missing data;
+- never above any ceiling, the merchant's test, loss or daily limits;
+- daily × days ≤ the test budget;
+- every recommended test is at least the minimum;
+- GO only with proven acquisition and economics at least medium;
+- all five verdicts occur.
+
+**The property tests found two faults, both fixed before merging:**
+- a test stretched by the daily limit could fall below the minimum;
+- rounding the test length up let daily × days exceed the test budget.

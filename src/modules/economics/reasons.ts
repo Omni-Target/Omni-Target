@@ -59,6 +59,7 @@ export const REASONS = {
   INVENTORY_UNTRACKED: { category: "constraint", text: "Shopify does not track this product's stock, so no stock limit can be checked." },
   INVENTORY_OVERSELL_ALLOWED: { category: "constraint", text: "The product keeps selling when out of stock; only stock on hand is counted." },
   INVENTORY_STALE: { category: "constraint", text: "Stock levels have not been confirmed recently." },
+  INVENTORY_UNKNOWN: { category: "constraint", text: "Shopify tracks this product's stock, but no stock level has been read, so none is counted." },
   MERCHANT_LIMIT_BINDING: { category: "constraint", text: "The merchant's own spending limit sets the budget." },
   MERCHANT_AUTHORITY_MISSING: { category: "constraint", text: "No spending limit has been authorised by the merchant, so no amount is recommended." },
   PORTFOLIO_LIMIT_REACHED: { category: "constraint", text: "The merchant's total advertising limit is already allocated to other products." },
