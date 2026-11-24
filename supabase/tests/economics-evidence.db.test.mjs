@@ -149,6 +149,8 @@ describe("product economics evidence (0053), synthetic fixtures", () => {
     expect(e.store).toMatchObject({ orders: 5, orders_unpaid: 1, discount_orders: 5, discount_amount: 8, discount_gross: 520,
       matured_orders: 4, matured_refunded: 170, matured_orders_returned: 1 });
     expect(Number(e.store.matured_total)).toBeCloseTo(91.4 + 221 + 130 + 80, 6);
+    expect(Number(e.store.tax_amount)).toBeCloseTo(14.4 + 36 + 20 + 0 + 16, 6);
+    expect(Number(e.store.tax_base)).toBeCloseTo(77 + 185 + 110 + 80 + 85, 6);
   });
 
   it("withholds refund and return figures while lines are unread, never guessing them", async () => {

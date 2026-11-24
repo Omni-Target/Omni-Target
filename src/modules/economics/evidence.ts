@@ -91,6 +91,9 @@ export interface ProductEvidence {
 export interface StoreEvidence {
   orders: number;
   orders_unpaid: number;
+  /** Tax on paid orders in the sales window, and its base (subtotal + shipping). */
+  tax_amount: number;
+  tax_base: number;
   discount_orders: number;
   discount_amount: number;
   discount_gross: number;

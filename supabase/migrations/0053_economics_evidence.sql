@@ -20,7 +20,8 @@
 --    (null), not guessed;
 --  - inventory per variant from Phase 3's inventory_availability (online availability, state, unknown
 --    locations), without location detail;
---  - store-wide rates from orders over the same windows, for a product without enough history of its own;
+--  - store-wide rates from orders over the same windows, for a product without enough history of its own
+--    (paid and unpaid orders, tax and its base, discounts, matured totals, refunds and returns);
 --  - freshness: when each synced domain was last complete (import checkpoint or reconcile watermark).
 -- Test orders are excluded everywhere. Money is in the shop's currency (Shopify's shop money).
 
@@ -171,6 +172,8 @@ returns jsonb language sql stable security definer set search_path = public, pg_
   -- Store-wide rates from orders over the same windows: for a product without enough history of its own.
   store as (
     select count(*) filter (where o.financial_status in ('paid', 'partially_refunded', 'refunded')) as orders,
+           coalesce(sum(o.total_tax) filter (where o.financial_status in ('paid', 'partially_refunded', 'refunded')), 0) as tax_amount,
+           coalesce(sum(o.subtotal + o.total_shipping) filter (where o.financial_status in ('paid', 'partially_refunded', 'refunded')), 0) as tax_base,
            count(*) filter (where coalesce(o.financial_status not in ('paid', 'partially_refunded', 'refunded'), true)) as orders_unpaid,
            count(*) filter (where o.financial_status in ('paid', 'partially_refunded', 'refunded') and o.processed_at >= params.discount_from) as discount_orders,
            coalesce(sum(o.total_discounts) filter (where o.financial_status in ('paid', 'partially_refunded', 'refunded') and o.processed_at >= params.discount_from), 0) as discount_amount,

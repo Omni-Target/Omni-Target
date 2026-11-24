@@ -560,7 +560,7 @@ Recorded above: "Task 1: how budgets are produced today". The reference implemen
 - **Inventory:** Phase 3's `inventory_availability` per variant, without location detail. It is reused, not recreated.
 
 **Also returned:**
-- **Store-wide figures** over the same windows, for products without enough history: paid and unpaid orders, discounts, matured totals and refunds, matured orders with a return.
+- **Store-wide figures** over the same windows, for products without enough history: paid and unpaid orders, tax and its base, discounts, matured totals and refunds, matured orders with a return.
 - **Freshness** per domain: the later of the import checkpoint and the reconcile watermark.
 
 **Tests:**

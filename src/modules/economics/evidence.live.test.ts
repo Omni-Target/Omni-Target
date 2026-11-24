@@ -171,6 +171,8 @@ describe("live economics evidence", () => {
     const returnedOrders = new Set(returns.filter((r) => returnLines.some((l) => l.return_shopify_id === r.shopify_id)).map((r) => Number(r.order_shopify_id)));
     const expStore = {
       orders: paidOrders.length, orders_unpaid: orders.length - paidOrders.length,
+      tax_amount: paidOrders.reduce((t, o) => t + n(o.total_tax), 0),
+      tax_base: paidOrders.reduce((t, o) => t + n(o.subtotal) + n(o.total_shipping), 0),
       discount_orders: paidOrders.filter((o) => Date.parse(String(o.processed_at)) >= discountFrom).length,
       discount_amount: paidOrders.filter((o) => Date.parse(String(o.processed_at)) >= discountFrom).reduce((t, o) => t + n(o.total_discounts), 0),
       matured_orders: maturedPaid.length,
