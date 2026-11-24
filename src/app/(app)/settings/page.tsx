@@ -2,18 +2,20 @@ import { auth } from "@clerk/nextjs/server";
 import { SignOutButton } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ShoppingBag, Database, LogOut, ShieldAlert } from "lucide-react";
+import { ShoppingBag, Database, LogOut, ShieldAlert, Calculator } from "lucide-react";
 import { getUserIntegration } from "@/lib/db";
 import { currentWorkspaceFor, hasConnectedShop } from "@/modules/workspaces/current";
 import { exportsForOwner } from "@/modules/compliance/exports-repository";
 import { PageContainer } from "@/components/layout/page-container";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { CustomerDataRequests, IntegrationCard } from "@/components/settings";
+import { CustomerDataRequests, EconomicsSettings, IntegrationCard } from "@/components/settings";
 import { SyncButton } from "@/components/SyncButton";
 import { DeleteAccountButton } from "@/components/DeleteAccountButton";
 import { normalizeStoreLogoUrl } from "@/lib/store-logo-url";
 import { storedShopLogo } from "@/modules/insights/repository";
+import { economicsInputs } from "@/modules/economics/repository";
+import { shopKeyFor } from "@/modules/ingestion/repository";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -54,6 +56,10 @@ export default async function SettingsPage() {
     }
   }
   const storeName = metadata.storeName || null;
+  // Phase 4: the merchant's stored costs and limits, read from the database for the form below.
+  const economicsShopKey = workspace?.status === "active" && workspace.shop_domain ? await shopKeyFor(workspace.shop_domain).catch(() => null) : null;
+  const economics = economicsShopKey === null ? null : await economicsInputs(economicsShopKey, []).catch(() => null);
+  const economicsInitial = economics ? { currency: economics.currency, inputs: economics.inputs.filter((i) => i.product_id === 0) } : null;
 
   return (
     <PageContainer width="default" className="space-y-7 pb-16">
@@ -118,6 +124,20 @@ export default async function SettingsPage() {
             {shopifyConnected && <SyncButton />}
           </div>
         </IntegrationCard>
+
+        {/* Phase 4: the merchant's costs and advertising limits, used by the economics engine. */}
+        {shopifyConnected && (
+          <IntegrationCard
+            icon={<Calculator />}
+            name="Costs and advertising limits"
+            accent="neutral"
+            connected
+            statusLabel="Used for every budget"
+            description="Omnitarget works out whether each product can pay for its advertising from these figures and your Shopify data. Unknown costs are never treated as zero."
+          >
+            <EconomicsSettings initial={economicsInitial} />
+          </IntegrationCard>
+        )}
 
         {/* Customer data requests (Shopify privacy) */}
         {dataRequests && <CustomerDataRequests requests={dataRequests} />}

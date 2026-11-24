@@ -71,6 +71,9 @@ const httpUrl = z
 const location = z.looseObject({ name: optText(300), city: optText(300), source: optText(100) });
 
 const briefPdfParamsSchema = z.looseObject({
+  // Phase 4: the engine's recorded economics snapshot. Bounded here; the template reads it only through the strict
+  // parseBriefEconomics(), which drops anything malformed, and escapes every value it renders.
+  budget_economics: z.unknown().optional().refine((v) => v === undefined || v === null || JSON.stringify(v).length <= 32_768, "budget_economics too large"),
   storeCountry: optText(100),
   id: optText(100),
   brandName: text(300),

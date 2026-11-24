@@ -102,6 +102,8 @@ export interface BriefPDFParams {
   };
   /** S0.6: the merchant's maximum test budget — the only source of budget amounts. */
   budget_plan?: import("./budget-plan").BudgetPlan;
+  /** Phase 4: the engine's recorded recommendation for the brief's product (rendered when present). */
+  budget_economics?: import("./brief-economics").BriefEconomics | null;
   budget: {
     calculation?: import("./budget-evidence").BudgetCalculation;
     recommended_daily?: number;

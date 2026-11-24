@@ -85,3 +85,29 @@ describe("frozen budget engines stay out of the app (Phase 4, task 1)", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe("financial figures come only from the economics engine (Phase 4, task 8)", () => {
+  const COMPUTING = /from\s+["']@\/modules\/economics\/(contribution|recommend|portfolio|run|feedback|stats)["']|from\s+["']\.\.?\/(contribution|recommend|portfolio|run|feedback)["']/;
+  const usesAnthropic = (text: string) => /@anthropic-ai\/sdk/.test(text);
+
+  it("no page, component, route or library computes economics: only the economics module does", () => {
+    const offenders = files.filter((file) => COMPUTING.test(file.text) && !file.path.startsWith("modules/economics/")).map((file) => file.path);
+    expect(offenders).toEqual([]);
+  });
+
+  it("the economics module never calls a language model", () => {
+    const offenders = files.filter((file) => file.path.startsWith("modules/economics/") && usesAnthropic(file.text)).map((file) => file.path);
+    expect(offenders).toEqual([]);
+  });
+
+  it("no file that calls a language model imports the economics engine, except the brief route, which runs it after every model call", () => {
+    const offenders = files.filter((file) => usesAnthropic(file.text) && /@\/modules\/economics\//.test(file.text) && file.path !== "app/api/campaigns/generate/route.ts")
+      .map((file) => file.path);
+    expect(offenders).toEqual([]);
+    const route = files.find((file) => file.path === "app/api/campaigns/generate/route.ts")!.text;
+    const lastModelCall = Math.max(route.lastIndexOf("messages.create("), route.lastIndexOf("generateRecommendations("));
+    const economics = route.indexOf("economicsForBrief(");
+    expect(lastModelCall).toBeGreaterThan(0);
+    expect(economics).toBeGreaterThan(lastModelCall);
+  });
+});

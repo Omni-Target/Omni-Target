@@ -6,6 +6,7 @@ import { CopyField } from "../copy-field";
 import { CreativeHooksCard } from "../creative-hooks-card";
 import { TargetingSummary } from "../targeting-summary";
 import { BudgetPlanner } from "../budget-planner";
+import type { BriefEconomics } from "@/lib/brief-economics";
 import type { GeneratedCopy, AiInsights, StoreInsights } from "../types";
 import type { BriefPDFParams } from "@/lib/brief-pdf-types";
 
@@ -38,6 +39,9 @@ export interface BriefStepProps {
   /** S0.6: the merchant's maximum total test budget (null = not set). */
   maxTestBudget?: number | null;
   setMaxTestBudget?: (value: number | null) => void;
+  /** Phase 4: the engine's recorded economics for the brief's product, and whether they are being recalculated. */
+  economics?: BriefEconomics | null;
+  recalculating?: boolean;
   // Outer container class — defaults to a centered narrow column; the durable
   // /campaigns/[id] page overrides it to fill the width beside its rail.
   className?: string;
@@ -67,6 +71,8 @@ export function BriefStep({
   gatewayInsight,
   maxTestBudget = null,
   setMaxTestBudget,
+  economics = null,
+  recalculating = false,
   className = "mx-auto max-w-3xl",
 }: BriefStepProps) {
   const isGateway = gatewayInsight?.currentProductClassification === "Gateway";
@@ -194,6 +200,8 @@ export function BriefStep({
           setSelectedDuration={setSelectedDuration}
           maxTestBudget={maxTestBudget}
           setMaxTestBudget={setMaxTestBudget ?? (() => {})}
+          economics={economics}
+          recalculating={recalculating}
         />
 
         {Boolean(

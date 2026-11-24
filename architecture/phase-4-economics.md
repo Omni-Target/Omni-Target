@@ -829,3 +829,37 @@ In ties the portfolio is named as binding only when it actually cut the budget.
 - **Full database suite:** 265 tests.
 
 **Staging:** 0055 applied.
+
+### Task 8: product integration (2026-11-24; no migration)
+
+**One source for every budget figure:**
+- A brief linked to a product stores a bounded **snapshot** of the engine's recorded recommendation (`src/lib/brief-economics.ts`, built by `snapshot.ts`). It holds the run ID, calculation and policy versions, verdict, reasons and notes with their text, confidence, the per-order lines and figures, and the budget.
+- `describeBriefEconomics` is the only wording for it. The **brief view, budget planner, PDF and plain-text export** all render it.
+- Money is shown in each currency's own minor unit and never rounded up. (The shared formatter rounds naira to whole units, which could have shown a ceiling above the computed one.)
+- **Unavailable snapshots** say why (store not connected, product not identified, product not in the synced data, currency unknown, engine error) and carry no amounts.
+- **Briefs saved before Phase 4** keep their S0.6 plan unchanged.
+
+**Brief flow:**
+- **Generation** runs and records the engine for the matched product **after every AI call**, stores `productShopifyId` and the snapshot, and never blocks or fabricates if the economics fail.
+- **Recalculation** (`POST /api/economics/brief`, rate-limited) runs when the merchant changes the maximum for this test (saved as the product's own `ad_test_limit`) or the test length, so the planner shows the engine's new answer.
+- **Saving the brief** (`PUT /api/campaigns/[id]`) recalculates on the server again. The product comes from the saved brief, never the request, and client-sent figures are never stored.
+
+**Merchant inputs:**
+- **Settings** has a "Costs and advertising limits" form: costs per order, expected rates (labelled estimates) and advertising limits.
+- A blank field clears the value and makes it unknown; "Doesn't apply" is an explicit zero.
+- It saves through `GET` / `PUT /api/economics/inputs` (rate-limited, workspace-scoped), and the database validates again.
+- The page reads the stored values on the server, so the form needs no client-side effect.
+
+**PDF route:** the payload's `budget_economics` is size-bounded in the schema. The template reads it only through the strict parser and escapes every value.
+
+**Boundary tests** (`src/platform/boundaries.test.ts`):
+- No page, component, route or library imports the computing modules; only `src/modules/economics/` does.
+- The economics module never imports the AI SDK.
+- The only AI-calling file that imports the engine is the brief route, and there the engine call comes after the last model call.
+
+**Tests:**
+- **Snapshot and wording (6):** engine figures copied and round-tripped; strict parsing (tampered numbers and codes dropped); GO, insufficient data, do not launch, awaiting authority and unavailable wording; plain text; floor-only money.
+- **Brief route (3 new):** server recalculation with the saved product and the merchant's limit, ignoring a client-sent snapshot, product and plan; limit unchanged, cleared or invalid; the S0.6 path kept for older briefs.
+- **Boundaries (3 new).**
+- **Full unit suite:** 1,058 tests.
+- **Production build:** succeeds.

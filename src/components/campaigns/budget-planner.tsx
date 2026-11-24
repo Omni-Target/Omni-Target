@@ -7,14 +7,14 @@ import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { budgetPlanFor } from "@/lib/campaigns/brief";
 import { BUDGET_TEST_DURATIONS, describeBudgetPlan, normalizeMaxTotalBudget } from "@/lib/budget-plan";
+import { describeBriefEconomics, type BriefEconomics } from "@/lib/brief-economics";
 import type { AiInsights, StoreInsights } from "./types";
 
 /**
- * Test budget (Phase S0.6). Omni Target no longer recommends budgets from
- * store-wide revenue; the merchant sets the maximum they are willing to spend
- * on this test and the brief shows only that, split evenly over the test.
- * Wording comes from describeBudgetPlan() so the brief view, PDF and
- * plain-text export always agree.
+ * Test budget. Phase 4: a brief linked to a product shows the deterministic engine's recorded recommendation
+ * (verdict, per-order economics and a budget within the merchant's limits), worded by describeBriefEconomics()
+ * like the PDF and plain text. Changing the limit or the test length asks the server to recalculate; nothing is
+ * computed here. Briefs saved before Phase 4 keep the S0.6 view: the merchant's own maximum, split evenly.
  */
 interface BudgetPlannerProps {
   aiInsights: AiInsights | null;
@@ -23,7 +23,17 @@ interface BudgetPlannerProps {
   setSelectedDuration: (duration: 7 | 14 | 30) => void;
   maxTestBudget: number | null;
   setMaxTestBudget: (value: number | null) => void;
+  economics?: BriefEconomics | null;
+  recalculating?: boolean;
 }
+
+const VERDICT_TONE: Record<string, string> = {
+  GO: "border-emerald-300 bg-emerald-50 text-emerald-800",
+  PILOT: "border-sky-300 bg-sky-50 text-sky-800",
+  DO_NOT_LAUNCH: "border-red-300 bg-red-50 text-red-800",
+  BLOCKED: "border-red-300 bg-red-50 text-red-800",
+  INSUFFICIENT_DATA: "border-amber-300 bg-amber-50 text-amber-800",
+};
 
 export function BudgetPlanner({
   aiInsights,
@@ -32,13 +42,17 @@ export function BudgetPlanner({
   setSelectedDuration,
   maxTestBudget,
   setMaxTestBudget,
+  economics = null,
+  recalculating = false,
 }: BudgetPlannerProps) {
   const inputId = useId();
   const [draft, setDraft] = useState(maxTestBudget != null ? String(maxTestBudget) : "");
   const [error, setError] = useState<string | null>(null);
 
   const plan = budgetPlanFor({ aiInsights, storeInsights, maxTestBudget, selectedDuration });
-  const text = describeBudgetPlan(plan);
+  const engine = economics ? describeBriefEconomics(economics) : null;
+  const text = engine ?? describeBudgetPlan(plan);
+  const currency = economics?.currency ?? plan.currency;
 
   const commit = () => {
     if (draft.trim() === "") {
@@ -56,18 +70,43 @@ export function BudgetPlanner({
   };
 
   return (
-    <Card className="p-6">
+    <Card className="p-6" aria-busy={recalculating}>
       <h3 className="mb-1 text-sm font-semibold uppercase tracking-widest text-subtle-foreground">
-        Test budget
+        {engine ? "Economics and test budget" : "Test budget"}
       </h3>
+
+      {engine && (
+        <div className="mb-4 space-y-3">
+          <p className={`inline-block rounded-md border px-2 py-1 text-xs font-semibold ${engine.verdict ? VERDICT_TONE[engine.verdict] : "border-border"}`}>
+            {engine.verdict_label}
+          </p>
+          {engine.reasons.length > 0 && (
+            <ul className="list-disc space-y-1 pl-5 text-xs leading-relaxed text-muted-foreground">
+              {engine.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+            </ul>
+          )}
+          {engine.figures.length > 0 && (
+            <dl className="grid gap-2 sm:grid-cols-2">
+              {engine.figures.map(([label, value]) => (
+                <div key={label} className="flex items-baseline justify-between gap-3 border-b border-border py-1">
+                  <dt className="text-xs text-muted-foreground">{label}</dt>
+                  <dd className="text-sm font-semibold text-foreground">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      )}
+
       <p className="text-sm font-semibold text-foreground">{text.heading}</p>
       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{text.explanation}</p>
+      {recalculating && <p role="status" className="mt-2 text-xs text-muted-foreground">Recalculating…</p>}
 
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         <Field
-          label={`Maximum test budget (${plan.currency})`}
+          label={`${engine ? "Most you will spend on this test" : "Maximum test budget"} (${currency})`}
           htmlFor={inputId}
-          hint="The most you are willing to spend on this whole test."
+          hint={engine ? "Your limit for this product. The recommendation never exceeds it." : "The most you are willing to spend on this whole test."}
           error={error ?? undefined}
         >
           <Input
@@ -76,6 +115,7 @@ export function BudgetPlanner({
             placeholder="e.g. 300"
             value={draft}
             invalid={Boolean(error)}
+            disabled={recalculating}
             onChange={(event) => setDraft(event.target.value)}
             onBlur={commit}
             onKeyDown={(event) => {
@@ -95,8 +135,8 @@ export function BudgetPlanner({
 
       <dl className="mt-5 grid gap-3 sm:grid-cols-3">
         {[
-          ["Daily cap", text.daily],
-          ["Maximum total spend", text.total],
+          [engine ? "Daily budget" : "Daily cap", text.daily],
+          [engine ? "Test budget" : "Maximum total spend", text.total],
           ["Test length", text.duration],
         ].map(([label, value]) => (
           <div key={label} className="rounded-lg border border-border bg-surface-subtle px-3 py-2">

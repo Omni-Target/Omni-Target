@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { BriefStep } from "@/components/campaigns/steps/brief-step";
 import { buildBriefPdfPayload, buildBriefText, budgetPlanFor } from "@/lib/campaigns/brief";
 import { savedMaxTestBudget } from "@/lib/budget-plan";
+import { parseBriefEconomics, type BriefEconomics } from "@/lib/brief-economics";
 import { buildBriefHTML } from "@/lib/brief-html-template";
 import type { BriefPDFParams } from "@/lib/brief-pdf-types";
 import type { AiInsights, GeneratedCopy, StoreInsights } from "@/components/campaigns/types";
@@ -25,6 +26,8 @@ export interface BriefRenderingInput {
   gatewayInsight?: BriefPDFParams["gatewayInsight"] | null;
   isNewLaunch?: boolean;
   maxTestBudget: number | null;
+  /** Phase 4: the engine's recorded economics snapshot, when the brief has one. */
+  economics?: BriefEconomics | null;
   selectedDuration: 7 | 14 | 30;
   selectedIntlDuration?: 7 | 14 | 30;
   selectedStrategyIndex?: number;
@@ -40,6 +43,7 @@ export async function briefRenderings(input: BriefRenderingInput) {
     selectedStrategyIndex: input.selectedStrategyIndex ?? 1,
     selectedIntlStrategyIndex: input.selectedIntlStrategyIndex ?? 1,
     maxTestBudget: input.maxTestBudget,
+    economics: input.economics ?? null,
     gatewayInsight: input.gatewayInsight ?? null,
   };
   const payload = buildBriefPdfPayload({
@@ -61,7 +65,7 @@ export async function briefRenderings(input: BriefRenderingInput) {
         selectedStrategyIndex={common.selectedStrategyIndex} setSelectedStrategyIndex={() => {}}
         selectedDuration={input.selectedDuration} setSelectedDuration={() => {}} isDownloadingPdf={false}
         onDownloadPdf={() => {}} onCopyBrief={() => {}} onCreateNew={() => {}} gatewayInsight={common.gatewayInsight}
-        productPrice={input.productPrice} maxTestBudget={input.maxTestBudget} setMaxTestBudget={() => {}}
+        productPrice={input.productPrice} maxTestBudget={input.maxTestBudget} setMaxTestBudget={() => {}} economics={input.economics ?? null}
       />,
     ),
   };
@@ -86,6 +90,7 @@ export function renderSavedBrief(brief: Saved, campaign: { product_name?: string
     gatewayInsight: (brief.gatewayInsight ?? null) as BriefPDFParams["gatewayInsight"] | null,
     isNewLaunch: (brief.isNewLaunch ?? false) as boolean,
     maxTestBudget: savedMaxTestBudget(brief),
+    economics: parseBriefEconomics(brief.economics),
     selectedDuration: duration(brief.selectedDuration),
     selectedIntlDuration: duration(brief.selectedIntlDuration),
     selectedStrategyIndex: (brief.selectedStrategyIndex ?? 1) as number,

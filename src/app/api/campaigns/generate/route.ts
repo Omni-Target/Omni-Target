@@ -8,6 +8,7 @@ import { Anthropic } from "@anthropic-ai/sdk";
 import { requireUser } from "@/lib/api/require-user";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { logApiUsage, isBriefRegenerationCommitReady, commitBriefGeneration } from "@/lib/db";
+import { economicsForBrief } from "@/modules/economics/brief-run";
 import { loadStoreSnapshot } from "@/modules/insights/read";
 import { getBriefVersions, getCampaign, getGenerationReceipt } from "@/modules/campaigns/repository";
 import { boundBriefEvidence } from "@/modules/briefs/evidence";
@@ -925,6 +926,11 @@ ${(productDescription || "").trim().split(/\s+/).filter(Boolean).length < 30 ?
       gatewayInsight: buildGenerationContext(integration.store_snapshot, productName).gatewayInsight,
       isNewLaunch: !!isNewLaunch,
       selectedDuration: 14, selectedIntlDuration: 14, selectedStrategyIndex: 1, selectedIntlStrategyIndex: 1,
+      // Phase 4: the product's economics and budget, from the deterministic engine, run and recorded after every AI
+      // call above, so no model ever sees or writes a financial figure. Never blocks the brief: when they cannot
+      // be calculated the snapshot says why and carries no amounts.
+      productShopifyId: matchedProduct?.id ?? null,
+      economics: await economicsForBrief({ userId: userId!, productId: matchedProduct?.id, testDays: 14 }),
     };
     const result = await commitBriefGeneration({
       p_workspace: workspaceId, p_user_id: userId!, p_request_id: requestId, p_request_hash: requestHash,

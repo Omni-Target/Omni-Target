@@ -13,6 +13,7 @@ import type {
 import { getAdvantagePlusGuidance } from "@/lib/advantage-plus";
 import { getInternationalStrategies } from "@/lib/market-geography";
 import { computeBudgetPlan, describeBudgetPlan, type BudgetPlan } from "@/lib/budget-plan";
+import { describeBriefEconomics, type BriefEconomics } from "@/lib/brief-economics";
 
 /**
  * The merchant's maximum test budget for this brief (S0.6). Same inputs →
@@ -32,8 +33,21 @@ export function budgetPlanFor(input: {
   });
 }
 
-/** Plain-text budget lines (same labels as the PDF budget card). */
-export function budgetPlanTextLines(plan: BudgetPlan): string[] {
+/** Plain-text budget lines (same labels as the PDF budget card): the engine's recorded economics when present. */
+export function budgetPlanTextLines(plan: BudgetPlan, economics?: BriefEconomics | null): string[] {
+  if (economics) {
+    const e = describeBriefEconomics(economics);
+    return [
+      `Verdict: ${e.verdict_label}`,
+      ...e.figures.map(([label, value]) => `${label}: ${value}`),
+      e.heading,
+      `Daily budget: ${e.daily}`,
+      `Test budget: ${e.total}`,
+      `Test length: ${e.duration}`,
+      ...e.reasons.map((r) => `Why: ${r}`),
+      e.explanation,
+    ];
+  }
   const text = describeBudgetPlan(plan);
   return [
     text.heading,
@@ -63,6 +77,8 @@ export interface BuildBriefPdfPayloadParams {
   isNewLaunch: boolean;
   /** S0.6: the merchant's maximum total test budget (null = not set). */
   maxTestBudget?: number | null;
+  /** Phase 4: the engine's recorded economics for the brief's product. */
+  economics?: BriefEconomics | null;
 }
 
 function usableCreativeHooks(aiInsights: AiInsights | null | undefined): CreativeHook[] {
@@ -132,6 +148,7 @@ export function buildBriefPdfPayload({
   gatewayInsight,
   isNewLaunch,
   maxTestBudget,
+  economics,
 }: BuildBriefPdfPayloadParams): BriefPDFParams {
   const cp = storeInsights?.products?.find((p) => p.name === productName);
   const finalProductPrice =
@@ -258,6 +275,7 @@ export function buildBriefPdfPayload({
   return {
     // S0.6: the template renders budget amounts only from this plan.
     budget_plan: budgetPlanFor({ aiInsights, storeInsights, maxTestBudget, selectedDuration }),
+    budget_economics: economics ?? null,
     brandName,
     storeCountry: storeInsights?.store?.country,
     productName,
@@ -436,6 +454,8 @@ export interface BuildBriefTextParams {
   gatewayInsight?: BriefPDFParams["gatewayInsight"] | null;
   /** S0.6: the merchant's maximum total test budget (null = not set). */
   maxTestBudget?: number | null;
+  /** Phase 4: the engine's recorded economics for the brief's product. */
+  economics?: BriefEconomics | null;
 }
 
 /** Builds the plain-text campaign brief copied to the clipboard. Pure. */
@@ -447,6 +467,7 @@ export function buildBriefText({
   selectedDuration,
   gatewayInsight,
   maxTestBudget,
+  economics,
 }: BuildBriefTextParams): string {
   const monthlyOrders =
     storeInsights?.orders?.orders_last_30_days ?? 0;
@@ -569,7 +590,7 @@ export function buildBriefText({
     "── BUDGET ──",
     // S0.6: the merchant's own maximum test budget is the only budget shown;
     // wording comes from describeBudgetPlan() so it matches the brief and PDF.
-    ...budgetPlanTextLines(budgetPlanFor({ aiInsights, storeInsights, maxTestBudget, selectedDuration })),
+    ...budgetPlanTextLines(budgetPlanFor({ aiInsights, storeInsights, maxTestBudget, selectedDuration }), economics),
     "",
     "── TIMING ──",
     storeInsights?.orders?.peak_days &&

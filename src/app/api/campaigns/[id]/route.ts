@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/require-user";
 import { finalizeBriefVersion, getBriefVersions, getCampaign, tenantFor } from "@/modules/campaigns/repository";
 import { computeBudgetPlan, normalizeMaxTotalBudget, savedMaxTestBudget } from "@/lib/budget-plan";
+import { economicsForBrief } from "@/modules/economics/brief-run";
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await requireUser();
@@ -31,10 +32,27 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: "Invalid strategy" }, { status: 400 });
     }
   }
-  // S0.6: the stored budget plan is computed here from the merchant's own
-  // maximum test budget — never taken from client-sent amounts. Currency comes
-  // from the saved campaign, not from the request.
-  if (context) {
+  // Phase 4: a brief linked to a product gets its economics and budget recomputed here by the engine, with the
+  // merchant's maximum for this test saved as the product's own limit. The product comes from the saved brief,
+  // never from the request, and no client-sent amount is ever stored.
+  const savedProductId = (campaign.brief_data as { productShopifyId?: unknown } | null)?.productShopifyId;
+  let economics: Awaited<ReturnType<typeof economicsForBrief>> | undefined;
+  if (context && savedProductId !== undefined && savedProductId !== null) {
+    const explicitMax = context.maxTestBudget;
+    const parsed = explicitMax === undefined || explicitMax === null || explicitMax === "" ? null : normalizeMaxTotalBudget(explicitMax);
+    if (explicitMax !== undefined && explicitMax !== null && explicitMax !== "" && parsed === null) {
+      return NextResponse.json({ error: "Invalid maximum test budget" }, { status: 400 });
+    }
+    economics = await economicsForBrief({ userId, productId: savedProductId as string | number, testDays: context.selectedDuration,
+      testLimit: explicitMax === undefined ? undefined : parsed });
+    context.productShopifyId = savedProductId;
+    context.economics = economics;
+    delete context.maxTestBudget;
+    delete context.budget_plan;
+  } else if (context) {
+    // S0.6 (briefs saved before Phase 4): the stored budget plan is computed here from the merchant's own
+    // maximum test budget — never taken from client-sent amounts. Currency comes from the saved campaign.
+    delete context.economics;
     const explicitMax = context.maxTestBudget;
     if (explicitMax !== undefined && explicitMax !== null && explicitMax !== "" && normalizeMaxTotalBudget(explicitMax) === null) {
       return NextResponse.json({ error: "Invalid maximum test budget" }, { status: 400 });
@@ -59,7 +77,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   }
   try {
     await finalizeBriefVersion(tenant, id, version.id, context, body.copy, body.status);
-    return NextResponse.json({ ok: true, id });
+    return NextResponse.json({ ok: true, id, ...(economics ? { economics } : {}) });
   } catch (error) {
     console.error("Brief save failed", error);
     return NextResponse.json({ error: "Your brief could not be saved. Please retry." }, { status: 503 });

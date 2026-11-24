@@ -7,7 +7,8 @@ import {
   getStoreTimezoneName,
   isTier1Market,
 } from "./market-geography";
-import { describeBudgetPlan, readBudgetPlan } from "./budget-plan";
+import { readBudgetPlan } from "./budget-plan";
+import { describeBriefBudget, describeBriefEconomics, formatAmount, parseBriefEconomics } from "./brief-economics";
 import fs from "fs";
 import path from "path";
 import { randomBytes } from "crypto";
@@ -235,9 +236,16 @@ export async function buildBriefHTML(
   // S0.6: revenue-derived budgets are withdrawn. The only budget amounts are the
   // merchant's own maximum test budget (BudgetPlan), recomputed from its inputs.
   const budgetPlan = readBudgetPlan(params.budget_plan, currency, budget.currency_symbol ?? null);
-  const budgetPlanText = describeBudgetPlan(budgetPlan);
-  const daily = budgetPlan.daily_cap;
-  const duration = budgetPlan.duration_days;
+  // Phase 4: a brief with recorded economics shows the engine's recommendation; older briefs keep their plan.
+  const economics = parseBriefEconomics(params.budget_economics);
+  const economicsText = economics ? describeBriefEconomics(economics) : null;
+  const budgetPlanText = describeBriefBudget(budgetPlan, economics);
+  const recommended = economics?.status === "computed" && economics.budget?.status === "recommended" ? economics.budget : null;
+  const hasBudget = economics ? recommended !== null : budgetPlan.basis === "merchant_cap";
+  const daily = economics ? recommended?.daily_budget ?? null : budgetPlan.daily_cap;
+  const duration = economics ? recommended?.test_days ?? budgetPlan.duration_days : budgetPlan.duration_days;
+  const testTotal = economics ? recommended?.test_budget ?? 0 : budgetPlan.max_total_budget ?? 0;
+  const money = (n: number) => (economics?.currency ? formatAmount(n, economics.currency) : fmt(n, currency, symbol));
 
   const campaignType =
     guidance?.campaign_type ?? "Manual Sales with Advantage+ Audience";
@@ -297,7 +305,7 @@ export async function buildBriefHTML(
 
   // Overseas budget amounts were fixed floors attached to the withdrawn rule;
   // an overseas test needs its own merchant-set budget (S0.6), so none is shown.
-  const domesticBudgetStr = budgetPlan.basis === "merchant_cap" ? budgetPlanText.daily : "";
+  const domesticBudgetStr = hasBudget ? budgetPlanText.daily : "";
 
   const seedInterests =
     seed?.seed_interests ??
@@ -561,8 +569,8 @@ export async function buildBriefHTML(
 
     <div class="flight-metric-grid">
       <div class="flight-metric">
-        <div class="flight-metric-val">${daily ? fmt(daily, currency, symbol) : "Not set"}<span class="flight-metric-unit">/day</span></div>
-        <div class="flight-metric-label">${budgetPlan.basis === "merchant_cap" ? "Your Daily Cap" : "Daily Budget"}</div>
+        <div class="flight-metric-val">${daily ? money(daily) : economics ? "None" : "Not set"}<span class="flight-metric-unit">/day</span></div>
+        <div class="flight-metric-label">${economics ? (hasBudget ? "Recommended Daily Budget" : esc(economicsText?.verdict_label ?? "Daily Budget")) : hasBudget ? "Your Daily Cap" : "Daily Budget"}</div>
         <div class="flight-metric-sub">${esc(budgetPlanText.duration)} · 1 Ad Set</div>
       </div>
       <div class="flight-metric">
@@ -607,9 +615,9 @@ export async function buildBriefHTML(
         <div class="cheat-cell">
           <span class="cheat-label">Test Length &amp; Max Spend</span>
           <span class="cheat-val">${
-            budgetPlan.basis === "merchant_cap"
+            hasBudget
               ? esc(budgetPlanText.total)
-              : `${esc(budgetPlanText.duration)} · Budget not set`
+              : `${esc(budgetPlanText.duration)} · ${economics ? esc(budgetPlanText.daily) : "Budget not set"}`
           }</span>
         </div>
         <div class="cheat-cell">
@@ -950,12 +958,15 @@ export async function buildBriefHTML(
   const budgetHTML = card(
     "Budget & spending plan",
     `
+    ${economicsText ? `<div class="callout callout-info"><div class="callout-label">Verdict: ${esc(economicsText.verdict_label)}</div>
+      ${economicsText.reasons.length ? `<p class="prose">${esc(economicsText.reasons.join(" "))}</p>` : ""}</div>
+    ${economicsText.figures.map(([label, value]) => row(esc(label), esc(value))).join("")}` : ""}
     <div class="callout callout-info">
       <div class="callout-label">${esc(budgetPlanText.heading)}</div>
       <p class="prose">${esc(budgetPlanText.explanation)}</p>
     </div>
-    ${row("Daily cap", esc(budgetPlanText.daily))}
-    ${row("Maximum total spend", esc(budgetPlanText.total))}
+    ${row(economics ? "Daily budget" : "Daily cap", esc(budgetPlanText.daily))}
+    ${row(economics ? "Test budget" : "Maximum total spend", esc(budgetPlanText.total))}
     ${row("Test length", esc(budgetPlanText.duration))}
     ${row("Ad sets", "1 (your primary domestic market)")}
     <p class="prose" style="margin-top:8px;">Run the test as 1 ad set so your budget is not split. If you choose to test overseas buyers, give that test its own separate budget.</p>`,
@@ -1071,14 +1082,17 @@ export async function buildBriefHTML(
 
   // ── Day 7 Decision Tree & Scaling Playbook (Card 8) ──
   // The merchant's cap itself (not daily × days, which is floored and can differ).
-  const totalTestSpend = budgetPlan.max_total_budget ?? 0;
+  const totalTestSpend = testTotal;
   const midpointSpend = totalTestSpend ? Math.round(totalTestSpend * 0.5) : 0;
   // BIZ-05: price less recorded unit cost is a break-even ceiling on product
   // cost alone (shipping, payment fees, returns and overhead are excluded), not
   // a profitability target. With no recorded unit cost there is no basis for a
   // number at all, so none is invented.
   const contributionCeiling = decisionEvidence?.price_less_unit_cost ?? null;
-  const contributionLabel = contributionCeiling !== null && contributionCeiling > 0
+  const economicsUnit = economics?.status === "computed" ? economics.unit : null;
+  const contributionLabel = economicsUnit && economicsUnit.break_even_cpa !== null && economicsUnit.target_cpa !== null
+    ? `Break-even cost per sale: ${money(economicsUnit.break_even_cpa)} (every variable cost counted); target ${money(economicsUnit.target_cpa)}. Above break-even each sale loses money; between the two, hold and optimise rather than scale.`
+    : contributionCeiling !== null && contributionCeiling > 0
     ? `Break-even ceiling: ad spend above ~${fmt(contributionCeiling, currency, symbol)} per sale loses money on product cost alone (price minus recorded unit cost, before shipping, fees and returns). Staying under it does not guarantee a profit.`
     : "No unit cost is recorded in Shopify, so no cost-per-sale ceiling can be calculated. Work out your margin before judging ad spend per sale.";
 

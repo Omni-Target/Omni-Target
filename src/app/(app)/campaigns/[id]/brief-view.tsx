@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type * as React from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useQueryClient } from "@tanstack/react-query";
@@ -20,6 +21,7 @@ import type {
 } from "@/lib/brief-pdf-types";
 import { buildBriefPdfPayload, buildBriefText } from "@/lib/campaigns/brief";
 import { savedMaxTestBudget } from "@/lib/budget-plan";
+import { parseBriefEconomics, type BriefEconomics } from "@/lib/brief-economics";
 
 // The full-screen PDF modal is only reached on click — load its chunk on demand.
 const PdfBriefModal = dynamic(
@@ -33,6 +35,9 @@ const PdfBriefModal = dynamic(
 // Full brief context persisted at finalize time (campaigns.brief_data). Optional
 // throughout: if finalize didn't run, we fall back to the campaign's columns.
 interface BriefData {
+  /** Phase 4: the product the economics were run for, and the recorded snapshot. */
+  productShopifyId?: string | number | null;
+  economics?: unknown;
   generatedAt?: string;
   brandName?: string;
   productName?: string;
@@ -190,6 +195,34 @@ export function BriefView({
   const [maxTestBudget, setMaxTestBudget] = useState<number | null>(
     savedMaxTestBudget(bd),
   );
+  // Phase 4: the engine's recorded economics for the brief's product. They are recalculated on the server when
+  // the merchant changes the limit or the test length; nothing is computed here.
+  const hasEconomics = bd.productShopifyId !== undefined && bd.productShopifyId !== null;
+  const [economics, setEconomics] = useState<BriefEconomics | null>(parseBriefEconomics(bd.economics));
+  const [recalculating, setRecalculating] = useState(false);
+  const recalculate = async (limit: number | null | undefined, days: 7 | 14 | 30) => {
+    if (!hasEconomics) return;
+    setRecalculating(true);
+    try {
+      const response = await fetch("/api/economics/brief", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId: campaign.id, testDays: days, ...(limit === undefined ? {} : { maxTestBudget: limit }) }),
+      });
+      if (response.ok) setEconomics(parseBriefEconomics((await response.json()).economics));
+    } finally {
+      setRecalculating(false);
+    }
+  };
+  const changeMaxTestBudget = (value: number | null) => {
+    setMaxTestBudget(value);
+    void recalculate(value, selectedDuration);
+  };
+  const changeDuration: React.Dispatch<React.SetStateAction<7 | 14 | 30>> = (value) => {
+    const days = typeof value === "function" ? value(selectedDuration) : value;
+    setSelectedDuration(days);
+    void recalculate(undefined, days);
+  };
   const [modalOpen, setModalOpen] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -215,9 +248,11 @@ export function BriefView({
         gatewayInsight,
         isNewLaunch,
         maxTestBudget,
+        economics,
       }),
     [
       maxTestBudget,
+      economics,
       bd.generatedAt,
       brandName,
       productName,
@@ -255,6 +290,7 @@ export function BriefView({
       selectedIntlDuration,
       gatewayInsight,
       maxTestBudget,
+      economics,
     });
     navigator.clipboard.writeText(briefText);
     setCopiedField("full-brief");
@@ -393,7 +429,7 @@ export function BriefView({
             selectedIntlStrategyIndex={selectedIntlStrategyIndex}
             setSelectedIntlStrategyIndex={setSelectedIntlStrategyIndex}
             selectedDuration={selectedDuration}
-            setSelectedDuration={setSelectedDuration}
+            setSelectedDuration={hasEconomics ? changeDuration : setSelectedDuration}
             selectedIntlDuration={selectedIntlDuration}
             setSelectedIntlDuration={setSelectedIntlDuration}
             isDownloadingPdf={false}
@@ -403,7 +439,9 @@ export function BriefView({
             gatewayInsight={gatewayInsight}
             productPrice={productPrice}
             maxTestBudget={maxTestBudget}
-            setMaxTestBudget={setMaxTestBudget}
+            setMaxTestBudget={hasEconomics ? changeMaxTestBudget : setMaxTestBudget}
+            economics={economics}
+            recalculating={recalculating}
           />
         </div>
       </div>

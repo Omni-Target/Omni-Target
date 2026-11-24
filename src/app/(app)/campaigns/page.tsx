@@ -38,6 +38,7 @@ import {
 } from "@/components/campaigns/use-campaign-form";
 import { buildGenerationContext } from "@/lib/campaigns/insights";
 import { buildBriefPdfPayload, buildBriefText } from "@/lib/campaigns/brief";
+import { parseBriefEconomics, type BriefEconomics } from "@/lib/brief-economics";
 import {
   PENDING_GENERATION_KEY,
   clearPendingGeneration,
@@ -184,6 +185,8 @@ function CampaignsContent() {
   // (so attempts append to the same campaign) and by "Generate Brief" to route
   // to the durable /campaigns/[id] page.
   const [campaignId, setCampaignId] = useState<string | null>(null);
+  // Phase 4: the engine's recorded economics for the brief's product, as the server returned them.
+  const [economics, setEconomics] = useState<BriefEconomics | null>(null);
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(null);
   // Every generation attempt this session, retained so the review step can
   // compare variations; selectedVariationIndex is the one shown/proceeded with.
@@ -552,6 +555,7 @@ function CampaignsContent() {
       responseConfirmed = true;
       generationRequestRef.current = null;
       setGeneratedAt(data.briefData?.generatedAt);
+      setEconomics(parseBriefEconomics(data.briefData?.economics));
       setProductAiInsights(data.aiInsights);
       const generatedCopyData: GeneratedCopy = data;
       const newVersionId: string | null = data.versionId ?? null;
@@ -719,8 +723,10 @@ function CampaignsContent() {
       selectedIntlStrategyIndex,
       gatewayInsight,
       isNewLaunch,
+      economics,
     });
   }, [
+    economics,
     brandName,
     productName,
     generatedAt,
@@ -781,6 +787,7 @@ function CampaignsContent() {
       selectedDuration,
       selectedIntlDuration,
       gatewayInsight,
+      economics,
     });
     navigator.clipboard.writeText(briefText);
     setCopiedField("full-brief");
@@ -1083,6 +1090,7 @@ function CampaignsContent() {
               onCreateNew={handleCreateNewBrief}
               gatewayInsight={gatewayInsight}
               productPrice={productPrice ? parseFloat(productPrice) : undefined}
+              economics={economics}
             />
           )}
         </div>
