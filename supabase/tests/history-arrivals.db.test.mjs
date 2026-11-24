@@ -82,12 +82,13 @@ async function summarised(s, monthText, finalizedAt) {
 }
 
 /** An order as the sync passes it: processed in a month, created at `createdMs`, with lines and refunds. */
-function order(s, id, processedMs, createdMs, { lines = [], refunds = [], cancelled = false, test = false } = {}) {
+function order(s, id, processedMs, createdMs, { lines = [], refunds = [], cancelled = false, cancelledAt = null, test = false } = {}) {
   const subtotal = lines.reduce((sum, l) => sum + l.quantity * l.price, 0);
   const refunded = refunds.reduce((sum, r) => sum + r.amount, 0);
   return {
     order: {
-      shopify_id: id, shopify_created_at: iso(createdMs), processed_at: iso(processedMs), cancelled_at: cancelled ? iso(processedMs) : null,
+      shopify_id: id, shopify_created_at: iso(createdMs), processed_at: iso(processedMs),
+      cancelled_at: cancelledAt !== null ? iso(cancelledAt) : cancelled ? iso(processedMs) : null,
       currency: "GBP", subtotal, total_discounts: 0, total_tax: 1, total_shipping: 2, total_price: subtotal + 3, total_refunded: refunded,
       customer_shopify_id: null, is_test: test, order_digest: digest(s, "order", id), customer_digest: null,
     },
@@ -267,5 +268,68 @@ describe("late arrivals in history months (0042)", () => {
     await q("select public.delete_shop_synced_data($1)", [s.shop]);
     expect(await one("select count(*)::int as n from public.history_arrivals where shop_key = $1", [s.key])).toEqual({ n: 0 });
     expect(await one("select public.shop_synced_row_count($1)::int as n", [s.shop])).toEqual({ n: 0 });
+  });
+});
+
+describe("cancellations in history months (Phase 3, task 7; 0050)", () => {
+  it("takes back a counted order cancelled after its month closed: the order, and only the refunds that were counted, once", async () => {
+    const s = await boundShop();
+    await finishedImport(s);
+    const start = await windowStart();
+    const h = month(start, -4);
+    const closed = Date.now() - 10 * 86_400_000;
+    await summarised(s, h, iso(closed));
+    const lines = [{ id: 11, product: 10, quantity: 2, price: 15, refunded: 1 }];
+    const early = { id: 81, amount: 5, created: day(h, 6), lines: [{ product: 10, quantity: 1 }] };     // before the month closed: in the summary
+    const late = { id: 82, amount: 4, created: closed + 86_400_000, lines: [] };                        // after: applied as a late refund
+    const withCancellation = { id: 83, amount: 21, created: Date.now(), lines: [{ product: 10, quantity: 1 }] }; // made by the cancellation
+
+    expect(await arrive(s, order(s, 1, day(h, 5), day(h, 5), { lines, refunds: [early, late] }))).toMatchObject({ refunds_applied: 1, cancellations_applied: 0 });
+    const cancelled = order(s, 1, day(h, 5), day(h, 5), { lines, refunds: [early, late, withCancellation], cancelledAt: Date.now() - 3_600_000 });
+    expect(await arrive(s, cancelled)).toMatchObject({ cancellations_applied: 1, refunds_applied: 0 });
+    expect(await storeAdjustments(s)).toEqual([
+      { month: h, reason: "refund", orders: 0, units: 0, subtotal: 0, total: 0, refunded: 4 },
+      { month: h, reason: "cancellation", orders: -1, units: -2, subtotal: -30, total: -33, refunded: -9 },
+    ]);
+    expect(await productAdjustments(s)).toEqual([{ product: 10, month: h, reason: "cancellation", orders: -1, units: -2, gross: -30, refunded_units: -1 }]);
+    // Again (webhook, reconcile, replay): once only.
+    expect(await arrive(s, cancelled)).toMatchObject({ cancellations_applied: 0 });
+    expect(await storeAdjustments(s)).toHaveLength(2);
+    expect(await q("select subject from public.history_arrivals where shop_key = $1 order by subject", [s.key]))
+      .toEqual([{ subject: "cancellation" }, { subject: "refund" }]);
+  });
+
+  it("takes nothing back for an order cancelled before its month closed, or never counted", async () => {
+    const s = await boundShop();
+    await finishedImport(s);
+    const start = await windowStart();
+    const h = month(start, -5);
+    const closed = Date.now() - 10 * 86_400_000;
+    await summarised(s, h, iso(closed));
+    // Cancelled before the summary was made: the summary never counted it.
+    const before = order(s, 2, day(h, 3), day(h, 3), { lines: [{ id: 21, product: 10, quantity: 1, price: 10 }], cancelledAt: closed - 86_400_000 });
+    // Created after the month closed and cancelled when first seen: never applied as a late order.
+    const neverCounted = order(s, 3, day(h, 4), Date.now() - 7_200_000, { lines: [{ id: 31, product: 10, quantity: 1, price: 10 }], cancelledAt: Date.now() - 3_600_000 });
+    expect(await arrive(s, before, neverCounted)).toMatchObject({ orders_applied: 0, cancellations_applied: 0 });
+    expect(await storeAdjustments(s)).toEqual([]);
+  });
+
+  it("nets a late order to nothing once it is cancelled", async () => {
+    const s = await boundShop();
+    await finishedImport(s);
+    const start = await windowStart();
+    const h = month(start, -6);
+    await summarised(s, h, iso(Date.now() - 10 * 86_400_000));
+    const lines = [{ id: 41, product: 10, quantity: 3, price: 7 }];
+    const created = Date.now() - 2 * 86_400_000;
+    expect(await arrive(s, order(s, 4, day(h, 9), created, { lines }))).toMatchObject({ orders_applied: 1 });
+    expect(await arrive(s, order(s, 4, day(h, 9), created, { lines, cancelledAt: Date.now() - 3_600_000 }))).toMatchObject({ cancellations_applied: 1 });
+    const [effective] = await rowsOf("store_months_effective", s.key, h, h);
+    // Back to the summary as the import wrote it: 1 order, 1 unit, 13.00.
+    expect(effective).toMatchObject({ orders: 1, units: 1, adjustments: 2 });
+    expect(Number(effective.total_price)).toBe(13);
+    const [product] = await rowsOf("product_months_effective", s.key, h, h);
+    expect(product).toMatchObject({ product_shopify_id: "10", orders: 1, units: 1 });
+    expect(Number(product.gross_sales)).toBe(10);
   });
 });

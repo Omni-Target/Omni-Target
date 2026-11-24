@@ -8,8 +8,10 @@
  * the final rows are untouched; every window month's effective summary (final
  * plus adjustments, or the open month) equals a recomputation from the shop's
  * own orders, exported raw from Shopify (not through the import's mappers);
- * and every changed final month has adjustments. Customer counts are not
- * adjusted by design, so they are reported, not compared. Writes LIVE_OUT.
+ * and every changed final month has adjustments. Distinct customers per month
+ * and per product-month are compared too since Phase 3 task 7 adjusts them
+ * (0050); new-customer counts, which depend on orders before the window, are
+ * reported, not compared. Writes LIVE_OUT.
  */
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -96,6 +98,8 @@ describe("live summary adjustments", () => {
     if (phase.phase !== "completed") throw new Error(JSON.stringify(phase));
     const stores = new Map<string, StoreMonth>();
     const products = new Map<string, ProductMonth>();
+    const storeCustomers = new Map<string, Set<number>>();
+    const productCustomers = new Map<string, Set<number>>();
     let exported = 0;
     if (phase.url) for await (const unit of groupUnits(parseJsonl(await bulk.openBulkResult(phase.url)))) {
       exported += 1;
@@ -111,6 +115,8 @@ describe("live summary adjustments", () => {
       store.shipping += money(order.totalShippingPriceSet);
       store.total += money(order.totalPriceSet);
       store.refunded += money(order.totalRefundedSet);
+      const customer = (order.customer as Raw | null)?.id ? idOf(order.customer) : null;
+      if (customer !== null) storeCustomers.set(month, (storeCustomers.get(month) ?? new Set()).add(customer));
       for (const line of unit.children.filter((child) => String(child.id).includes("/LineItem/"))) {
         const quantity = Number(line.quantity ?? 0);
         store.units += quantity;
@@ -124,6 +130,7 @@ describe("live summary adjustments", () => {
         const current = line.currentQuantity === null || line.currentQuantity === undefined ? null : Number(line.currentQuantity);
         product.refunded += current === null ? 0 : Math.max(0, quantity - Math.min(current, quantity));
         products.set(productKey, product);
+        if (customer !== null) productCustomers.set(productKey, (productCustomers.get(productKey) ?? new Set()).add(customer));
       }
       stores.set(month, store);
     }
@@ -131,7 +138,7 @@ describe("live summary adjustments", () => {
     // Effective: final plus adjustments, or the open month as rebuilt.
     type StoreEffective = Row & { month: string; final: boolean; adjustments: number; customers: number; new_customers: number };
     type ProductEffective = { month: string; product_shopify_id: number; orders: number; units: number; gross_sales: number; discounts: number;
-      refunded_units: number; final: boolean; adjustments: number };
+      refunded_units: number; customers: number; final: boolean; adjustments: number };
     const storeEffective = await paged<StoreEffective>((lo, hi) => supabaseAdmin.rpc("store_months_effective", { p_shop_key: key, p_from: from, p_to: to }).range(lo, hi));
     const productEffective = await paged<ProductEffective>((lo, hi) => supabaseAdmin.rpc("product_months_effective", { p_shop_key: key, p_from: from, p_to: to }).range(lo, hi));
 
@@ -142,6 +149,8 @@ describe("live summary adjustments", () => {
       const row = storeEffective.find((r) => r.month === month);
       const actual = row && storeOf(row);
       if (JSON.stringify(actual) !== JSON.stringify(expected)) storeMismatches.push({ month, expected, actual });
+      const customers = storeCustomers.get(month)?.size ?? 0;
+      if ((row?.customers ?? 0) !== customers) storeMismatches.push({ month, field: "customers", expected: customers, actual: row?.customers ?? null });
     }
     const productMismatches: unknown[] = [];
     const productKeys = new Set([...products.keys(), ...productEffective.filter((r) => r.orders !== 0 || r.units !== 0).map((r) => `${r.month}|${Number(r.product_shopify_id)}`)]);
@@ -152,6 +161,8 @@ describe("live summary adjustments", () => {
       const row = productEffective.find((r) => r.month === month && Number(r.product_shopify_id) === Number(product));
       const actual = row && { orders: row.orders, units: row.units, gross: scaled(row.gross_sales), discounts: scaled(row.discounts), refunded: row.refunded_units };
       if (JSON.stringify(actual) !== JSON.stringify(wanted)) productMismatches.push({ month, product, expected: wanted, actual });
+      const customers = productCustomers.get(productKey)?.size ?? 0;
+      if (row && row.customers !== customers) productMismatches.push({ month, product, field: "customers", expected: customers, actual: row.customers });
     }
 
     // Final rows untouched; every final month whose figures changed has adjustments.
@@ -183,7 +194,7 @@ describe("live summary adjustments", () => {
       },
       changedWithoutAdjustments, storeMonths: months.size, productMonths: productKeys.size,
       storeMismatches, productMismatches: productMismatches.slice(0, 10), productMismatchCount: productMismatches.length,
-      customersNotAdjusted: storeEffective.filter((r) => r.final && r.adjustments > 0).map((r) => ({ month: r.month, customers: r.customers, new_customers: r.new_customers })),
+      newCustomersReported: storeEffective.filter((r) => r.final && r.adjustments > 0).map((r) => ({ month: r.month, customers: r.customers, new_customers: r.new_customers })),
     };
     console.log("adjustments", JSON.stringify(report).slice(0, 4000));
     if (process.env.LIVE_OUT) writeFileSync(process.env.LIVE_OUT, JSON.stringify(report, null, 1));

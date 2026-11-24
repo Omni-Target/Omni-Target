@@ -574,3 +574,49 @@ The fields are price, compare-at price, unit cost, weight, inventory, fulfilment
 - `product-quality.db.test.mjs` (2): every fact counted on a product with mixed variants, levels at known, unknown and third-party locations, partial quantities, defined, truncated and unresolved metafields, plus a gift card; grants.
 - `rules.test.ts` (6): golden cases for each state and the property test.
 - The canonical builder attaches flags with the return signals.
+
+### Task 7: historical adjustments (2026-11-24; migration 0050)
+
+**Rules.** How each kind of late change reaches a month whose summary is final:
+
+| Change after a month closed | Final months inside the window (detail held) | History months (summaries only) |
+|---|---|---|
+| New order | `correction`, by recomputation (0036) | `correction` (0042) |
+| Refund | `refund` or `correction`, by recomputation | `refund` (0042), with units from the refund's lines |
+| Cancellation | `correction`, by recomputation | **`cancellation` (0050).** Takes back the order and only the refunds that were counted (made before the month closed, or applied as late refunds), once. Nothing is taken back for an order cancelled before its month closed, or never counted |
+| Edit to an order's lines or totals | `correction`, by recomputation | As finalised |
+| Return (returned units) | `return`, by recomputation | As finalised; its refund adjusts revenue |
+| Distinct customers (store, and per product) | **Adjusted (0050):** the difference is recorded with each adjustment | As finalised |
+| New and first-time customers | **Adjusted (0050)** | As finalised |
+
+**What changed in 0050:**
+- Adjustments carry customer-count differences.
+- The effective summaries add them.
+- `apply_history_arrivals` handles cancellations, with a `cancellation` ledger subject.
+- Final months inside the window were marked for one maintenance run, so the differences that built up before 0050 are recorded.
+
+**Why history stays partly as finalised.**
+- Months before the window hold no detail, so an edit or a return there cannot be recomputed. Shopify also rarely allows editing orders that old.
+- Correcting distinct customers in a history month would need, for each month, which customers had ordered. That is a lasting per-customer record, which the approved retention decision rules out ("no permanent identifiable customer facts").
+
+**For Phase 4:**
+- **Exact for every month, history included:** orders, units, revenue, discounts, tax, shipping and refunds.
+- **Customer-based measures** (customers per month, new customers, repeat behaviour) should use the 24-month window, where they are now exact, or the cohort outcomes (Phase 2), not history months.
+- **History months' customer counts and returned units** are figures as finalised and should be labelled so wherever they are shown.
+
+**Results on omni-beta:**
+
+| Check | Result |
+|---|---|
+| Maintenance after 0050 (`summary-adjustments.live.test.ts`) | 42 months refreshed: 20 store and 227 product `correction` adjustments recording customer-count differences; final rows untouched |
+| Window months against Shopify's raw orders | 25 store months and 1,642 product-months identical, **including distinct customers per month and per product-month** (compared from 0050; Phase 2 only reported them) |
+| History months (`history.live.test.ts`) | 6 months and 452 product-months identical in orders, units, revenue and refunds; customer counts as finalised (for example 2024-06: 75 against Shopify's 92, from the 55 late orders) |
+| Cancellation of an old order on a real store | Not possible here: omni-beta's scopes are read-only. Covered by synthetic tests |
+
+**Tests:**
+- `history-arrivals.db.test.mjs` (+3):
+  - a counted order cancelled late takes back exactly the order and its counted refunds, not the cancellation's own refund, once;
+  - nothing for orders cancelled before close or never counted;
+  - a late order then cancelled nets to the summary as written.
+- `summary-maintenance.db.test.mjs` now requires effective customer counts to equal a recomputation; it previously asserted they stayed as finalised.
+- The live adjustments check compares customers.

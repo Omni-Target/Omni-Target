@@ -103,6 +103,8 @@ export interface HistoryArrivalResult {
   history_orders: number;
   orders_applied?: number;
   refunds_applied?: number;
+  /** Counted orders cancelled after their month closed, taken back (Phase 3, task 7; 0050). */
+  cancellations_applied?: number;
   /** An import is in progress: nothing was applied, and the caller tries again later. */
   deferred?: boolean;
   skipped?: string;

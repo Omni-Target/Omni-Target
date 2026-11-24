@@ -175,9 +175,12 @@ describe("summary maintenance (task 8)", () => {
     const [effectiveStore] = await q("select * from public.store_months_effective($1, $2, $2)", [s.key, m.final]);
     const [recomputedStore] = await q("select * from public.detail_store_month($1, $2)", [s.key, m.final]);
     expect(measured(effectiveStore)).toEqual(measured(recomputedStore));
-    // Customer counts stay as finalised: 502 left the month with the cancellation, but the count is not adjusted.
-    expect(effectiveStore).toMatchObject({ customers: 2, final: true, adjustments: 2 });
+    // Customer counts are adjusted too (Phase 3, task 7): 502 left the month with the cancellation.
+    expect(effectiveStore).toMatchObject({ customers: 1, final: true, adjustments: 2 });
     expect(recomputedStore.customers).toBe(1);
+    const counts = ({ product_shopify_id, customers, first_time_customers }) => ({ product_shopify_id, customers, first_time_customers });
+    expect(effectiveProducts.map(counts)).toEqual(recomputedProducts.map(counts));
+    expect(effectiveStore.new_customers).toBe(recomputedStore.new_customers);
   });
 
   it("rebuilds an open month without adjustments and refreshes exactly the month asked for", async () => {
