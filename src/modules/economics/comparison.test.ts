@@ -52,7 +52,14 @@ function compare(c: Case) {
     new: { verdict: r.verdict, reasons: r.reasons, notes: r.notes, confidence: r.confidence.overall, contribution: r.economics.contribution,
       contribution_upper_bound: r.economics.contribution_upper_bound, break_even_cpa: r.economics.break_even_cpa, target_cpa: r.economics.target_cpa,
       maximum_viable_cpa: r.economics.maximum_viable_cpa, budget_status: r.budget.status, test_budget: r.budget.test_budget, daily_budget: r.budget.daily_budget,
-      test_days: r.budget.test_days, binding: r.budget.binding },
+      test_days: r.budget.test_days, binding: r.budget.binding,
+      // For the report's worked examples: every line, the rates and their sources, the ceilings and stock.
+      lines: Object.fromEntries(Object.entries(r.economics.lines).map(([k, l]) => [k, { amount: l.amount, source: l.provenance, basis: l.basis }])),
+      rates: Object.fromEntries(Object.entries(r.economics.rates).map(([k, v]) => [k, { value: v.value, stress: v.stress, source: v.provenance, sample: v.sample }])),
+      margin: r.economics.contribution_margin, break_even_roas: r.economics.break_even_roas, target_roas: r.economics.target_roas,
+      platform_target_roas: r.economics.platform_target_roas, ceilings: r.budget.ceilings, inventory: r.budget.inventory,
+      max_experimental_loss: r.budget.max_experimental_loss, sales_at_target_cpa: r.budget.sales_at_target_cpa, kind: r.budget.kind,
+      confidence_detail: r.confidence },
   };
 }
 
