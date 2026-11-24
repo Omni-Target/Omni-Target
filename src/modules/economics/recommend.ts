@@ -37,6 +37,8 @@ export interface RecommendArgs extends ContributionArgs {
   portfolioLimit?: number | null;
   /** The test length the merchant chose (7, 14 or 30), else the policy default. */
   testDays?: number;
+  /** The product is already in an active campaign: no second budget (task 6). */
+  alreadyFunded?: boolean;
   /** When the evidence was read; inventory freshness is judged against it. */
   asOf: string;
   freshness: { inventory?: string | null };
@@ -167,6 +169,9 @@ export function recommendProduct(args: RecommendArgs): ProductRecommendation {
   let budget: BudgetRecommendation;
   if (verdict === "BLOCKED" || verdict === "DO_NOT_LAUNCH") {
     budget = empty("zero");
+  } else if (args.alreadyFunded && (verdict === "GO" || verdict === "PILOT")) {
+    notes.add("ALREADY_IN_ACTIVE_CAMPAIGN");
+    budget = empty("zero");
   } else if (verdict === "INSUFFICIENT_DATA" || target === null || target <= 0) {
     budget = empty("withheld");
   } else {
@@ -198,7 +203,8 @@ export function recommendProduct(args: RecommendArgs): ProductRecommendation {
 
     ceilings.portfolio = args.portfolioLimit === undefined || args.portfolioLimit === null ? null : m.major(m.down(Math.max(0, args.portfolioLimit)));
 
-    const order: Constraint[] = ["merchant", "inventory", "portfolio", "policy"];
+    // Ties go to the product's own limits first: the portfolio is named only when it actually cut the budget.
+    const order: Constraint[] = ["merchant", "inventory", "policy", "portfolio"];
     const applicable = order.filter((c) => ceilings[c] !== null);
     const binding = applicable.reduce((best, c) => ((ceilings[c] as number) < (ceilings[best] as number) ? c : best), applicable[0]);
     const maximum = ceilings[binding] as number;

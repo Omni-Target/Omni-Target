@@ -716,3 +716,56 @@ It returns the verdict, the reasons, the notes, the confidence and the budget.
 **The property tests found two faults, both fixed before merging:**
 - a test stretched by the daily limit could fall below the minimum;
 - rounding the test length up let daily × days exceed the test budget.
+
+### Task 6: portfolio allocation, recorded runs and reproducibility (2026-11-24; migration 0054)
+
+**Allocation** (`portfolio.ts`) is a fixed, explainable order, not a score:
+1. **Available:** the monthly limit, less the period's commitments. A campaign shared by several products is counted once.
+2. **Candidates:** GO and PILOT products with a recommended test. A product already in an active campaign gets no second budget (`ALREADY_IN_ACTIVE_CAMPAIGN`).
+3. **Order:**
+   1. GO before PILOT.
+   2. Then margin of safety: (break-even − measured CPA upper bound) ÷ break-even where proven, else target CPA ÷ net revenue.
+   3. Then economics confidence.
+   4. Then product ID.
+4. **Allocation:** each product gets its full test budget while it fits. Otherwise it gets what remains, if that is still a meaningful test (5 sales at its target CPA). Otherwise it gets nothing (`PORTFOLIO_LIMIT_REACHED`).
+5. **Explanation:** each allocation records its rank and the basis of its rank in words.
+
+**The run** (`run.ts`) works in two passes:
+1. Each product's own recommendation.
+2. The allocation, then each candidate again with its allocation as its portfolio ceiling, so the final budgets, daily amounts and test lengths are consistent with it.
+
+In ties the portfolio is named as binding only when it actually cut the budget.
+
+**Recording (0054):**
+- **`economics_runs`:** when, as-of time, calculation and policy versions (a foreign key to the policy), trigger, requester, the allocation, a summary.
+- **`product_recommendations`:**
+  - verdict, reasons and the headline amounts as columns;
+  - the **complete arguments** the engine received (≤ 256 KB) and its **complete output** (≤ 128 KB).
+- **The table itself refuses** a blocked or do-not-launch row with any amount, and an insufficient-data row with one.
+- **Writes** go through `record_economics_run` only, all or none, for shops bound to an active workspace.
+- **Reads:** `economics_run` (for audit and recomputation) and `latest_product_recommendations`.
+- **Deletion:** with the shop's data; nothing is pruned.
+
+**Service** (`service.ts`, server-only): reads the active policy, the merchant's inputs and the evidence; runs; records the run with the versions used.
+
+**Tests:**
+- **Unit, scenario G:**
+  - six products and a $1,000 limit with a $300 campaign shared by two products;
+  - $700 available: product 1 gets $420 in full; product 2 gets the $280 left (partial, still above its $105 minimum); products 3 and 4 get nothing (`PORTFOLIO_LIMIT_REACHED`);
+  - the funded product gets no second budget, and the insufficient-data product is not a candidate;
+  - final budgets re-sized: product 2 runs $280 at $20 a day.
+- **Unit, reproducibility:** every recorded recommendation, round-tripped through JSON, recomputes identically.
+- **Unit, properties over 300 random portfolios:**
+  - the total never exceeds the limit less commitments;
+  - funded products get nothing new;
+  - everything recomputes.
+- **Database** (`economics-runs.db.test.mjs`, 4):
+  - recording and reading back;
+  - latest per product;
+  - the table's zero and no-amount rules, with all-or-none recording;
+  - version and policy checks, and binding;
+  - isolation between shops, cascade, function-only access.
+- **Commerce classification:** both tables are deleted with the shop.
+- **Full database suite:** 262 tests.
+
+**Staging:** 0054 applied.

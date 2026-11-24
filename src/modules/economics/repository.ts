@@ -40,3 +40,17 @@ export async function productEconomicsEvidence(shopKey: number, productIds: numb
   });
   return normaliseEvidence(raw);
 }
+
+/** Records a run and its recommendations, all or none (migration 0054). */
+export const recordEconomicsRun = (shopKey: number, run: Record<string, unknown>, recommendations: Record<string, unknown>[]) =>
+  rpc<string>("record_economics_run", { p_shop_key: shopKey, p_run: run, p_recommendations: recommendations });
+
+/** A recorded run with each recommendation's arguments and output. */
+export const economicsRun = (shopKey: number, runId: string) =>
+  rpc<{ run: Record<string, unknown>; recommendations: Array<{ product_id: number; inputs: unknown; outputs: unknown }> } | null>(
+    "economics_run", { p_shop_key: shopKey, p_run_id: runId });
+
+/** Each product's latest recorded recommendation. */
+export const latestProductRecommendations = (shopKey: number, productIds: number[]) =>
+  rpc<Array<{ product_id: number; run_id: string; created_at: string; verdict: string; outputs: unknown }>>(
+    "latest_product_recommendations", { p_shop_key: shopKey, p_product_ids: productIds.slice(0, 200) });

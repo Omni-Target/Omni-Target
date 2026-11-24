@@ -63,6 +63,7 @@ export const REASONS = {
   MERCHANT_LIMIT_BINDING: { category: "constraint", text: "The merchant's own spending limit sets the budget." },
   MERCHANT_AUTHORITY_MISSING: { category: "constraint", text: "No spending limit has been authorised by the merchant, so no amount is recommended." },
   PORTFOLIO_LIMIT_REACHED: { category: "constraint", text: "The merchant's total advertising limit is already allocated to other products." },
+  ALREADY_IN_ACTIVE_CAMPAIGN: { category: "constraint", text: "The product is already in an active campaign, so it is not given a second budget." },
   POLICY_LIMIT_BINDING: { category: "constraint", text: "The test is sized by policy to learn, not to scale." },
   BUDGET_BELOW_MINIMUM_TEST: { category: "constraint", text: "The amount available is too small to learn anything from a test." },
 } as const satisfies Record<string, { category: ReasonCategory; text: string }>;

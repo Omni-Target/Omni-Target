@@ -64,6 +64,8 @@ const SUMMARIES = [
   "shop_context",
   // The merchant's economics inputs (0052), written only by save_economics_inputs.
   "merchant_economics_inputs",
+  // Recorded economics runs and recommendations (0054), written only by record_economics_run.
+  "economics_runs", "product_recommendations",
 ];
 /** Every table that mirrors or is derived from one shop's Shopify data. */
 const SYNCED = [
@@ -117,6 +119,9 @@ async function seed({ id, shop }) {
   await q("insert into public.shop_context (shop_key, fields_version) values ($1, 1)", [id]);
   // merchant_economics_inputs is written only by save_economics_inputs (0052); the table owner stands in for it.
   await q("insert into public.merchant_economics_inputs (shop_key, key, value, state, entered_by) values ($1, 'payment_rate', 0.02, 'merchant_entered', 'user_test')", [id]);
+  // economics_runs and product_recommendations are written only by record_economics_run (0054); the owner stands in.
+  const { id: run } = await one("insert into public.economics_runs (shop_key, as_of, calc_version, policy_version, trigger, products) values ($1, now(), 'econ-1.0.0', 1, 'check', 1) returning id", [id]);
+  await q("insert into public.product_recommendations (run_id, shop_key, product_shopify_id, verdict, budget_status, inputs, outputs) values ($1, $2, 10, 'PILOT', 'awaiting_authority', '{}', '{}')", [run, id]);
   await q("insert into public.history_arrivals (shop_key, subject, digest, month) values ($1, 'order', decode(repeat('ab', 32), 'hex'), date_trunc('month', now()))", [id]);
 }
 const syncedRows = async (shop) => Number((await one("select public.shop_synced_row_count($1) as n", [shop])).n);
