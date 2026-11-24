@@ -54,3 +54,13 @@ export const economicsRun = (shopKey: number, runId: string) =>
 export const latestProductRecommendations = (shopKey: number, productIds: number[]) =>
   rpc<Array<{ product_id: number; run_id: string; created_at: string; verdict: string; outputs: unknown }>>(
     "latest_product_recommendations", { p_shop_key: shopKey, p_product_ids: productIds.slice(0, 200) });
+
+/** Tracked campaigns and their daily results (migration 0055). Nothing is published or spent. */
+export const saveAdCampaign = (shopKey: number, campaign: Record<string, unknown>, by: string) =>
+  rpc<string>("save_ad_campaign", { p_shop_key: shopKey, p_campaign: campaign, p_by: by });
+
+export const saveAdCampaignResults = (shopKey: number, campaignId: string, days: Record<string, unknown>[], by: string) =>
+  rpc<{ saved: number }>("save_ad_campaign_results", { p_shop_key: shopKey, p_campaign_id: campaignId, p_days: days, p_by: by, p_source: "merchant_entered" });
+
+export const adCampaignsWithResults = (shopKey: number, campaignIds: string[] | null = null) =>
+  rpc<unknown[]>("ad_campaigns_with_results", { p_shop_key: shopKey, p_campaign_ids: campaignIds });

@@ -21,8 +21,8 @@ import type { ReasonCode } from "./reasons";
 export interface Commitment {
   campaign_id: string;
   product_ids: number[];
-  /** Spend still expected in the period, in the shop's currency. */
-  amount: number;
+  /** Spend still expected in the period, in the shop's currency; null when it cannot be converted. */
+  amount: number | null;
 }
 
 export interface Allocation {
@@ -44,6 +44,8 @@ export interface PortfolioAllocation {
   available: number | null;
   allocated: number;
   allocations: Allocation[];
+  /** A running campaign's remaining spend could not be valued, so nothing was allocated. */
+  unknown_commitments: boolean;
 }
 
 const CONFIDENCE_ORDER = { high: 0, medium: 1, low: 2 } as const;
@@ -71,10 +73,12 @@ export function allocatePortfolio(args: {
   const m = money(args.currency);
   const funded = new Set(args.commitments.flatMap((c) => c.product_ids));
   // One amount per campaign, however many products share it.
-  const byCampaign = new Map(args.commitments.map((c) => [c.campaign_id, Math.max(0, c.amount)]));
-  const committed = [...byCampaign.values()].reduce((t, a) => t + m.up(a), 0);
+  const byCampaign = new Map(args.commitments.map((c) => [c.campaign_id, c.amount === null ? null : Math.max(0, c.amount)]));
+  // A commitment that cannot be valued leaves nothing to allocate: never assume it is small.
+  const unknown = [...byCampaign.values()].some((a) => a === null);
+  const committed = [...byCampaign.values()].reduce((t: number, a) => t + (a === null ? 0 : m.up(a)), 0);
   const limit = args.monthlyLimit === null ? null : m.down(args.monthlyLimit);
-  let remaining = limit === null ? null : Math.max(0, limit - committed);
+  let remaining = limit === null ? null : unknown ? 0 : Math.max(0, limit - committed);
 
   const candidates = args.recommendations.filter((r) => (r.verdict === "GO" || r.verdict === "PILOT") && r.budget.status === "recommended"
     && (r.budget.test_budget ?? 0) > 0 && !funded.has(r.product_id));
@@ -96,7 +100,7 @@ export function allocatePortfolio(args: {
     else { allocated = 0; outcome = "none"; }
     if (remaining !== null) remaining -= allocated;
     allocations.push({ product_id: r.product_id, rank: index + 1, rank_basis: basis, requested: m.major(requested), allocated: m.major(allocated), outcome,
-      reason: outcome === "full" ? null : "PORTFOLIO_LIMIT_REACHED" });
+      reason: outcome === "full" ? null : unknown ? "COMMITMENTS_UNKNOWN" : "PORTFOLIO_LIMIT_REACHED" });
   });
   for (const r of args.recommendations) {
     if (candidates.includes(r)) continue;
@@ -107,6 +111,7 @@ export function allocatePortfolio(args: {
   const total = allocations.reduce((t, a) => t + m.down(a.allocated), 0);
   return {
     currency: args.currency, period_days: args.policy.portfolio_period_days, monthly_limit: limit === null ? null : m.major(limit),
-    committed: m.major(committed), available: limit === null ? null : m.major(Math.max(0, limit - committed)), allocated: m.major(total), allocations,
+    committed: m.major(committed), available: limit === null ? null : unknown ? 0 : m.major(Math.max(0, limit - committed)), allocated: m.major(total), allocations,
+    unknown_commitments: unknown,
   };
 }

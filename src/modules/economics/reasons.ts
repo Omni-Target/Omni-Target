@@ -33,6 +33,8 @@ export const REASONS = {
   NEGATIVE_CONTRIBUTION_MARGIN: { category: "economics", text: "Each order loses money before any advertising: variable costs exceed net revenue." },
   CPA_ABOVE_BREAK_EVEN: { category: "economics", text: "Measured campaign results show a cost per sale above what each sale can pay for." },
   CPA_ABOVE_TARGET: { category: "economics", text: "Measured cost per sale is above the target, though below break-even." },
+  LOSS_LIMIT_REACHED: { category: "economics", text: "The campaign's loss has reached the limit the merchant authorised." },
+  ECONOMICS_CHANGED: { category: "economics", text: "Price, cost or break-even changed materially since the campaign was authorised, or an input is now missing." },
   // Evidence notes.
   INSUFFICIENT_CONVERSION_EVIDENCE: { category: "evidence", text: "Advertising has not yet produced enough matured sales to prove an acquisition cost." },
   NO_SALES_HISTORY: { category: "evidence", text: "The product has no sales in the last year." },
@@ -66,6 +68,8 @@ export const REASONS = {
   ALREADY_IN_ACTIVE_CAMPAIGN: { category: "constraint", text: "The product is already in an active campaign, so it is not given a second budget." },
   POLICY_LIMIT_BINDING: { category: "constraint", text: "The test is sized by policy to learn, not to scale." },
   BUDGET_BELOW_MINIMUM_TEST: { category: "constraint", text: "The amount available is too small to learn anything from a test." },
+  SCALE_INTERVAL_NOT_ELAPSED: { category: "constraint", text: "The budget was increased recently; the next increase waits for the policy's interval." },
+  COMMITMENTS_UNKNOWN: { category: "constraint", text: "A running campaign's remaining spend cannot be converted to the shop's currency, so nothing more is allocated." },
 } as const satisfies Record<string, { category: ReasonCategory; text: string }>;
 
 export type ReasonCode = keyof typeof REASONS;

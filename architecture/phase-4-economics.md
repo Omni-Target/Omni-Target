@@ -325,17 +325,23 @@ A daily recommendation is not a platform spending guarantee. Meta may under- or 
 
 Days within `attribution_lag_days` are **immature**. Only matured days are judged.
 
-**Rules, in order:**
+**Rules, in order** (as built in Task 7). Thresholds are in the shop's currency; each day is converted at the rate recorded beside it.
 
-| Action | When |
-|---|---|
-| STOP | cumulative loss (spend − conversions × contribution) has reached the maximum experimental loss |
-| REDUCE or PAUSE for inventory | sellable stock cannot cover the orders expected over the next `inventory_cover_days` |
-| RECALCULATE | a material change since the recommendation: price or unit cost ±5%, a refund-rate change outside its interval, changed cost settings |
-| WAIT | matured spend < 1 × break-even CPA with fewer than `min_judgement_conversions`, or the recent days are immature |
-| PAUSE or REVISE | the CPA's 90% **lower** bound exceeds break-even |
-| SCALE | ≥ `min_scale_conversions` matured conversions, point CPA ≤ target, and the 90% **upper** bound ≤ break-even. At most `scale_step` per step, at least `scale_interval_days` apart, within every constraint |
-| HOLD and OPTIMISE | point CPA between target and break-even, or an interval spanning both |
+| Action | When | Next daily budget |
+|---|---|---|
+| NOT RUNNING | the campaign is planned, paused or ended | unchanged |
+| STOP | cumulative loss (all spend − all sales × break-even) has reached the authorised maximum loss (`LOSS_LIMIT_REACHED`) | 0 |
+| PAUSE or REVISE | a product in the campaign is now blocked or has negative contribution | 0 |
+| RECALCULATE | price, unit cost or break-even moved more than the material-change threshold since the authorising recommendation, or an input is now missing (`ECONOMICS_CHANGED`) | unchanged until recalculated |
+| PAUSE for inventory | no stock is left for advertising after the organic reserve | 0 |
+| REDUCE for inventory | the current budget would bring more orders over `inventory_cover_days` than the stock left for ads | stock ÷ units per order × cost per sale ÷ cover days |
+| WAIT | no matured day yet (`ATTRIBUTION_IMMATURE`), or matured spend < `min_judgement_spend_multiple` × break-even with fewer than `min_scale_conversions` sales | unchanged |
+| PAUSE or REVISE | the CPA's 90% **lower** bound exceeds break-even (`CPA_ABOVE_BREAK_EVEN`); with no sales this happens once spend exceeds 2.30 × break-even | 0 |
+| SCALE | ≥ `min_scale_conversions` matured sales, point CPA ≤ target, 90% **upper** bound ≤ break-even, and `scale_interval_days` since the last increase | × (1 + `scale_step`), capped by the merchant's daily limit and the stock |
+| HOLD and OPTIMISE | point CPA above target, or no sale yet but not confidently above break-even | unchanged |
+| CONTINUE | on target but too few sales to scale, recently scaled, or capped by the daily limit or stock | unchanged |
+
+A campaign covering several products is judged against the least forgiving product's break-even and target. Only single-product campaigns count as a product's own acquisition evidence: a shared campaign's sales cannot be attributed to one product.
 
 **Statistics:**
 - **The CPA interval** comes from the conversion count. Conversions for a fixed spend are Poisson, so the exact (Garwood) interval on the count gives CPA = spend ÷ count bounds.
@@ -769,3 +775,57 @@ In ties the portfolio is named as binding only when it actually cut the budget.
 - **Full database suite:** 262 tests.
 
 **Staging:** 0054 applied.
+
+### Task 7: campaign tracking and feedback (2026-11-24; migration 0055)
+
+**Tables (0055):**
+- **`ad_campaigns`:** the shop's own products (1–50), status, ad-account currency, daily budget, the authorised test budget and loss limit in the shop's currency, and the authorising recommendation run.
+- **`ad_campaign_results`:** per day, spend, conversions, value, clicks and impressions, with the **exchange rate to the shop's currency and its source**. A same-currency campaign must use a rate of 1. Future days are refused.
+
+**Rules for writing and reading:**
+- Writes go through `save_ad_campaign` and `save_ad_campaign_results` (up to 400 days, all or none) for shops bound to an active workspace.
+- Reads go through `ad_campaigns_with_results`.
+- Everything is deleted with the shop's data.
+- **Omnitarget publishes nothing and spends nothing:** results are entered by the merchant now, and an import can follow.
+
+**The engine** (`feedback.ts`):
+- **`measureCampaign`:**
+  - matured days only;
+  - spend converted at each day's recorded rate;
+  - CPA with **exact Poisson (Garwood) bounds**;
+  - the conversion rate with its own **Wilson** bounds, never used as a CPA interval.
+- **`evaluateCampaign`:** the actions in the table above.
+- **`acquisitionFromCampaigns`:** single-product campaigns over the acquisition window feed each product's acquisition evidence.
+- **`commitmentsFromCampaigns`:** what running and planned campaigns will still spend in the period, the lesser of the authorised budget left and daily × period.
+  - A commitment that cannot be valued (a foreign currency with no recorded rate and no authorised budget) leaves **nothing** to allocate (`COMMITMENTS_UNKNOWN`). It is never assumed small.
+
+**Service:**
+- Runs now read tracked campaigns: their results become acquisition evidence and their remaining spend becomes commitments.
+- `evaluateShopCampaigns` records a fresh check run and judges each active campaign against it and against the run that authorised it.
+
+**Tests:**
+- **Unit (14)**, each worked out in the test:
+  - matured-only measurement;
+  - Poisson against Wilson;
+  - currency conversion with the rates listed;
+  - STOP ($210 loss against a $200 limit);
+  - PAUSE for an unviable product;
+  - RECALCULATE (price +12.5%);
+  - PAUSE and REDUCE for stock ($50 → $36 a day);
+  - WAIT, immature and thin;
+  - PAUSE with no sale ($75 spent: lowest plausible CPA $32.57 > $30), not yet at $60;
+  - SCALE ($34 → $40.80), blocked by the interval and by the daily limit;
+  - HOLD at $25;
+  - CONTINUE at $17 with 12 sales;
+  - single-product acquisition evidence;
+  - commitments, including the unvaluable case.
+- **Database** (`campaign-tracking.db.test.mjs`, 3):
+  - saving and reading, replacing days, updates;
+  - negative spend, future days, zero rates, empty batches;
+  - the same-currency rate;
+  - the shop's own products and runs;
+  - isolation and access.
+- **Commerce classification:** both tables are deleted with the shop.
+- **Full database suite:** 265 tests.
+
+**Staging:** 0055 applied.
