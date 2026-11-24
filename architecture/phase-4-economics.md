@@ -288,7 +288,7 @@ Evaluated in this order. The first match wins, and every reason found is kept.
 | Constraint | Definition |
 |---|---|
 | Merchant limit | the merchant's maximum for this test, and the maximum experimental loss (a test that sells nothing loses its whole spend, so the test total never exceeds the loss limit). Without merchant limits no amount is recommended (`MERCHANT_AUTHORITY_MISSING`) |
-| Inventory limit | sellable units at active online locations (available − safety stock, tracked variants, overselling off), less the organic sales expected during the test, ÷ units per order × target CPA. Incoming stock is excluded |
+| Inventory limit | sellable units: Shopify's `available` at active online locations, for tracked variants with overselling off, from Phase 3's `inventory_availability`. Shopify already nets committed, reserved and unavailable stock (damaged, quality control, safety stock) out of `available`, so nothing is subtracted twice. Less the organic sales expected during the test, ÷ units per order × target CPA. Incoming stock is excluded |
 | Portfolio limit | the merchant's monthly advertising limit, less existing commitments, allocated across products (below) |
 | Policy limit | PILOT: `pilot_conversions` × target CPA. GO: `test_conversions` × target CPA. Scaling: the current daily × (1 + `scale_step`) |
 
@@ -535,3 +535,60 @@ Recorded above: "Task 1: how budgets are produced today". The reference implemen
   - override precedence, currency change, staleness.
 
 **Staging:** 0052 applied. The active policy has version 1, 32 settings, approval pending. There are 17 input keys. Both test stores' currencies are known (USD, NGN), and no inputs have been entered yet.
+
+### Task 3: economics evidence in Postgres (2026-11-24; migration 0053)
+
+**`product_economics_evidence(shop, products, as_of, sales, discount, maturity and demand windows)`.** One bounded call returns everything the formulas read:
+- **Scope:** at most 200 products, at most 250 variants each (sold ones first).
+- **Windows:** passed in from the policy, so a recommendation can record and reproduce them.
+- **Test orders** are excluded.
+- **"Paid"** means money collected: paid, partially refunded or refunded. An order with no financial status counts as **not paid**.
+
+**What it returns per product:**
+- **The product:** status, gift card, Collective, published online, when it was read.
+- **Variants:** current price, unit cost and its currency, tracking, overselling policy, shipping, and units and orders sold in the window (the variant mix).
+- **Sales over paid orders:** orders, units, gross, line discounts, net; orders created but not paid; first and last order; demand-window and 30-day units.
+- **The discount window's** gross and discounts.
+- **Customer-paid shipping:**
+  - summed on orders holding only this product;
+  - allocated by line value on orders holding others;
+  - always only from orders with no refund, because shipping on a refunded order may have been refunded.
+- **Allocated tax:** order tax × line net ÷ (subtotal + shipping).
+- **Matured orders only:** refunded amount, refunded units, units restocked by return and by cancellation, orders refunded, returns and returned units.
+  - Refund figures are **withheld (null)** while any refund on those orders has unread lines.
+  - Return figures are withheld while any return predates Phase 3's fields.
+- **Inventory:** Phase 3's `inventory_availability` per variant, without location detail. It is reused, not recreated.
+
+**Also returned:**
+- **Store-wide figures** over the same windows, for products without enough history: paid and unpaid orders, discounts, matured totals and refunds, matured orders with a return.
+- **Freshness** per domain: the later of the import checkpoint and the reconcile watermark.
+
+**Tests:**
+- `economics-evidence.db.test.mjs` (4), on **synthetic fixtures** built to cover what the test stores lack:
+  - a discounted single-product order;
+  - a partially refunded order with one unit returned and restocked;
+  - a two-product order with allocated shipping;
+  - an order cancelled and refunded before shipping (restocked by cancellation);
+  - an immature refunded order;
+  - an unpaid voided order;
+  - a test order;
+  - an order outside the year;
+  - tax on every paid order;
+  - an order with no financial status.
+- Each aggregate is worked out by hand in the test. Further cases cover withholding, shop isolation, the 200-product bound and access.
+- Unit: number normalisation.
+
+**Live, read-only on staging** (`evidence.live.test.ts`). Every figure is recomputed independently in the test from the raw mirror rows (orders, lines, refunds, refund lines, returns, variants, levels, locations):
+
+| Store | Products | Product-orders | Matured | Refunds checked | Variants against Shopify | Mismatches |
+|---|---|---|---|---|---|---|
+| omni-beta | 27 (25 sold, 2 never sold) | 855 | 707 | ₦18,015,000 | 27 (price and unit cost) | 0 |
+| Dev store | 3 | 1 | 1 | none | 5 | 0 |
+
+**Found and fixed:**
+- omni-beta's order #1001 has no financial status (Phase 3 found it). The first version counted it as neither paid nor unpaid.
+- It now counts as not paid, the conservative choice: its money is not known to have been collected.
+
+**Inventory freshness:**
+- omni-beta's inventory checkpoint dates from 2026-11-19, because staging's worker runs only while the development machine does.
+- The engine will mark it stale (more than 48 hours old) and cap confidence at Medium, as designed.

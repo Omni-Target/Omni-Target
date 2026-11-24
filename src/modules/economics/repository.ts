@@ -2,6 +2,7 @@ import "server-only";
 import { supabaseAdmin } from "@/platform/supabase";
 import { parseEconomicsPolicy, type EconomicsPolicy } from "./policy";
 import type { MerchantInputKey, StoredMerchantInputs } from "./inputs";
+import { normaliseEvidence, type EconomicsEvidence } from "./evidence";
 
 /** The economics policy and the merchant's inputs (Phase 4, task 2; migration 0052). */
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
@@ -28,3 +29,14 @@ export type MerchantInputChange =
 /** Saves or clears inputs, all or none; the database checks each against the catalogue. */
 export const saveEconomicsInputs = (shopKey: number, changes: MerchantInputChange[], enteredBy: string) =>
   rpc<{ saved: number; cleared: number }>("save_economics_inputs", { p_shop_key: shopKey, p_inputs: changes, p_entered_by: enteredBy });
+
+/** The economics evidence for at most 200 products, over the windows the policy sets (migration 0053). */
+export async function productEconomicsEvidence(shopKey: number, productIds: number[], asOf: Date, policy: EconomicsPolicy): Promise<EconomicsEvidence> {
+  const s = policy.settings;
+  const raw = await rpc<EconomicsEvidence>("product_economics_evidence", {
+    p_shop_key: shopKey, p_product_ids: productIds.slice(0, 200), p_as_of: asOf.toISOString(),
+    p_sales_window_days: s.sales_window_days, p_discount_window_days: s.discount_window_days,
+    p_maturity_days: s.return_maturity_days, p_demand_window_days: s.established_demand_window_days,
+  });
+  return normaliseEvidence(raw);
+}
