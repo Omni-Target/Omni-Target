@@ -620,3 +620,40 @@ The fields are price, compare-at price, unit cost, weight, inventory, fulfilment
   - a late order then cancelled nets to the summary as written.
 - `summary-maintenance.db.test.mjs` now requires effective customer counts to equal a recomputation; it previously asserted they stayed as finalised.
 - The live adjustments check compares customers.
+
+### Task 8: acquisition attribution (2026-11-24; migration 0051)
+
+**Assessment: needed.**
+- The snapshot's acquisition channel mix (per product, and for the shop) is computed from each order's referring site, landing site and sales channel.
+- REST gave the first two. The GraphQL mirror had neither, so since Phase 2's read path every order was classed by sales channel alone ("Direct / Organic" for most). That silently degraded the channel evidence Phase 5's channel fit needs.
+- Shopify's GraphQL equivalent is the order's customer journey (`customerJourneySummary`).
+
+**Stored per order, with nothing that identifies a person:**
+- **Converting (last) visit:**
+  - source and source type;
+  - the referrer's **host only**;
+  - the landing page's **path only**, never the query string, which can carry tokens or e-mail addresses;
+  - UTM source, medium and campaign (100 characters each). Shopify's parsed values are used, else those read from the landing page's query; the query itself is never stored.
+- **First visit:** source and source type.
+- **The order:** days to conversion and its place in the customer's orders.
+- **Readiness:** whether Shopify had finished the journey when the order was read.
+- **Never read:** IP address, user agent, full URL, referral code, customer identifier.
+- **Null** means not read (orders written before 0051) or unknown to Shopify (orders created through the API have no visits).
+
+**Read path.** The order page returns the host, path and UTM values. They are rebuilt into the referring and landing sites REST gave, so the existing classification (`parseTrafficSource`) classes channels exactly as on REST.
+
+**Results:**
+
+| Check | Result |
+|---|---|
+| omni-beta, 100 orders re-read by ID (`attribution.live.test.ts`) | Identical to Shopify's raw journey: order index and readiness. No order has a visit (all created through the API), so referrer, landing and UTM are null, as in Shopify |
+| Read-path equivalence, dev store | Now compares **each shared order's channel** from REST's raw sites against the stored attribution: identical (2 orders, both draft orders) |
+| Real referrer and UTM data | Not on the test stores: covered by unit tests (Instagram UTM, Google referrer, TikTok, no visit) |
+
+**Tests:**
+- unit: the mapper (host and path only, query strings, e-mail addresses and referral codes never stored, UTM bounds and fallback, no visit) and the channel rebuild;
+- `order-attribution.db.test.mjs` (2): stored, read back by the order page, bounds.
+
+**For Phase 5:**
+- Channel fit can use the stored channel, UTM and first or last visit.
+- The order index separates new from returning buyers per order, without customer data.

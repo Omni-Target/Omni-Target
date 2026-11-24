@@ -49,7 +49,9 @@ const ORDER_FIELDS = `id name createdAt processedAt cancelledAt updatedAt test s
       totalRefundedSet { shopMoney { amount } }
       customer { id }
       shippingAddress { city provinceCode countryCodeV2 }
-      productNetwork returnStatus`;
+      productNetwork returnStatus
+      customerJourneySummary { ready daysToConversion customerOrderIndex firstVisit { source sourceType }
+        lastVisit { source sourceType landingPage referrerUrl utmParameters { source medium campaign } } }`;
 const LINE_ITEM_FIELDS = `id title sku quantity currentQuantity product { id } variant { id }
         originalUnitPriceSet { shopMoney { amount } } totalDiscountSet { shopMoney { amount } }
         restockable nonFulfillableQuantity requiresShipping isGiftCard`;

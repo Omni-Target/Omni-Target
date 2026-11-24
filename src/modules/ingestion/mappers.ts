@@ -300,7 +300,7 @@ export function mapMetaobject(node: unknown, displayNameKey: string | null): Met
   };
 }
 
-export interface OrderRow {
+export interface OrderRow extends OrderAttribution {
   shopify_id: number; name: string | null; shopify_created_at: string; processed_at: string; cancelled_at: string | null;
   financial_status: string | null; fulfillment_status: string | null; currency: string; presentment_currency: string | null;
   subtotal: string; total_discounts: string; total_tax: string; total_shipping: string; total_price: string; total_refunded: string;
@@ -308,6 +308,54 @@ export interface OrderRow {
   ship_city: string | null; ship_city_raw: string | null; source_name: string | null; is_test: boolean; shopify_updated_at: string | null;
   /** Shopify Collective: the order holds products a supplier fulfils (task 4). */
   product_network: boolean | null; return_status: string | null;
+}
+
+/**
+ * An order's acquisition attribution (Phase 3, task 8), from Shopify's customer journey: signals that identify
+ * no one. The referrer as a host only, the landing page as a path only (never a query string, which can carry
+ * tokens or e-mail addresses), UTM parameters bounded; no referral code, IP or user agent.
+ */
+export interface OrderAttribution {
+  visit_source: string | null; visit_source_type: string | null; referrer_host: string | null; landing_path: string | null;
+  utm_source: string | null; utm_medium: string | null; utm_campaign: string | null;
+  first_visit_source: string | null; first_visit_source_type: string | null;
+  days_to_conversion: number | null; customer_order_index: number | null; journey_ready: boolean | null;
+}
+const urlOf = (value: unknown): URL | null => {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    return new URL(value.trim(), "https://landing.invalid");
+  } catch {
+    return null;
+  }
+};
+export function orderAttribution(journey: unknown): OrderAttribution {
+  const j = obj(journey);
+  const last = obj(j?.lastVisit);
+  const first = obj(j?.firstVisit);
+  const utm = obj(last?.utmParameters);
+  const referrer = urlOf(last?.referrerUrl);
+  const landing = urlOf(last?.landingPage);
+  // UTM parameters as Shopify parsed them, else from the landing page's query (read here, never stored as a URL).
+  const fromQuery = (name: string) => str(landing?.searchParams.get(`utm_${name}`), 100);
+  const positive = (value: unknown) => {
+    const n = nonNegativeInt(value);
+    return n !== null && n >= 1 ? n : null;
+  };
+  return {
+    visit_source: str(last?.source, 64),
+    visit_source_type: enumValue(last?.sourceType),
+    referrer_host: referrer && referrer.hostname !== "landing.invalid" ? str(referrer.hostname.toLowerCase(), 255) : null,
+    landing_path: landing ? str(landing.pathname, 255) : null,
+    utm_source: str(utm?.source, 100) ?? fromQuery("source"),
+    utm_medium: str(utm?.medium, 100) ?? fromQuery("medium"),
+    utm_campaign: str(utm?.campaign, 100) ?? fromQuery("campaign"),
+    first_visit_source: str(first?.source, 64),
+    first_visit_source_type: enumValue(first?.sourceType),
+    days_to_conversion: nonNegativeInt(j?.daysToConversion),
+    customer_order_index: positive(j?.customerOrderIndex),
+    journey_ready: bool(j?.ready),
+  };
 }
 export interface LineItemRow {
   shopify_id: number; order_shopify_id: number; product_shopify_id: number | null; variant_shopify_id: number | null;
@@ -376,6 +424,7 @@ export function mapOrderUnit(unit: JsonlUnit): { order: OrderRow | null; lineIte
     shopify_updated_at: at(root.updatedAt),
     product_network: bool(root.productNetwork),
     return_status: enumValue(root.returnStatus),
+    ...orderAttribution(root.customerJourneySummary),
   };
 
   const refunds: RefundRow[] = [];

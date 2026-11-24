@@ -18,7 +18,8 @@ import { describe, expect, it } from "vitest";
 
 const STAGING_REF = "eraycbxedmufsdvhtrvk";
 type RestOrder = { id: number; total_price: string; subtotal_price?: string; current_subtotal_price?: string; created_at: string; financial_status: string;
-  customer?: { id: number } | null; shipping_address?: { country_code?: string } | null; line_items?: Array<{ product_id: number | null; quantity: number; price: string }> };
+  customer?: { id: number } | null; shipping_address?: { country_code?: string } | null; line_items?: Array<{ product_id: number | null; quantity: number; price: string }>;
+  source_name?: string | null; referring_site?: string | null; landing_site?: string | null };
 const cents = (value: unknown) => Math.round(Number(value ?? 0) * 100);
 const lineKey = (lines: Array<{ product_id: number | null; quantity: number; price: unknown }>) =>
   lines.filter((l) => l.product_id).map((l) => `${l.product_id}x${l.quantity}@${cents(l.price)}`).sort().join(",");
@@ -30,6 +31,8 @@ describe("live read path equivalence", () => {
     if (!(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").includes(STAGING_REF)) throw new Error("Refusing: not the staging database");
     const { getShopifyAccessForShop } = await import("@/modules/credentials/shopify");
     const { fetchShopifyStoreData, shopifyGetPaginatedWithMeta } = await import("@/lib/connectors/shopify");
+    const { parseTrafficSource } = await import("@/lib/connectors/traffic-source");
+    const { attributionSites } = await import("./canonical");
     const { computeShopInsights } = await import("./live");
     const { insightOrdersPage, readShopInsights } = await import("./repository");
     const { syncShop } = await import("@/modules/ingestion/sync-repository");
@@ -45,7 +48,7 @@ describe("live read path equivalence", () => {
     const rest = await fetchShopifyStoreData(domain, access.accessToken, null);
     const restMs = Date.now() - restStarted;
     const restOrders = (await shopifyGetPaginatedWithMeta<RestOrder>(domain, access.accessToken,
-      "orders.json?status=any&financial_status=paid&limit=250&fields=id,total_price,subtotal_price,current_subtotal_price,created_at,customer,shipping_address,financial_status,line_items",
+      "orders.json?status=any&financial_status=paid&limit=250&fields=id,total_price,subtotal_price,current_subtotal_price,created_at,customer,shipping_address,financial_status,line_items,source_name,referring_site,landing_site",
       "orders", { maxPages: 100, maxDurationMs: 120_000, allowPartial: true })).items;
 
     // The canonical path, as the worker runs it.
@@ -71,6 +74,9 @@ describe("live read path equivalence", () => {
         customer: [r.customer?.id ?? null, o.customer_id],
         country: [r.shipping_address?.country_code ?? null, o.country_code],
         lines: [lineKey(r.line_items ?? []), lineKey(o.lines)],
+        // Phase 3, task 8: the acquisition channel from REST's raw sites, and from the stored attribution.
+        channel: [parseTrafficSource(r.referring_site ?? null, r.landing_site ?? null, r.source_name ?? null),
+          (() => { const sites = attributionSites(o); return parseTrafficSource(sites.referring_site, sites.landing_site, o.source_name); })()],
       };
       const differing = Object.entries(fields).filter(([, [a, b]]) => a !== b).map(([name, [a, b]]) => ({ name, rest: a, canonical: b }));
       return differing.length ? [{ id: o.id, differing }] : [];

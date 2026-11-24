@@ -12,6 +12,7 @@ import {
   mapMetaobjectDefinition,
   mapOrderUnit,
   metaobjectReferenceIds,
+  orderAttribution,
   mapProductUnit,
   mapRefundNode,
   mapReturnsUnit,
@@ -274,5 +275,35 @@ describe("customers, inventory, locations and returns", () => {
 
   it("normalises Shopify enumerations or drops ones that cannot be stored", () => {
     expect([enumValue("PARTIALLY_REFUNDED"), enumValue("size-too-small"), enumValue("123"), enumValue(null)]).toEqual(["partially_refunded", "size_too_small", null, null]);
+  });
+});
+
+describe("order attribution (Phase 3, task 8)", () => {
+  it("keeps the referrer's host, the landing path and UTM parameters, never a query string or a referral code", () => {
+    const attribution = orderAttribution({
+      ready: true, daysToConversion: 3, customerOrderIndex: 2,
+      firstVisit: { source: "google", sourceType: "SEO" },
+      lastVisit: { source: "instagram", sourceType: "AD", referralCode: "FRIEND-JANE",
+        referrerUrl: "https://l.instagram.com/?u=https%3A%2F%2Fshop.example%2F&e=jane%40example.com",
+        landingPage: "https://shop.example/products/lamp?utm_source=ig&email=jane@example.com&token=secret",
+        utmParameters: { source: "instagram", medium: "paid_social", campaign: "x".repeat(150) } },
+    });
+    expect(attribution).toEqual({
+      visit_source: "instagram", visit_source_type: "ad", referrer_host: "l.instagram.com", landing_path: "/products/lamp",
+      utm_source: "instagram", utm_medium: "paid_social", utm_campaign: "x".repeat(100), first_visit_source: "google", first_visit_source_type: "seo",
+      days_to_conversion: 3, customer_order_index: 2, journey_ready: true,
+    });
+    expect(JSON.stringify(attribution)).not.toMatch(/jane|secret|FRIEND/);
+  });
+
+  it("reads UTM parameters from the landing page when Shopify gives none, and nothing when there was no visit", () => {
+    expect(orderAttribution({ ready: true, lastVisit: { landingPage: "/collections/sale?utm_source=newsletter&utm_medium=email" } }))
+      .toMatchObject({ landing_path: "/collections/sale", referrer_host: null, utm_source: "newsletter", utm_medium: "email", utm_campaign: null });
+    // An order created through the API: Shopify knows its place in the customer's orders, and no visit.
+    expect(orderAttribution({ ready: true, daysToConversion: null, customerOrderIndex: 1, firstVisit: null, lastVisit: null })).toEqual({
+      visit_source: null, visit_source_type: null, referrer_host: null, landing_path: null, utm_source: null, utm_medium: null, utm_campaign: null,
+      first_visit_source: null, first_visit_source_type: null, days_to_conversion: null, customer_order_index: 1, journey_ready: true,
+    });
+    expect(orderAttribution(null).journey_ready).toBeNull();
   });
 });

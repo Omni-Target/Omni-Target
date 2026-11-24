@@ -51,6 +51,29 @@ export interface CanonicalOrder {
   province_code: string | null;
   country_code: string | null;
   lines: Array<{ product_id: number | null; variant_id: number | null; quantity: number; price: number | string }>;
+  /** Attribution (0051): null when not read or not known to Shopify. */
+  referrer_host?: string | null;
+  landing_path?: string | null;
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
+  journey_ready?: boolean | null;
+}
+
+/**
+ * The referring and landing sites, rebuilt in the shape REST gave them from what is stored (a host, a path and the
+ * UTM parameters), so parseTrafficSource classes the order's channel as it did on REST (task 8).
+ */
+export function attributionSites(order: Pick<CanonicalOrder, "referrer_host" | "landing_path" | "utm_source" | "utm_medium" | "utm_campaign">) {
+  const query = new URLSearchParams();
+  if (order.utm_source) query.set("utm_source", order.utm_source);
+  if (order.utm_medium) query.set("utm_medium", order.utm_medium);
+  if (order.utm_campaign) query.set("utm_campaign", order.utm_campaign);
+  const search = query.toString();
+  return {
+    referring_site: order.referrer_host ? `https://${order.referrer_host}/` : null,
+    landing_site: order.landing_path || search ? `${order.landing_path || "/"}${search ? `?${search}` : ""}` : null,
+  };
 }
 export interface CanonicalProduct {
   id: number;
@@ -131,8 +154,7 @@ export function toShopifyOrder(order: CanonicalOrder): ShopifyOrder {
       : undefined,
     financial_status: order.financial_status ?? "paid",
     source_name: order.source_name ?? "",
-    referring_site: null,
-    landing_site: null,
+    ...attributionSites(order),
     line_items: order.lines
       .filter((line) => line.product_id !== null)
       .map((line) => ({ product_id: line.product_id as number, ...(line.variant_id ? { variant_id: line.variant_id } : {}), quantity: line.quantity, price: money(line.price) })),

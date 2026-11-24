@@ -5,8 +5,9 @@ vi.mock("@anthropic-ai/sdk", () => ({ default: class { messages = { create: vi.f
 vi.mock("@/lib/db", () => ({ logApiUsage: vi.fn() }));
 
 import type { ShopifyIntelligenceResult } from "@/lib/connectors/shopify-intelligence";
+import { parseTrafficSource } from "@/lib/connectors/traffic-source";
 import {
-  buildCanonicalStoreData, canonicalEnrichment, toShopifyOrder, toShopifyProduct, type CanonicalInsightsDeps, type CanonicalOrder, type CanonicalProduct,
+  attributionSites, buildCanonicalStoreData, canonicalEnrichment, toShopifyOrder, toShopifyProduct, type CanonicalInsightsDeps, type CanonicalOrder, type CanonicalProduct,
   type MirrorReturnEvidence, type MirrorReturnSignal,
 } from "./canonical";
 
@@ -45,6 +46,20 @@ describe("the mirror in the snapshot computation's shape (task 11)", () => {
     });
     expect(toShopifyOrder(order(2, "2024-05-20T10:00:00Z", [], { customer_id: null, city: null, province_code: null, country_code: null })))
       .toMatchObject({ customer: undefined, shipping_address: undefined });
+  });
+
+  it("rebuilds the referring and landing sites so channels are classed as on REST (task 8)", () => {
+    const channel = (o: Parameters<typeof attributionSites>[0], source = "web") => {
+      const sites = attributionSites(o);
+      return parseTrafficSource(sites.referring_site, sites.landing_site, source);
+    };
+    expect(channel({ landing_path: "/products/lamp", utm_source: "instagram", utm_medium: "paid_social" })).toBe("Instagram");
+    expect(channel({ referrer_host: "www.google.com", landing_path: "/" })).toBe("Google / Search");
+    expect(channel({ utm_source: "tiktok" })).toBe("TikTok");
+    expect(attributionSites({})).toEqual({ referring_site: null, landing_site: null });
+    expect(toShopifyOrder(order(9, "2024-05-20T10:00:00Z", [], { referrer_host: "l.facebook.com", landing_path: "/" }))).toMatchObject({
+      referring_site: "https://l.facebook.com/", landing_site: "/",
+    });
   });
 
   it("maps a product with its variants, tags and image, and its cost and catalog evidence", () => {
