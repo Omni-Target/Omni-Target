@@ -159,12 +159,27 @@ export function recommendProduct(args: RecommendArgs): ProductRecommendation {
     if (acquisition && acquisition.immature_days > 0) notes.add("ATTRIBUTION_IMMATURE");
   }
 
+  // ── Stock for advertising: online stock less the organic demand expected during the test. Independent of the
+  //    verdict, so it is kept on every budget (a running campaign's checks need it even when no new budget is given). ──
+  const days = [7, 14, 30].includes(args.testDays ?? 0) ? (args.testDays as number) : policy.default_test_days;
+  let inventory: BudgetRecommendation["inventory"] = null;
+  if (!untracked) {
+    const sellable = product.inventory.reduce((t, i) => t + Math.max(0, i.state === "in_stock" || i.state === "oversell_allowed" ? i.online.available ?? 0 : 0), 0);
+    const organicPerDay = policy.reserve_organic_demand
+      ? Math.max(product.sales.recent_units / 30, product.sales.demand_units / policy.established_demand_window_days) : 0;
+    // `+ 0`: with no organic demand, Math.ceil(−ε) is −0, which would not survive a JSON round trip unchanged.
+    const reserve = Math.ceil(organicPerDay * days - 1e-9) + 0;
+    const forAds = Math.max(0, sellable - reserve);
+    inventory = { sellable_units: sellable, organic_reserve_units: reserve, units_for_ads: forAds,
+      max_orders: Math.floor(forAds / Math.max(1, economics.units_per_order) + 1e-9) + 0 };
+  }
+
   // ── Budget ──
   const ceilings: Record<Constraint, number | null> = { merchant: null, inventory: null, portfolio: null, policy: null };
   const empty = (status: BudgetRecommendation["status"]): BudgetRecommendation => ({
     status, kind: null, test_budget: status === "zero" ? 0 : null, daily_budget: status === "zero" ? 0 : null, test_days: null,
     ongoing_budget: status === "zero" ? 0 : null, max_experimental_loss: status === "zero" ? 0 : null, ceilings, binding: null,
-    sales_at_target_cpa: null, inventory: null,
+    sales_at_target_cpa: null, inventory,
   });
   let budget: BudgetRecommendation;
   if (verdict === "BLOCKED" || verdict === "DO_NOT_LAUNCH") {
@@ -176,7 +191,6 @@ export function recommendProduct(args: RecommendArgs): ProductRecommendation {
     budget = empty("withheld");
   } else {
     const kind = verdict === "GO" ? "controlled_test" : "pilot";
-    const days = [7, 14, 30].includes(args.testDays ?? 0) ? (args.testDays as number) : policy.default_test_days;
     const targetMinor = m.down(target);
 
     // Policy: sized to learn, at the target cost per sale.
@@ -188,18 +202,8 @@ export function recommendProduct(args: RecommendArgs): ProductRecommendation {
     const merchantLimits = [testLimit, lossLimit].filter((v): v is number => v !== null);
     ceilings.merchant = merchantLimits.length ? m.major(m.down(Math.min(...merchantLimits))) : null;
 
-    // Inventory: stock at online locations, less what organic demand will take during the test.
-    let inventory: BudgetRecommendation["inventory"] = null;
-    if (!untracked) {
-      const sellable = product.inventory.reduce((t, i) => t + Math.max(0, i.state === "in_stock" || i.state === "oversell_allowed" ? i.online.available ?? 0 : 0), 0);
-      const organicPerDay = policy.reserve_organic_demand
-        ? Math.max(product.sales.recent_units / 30, product.sales.demand_units / policy.established_demand_window_days) : 0;
-      const reserve = Math.ceil(organicPerDay * days - 1e-9);
-      const forAds = Math.max(0, sellable - reserve);
-      const maxOrders = Math.floor(forAds / Math.max(1, economics.units_per_order) + 1e-9);
-      inventory = { sellable_units: sellable, organic_reserve_units: reserve, units_for_ads: forAds, max_orders: maxOrders };
-      ceilings.inventory = m.major(targetMinor * maxOrders);
-    }
+    // Inventory: the orders the stock for advertising can fulfil, at the target cost per sale.
+    if (inventory) ceilings.inventory = m.major(targetMinor * (inventory.max_orders ?? 0));
 
     ceilings.portfolio = args.portfolioLimit === undefined || args.portfolioLimit === null ? null : m.major(m.down(Math.max(0, args.portfolioLimit)));
 

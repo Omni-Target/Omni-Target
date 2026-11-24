@@ -81,6 +81,13 @@ describe("what to do next", () => {
     expect(low).toMatchObject({ action: "REDUCE_FOR_INVENTORY", reasons: ["INVENTORY_LIMITED"], next_daily_budget: 36 });
   });
 
+  it("judges a running campaign's stock correctly even though its product gets no second budget (found live, task 9)", () => {
+    const built = buildScenario({ ...HEALTHY_80, inputs: { ...HEALTHY_80.inputs, ad_test_limit: 1000, ad_max_loss: 600 } });
+    const funded = recommendProduct({ ...built, asOf: AS_OF, freshness: built.evidence.freshness, alreadyFunded: true });
+    expect(funded.budget).toMatchObject({ status: "zero", test_budget: 0, inventory: { sellable_units: 500, units_for_ads: 492 } });
+    expect(evaluate(campaign(days(20, "2026-11-17", 34, 2)), { current: [funded] }).action).toBe("SCALE");
+  });
+
   it("WAIT: no matured day yet, or matured spend still under one break-even", () => {
     expect(evaluate(campaign(days(5, "2026-11-23", 30, 1)))).toMatchObject({ action: "WAIT", reasons: ["ATTRIBUTION_IMMATURE"], next_daily_budget: null });
     expect(evaluate(campaign([...days(2, "2026-11-17", 10, 0), ...days(3, "2026-11-23", 10, 0)])))

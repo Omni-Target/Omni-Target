@@ -77,6 +77,18 @@ describe("the required scenarios", () => {
   });
 });
 
+describe("reproducible from what is stored (found live, task 9)", () => {
+  it("a product with no sales recomputes identically after a JSON round trip (no −0 anywhere)", () => {
+    const built = buildScenario({ variants: [{ price: 80, cost: 30, available: 85 }], orders: 0,
+      inputs: { ...COMPLETE_COSTS, ...AUTHORITY, expected_discount_rate: { estimate: 0.05 }, expected_refund_rate: { estimate: 0.05 }, expected_return_rate: { estimate: 0.05 } } });
+    const args = { ...built, asOf: "2026-11-24T00:00:00Z", freshness: built.evidence.freshness };
+    const output = recommendProduct(args);
+    expect(output.budget.inventory).toMatchObject({ organic_reserve_units: 0 });
+    expect(Object.is(output.budget.inventory!.organic_reserve_units, 0)).toBe(true);
+    expect(recommendProduct(JSON.parse(JSON.stringify(args)))).toEqual(JSON.parse(JSON.stringify(output)));
+  });
+});
+
 describe("restrictions, unviable acquisition and the merchant's authority", () => {
   it("blocks with exactly zero for each hard restriction", () => {
     const cases: Array<[Scenario, Partial<RecommendArgs>, string]> = [

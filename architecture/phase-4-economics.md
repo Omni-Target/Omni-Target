@@ -863,3 +863,64 @@ In ties the portfolio is named as binding only when it actually cut the budget.
 - **Boundaries (3 new).**
 - **Full unit suite:** 1,058 tests.
 - **Production build:** succeeds.
+
+### Task 9: verification, comparison and reports (2026-11-25; no migration)
+
+**Before and after** (`comparison.test.ts`; every figure is computed by the code and asserted).
+- **Setup:** identical illustrative products through the production engine (frozen copy of main@ad56bfc), the staging interim and the new engine.
+- **The store:** $78,035 of revenue in 30 days and 2,000 orders.
+- **The merchant's limits:** $1,000 per test, $600 maximum loss.
+
+| | Production engine | Staging interim | New engine |
+|---|---|---|---|
+| A healthy, proven | $143/day ($2,002 per 14 days); PDF: under $50 per sale "keeps each order profitable" | $71.42/day, no judgement | **GO**: $420 test, $30/day (break-even $30, target $21) |
+| B unit cost missing | $143/day; PDF: ~$28 (35% of price) | $71.42/day | **INSUFFICIENT DATA**: no amounts |
+| C negative contribution | $143/day; PDF: under $10 "keeps each order profitable" | $71.42/day | **DO NOT LAUNCH**: $0 (−$10 per order) |
+| D 20 units in stock | $143/day | $71.42/day | **GO**: $252 (inventory-bound), $18/day |
+| E new product | $143/day | $71.42/day | **PILOT**: $210, $15/day, confidence low |
+| F CPA $25 | $143/day | $71.42/day | **PILOT**: $210 (`CPA_ABOVE_TARGET`) |
+| Total over 14 days | **$12,012** | $6,000 (the cap, six times) | **$1,092** |
+
+**What the comparison shows:**
+- The production engine also adds $25/day of overseas spend in its plain-text total (BIZ-04).
+- A $5,000 store gets $43/day for the same product, because store revenue drives it. The new engine's answer does not depend on store revenue.
+- **Scenario G:** four eligible products under a $1,000 monthly limit get $420, $420, $160 and $0. The production engine would give each $2,002 over 14 days ($8,008), with no portfolio limit.
+
+**Live on staging (read-write only on the test stores).**
+
+**omni-beta:**
+- **Inputs:** labelled synthetic merchant inputs (₦), proportionate to its catalog.
+- **Run:** the engine recorded 27 real products.
+- **Reproducibility:** all 27 recommendations recompute identically from their stored inputs.
+- **Hand check:** the top product's contribution matches a hand calculation from its evidence to ₦0.02.
+- **Results:**
+  - 1 GO, 25 PILOT, 1 DO NOT LAUNCH (a ₦149.99 product cannot carry ₦3,000 of shipping and fulfilment: −₦3,009 per order);
+  - the ₦20,000,000 monthly limit is exactly allocated (18 full, 1 partial, 4 `PORTFOLIO_LIMIT_REACHED`);
+  - 3 products get ₦0 because stock cannot support a minimum test.
+- **Campaign chain:** a synthetic single-product campaign (USD, converted at a recorded rate) gives SCALE ($20 → $24/day), and its results make the product GO: a ₦2,000,000 controlled test, capped by the merchant's loss limit.
+
+**Dev store:**
+- No costs are entered, so all products are INSUFFICIENT DATA (eight missing inputs named) or BLOCKED (one inactive product). There are no amounts anywhere.
+
+**Evidence check, re-run:**
+- omni-beta: 27 products, 853 product-orders, 706 matured, ₦18,015,000 refunds, 27 variants against Shopify: 0 mismatches.
+- Dev store: 0 mismatches.
+
+**Found and fixed during the live run:**
+1. **Running campaigns lost their stock figures.** A product in a running campaign gets no second budget, and its zeroed budget dropped its stock facts, so the campaign check wrongly said PAUSE for inventory.
+   - Stock facts are now computed independently of the verdict and kept on every budget.
+   - A regression test covers it.
+2. **A determinism fault.** With no organic demand, the reserve was −0, which does not survive JSON storage unchanged, so a stored recommendation did not recompute identically.
+   - Fixed, with a round-trip test.
+
+**Capacity:** a recorded recommendation stores about 2.7 KB of inputs and 2.3 KB of outputs (≈ 7 KB per product with indexes). A 200-product portfolio run is ≈ 1.4 MB.
+
+**Final results:**
+
+| Check | Result |
+|---|---|
+| Unit tests | 1,065 passing (economics module 84) |
+| Database tests (real Postgres) | 265 passing |
+| Live checks (staging) | evidence ×2, engine ×2: passing |
+| Type check, lint (src, supabase), production build | clean (pre-existing warnings only) |
+| Migrations 0052–0055 | applied to staging; each with a tested `.down.sql` |
