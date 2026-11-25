@@ -208,3 +208,18 @@ describe("3. campaign evidence: attribution windows, diagnostics, exchange rates
     expect(refundMaturityDays(buildScenario(HEALTHY_80).policy, { refunds: 500, p90_days: 41 })).toBe(60); // version 1: unchanged
   });
 });
+
+describe("1E. the reserve: what changing it does", () => {
+  it("at 20%, 30% (provisional) and 40%: target cost per sale, the contribution kept, and the test budgets", () => {
+    const proven = { matured_conversions: 40, matured_spend: 680, cpa: 17, cpa_lower: 13.8, cpa_upper: 21.3, immature_days: 0 };
+    const at = (reserve: number) => {
+      const built = v2({ ...HEALTHY_80, inputs: { ...COMPLETE_COSTS, ad_test_limit: 1000, ad_max_loss: 600 }, policy: { contribution_reserve: reserve } });
+      const go = recommendProduct({ ...built, asOf: "2026-11-24T00:00:00Z", freshness: built.evidence.freshness, acquisition: proven });
+      const pilot = recommendProduct({ ...built, asOf: "2026-11-24T00:00:00Z", freshness: built.evidence.freshness });
+      return [reserve, go.economics.break_even_cpa, go.economics.target_cpa, go.verdict, go.budget.test_budget, pilot.budget.test_budget];
+    };
+    // Break-even stays $30; the reserve only moves the target ($30 × (1 − reserve)) and, through it, the budgets.
+    // At 20% the target ($24) is capped by the maximum viable cost per sale ($26.07): not binding here.
+    expect([0.2, 0.3, 0.4].map(at)).toEqual([[0.2, 30, 24, "GO", 480, 240], [0.3, 30, 21, "GO", 420, 210], [0.4, 30, 18, "GO", 360, 180]]);
+  });
+});

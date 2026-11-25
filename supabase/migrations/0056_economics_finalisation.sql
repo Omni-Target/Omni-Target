@@ -146,7 +146,18 @@ insert into public.economics_policies (version, settings, rationale, status, act
   "refund_maturity_max_days": "Longest refund maturity.",
   "refund_lag_min_refunds": "Refunds needed before the store''s own refund timing (90th percentile, in days) sets refund maturity; otherwise return_maturity_days applies."
 }'::jsonb,
-  'active', now());
+  'active', now())
+-- Re-applied after a rollback (which keeps version 2, retired, for the runs recorded under it): the identical row
+-- becomes active again. A version 2 with any other settings is never overwritten.
+on conflict (version) do update set status = 'active', activated_at = now()
+  where public.economics_policies.settings = excluded.settings and public.economics_policies.rationale = excluded.rationale;
+do $$
+begin
+  if not exists (select 1 from public.economics_policies where version = 2 and status = 'active') then
+    raise exception 'economics policy version 2 already exists with different settings';
+  end if;
+end;
+$$;
 
 create or replace function public.save_economics_inputs(p_shop_key integer, p_inputs jsonb, p_entered_by text)
 returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$

@@ -1,5 +1,6 @@
 -- Reverts 0056_economics_finalisation.sql: the functions of 0052, 0053 and 0055 come back; version 1 of the
--- policy is active again; the new columns and input keys go (values entered at a variant scope are removed).
+-- policy is active again and version 2 is kept, retired; the new columns and input keys go (values entered at a
+-- variant scope, and values of the two new keys, are removed).
 
 drop function if exists public.store_refund_lag(integer, timestamptz, integer);
 create or replace function public.save_ad_campaign(p_shop_key integer, p_campaign jsonb, p_by text)
@@ -367,8 +368,9 @@ alter table public.economics_input_keys drop column variant_scope;
 alter table public.economics_input_keys drop constraint economics_input_keys_kind_check;
 alter table public.economics_input_keys add constraint economics_input_keys_kind_check check (kind in ('rate', 'money', 'flag'));
 
+-- Version 2 stays, retired: recommendations recorded under it reference it (economics_runs.policy_version) and
+-- still recompute from their stored arguments.
 update public.economics_policies set status = 'retired' where version = 2;
-delete from public.economics_policies where version = 2;
 update public.economics_policies set status = 'active' where version = 1;
 create or replace function public.economics_policy_settings_valid(p jsonb)
 returns boolean language sql immutable set search_path = public, pg_temp as $$

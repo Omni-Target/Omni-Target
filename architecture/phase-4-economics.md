@@ -363,19 +363,26 @@ All values live in `economics_policies`, versioned and documented with their rat
 
 | # | Policy | Default | Why this default |
 |---|---|---|---|
-| P1 | Contribution reserve | 30% | Keeps 30% of each sale's contribution after advertising. $30 break-even → $21 target |
+| P1 | Contribution reserve | 30% (provisional) | Keeps 30% of each sale's contribution after advertising, **towards fixed operating costs and profit** (it is not pure profit: rent, salaries and software are paid from it). $30 break-even → $21 target. Effect of changing it: see "Finalisation" |
 | P2 | Pilot size | 10 conversions at target CPA | Enough to show whether sales happen at all; not enough to scale on |
-| P3 | Controlled test size (GO) | 20 conversions at target CPA | Gives a CPA estimate within roughly ±45% (90%) |
+| P3 | Controlled test size (GO) | 20 conversions at target CPA | At 20 sales the measured CPA's range runs from 26% below to 38% above it (80% two-sided, each side 90%). *Corrected in the finalisation: this row first said "roughly ±45%".* |
 | P4 | Minimum meaningful test | 5 conversions at target CPA | Below this a test cannot distinguish a working product from a failing one |
 | P5 | Scaling | +20% per step, at least 3 days apart, ≥ 20 matured conversions | Gradual enough not to reset the platform's learning; reversible |
 | P6 | Evidence thresholds | 30 orders (High); 10–29 (Medium); product discount rate from ≥ 10 orders in 180 days; product refund rate from ≥ 20 matured orders; store proxy from ≥ 50 matured orders | Small samples give unstable rates |
-| P7 | Return maturity | 60 days | Most refunds arrive within a 30-day return window plus processing |
-| P8 | Attribution lag | 7 days | Meta's default 7-day click window |
+| P7 | Return maturity | 60 days; **version 2:** the store's own 90th-percentile refund lag, kept within 30–120 days, once it has ≥ 20 refunds | Most refunds arrive within a 30-day return window plus processing; a store's own timing is better evidence than a fixed default |
+| P8 | Attribution lag | 7 days, or the campaign's own attribution setting (version 2 reads it from the campaign) | Meta's default 7-day click window |
 | P9 | Decision confidence | 90% one-sided | Balances stopping a losing campaign early against cutting a working one |
-| P10 | Estimates for missing costs | **Not allowed.** The merchant enters or confirms each cost | No industry average is presented as the merchant's cost |
+| P10 | Estimates for missing costs | **Not allowed.** The merchant enters or confirms each cost. Expected discount, refund and return *rates* may be merchant estimates for a product with no history, labelled as such; **version 2** stresses them ×1.5 for the maximum viable CPA | No industry average is presented as the merchant's cost |
 | P11 | Inventory | incoming excluded; safety stock respected; organic demand reserved for the test | Spending must never sell stock the merchant cannot ship |
 | P12 | Acquired-order model | single product; basket upside ignored | The conservative choice for a first order |
 | P13 | Lifetime value | not used | Authorisation: first-order economics only |
+| P14 | Estimate downside (version 2) | ×1.5 | A merchant's estimate or a store-wide stand-in is not the product's own evidence. Paid share is stressed by 1.5× its shortfall |
+| P15 | Micro-pilot (version 2) | at least 1 sale at target CPA, when the limit is below the 5-sale minimum | A diagnostic: traffic, engagement and first sales. Never GO, never scaled, funded only after every full test |
+| P16 | Refund maturity bounds (version 2) | 30–120 days, from ≥ 20 refunds | See P7 |
+| P17 | Purchase counted (version 2, merchant input) | unconfirmed → the lower break-even | Omnitarget's Conversions API counts a purchase when paid; a browser pixel counts it when placed |
+| P18 | Rate bounds (version 2) | exact (Clopper–Pearson), one-sided 90% | Wilson bounds measured as low as 81% coverage at 20 orders |
+
+**Status:** version 1 (0052) is retired. Version 2 (0056) is active and **pending approval**. Recommendations made under version 1 keep `econ-1.0.0` and recompute unchanged.
 
 ## Data readiness on staging (checked 2026-11-24, read-only)
 
@@ -405,6 +412,7 @@ All values live in `economics_policies`, versioned and documented with their rat
 | 7 | Campaign tracking and feedback: results, attribution maturity, CPA intervals, the action rules | 0055 | 6 |
 | 8 | Product integration: briefs, PDF, plain text and planner render the recorded recommendation; settings for costs and limits; AI boundary | none | 6, 7 |
 | 9 | Verification, before-and-after comparison, the CEO economics report and the completion report | none | 2–8 |
+| F | Finalisation: cash on delivery, confirmed zero costs, per-variant landed cost, estimate downside, micro-pilot, statistics audit, policy version 2 | 0056 | 1–9 |
 
 Each task ships with:
 - its migration's `.down.sql`;
@@ -864,7 +872,7 @@ In ties the portfolio is named as binding only when it actually cut the budget.
 - **Full unit suite:** 1,058 tests.
 - **Production build:** succeeds.
 
-### Task 9: verification, comparison and reports (2026-11-25; no migration)
+### Task 9: verification, comparison and reports (2026-11-24; no migration)
 
 **Before and after** (`comparison.test.ts`; every figure is computed by the code and asserted).
 - **Setup:** identical illustrative products through the production engine (frozen copy of main@ad56bfc), the staging interim and the new engine.
@@ -924,3 +932,223 @@ In ties the portfolio is named as binding only when it actually cut the budget.
 | Live checks (staging) | evidence ×2, engine ×2: passing |
 | Type check, lint (src, supabase), production build | clean (pre-existing warnings only) |
 | Migrations 0052–0055 | applied to staging; each with a tested `.down.sql` |
+
+## Finalisation (2026-11-25; migration 0056, policy version 2)
+
+Requested after the Phase 4 report. Version 2 is **active and pending approval**. Every version-2 behaviour is gated on the policy, so a version-1 recommendation recomputes exactly as recorded (`econ-1.0.0`); version 2 records `econ-1.1.0`.
+
+### 1A. Cash on delivery and the Purchase event
+
+**Where Purchase events come from:**
+- **Omnitarget's Conversions API:**
+  - sends `Purchase` only on Shopify's `orders/paid` webhook (`src/app/api/shopify/webhook/route.ts`, `forwardPurchaseToMeta`, line 188);
+  - `event_id` is the Shopify order ID, so Meta receives it once per order (0015);
+  - value is `total_price`;
+  - the topic is registered at install (`auth/shopify/callback`) and checked daily (`cron/ensure-webhooks`);
+  - **an unpaid cash-on-delivery order sends nothing.**
+- **Omnitarget has no browser pixel.**
+  - A merchant's own pixel, through Shopify's Meta channel, fires at checkout completion, which a cash-on-delivery order reaches when placed and unpaid.
+  - Omnitarget cannot see which the merchant uses, so it asks (`purchase_event_basis`: placed or paid).
+
+**The four order states, measured on matured orders by `product_economics_evidence`:**
+- **Placed:** every order.
+- **Paid:** financial status paid, partially refunded or refunded.
+- **Shipped but never paid:** a failed delivery (fulfilment status fulfilled, partial or restocked).
+- **Unpaid and never shipped:** cancelled before shipping. It costs nothing and earns nothing.
+
+**Break-even**, where C = contribution per paid order, p = paid share, f = failed-delivery share, and L = outbound shipping + fulfilment + return handling, the product coming back:
+
+| Purchase counted | Break-even per purchase counted | Break-even per paid order |
+|---|---|---|
+| when paid | C − (f / p) · L | the same |
+| when placed | p · C − f · L | C − (f / p) · L |
+| unconfirmed | the lower of the two, with `PURCHASE_EVENT_BASIS_UNCONFIRMED` | C − (f / p) · L |
+
+- Version 1 multiplied by the paid share whatever counted the purchase. Version 2 does not reduce break-even for an event that is never sent.
+- A failed delivery is counted once, as a cost per failure; its order is not also counted as a refund.
+- Return handling is required when failed deliveries exist (`RETURN_COST_MISSING`).
+- **Worked case** (`finalisation.test.ts`): $30 contribution; 100 orders placed, 80 paid, 15 refused at the door; $25 per failed delivery.
+  - Counted when paid: $25.31.
+  - Counted when placed: $20.25 per purchase counted, still $25.31 per paid order.
+  - Version 1 gave $24.
+
+**Two CPAs, kept apart:**
+- Campaign feedback shows the ad-reported CPA against break-even per purchase counted.
+- Separately, it shows the **cost per order actually paid** against break-even per paid order:
+  - counted when placed: the reported CPA ÷ the paid share;
+  - unconfirmed: shown as unknown, since the engine already judges on the lower break-even.
+
+**Not verified [V]:** whether Meta deduplicates a merchant pixel's checkout Purchase against Omnitarget's paid-order event for the same order. They use different event IDs. If both run on one pixel, Meta's purchase count can be inflated and the reported CPA understated. Until verified, a merchant using both should choose one; this is a Phase 5 or 7 reconciliation item.
+
+### 1B. Zero unit cost
+
+- A zero Shopify unit cost stays `UNIT_COST_ZERO` (missing) until the merchant confirms it.
+- **Confirmation:**
+  - recorded per variant (`unit_cost_zero_confirmed`, variant scope) or per product, with `entered_by` and `entered_at`;
+  - the planner's button confirms exactly the variants whose cost is zero now;
+  - a new zero-cost variant, or a cost entered later, is not covered;
+  - the database checks the product is the shop's and the variant is the product's.
+- A confirmed zero shows as `UNIT_COST_ZERO_CONFIRMED`. Missing is never treated as free.
+
+### 1C. Landed costs
+
+- Either a rate of unit cost (`landed_cost_rate`) or an amount per unit (`landed_cost_per_unit`, now per variant or per product), or confirmed as already in the unit cost (`confirmed_none`, "Already in unit cost" in settings).
+- Allocation:
+  - each variant uses its own per-unit amount, else the product's, else the rate × that variant's cost;
+  - the result is weighted by the variant mix and multiplied by units per order;
+  - one source per unit, so it is never counted twice.
+- One variant set and another unknown, with no rate: `LANDED_COST_UNCONFIRMED`.
+
+### 1D. Estimates
+
+- **Essential costs are never estimated:**
+  - unit cost;
+  - payment fees;
+  - shipping;
+  - fulfilment;
+  - return handling.
+- **Only rates may be estimated** (expected discount, refund and return), and only when the product has no history. They are labelled `merchant_estimate`.
+- **Version 2 downside:**
+  - estimates and store-wide stand-ins are stressed ×1.5 (paid share by 1.5× its shortfall) for the maximum viable CPA, noted `ESTIMATE_DOWNSIDE_APPLIED`;
+  - the new product in scenario E: maximum viable $30 → $25.80.
+- **A product without its own evidence stays PILOT at most:** GO needs proven acquisition (≥ 20 matured conversions from a controlled test).
+
+### 1E. The reserve
+
+The 30% reserve is provisional. It is contribution **towards fixed operating costs and profit**, not profit. The wording is fixed in the policy rationale, the brief and the PDF. Effect on the $80 product, from the engine (`finalisation.test.ts`):
+
+| Reserve | Break-even | Target CPA | Kept per sale at target | GO test (20 sales) | Pilot (10 sales) |
+|---|---|---|---|---|---|
+| 20% | $30 | $24 | $6 | $480 | $240 |
+| **30%** | $30 | **$21** | $9 | $420 | $210 |
+| 40% | $30 | $18 | $12 | $360 | $180 |
+
+- **A higher reserve** lowers the target, so fewer products qualify and tests are smaller.
+- **Scaling** requires the measured CPA's upper bound under break-even. At 20 sales that means a CPA at most about 72% of break-even, which is consistent with a 30% reserve.
+
+### 2. Test sizes
+
+**Width of the CPA range for a given number of sales** (80% two-sided, each side 90%, exact Poisson):
+
+| Sales | 1 | 3 | 5 | 10 | 20 | 40 | 100 |
+|---|---|---|---|---|---|---|---|
+| Below | −74% | −55% | −46% | −35% | −26% | −19% | −12% |
+| Above | +849% | +172% | +106% | +61% | +38% | +24% | +14% |
+
+- **Pilot of 10:** enough to reject a product far above break-even, not enough to scale.
+- **Controlled test of 20:** enough to scale only a clearly profitable product.
+- **Minimum of 5:** detects gross failure only.
+- **Micro-pilot (version 2):**
+  - below the 5-sale minimum but at least one sale at target;
+  - a labelled **diagnostic** (`MICRO_PILOT_DIAGNOSTIC`, campaign purpose `diagnostic`);
+  - its results never make acquisition "proven", never give GO and never scale;
+  - the portfolio funds it only after every full test (found live on staging, fixed).
+- **Scaling** (+20%, at least 3 days apart, at least 20 matured sales) is unchanged.
+
+**Where the defaults should change.** These are proposals for a later policy version, **not implemented**:
+
+| Factor | Effect | Proposal |
+|---|---|---|
+| Category: high-return (apparel, footwear) | Refunds arrive later and more often | Already measured: the store's own refund timing sets maturity (version 2), and observed rates are stressed by exact bounds |
+| Category: high price or long consideration | Each sale costs more, so 20 sales take longer | Keep 20 sales and allow a longer test (`max_test_days` 30 → 45), rather than fewer sales |
+| Return policy longer than 30 days | Refunds can arrive after the default maturity | Until the store has 20 refunds, set maturity from a merchant-entered return window + 14 days |
+| Channel | Attribution windows differ by platform | Already handled: the attribution wait comes from the campaign's setting. Channel-specific sizes belong to Phase 5 (channel fit) |
+| Sample size | See the table above | No change: 5 / 10 / 20 sit where the range narrows enough to stop, pilot and scale respectively |
+
+### 3. Statistics audit
+
+All checks are in `finalisation-statistics.test.ts`:
+- coverage is computed **exactly** by enumerating the binomial or Poisson distribution;
+- campaign rules are simulated with a seeded generator (3,000 runs per case);
+- "90%" is **one-sided** for every decision.
+
+**Worst-plausible CPA:**
+- Lowest = spend ÷ Garwood upper count; highest = spend ÷ Garwood lower count.
+- Each holds at least 90% at every expected count (checked from λ = 0.2 to 160).
+- **Never derived from the conversion rate.** The conversion rate's Wilson interval is shown separately and is ignored by the CPA rules (tested).
+
+**High-end refund, return, paid-share and failed-delivery bounds:**
+- **Finding:** version 1's one-sided Wilson bounds do **not** hold 90%. Coverage was 81% at 20 orders with a true rate of 8%, and 86–88% is common.
+- **Fix:** version 2 uses exact Clopper–Pearson bounds, which hold at least 90% at every size and rate checked (10–200 orders, 1–50%).
+- Example: nothing refunded in 20 orders gives an upper bound of 10.9%.
+
+**The no-sale rule:**
+- With no sales, the lowest plausible CPA is spend ÷ 2.3026. The campaign is paused once spend passes 2.3026 × break-even.
+- A campaign truly at break-even shows no sale that long only 10.0% of the time (exact).
+
+**The campaign rules under daily checks** ($80 product, $34/day, rules checked every day from day 8 to day 35; the first pause or scale ends the run):
+
+| True CPA | $17 | $21 (target) | $25 | $30 (break-even) | $36 | $45 |
+|---|---|---|---|---|---|---|
+| Paused | 0.7% | 2.6% | 10.5% | 28.7% | 57.6% | 87.9% |
+| Scaled | 96.9% | 72.0% | 34.7% | 9.4% | 1.8% | 0.07% |
+
+- **A single check** holds the stated 10%: at 14 matured days, a break-even campaign is paused at most 10% of the time (exact).
+- **Repeated daily checks raise the pause rate at exactly break-even to 29%.** Pausing a campaign that earns nothing costs nothing. The rate that matters, pausing a profitable campaign at target, is 2.6%.
+- **Scaling a campaign that is not profitable:** 9.4% at exactly break-even, 1.8% at 20% above. A scaled campaign remains under every rule, including the loss limit.
+- **Never scales:**
+  - on fewer than 20 matured sales;
+  - on immature days;
+  - from a diagnostic campaign.
+
+  The simulation confirmed none of these in 18,500 runs. Insufficient evidence gives WAIT, HOLD or CONTINUE.
+
+**Timing:**
+- **Attribution:** the wait comes from the campaign's own setting ("7d_click_1d_view" → 7, "1d_click" → 1, "28d_click" → 28).
+- **Refund maturity:** from the store's own refunds. On omni-beta, 79 refunds have a median lag of 10.2 days and a 90th percentile of 16.2 days, so maturity is 30 days (the minimum), against 60 under version 1.
+
+### 4. Portfolio and currency (verified by tests)
+
+| Requirement | Where verified |
+|---|---|
+| Shared campaigns counted once | `portfolio.test.ts` (one $300 commitment for two products); shared campaigns are never one product's evidence (`feedback.test.ts`) |
+| Existing spend incorporated | commitments = what running campaigns will still spend (`feedback.test.ts`), deducted before allocation |
+| Never above the monthly limit | 300 random portfolios (`portfolio.test.ts`); live: ₦20,000,000 allocated exactly |
+| Unvalued foreign-currency spend blocks allocation | `COMMITMENTS_UNKNOWN`, nothing allocated (`feedback.test.ts`) |
+| Exchange rates with source, timestamp and pair | 0056: `fx_from`, `fx_to`, `fx_as_of` required and not in the future (`campaign-tracking.db.test.mjs`); each rate listed with its pair and time (`finalisation.test.ts`); live: USD→NGN 1,550 with its time |
+| Multi-product orders never counted repeatedly | shipping and tax allocated pro rata by line value (`economics-evidence.db.test.mjs`); a multi-product campaign's sales are evidence for no single product |
+| Test, daily and loss limits distinct | separate inputs and ceilings, with property tests (`recommend.test.ts`) |
+| Every recommendation reproducible | recomputed from stored inputs (`portfolio.test.ts`); live: 27 of 27 |
+
+### 5. Before and after, re-run
+
+The six scenarios under version 2 keep every verdict and budget (`comparison.test.ts`):
+- the maximum viable CPA moves from $26.11 to $26.07 (exact bounds are more conservative);
+- scenario E's falls from $30 to $25.80 (the estimate downside);
+- every product says the purchase basis is unconfirmed.
+
+The change from the old engine stands as reported: $12,012 over 14 days against $1,092. Version 2 matters where the scenarios had nothing to show:
+- cash on delivery: $24 → $20.25 or $25.31;
+- zero costs;
+- estimates;
+- small tests.
+
+**Live on staging (omni-beta, version 2):**
+- 27 of 27 recommendations reproduce; the hand check is within ₦0.02.
+- 1 GO, 25 PILOT, 1 DO NOT LAUNCH, unchanged.
+- ₦20,000,000 allocated exactly (18 full, 1 partial).
+- 3 stock-limited products that got ₦0 under version 1 now qualify for labelled micro-pilots, unfunded because full tests took the limit.
+- 0 failed deliveries on either store, so cash-on-delivery behaviour is covered by synthetic database and unit tests only.
+
+### Found and fixed during finalisation
+
+1. **Wilson bounds under-covered** (above). Replaced by exact bounds in version 2.
+2. **A micro-pilot displaced a full pilot** on staging. Micro-pilots are now funded last.
+3. **A plan figure was wrong:** "±45%" for 20 sales (P3) is −26% to +38%.
+4. **New products had to be checked:** saving an input now requires the product to exist in the shop.
+5. **The rollback could not run after use:** it deleted policy version 2, which recorded runs reference. It now retires it (above).
+
+### Rollback
+
+- `0056_economics_finalisation.down.sql`:
+  - restores the 0052–0055 functions;
+  - removes the new columns, the two new keys and their values, and variant-scoped values;
+  - re-activates policy version 1.
+- **Version 2 is kept, retired.** Recommendations recorded under it reference it, and still recompute from their stored arguments.
+  - *Found in finalisation:* the first draft deleted it, which fails once any version-2 run exists.
+- **Re-applying 0056** re-activates the identical row, and refuses a version 2 with other settings.
+- **Tested locally:**
+  - built from the 0017 baseline;
+  - a version-2 run recorded;
+  - down, then up again;
+  - the full database suite passing afterwards.

@@ -47,11 +47,13 @@ copy of staging's.
   contested or unresolved `legacy_shop_claims`, and `legacy_orphans`.
 - Plaintext credential columns are cleared only after a verified backup and
   restore: `--apply --clear-plaintext --backup-verified`.
-- Phase 4 (economics) adds migrations 0052–0055. They need no new environment variable and no new schedule.
-  - **0052** writes economics policy version 1 with `approval = 'pending'`. Once the CEO decides on the policy defaults (`architecture/phase-4-economics.md`, "Policy defaults"), either approve version 1 (`approval`, `approved_by`, `approved_at`) or insert the approved values as version 2 and activate it.
+- Phase 4 (economics) adds migrations 0052–0056. They need no new environment variable and no new schedule.
+  - **0052** writes economics policy version 1. **0056** (finalisation) retires it and makes version 2 active with `approval = 'pending'`. Once the CEO decides on the policy (`architecture/phase-4-economics.md`, "Policy defaults" and "Finalisation"), either approve version 2 (`approval`, `approved_by`, `approved_at`) or insert the approved values as version 3 and activate it. Never edit a written version: the database refuses it.
+  - **0056** requires `fx_as_of` on every campaign result (existing rows are backfilled from their date), adds variant-scoped inputs and the merchant's choice of when Meta counts a purchase (`purchase_event_basis`). Until a merchant sets it, the engine uses the lower break-even. Its `.down.sql` keeps version 2 retired, because recorded runs reference it.
   - After release, production's revenue-tier budget engine (main@ad56bfc) is replaced. Briefs saved earlier keep their stored plan.
   - Merchants must enter their costs and limits in Settings before any budget amount is recommended.
-  - Staging holds labelled synthetic economics data for omni-beta (inputs and two ended campaigns entered by `phase4-verification-synthetic`). It never reaches production.
+  - Staging holds labelled synthetic economics data for omni-beta (inputs and three ended campaigns entered by `phase4-verification-synthetic`). It never reaches production.
+  - Not verified before release: whether Meta deduplicates a merchant pixel's checkout Purchase against Omnitarget's paid-order Purchase for the same order. Advise merchants to send purchases from one source until checked.
 - Trim existing briefs to bounded evidence (task 9, `brief-archive.md`):
   1. Restore a fresh production backup locally, and prove every brief renders identically once trimmed (`VERIFY_STORED_BRIEFS=1 … pnpm test:db src/modules/briefs`).
   2. Take and verify a new backup.
