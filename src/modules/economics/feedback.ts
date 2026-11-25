@@ -178,9 +178,15 @@ export interface CampaignFeedback {
   action: FeedbackAction;
   reasons: ReasonCode[];
   measure: CampaignMeasure;
-  /** The thresholds judged against, in the shop's currency. */
+  /** The thresholds judged against, in the shop's currency, per purchase as the ad platform counts it. */
   break_even_cpa: number | null;
   target_cpa: number | null;
+  /**
+   * Policy version 2, kept apart from the ad-reported figures above: what each order actually PAID cost, and its
+   * break-even. Equal to the reported CPA when purchases are counted when paid; reported CPA ÷ the paid share when
+   * counted when placed; null while the merchant has not confirmed how the platform counts purchases.
+   */
+  paid_orders?: { purchase_event_basis: "placed" | "paid" | "unconfirmed"; cpa_per_paid_order: number | null; break_even_cpa_per_paid_order: number | null };
   cumulative_loss: number;
   loss_limit: number | null;
   /** The daily budget to run next, in the campaign's currency; 0 to stop or pause; null to leave as is. */
@@ -214,7 +220,17 @@ export function evaluateCampaign(args: {
   const latestFx = [...campaign.results].sort((a, b) => a.day.localeCompare(b.day)).at(-1)?.fx_to_shop ?? (campaign.currency === args.shopCurrency ? 1 : null);
   const toCampaignCurrency = (shopAmount: number) => (latestFx ? shopAmount / latestFx : null);
   const loss = m.major(m.up(measure.spend) - m.down(measure.conversions * (be ?? 0)));
-  const base = { campaign_id: campaign.id, measure, break_even_cpa: be, target_cpa: target, cumulative_loss: loss, loss_limit: campaign.max_loss };
+  // The paid-order view, for a single-product campaign under policy version 2.
+  const only = args.current.length === 1 ? args.current[0].economics : null;
+  const paidOrders = only?.purchase_event_basis === undefined || only === null ? undefined : {
+    purchase_event_basis: only.purchase_event_basis,
+    cpa_per_paid_order: measure.cpa === null || only.purchase_event_basis === "unconfirmed" ? null
+      : only.purchase_event_basis === "paid" ? measure.cpa
+      : (only.rates.paid_share.value ?? 0) > 0 ? m.major(m.up(measure.cpa / (only.rates.paid_share.value as number))) : null,
+    break_even_cpa_per_paid_order: only.break_even_cpa_per_paid_order ?? null,
+  };
+  const base = { campaign_id: campaign.id, measure, break_even_cpa: be, target_cpa: target, cumulative_loss: loss, loss_limit: campaign.max_loss,
+    ...(paidOrders ? { paid_orders: paidOrders } : {}) };
   const done = (action: FeedbackAction, next: number | null): CampaignFeedback => ({ ...base, action, reasons, next_daily_budget: next, explanation });
 
   if (campaign.status !== "active") return done("NOT_RUNNING", null);

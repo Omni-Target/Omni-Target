@@ -174,6 +174,26 @@ describe("3. campaign evidence: attribution windows, diagnostics, exchange rates
     expect(f).toMatchObject({ action: "CONTINUE", reasons: ["MICRO_PILOT_DIAGNOSTIC"], next_daily_budget: null });
   });
 
+  it("keeps the ad-reported cost per sale apart from the cost per order actually paid", () => {
+    // 80 of 100 matured orders paid, 15 failed deliveries. The campaign: $680 for 40 purchases counted, $17 each.
+    const rec = (basis?: 0 | 1) => {
+      const built = outcomes(100, 80, 15)(v2({ ...HEALTHY_80, inputs: { ...COMPLETE_COSTS, ad_test_limit: 1000, ad_max_loss: 600,
+        ...(basis === undefined ? {} : { purchase_event_basis: basis }) } }));
+      return recommendProduct({ ...built, asOf: "2026-11-24T00:00:00Z", freshness: built.evidence.freshness });
+    };
+    const judge = (basis?: 0 | 1) => evaluateCampaign({ campaign: campaign(days(20, "2026-11-17", 34, 2)), shopCurrency: "USD", current: [rec(basis)],
+      policy: POLICY_V2.settings, asOf: "2026-11-24T00:00:00Z", dailyLimit: 50 });
+    // Counted when placed: 40 purchases are 32 paid orders, $21.25 each, against $25.31 per paid order.
+    expect(judge(0)).toMatchObject({ break_even_cpa: 20.25, measure: { cpa: 17 },
+      paid_orders: { purchase_event_basis: "placed", cpa_per_paid_order: 21.25, break_even_cpa_per_paid_order: 25.31 } });
+    expect(judge(1).paid_orders).toEqual({ purchase_event_basis: "paid", cpa_per_paid_order: 17, break_even_cpa_per_paid_order: 25.31 });
+    expect(judge().paid_orders).toEqual({ purchase_event_basis: "unconfirmed", cpa_per_paid_order: null, break_even_cpa_per_paid_order: 25.31 });
+    // Version 1 recommendations carry no paid-order view.
+    expect(evaluateCampaign({ campaign: campaign(days(20, "2026-11-17", 34, 2)), shopCurrency: "USD",
+      current: [recommendProduct({ ...buildScenario(HEALTHY_80), asOf: "2026-11-24T00:00:00Z", freshness: buildScenario(HEALTHY_80).evidence.freshness })],
+      policy: buildScenario(HEALTHY_80).policy, asOf: "2026-11-24T00:00:00Z" }).paid_orders).toBeUndefined();
+  });
+
   it("lists each exchange rate with its pair and when it applied", () => {
     const m = measureCampaign(days(5, "2026-11-10", 20, 1, { fx_to_shop: 1550, fx_source: "exchange_rate_cache", fx_from: "USD", fx_to: "NGN", fx_as_of: "2026-11-01T06:00:00Z" }),
       "NGN", "2026-11-24T00:00:00Z", policy);
