@@ -5,6 +5,7 @@ import { interimBudgetPlan } from "./legacy/interim-budget";
 import { recommendProduct, type AcquisitionEvidence, type ProductRecommendation } from "./recommend";
 import { runEconomics } from "./run";
 import { buildScenario, COMPLETE_COSTS, HEALTHY_80, type Scenario } from "./__fixtures__/scenario";
+import { POLICY_V2 } from "./__fixtures__/policy-v2";
 
 /**
  * Phase 4, task 9: the before-and-after comparison. The SAME illustrative products and merchant limits go through
@@ -32,8 +33,8 @@ const CASES: Case[] = [
   { id: "F", title: "Measured CPA $25: above target, below break-even", scenario: HEALTHY_80, acquisition: BETWEEN },
 ];
 
-const recommend = (c: Case): ProductRecommendation => {
-  const built = buildScenario({ ...c.scenario, inputs: { ...c.scenario.inputs, ...LIMITS } });
+const recommend = (c: Case, policy?: typeof POLICY_V2.settings): ProductRecommendation => {
+  const built = buildScenario({ ...c.scenario, inputs: { ...c.scenario.inputs, ...LIMITS }, ...(policy ? { policy } : {}) });
   return recommendProduct({ ...built, asOf: AS_OF, freshness: built.evidence.freshness, acquisition: c.acquisition });
 };
 
@@ -113,7 +114,39 @@ describe("before and after: identical products through all three engines", () =>
     expect(budgets).toEqual([[1, "GO", 420], [2, "GO", 420], [3, "PILOT", 160], [4, "PILOT", 0]]);
     expect(result.portfolio).toMatchObject({ available: 1000, allocated: 1000 });
     if (process.env.COMPARISON_OUT) {
-      writeFileSync(process.env.COMPARISON_OUT, JSON.stringify({ store: STORE, limits: LIMITS, rows, portfolio: { budgets, allocation: result.portfolio } }, null, 2));
+      writeFileSync(process.env.COMPARISON_OUT, JSON.stringify({ store: STORE, limits: LIMITS, rows, portfolio: { budgets, allocation: result.portfolio },
+        finalisation: finalisationRows() }, null, 2));
     }
+  });
+});
+
+/** Phase 4 finalisation: the same six cases under policy version 2 (0056), beside version 1. */
+function finalisationRows() {
+  return CASES.map((c) => {
+    const before = recommend(c);
+    const after = recommend(c, POLICY_V2.settings);
+    const pick = (r: ProductRecommendation) => ({ calc_version: r.economics.calc_version, verdict: r.verdict, reasons: r.reasons, notes: r.notes,
+      break_even_cpa: r.economics.break_even_cpa, target_cpa: r.economics.target_cpa, maximum_viable_cpa: r.economics.maximum_viable_cpa,
+      purchase_event_basis: r.economics.purchase_event_basis ?? null, test_budget: r.budget.test_budget, daily_budget: r.budget.daily_budget, kind: r.budget.kind });
+    return { id: c.id, v1: pick(before), v2: pick(after) };
+  });
+}
+
+describe("finalisation: the same six products under policy version 2", () => {
+  const rows = Object.fromEntries(finalisationRows().map((r) => [r.id, r]));
+
+  it("keeps every verdict and budget, records econ-1.1.0, and says when the purchase basis is unconfirmed", () => {
+    for (const r of Object.values(rows)) {
+      expect(r.v2.verdict).toBe(r.v1.verdict);
+      expect(r.v2.test_budget).toBe(r.v1.test_budget);
+      expect([r.v1.calc_version, r.v2.calc_version]).toEqual(["econ-1.0.0", "econ-1.1.0"]);
+    }
+    expect(rows.A.v2).toMatchObject({ purchase_event_basis: "unconfirmed", break_even_cpa: 30 });
+    expect(rows.A.v2.notes).toContain("PURCHASE_EVENT_BASIS_UNCONFIRMED");
+  });
+
+  it("E: the new product's estimates now carry the downside: maximum viable $25.80 instead of $30", () => {
+    expect([rows.E.v1.maximum_viable_cpa, rows.E.v2.maximum_viable_cpa]).toEqual([30, 25.8]);
+    expect(rows.E.v2.notes).toContain("ESTIMATE_DOWNSIDE_APPLIED");
   });
 });
