@@ -967,9 +967,18 @@ Requested after the Phase 4 report. Version 2 is **active and pending approval**
 - Version 1 multiplied by the paid share whatever counted the purchase. Version 2 does not reduce break-even for an event that is never sent.
 - A failed delivery is counted once, as a cost per failure; its order is not also counted as a refund.
 - Return handling is required when failed deliveries exist (`RETURN_COST_MISSING`).
-- **Worked case** (`finalisation.test.ts`): $30 contribution; 100 orders placed, 80 paid, 15 refused at the door; $25 per failed delivery.
-  - Counted when paid: $25.31.
-  - Counted when placed: $20.25 per purchase counted, still $25.31 per paid order.
+- **Worked case** (`finalisation.test.ts`): $30 contribution; $25 per failed delivery ($7 shipping, $2 fulfilment, $16 return). All 100 orders placed are accounted for:
+
+  | Orders | Outcome | Each | Total |
+  |---|---|---|---|
+  | 80 | paid | +$30 | +$2,400 |
+  | 15 | shipped, refused at the door | −$25 | −$375 |
+  | 5 | cancelled before shipping: nothing shipped, nothing paid | $0 | $0 |
+  | **100** | | | **$2,025** |
+
+  - Counted when paid (Meta sees the 80 paid orders): $2,025 ÷ 80 = **$25.31**.
+  - Counted when placed (a pixel sees all 100, the 5 cancelled included): $2,025 ÷ 100 = **$20.25** per purchase counted, still $25.31 per paid order.
+  - The 5 cancellations cost nothing themselves. Counted when placed, they still lower break-even by $1.50, because the pixel counted 5 purchases that earned nothing; had they been paid instead (85 paid), it would be $21.75.
   - Version 1 gave $24.
 
 **Two CPAs, kept apart:**
@@ -1137,6 +1146,147 @@ The change from the old engine stands as reported: $12,012 over 14 days against 
 3. **A plan figure was wrong:** "±45%" for 20 sales (P3) is −26% to +38%.
 4. **New products had to be checked:** saving an input now requires the product to exist in the shop.
 5. **The rollback could not run after use:** it deleted policy version 2, which recorded runs reference. It now retires it (above).
+
+### Provisional approval (2026-11-25)
+
+The CEO approved version 2's decisions provisionally, **except the scaling confidence**:
+- 30% reserve;
+- 10 / 20 / 5 test sizes with 1–4 sale diagnostic micro-pilots;
+- the lower break-even until the purchase basis is confirmed;
+- no estimated essential costs, and confirmed zero costs;
+- labelled rate estimates at 1.5×;
+- a 7-day attribution wait, a 60-day refund maturity, 20 matured sales before scaling, and +20% at most every 3 days;
+- explicit test, daily and monthly limits.
+
+The policy stays pending until the scaling decision is made. Two of those approvals differ from version 2 as built, so they go into version 3 rather than changing version 2:
+- **Spending limits.** Version 2 recommends an amount once a test (or loss) limit exists. The approval requires all three limits (`require_spending_limits`).
+- **60-day refund maturity.** Version 2 lets the store's own refund timing shorten maturity to 30 days (30 on omni-beta). Version 3 sets the floor at the approved 60 days; the store's timing can only lengthen it.
+
+## Scaling and pausing thresholds (policy version 3, draft; migration 0057)
+
+The CEO asked for the scaling confidence to be re-examined, separately from pausing, after 90% scaled 9.4% of break-even campaigns in the finalisation simulation. Migration 0057 writes the result as policy **version 3, a draft**. Version 2 stays active and pending; nothing the engine does changes until version 3 is approved and activated.
+
+### The method, in business terms
+
+- **What the engine sees.**
+  - For each campaign: the spend, and the sales Meta has reported for days old enough to be complete (the 7-day wait).
+  - Sales arrive by chance: a campaign whose true cost per sale is $25 can show $19 or $33 over a fortnight purely by luck.
+- **The question it asks** is how good, or how bad, the true cost per sale could plausibly be given what it has seen.
+  - It answers with exact counting statistics (Poisson bounds): never an average, and never derived from click-through rates.
+  - **Pause** only if even an *optimistic* reading (the lower bound) is above break-even.
+  - **Scale** (+20%) only if:
+    - there are at least 20 matured sales;
+    - the measured cost per sale is at or under target;
+    - even a *pessimistic* reading (the upper bound) is under break-even.
+- **What "confidence" means.** At 97.5%, a single check has at most a 1-in-40 chance that the true cost per sale is worse than the pessimistic reading.
+- **Repeated checks change the picture.** The engine checks every day, and every check gives luck another chance. What matters is how often a campaign is wrongly scaled or paused over weeks of daily checks, so that is what the study measures.
+- **Stopping is not statistical.**
+  - `STOP` fires when spend − sales × break-even reaches the merchant's authorised loss.
+  - It is a hard cap that applies whatever the thresholds. It is unchanged and bounds what slower pausing can cost.
+
+### Study design
+
+The study is in `threshold-study.test.ts` and `__fixtures__/campaign-simulator.ts`; CI runs all of it in about 20 seconds.
+
+**Products:** the $80 product, with break-even $30 and target $21. Seven true costs per sale:
+
+| True cost per sale | Kind | Share of break-even |
+|---|---|---|
+| $18 | profitable | 60% |
+| $21 | profitable, on target | 70% |
+| $25 | profitable | 83% |
+| $27 | profitable | 90% |
+| $30 | break-even | 100% |
+| $36 | losing | 120% |
+| $45 | losing | 150% |
+
+**Volume:** four daily budgets, $15, $30, $60 and $120: about 0.5, 1, 2 and 4 sales a day at break-even.
+
+**Attribution:**
+- **Complete:** every sale reported within the 7-day wait.
+- **10% late** or **25% late:** reported 7–20 days later, so some sales are still missing from "matured" days.
+- **15% over-reported:** Meta counts sales that never happened, for example the same order counted twice.
+
+**Thresholds:** five levels each for scaling and pausing (80, 90, 95, 97.5, 99%), all 25 pairs, applied to the *same* simulated campaigns so they compare like for like.
+
+**Runs:** 3,000 campaigns per condition, checked daily from day 8 to day 35. The first pause or scale ends a run.
+
+**Assumptions:**
+- Daily sales are random (Poisson) around a steady true cost per sale.
+- The budget is steady.
+- No creative fatigue or seasonality.
+
+**Checked against the engine:**
+- The simulator reaches `evaluateCampaign`'s decision on every one of 24,192 sampled checks, at equal and unequal thresholds, with and without a loss limit.
+- A fast path (running totals) matches the day-by-day path.
+
+### Results: scaling
+
+Pause held at 95%. The worst of the four volumes is shown unless a volume is named.
+
+| Scale confidence | Break-even scaled | …10% late | …15% over-reported | 20%-losing scaled | On-target scaled at 0.5 / 1 / 2 / 4 sales a day | Median day |
+|---|---|---|---|---|---|---|
+| 90% (today) | 11.3% | 7.3% | 29.1% | 1.9% | 54% / 71% / 79% / 83% | 30 / 19 / 13 / 10 |
+| 95% | 9.3% | 6.2% | 25.8% | 1.2% | 48% / 69% / 77% / 82% | 30 / 19 / 13 / 10 |
+| **97.5%** | **5.9%** | **4.1%** | 21.4% | **0.6%** | **38% / 64% / 75% / 82%** | 29 / 20 / 14 / 11 |
+| 99% | 2.8% | 1.9% | 15.7% | 0.3% | 27% / 52% / 71% / 79% | 28 / 21 / 17 / 12 |
+
+- **Below about 93%, the confidence changes nothing.** With 20 or more sales, "measured at or under the $21 target" is the stricter test: 80% and 90% give identical results in every cell. So the 9.4% came from chance meeting the target rule under daily checks, and 95% removes only a fifth of it.
+- **The exchange rate.** Each step up costs profitable scale-ups (products at $18 and $21) for each unprofitable one avoided ($30 and $36). Per unprofitable scale-up avoided:
+
+  | Sales a day at break-even | 90→95% | 95→97.5% | 97.5→99% |
+  |---|---|---|---|
+  | 1 | 0.95 | 1.83 | 4.79 |
+  | 2 | 0.55 | 0.89 | 1.39 |
+  | 4 | 0.58 | 0.67 | 0.78 |
+  | 0.5 | 3.6 | 5.5 | 12.9 |
+
+  At half a sale a day, every step mostly delays good products, which seldom reach 20 sales in five weeks anyway.
+- **What 97.5% means in sales:**
+  - with 20 sales, scaling needs a measured cost per sale of $18.32 or less;
+  - from 40 sales, the $21 target alone decides.
+
+### Results: pausing
+
+Scale held at 97.5%. "Lost" is the average money a losing product loses over five weeks, stopping when it is paused. Without any pause it would lose $175 / $350 / $700 / $1,400 at $45.
+
+| Pause confidence | On-target wrongly paused: complete / 10% late / 25% late | $25 (profitable) paused | $36 (20% losing) paused at 0.5 / 1 / 2 / 4 sales a day | Lost at $45, by volume | No-sale pause after |
+|---|---|---|---|---|---|
+| 90% (today) | 5.5% / 8.0% / 13.3% | 12.5% | 46% / 55% / 70% / 85% | $119 / $193 / $285 / $446 | 2.3 × break-even |
+| **95%** | **2.4% / 3.8% / 6.4%** | **6.6%** | 29% / 38% / 52% / 72% | $138 / $230 / $353 / $513 | 3.0 × break-even |
+| 97.5% | 0.8% / 1.3% / 2.9% | 2.6% | 16% / 25% / 39% / 59% | $153 / $267 / $411 / $595 | 3.7 × break-even |
+
+### Recommendation
+
+**Scale at 97.5% and pause at 95%,** each chosen on its own trade-off:
+- **Scaling at 97.5%.** It is the elbow:
+  - it halves break-even scale-ups (11.3% → 5.9%) and loss-making ones (1.9% → 0.6%);
+  - at one or more sales a day, the step from 95% still costs at most about two profitable scale-ups per unprofitable one avoided (0.7–1.8);
+  - 99% costs 1.4–4.8;
+  - 95% alone is not enough: it leaves 9.3%.
+- **Pausing at 95%.** It is the least strict level that wrongly pauses fewer than 1 in 20 on-target products even when 10% of sales arrive late (3.8%; 90% gives 8.0%). The cost:
+  - products 50% above break-even lose about a fifth more before they are paused;
+  - the merchant's loss limit still caps every campaign.
+  - 97.5% would leave most products losing 20% a sale running for five weeks at low volume.
+- **No threshold fixes a counting error.** With 15% of sales over-reported, break-even products are scaled 21% of the time even at 97.5% (16% at 99%). Reconciling Meta's count with Shopify's paid orders is the remedy (Phase 5 or 7; see 1A).
+- **`decision_confidence` (90%) keeps its other roles:** the exact bounds on refund, return, paid and failed-delivery rates, and the conversion rate shown beside a campaign.
+
+### Version 3 (draft)
+
+| Setting | Version 2 (active) | Version 3 (draft) |
+|---|---|---|
+| `scale_confidence` | 90% (`decision_confidence`) | **97.5%** |
+| `pause_confidence` | 90% (`decision_confidence`) | **95%** |
+| `require_spending_limits` | no: a test or loss limit suffices | **yes:** test, daily and monthly |
+| `refund_maturity_min_days` | 30 | **60** |
+| everything else | | unchanged |
+
+- **Engine:**
+  - `calc_version` becomes `econ-1.2.0` under version 3;
+  - version-1 and version-2 recommendations recompute unchanged (tested);
+  - the brief names each missing limit.
+- **Activation:** after approval, a later migration activates version 3 and records the approval. Version 2 is retired and kept.
+- **Rollback:** `0057_…down.sql` removes the draft. An activated version 3 would be retired and kept, with version 2 restored. Tested locally.
 
 ### Rollback
 

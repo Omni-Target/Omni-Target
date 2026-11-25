@@ -177,10 +177,18 @@ export function describeBriefEconomics(e: BriefEconomics): BriefEconomicsText {
     case "zero":
       return { ...base, heading: e.verdict === "BLOCKED" ? "Advertising blocked" : e.verdict === "DO_NOT_LAUNCH" ? "Do not launch: no budget" : "No budget for now",
         daily: formatAmount(0, e.currency), total: formatAmount(0, e.currency), duration: "No test", explanation: [...reasons, ...notes.slice(0, 2)].join(" ") };
-    case "awaiting_authority":
-      return { ...base, heading: "Set your spending limit to get a budget", daily: "Not set", total: "Not set", duration: "Not set",
-        explanation: `The economics support a ${b.kind === "controlled_test" ? "controlled test" : "pilot"} at a ${money(u.target_cpa)} target cost per sale. `
-          + "Omnitarget recommends no amount until you set the most you will spend on this test." };
+    case "awaiting_authority": {
+      // Policy version 3 names each limit still to set (test, daily, monthly); earlier versions ask for the test limit.
+      const LIMIT_NAMES: Record<string, string> = { TEST_LIMIT_MISSING: "the most you will spend on this test",
+        DAILY_LIMIT_MISSING: "a daily limit", MONTHLY_LIMIT_MISSING: "a monthly limit" };
+      const missing = (e.notes ?? []).map((n) => LIMIT_NAMES[n.code]).filter((n): n is string => !!n);
+      const ask = missing.length
+        ? `Omnitarget recommends no amount until you set ${missing.length > 1 ? `${missing.slice(0, -1).join(", ")} and ${missing.at(-1)}` : missing[0]}.`
+        : "Omnitarget recommends no amount until you set the most you will spend on this test.";
+      return { ...base, heading: missing.length > 1 ? "Set your spending limits to get a budget" : "Set your spending limit to get a budget",
+        daily: "Not set", total: "Not set", duration: "Not set",
+        explanation: `The economics support a ${b.kind === "controlled_test" ? "controlled test" : "pilot"} at a ${money(u.target_cpa)} target cost per sale. ${ask}` };
+    }
     default:
       return { ...base, heading: "No budget recommendation yet", daily: "Withheld", total: "Withheld", duration: "Not set",
         explanation: `${reasons.join(" ")} No figure is estimated in its place.` };

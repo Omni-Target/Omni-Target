@@ -50,6 +50,26 @@ describe("1A. purchases counted when placed or when paid; failed deliveries", ()
     expect(cod(0).notes).toContain("UNPAID_ORDERS_ADJUSTED");
   });
 
+  it("accounts for all 100 orders: 80 paid, 15 refused at the door, 5 cancelled before shipping", () => {
+    const s = outcomes(100, 80, 15)(v2({ ...HEALTHY_80, inputs: { ...COMPLETE_COSTS, purchase_event_basis: 0 } }));
+    const m = s.product.matured;
+    expect([m.placed, m.paid, m.unpaid_shipped, m.unpaid_unshipped]).toEqual([100, 80, 15, 5]);
+    // What the 100 orders earn before advertising: paid orders $30 each, refused deliveries −$25 each (shipping $7,
+    // fulfilment $2, the parcel's return $16), cancelled-before-shipping orders $0 (nothing shipped, nothing paid).
+    const earned = 80 * 30 - 15 * 25 + 5 * 0;
+    expect(earned).toBe(2025);
+    const e = computeProductEconomics(s);
+    expect(e.failed_delivery).toMatchObject({ share: 0.15, cost_per_failure: 25 });
+    // Counted when placed, a pixel counts all 100 (the 5 cancelled included): $2,025 ÷ 100 = $20.25 per purchase counted.
+    expect(e.break_even_cpa).toBe(earned / 100);
+    // Counted when paid, only the 80 paid orders are counted: $2,025 ÷ 80 = $25.31 per purchase (per paid order).
+    expect(e.break_even_cpa_per_paid_order).toBe(Math.floor((earned / 80) * 100) / 100);
+    // The 5 cancellations cost nothing themselves; when placed orders are counted they still lower break-even by $1.50,
+    // because the pixel counted 5 purchases that earned nothing (85 paid instead: 0.85 × $30 − 0.15 × $25 = $21.75).
+    const noCancellations = computeProductEconomics(outcomes(100, 85, 15)(v2({ ...HEALTHY_80, inputs: { ...COMPLETE_COSTS, purchase_event_basis: 0 } })));
+    expect(noCancellations.break_even_cpa).toBe(21.75);
+  });
+
   it("not confirmed: the lower break-even ($20.25) is used, and said so", () => {
     const e = cod();
     expect(e).toMatchObject({ purchase_event_basis: "unconfirmed", break_even_cpa: 20.25 });

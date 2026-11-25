@@ -219,8 +219,14 @@ export function recommendProduct(args: RecommendArgs): ProductRecommendation {
     const bindingReason: Record<Constraint, ReasonCode> = { merchant: "MERCHANT_LIMIT_BINDING", inventory: "INVENTORY_LIMITED",
       portfolio: "PORTFOLIO_LIMIT_REACHED", policy: "POLICY_LIMIT_BINDING" };
 
-    if (ceilings.merchant === null) {
+    // Version 3: a test, a daily and a monthly limit must all be set before any amount is recommended.
+    const limitsMissing: ReasonCode[] = policy.require_spending_limits
+      ? ([[inputs.ad_test_limit.value, "TEST_LIMIT_MISSING"], [inputs.ad_daily_limit.value, "DAILY_LIMIT_MISSING"],
+          [inputs.ad_monthly_limit.value, "MONTHLY_LIMIT_MISSING"]] as const).filter(([v]) => v === null).map(([, code]) => code)
+      : [];
+    if (ceilings.merchant === null || limitsMissing.length) {
       notes.add("MERCHANT_AUTHORITY_MISSING");
+      for (const code of limitsMissing) notes.add(code);
       budget = { ...empty("awaiting_authority"), kind, ceilings, inventory };
     } else {
       const minimum = m.major(targetMinor * policy.min_test_conversions);

@@ -44,6 +44,15 @@ export interface EconomicsPolicySettings {
   refund_maturity_min_days?: number;
   refund_maturity_max_days?: number;
   refund_lag_min_refunds?: number;
+  /**
+   * Version 3 (migration 0057, draft): separate confidence for the two campaign decisions. Scaling needs the
+   * measured cost per sale's upper bound under break-even at scale_confidence; pausing needs its lower bound above
+   * break-even at pause_confidence. Absent: both use decision_confidence, as in versions 1 and 2.
+   */
+  scale_confidence?: number;
+  pause_confidence?: number;
+  /** Version 3: no amount is recommended until the merchant has set a test, a daily and a monthly limit. */
+  require_spending_limits?: boolean;
 }
 
 export interface EconomicsPolicy {
@@ -96,6 +105,14 @@ export function parseEconomicsPolicy(raw: unknown): EconomicsPolicy {
     for (const k of v2Keys.slice(1)) if (!Number.isInteger(s[k]) || n(k) < 1) fail(k);
     if (n("micro_pilot_min_conversions") > n("min_test_conversions")) fail("micro_pilot_min_conversions");
     if (n("refund_maturity_min_days") > n("refund_maturity_max_days")) fail("refund maturity bounds out of order");
+  }
+  // Version 3's keys: all or none, and only on top of version 2's (as economics_policy_settings_valid, 0057).
+  const v3Keys = ["scale_confidence", "pause_confidence", "require_spending_limits"];
+  if (v3Keys.some((k) => k in s)) {
+    for (const k of v3Keys) if (!(k in s)) fail(k);
+    if (!v2Keys.every((k) => k in s)) fail("version 3 settings need version 2's");
+    for (const k of ["scale_confidence", "pause_confidence"]) if (typeof s[k] !== "number" || n(k) < 0.5 || n(k) >= 1) fail(k);
+    if (typeof s.require_spending_limits !== "boolean") fail("require_spending_limits");
   }
   if (row.approval !== "pending" && row.approval !== "approved") fail("approval");
   return { version: row.version as number, settings: s as unknown as EconomicsPolicySettings, approval: row.approval as "pending" | "approved" };

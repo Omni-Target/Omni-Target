@@ -59,6 +59,24 @@ describe("economics policy (0052)", () => {
     expect(await call("economics_policy", 999)).toBeNull();
   });
 
+  it("holds version 3 (0057) as a draft: separate scaling and pausing confidence, all limits required; version 2 stays active", async () => {
+    const v3 = await call("economics_policy", 3);
+    expect(v3).toMatchObject({ version: 3, status: "draft", approval: "pending" });
+    expect(v3.settings).toMatchObject({ scale_confidence: 0.975, pause_confidence: 0.95, require_spending_limits: true, refund_maturity_min_days: 60,
+      decision_confidence: 0.9, estimate_downside_factor: 1.5 });
+    expect(Object.keys(v3.rationale).sort()).toEqual(Object.keys(v3.settings).sort());
+    expect((await call("economics_policy", null)).version).toBe(2);
+    // Version 3's keys come all together, on top of version 2's, in range.
+    const { settings, rationale } = await one("select settings, rationale from public.economics_policies where version = 3");
+    const v = 800000 + Math.floor(Math.random() * 99999);
+    const insert = (st) => q("insert into public.economics_policies (version, settings, rationale, status) values ($1, $2, $3, 'draft')", [v, st, rationale]);
+    const without = (st, k) => { const c = { ...st }; delete c[k]; return c; };
+    await expect(insert(without(settings, "pause_confidence"))).rejects.toThrow(/economics_policies_settings_valid/);
+    await expect(insert({ ...settings, scale_confidence: 1 })).rejects.toThrow(/economics_policies_settings_valid/);
+    await expect(insert({ ...settings, require_spending_limits: "yes" })).rejects.toThrow(/economics_policies_settings_valid/);
+    await expect(insert(without(settings, "estimate_downside_factor"))).rejects.toThrow(/economics_policies_settings_valid/);
+  });
+
   it("never changes a written version, refuses invalid settings and allows one active version", async () => {
     await expect(q("update public.economics_policies set settings = settings || '{\"contribution_reserve\": 0.1}' where version = 1"))
       .rejects.toThrow(/economics_policy_immutable/);

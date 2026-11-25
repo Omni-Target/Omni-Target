@@ -96,6 +96,8 @@ export interface CampaignMeasure {
   fx: Array<{ rate: number; source: string; days: number; from?: string; to?: string; as_of?: string }>;
   /** The attribution wait used, in days. */
   attribution_lag_days: number;
+  /** Policy version 3: the confidence behind cpa_lower (pausing) and cpa_upper (scaling). */
+  confidence?: { pause: number; scale: number };
 }
 
 export function measureCampaign(days: CampaignDay[], shopCurrency: string, asOf: string, policy: EconomicsPolicySettings, sinceDays?: number,
@@ -110,7 +112,9 @@ export function measureCampaign(days: CampaignDay[], shopCurrency: string, asOf:
   const spendMatured = matured.reduce((t, d) => t + toShop(d), 0);
   const conversions = window.reduce((t, d) => t + d.conversions, 0);
   const maturedConversions = matured.reduce((t, d) => t + d.conversions, 0);
-  const bounds = poissonBounds(maturedConversions, policy.decision_confidence);
+  // Each decision uses its own confidence (policy version 3); before that, both use decision_confidence.
+  const pauseBounds = poissonBounds(maturedConversions, policy.pause_confidence ?? policy.decision_confidence);
+  const scaleBounds = policy.scale_confidence === undefined ? pauseBounds : poissonBounds(maturedConversions, policy.scale_confidence);
   const withClicks = matured.filter((d) => d.clicks !== null);
   const clicks = withClicks.reduce((t, d) => t + (d.clicks ?? 0), 0);
   const clickConversions = withClicks.reduce((t, d) => t + d.conversions, 0);
@@ -130,12 +134,13 @@ export function measureCampaign(days: CampaignDay[], shopCurrency: string, asOf:
     matured_spend: m.major(spendMatured),
     matured_conversions: maturedConversions,
     cpa: maturedConversions > 0 ? m.major(m.up(m.major(spendMatured) / maturedConversions)) : null,
-    cpa_lower: matured.length ? m.major(m.down(m.major(spendMatured) / bounds.upper)) : null,
-    cpa_upper: maturedConversions > 0 ? m.major(m.up(m.major(spendMatured) / bounds.lower)) : null,
+    cpa_lower: matured.length ? m.major(m.down(m.major(spendMatured) / pauseBounds.upper)) : null,
+    cpa_upper: maturedConversions > 0 ? m.major(m.up(m.major(spendMatured) / scaleBounds.lower)) : null,
     conversion_rate: clicks > 0 && clickConversions <= clicks ? { value: clickConversions / clicks, clicks,
       ...wilsonBounds(clickConversions, clicks, policy.decision_confidence) } : null,
     fx: [...fx.values()],
     attribution_lag_days: lagDays,
+    ...(policy.scale_confidence !== undefined ? { confidence: { pause: policy.pause_confidence as number, scale: policy.scale_confidence } } : {}),
   };
 }
 

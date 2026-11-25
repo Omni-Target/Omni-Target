@@ -17,6 +17,8 @@ import type { ReasonCode } from "./reasons";
 export const ECONOMICS_CALC_VERSION = "econ-1.0.0" as const;
 /** Policy version 2 (migration 0056) switches on the finalisation rules; records made under version 1 recompute unchanged. */
 export const ECONOMICS_CALC_VERSION_V2 = "econ-1.1.0" as const;
+/** Policy version 3 (0057): separate scaling and pausing confidence; all three spending limits required. */
+export const ECONOMICS_CALC_VERSION_V3 = "econ-1.2.0" as const;
 /** Inputs a merchant can give per variant (0056). */
 export type VariantInputs = Record<number, Partial<Record<"unit_cost_zero_confirmed" | "landed_cost_per_unit", ResolvedInput>>>;
 
@@ -46,7 +48,7 @@ export interface RateEvidence {
 }
 
 export interface ProductEconomics {
-  calc_version: typeof ECONOMICS_CALC_VERSION | typeof ECONOMICS_CALC_VERSION_V2;
+  calc_version: typeof ECONOMICS_CALC_VERSION | typeof ECONOMICS_CALC_VERSION_V2 | typeof ECONOMICS_CALC_VERSION_V3;
   product_id: number;
   currency: string | null;
   units_per_order: number;
@@ -428,7 +430,7 @@ export function computeProductEconomics({ evidence, product, inputs, policy, var
   const ratio = (a: number, b: number) => Math.round((a / b) * 1e4) / 1e4;
 
   return {
-    calc_version: v2 ? ECONOMICS_CALC_VERSION_V2 : ECONOMICS_CALC_VERSION,
+    calc_version: policy.scale_confidence !== undefined ? ECONOMICS_CALC_VERSION_V3 : v2 ? ECONOMICS_CALC_VERSION_V2 : ECONOMICS_CALC_VERSION,
     product_id: product.product_id,
     currency,
     units_per_order: rate6(unitsPerOrder),
