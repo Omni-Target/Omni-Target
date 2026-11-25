@@ -1,9 +1,10 @@
 import "server-only";
 import { ECONOMICS_CALC_VERSION } from "./contribution";
 import { acquisitionFromCampaigns, commitmentsFromCampaigns, evaluateCampaign, normaliseCampaigns, type CampaignFeedback } from "./feedback";
-import { resolveMerchantInputs } from "./inputs";
+import { resolveMerchantInputs, resolveVariantInputs } from "./inputs";
 import type { ProductRecommendation } from "./recommend";
-import { adCampaignsWithResults, economicsInputs, economicsPolicy, economicsRun, productEconomicsEvidence, recordEconomicsRun } from "./repository";
+import { adCampaignsWithResults, economicsInputs, economicsPolicy, economicsRun, productEconomicsEvidence, recordEconomicsRun, refundMaturityDays,
+  storeRefundLag } from "./repository";
 import { recordedRows, runEconomics, runSummary, type EconomicsRunResult } from "./run";
 
 /**
@@ -24,8 +25,11 @@ export async function runAndRecordEconomics(params: {
   const ids = [...new Set(params.productIds)].slice(0, 200);
   if (!ids.length) throw new Error("runAndRecordEconomics: no products");
   const policy = await economicsPolicy();
+  // Policy version 2: refund maturity follows how long this store's refunds actually take.
+  const lag = policy.settings.refund_lag_min_refunds !== undefined ? await storeRefundLag(params.shopKey, asOf, policy.settings.sales_window_days) : null;
+  const maturity = refundMaturityDays(policy.settings, lag);
   const [stored, evidence, rawCampaigns] = await Promise.all([
-    economicsInputs(params.shopKey, ids), productEconomicsEvidence(params.shopKey, ids, asOf, policy), adCampaignsWithResults(params.shopKey)]);
+    economicsInputs(params.shopKey, ids), productEconomicsEvidence(params.shopKey, ids, asOf, policy, maturity), adCampaignsWithResults(params.shopKey)]);
   if (!evidence.products.length) throw new Error("runAndRecordEconomics: none of the products exist");
   if (!evidence.currency) throw new Error("runAndRecordEconomics: the shop's currency is not known");
   const campaigns = normaliseCampaigns(rawCampaigns);
@@ -33,6 +37,7 @@ export async function runAndRecordEconomics(params: {
   const result = runEconomics({
     evidence,
     products: evidence.products.map((product) => ({ product, inputs: resolve(product.product_id),
+      variantInputs: resolveVariantInputs(stored, product.product_id, { now: asOf, staleDays: policy.settings.merchant_inputs_stale_days }),
       acquisition: acquisitionFromCampaigns(campaigns, product.product_id, evidence.currency as string, asOf.toISOString(), policy.settings),
       targetMarketServiced: params.targetMarketServiced ?? null })),
     policy: policy.settings,

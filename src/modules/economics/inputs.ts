@@ -8,6 +8,8 @@ export const MERCHANT_INPUT_KEYS = [
   "fulfilment_cost_per_unit", "landed_cost_rate", "landed_cost_per_unit", "return_handling_cost",
   "expected_discount_rate", "expected_refund_rate", "expected_return_rate",
   "ad_monthly_limit", "ad_test_limit", "ad_daily_limit", "ad_max_loss", "advertising_excluded",
+  // 0056: a confirmed zero unit cost (product or variant), and when Meta counts a purchase (0 placed, 1 paid).
+  "unit_cost_zero_confirmed", "purchase_event_basis",
 ] as const;
 export type MerchantInputKey = (typeof MERCHANT_INPUT_KEYS)[number];
 
@@ -22,6 +24,8 @@ export type Provenance = "observed" | "merchant_entered" | "confirmed_none" | "s
 
 export interface StoredMerchantInput {
   product_id: number;
+  /** 0056: 0 (or absent) for product- and shop-wide values; a variant's own value otherwise. */
+  variant_id?: number;
   key: MerchantInputKey;
   value: number;
   state: "merchant_entered" | "confirmed_none" | "merchant_estimate";
@@ -49,7 +53,9 @@ export interface ResolvedInput {
   unusable?: "currency_changed";
 }
 
-export type ResolvedInputs = Record<MerchantInputKey, ResolvedInput>;
+/** Keys added in 0056 may be absent from records made before it. */
+export type ResolvedInputs = Record<Exclude<MerchantInputKey, "unit_cost_zero_confirmed" | "purchase_event_basis">, ResolvedInput>
+  & Partial<Record<"unit_cost_zero_confirmed" | "purchase_event_basis", ResolvedInput>>;
 
 /** One product's inputs: its override, else the shop's value, else missing. */
 export function resolveMerchantInputs(
@@ -59,8 +65,9 @@ export function resolveMerchantInputs(
 ): ResolvedInputs {
   const staleBefore = options.now.getTime() - options.staleDays * 86_400_000;
   const pick = (key: MerchantInputKey): ResolvedInput => {
-    const row = stored.inputs.find((i) => i.key === key && i.product_id === productId && productId !== 0)
-      ?? stored.inputs.find((i) => i.key === key && i.product_id === 0);
+    const shared = stored.inputs.filter((i) => !i.variant_id);
+    const row = shared.find((i) => i.key === key && i.product_id === productId && productId !== 0)
+      ?? shared.find((i) => i.key === key && i.product_id === 0);
     if (!row) return { key, value: null, state: "missing", scope: null, entered_at: null, stale: false };
     const scope = row.product_id === 0 ? "shop" : "product";
     // Money entered in another currency (the shop's currency changed since) is not converted: it is unknown.
@@ -71,4 +78,18 @@ export function resolveMerchantInputs(
     return { key, value, state: row.state, scope, entered_at: row.entered_at, stale: Date.parse(row.entered_at) < staleBefore };
   };
   return Object.fromEntries(MERCHANT_INPUT_KEYS.map((key) => [key, pick(key)])) as ResolvedInputs;
+}
+
+/** One product's per-variant inputs (0056): a confirmed zero unit cost, landed cost per unit. */
+export function resolveVariantInputs(stored: StoredMerchantInputs, productId: number, options: { now: Date; staleDays: number }) {
+  const staleBefore = options.now.getTime() - options.staleDays * 86_400_000;
+  const out: Record<number, Partial<Record<"unit_cost_zero_confirmed" | "landed_cost_per_unit", ResolvedInput>>> = {};
+  for (const row of stored.inputs) {
+    if (row.product_id !== productId || !row.variant_id || (row.key !== "unit_cost_zero_confirmed" && row.key !== "landed_cost_per_unit")) continue;
+    const unusable = MONEY_INPUT_KEYS.has(row.key) && (!stored.currency || row.currency !== stored.currency);
+    out[row.variant_id] = { ...out[row.variant_id], [row.key]: unusable
+      ? { key: row.key, value: null, state: "missing", scope: "product", entered_at: row.entered_at, stale: false, unusable: "currency_changed" }
+      : { key: row.key, value: Number(row.value), state: row.state, scope: "product", entered_at: row.entered_at, stale: Date.parse(row.entered_at) < staleBefore } };
+  }
+  return out;
 }

@@ -73,6 +73,11 @@ export interface EvidenceMatured {
   returned_units: number | null;
   refunds_unread: number;
   returns_unread: number;
+  /** 0056: matured orders placed, paid, shipped but never paid, and cancelled before shipping (absent before 0056). */
+  placed?: number;
+  paid?: number;
+  unpaid_shipped?: number;
+  unpaid_unshipped?: number;
 }
 
 export interface ProductEvidence {
@@ -101,6 +106,10 @@ export interface StoreEvidence {
   matured_total: number;
   matured_refunded: number;
   matured_orders_returned: number;
+  /** 0056 (absent before). */
+  matured_placed?: number;
+  matured_paid?: number;
+  matured_unpaid_shipped?: number;
 }
 
 export interface EconomicsEvidence {

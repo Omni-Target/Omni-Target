@@ -25,6 +25,8 @@ interface BudgetPlannerProps {
   setMaxTestBudget: (value: number | null) => void;
   economics?: BriefEconomics | null;
   recalculating?: boolean;
+  /** Records the merchant's confirmation that the product's zero unit cost is correct, then recalculates. */
+  onConfirmZeroCost?: () => void;
 }
 
 const VERDICT_TONE: Record<string, string> = {
@@ -44,6 +46,7 @@ export function BudgetPlanner({
   setMaxTestBudget,
   economics = null,
   recalculating = false,
+  onConfirmZeroCost,
 }: BudgetPlannerProps) {
   const inputId = useId();
   const [draft, setDraft] = useState(maxTestBudget != null ? String(maxTestBudget) : "");
@@ -80,6 +83,12 @@ export function BudgetPlanner({
           <p className={`inline-block rounded-md border px-2 py-1 text-xs font-semibold ${engine.verdict ? VERDICT_TONE[engine.verdict] : "border-border"}`}>
             {engine.verdict_label}
           </p>
+          {onConfirmZeroCost && economics?.reasons?.some((r) => r.code === "UNIT_COST_ZERO") && (
+            <button type="button" disabled={recalculating} onClick={onConfirmZeroCost}
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-subtle focus-visible:outline focus-visible:outline-2">
+              Confirm the variants with a zero unit cost really cost nothing
+            </button>
+          )}
           {engine.reasons.length > 0 && (
             <ul className="list-disc space-y-1 pl-5 text-xs leading-relaxed text-muted-foreground">
               {engine.reasons.map((reason) => <li key={reason}>{reason}</li>)}

@@ -47,7 +47,7 @@ async function boundShop(currency = "NGN") {
 const CAMPAIGN = { name: "Board test", platform: "meta", product_ids: [1], status: "active", currency: "USD", daily_budget: 20,
   authorised_budget: 280000, max_loss: 200000, started_on: "2026-11-01" };
 const day = (d, patch = {}) => ({ day: d, spend: 20, conversions: 1, conversion_value: 80, clicks: 40, impressions: 2000, fx_to_shop: 1500,
-  fx_source: "exchange_rate_cache 2026-11-01", ...patch });
+  fx_source: "exchange_rate_cache 2026-11-01", fx_as_of: "2026-11-01T06:00:00Z", ...patch });
 
 describe("tracked campaigns (0055)", () => {
   it("saves a campaign and its daily results with the exchange rate beside each day, and reads them back", async () => {
@@ -59,10 +59,11 @@ describe("tracked campaigns (0055)", () => {
     await call("save_ad_campaign_results", key, id, json([day("2026-11-02", { conversions: 2, conversion_value: 160 })]), "user_owner");
     const [c] = await call("ad_campaigns_with_results", key, null);
     expect(c).toMatchObject({ id, name: "Board test", product_ids: [1], status: "active", currency: "USD", created_by: "user_owner" });
-    expect(c.results.map((r) => [r.day, r.spend, r.conversions, r.fx_to_shop, r.fx_source, r.source])).toEqual([
-      ["2026-11-01", 20, 1, 1500, "exchange_rate_cache 2026-11-01", "merchant_entered"],
-      ["2026-11-02", 20, 2, 1500, "exchange_rate_cache 2026-11-01", "merchant_entered"],
+    expect(c.results.map((r) => [r.day, r.spend, r.conversions, r.fx_to_shop, r.fx_source, r.source, r.fx_from, r.fx_to, Date.parse(r.fx_as_of)])).toEqual([
+      ["2026-11-01", 20, 1, 1500, "exchange_rate_cache 2026-11-01", "merchant_entered", "USD", "NGN", Date.parse("2026-11-01T06:00:00Z")],
+      ["2026-11-02", 20, 2, 1500, "exchange_rate_cache 2026-11-01", "merchant_entered", "USD", "NGN", Date.parse("2026-11-01T06:00:00Z")],
     ]);
+    expect(c.purpose).toBe("test");
     // Update: scaled and paused.
     await call("save_ad_campaign", key, json({ ...CAMPAIGN, id, status: "paused", daily_budget: 24, last_scaled_on: "2026-11-10" }), "user_owner");
     expect((await call("ad_campaigns_with_results", key, [id]))[0]).toMatchObject({ status: "paused", daily_budget: 24, last_scaled_on: "2026-11-10" });
@@ -77,6 +78,8 @@ describe("tracked campaigns (0055)", () => {
     await expect(call("save_ad_campaign_results", key, id, json([day("2999-01-01")]), "u")).rejects.toThrow(/future/);
     await expect(call("save_ad_campaign_results", key, id, json([day("2026-11-01", { fx_to_shop: 0 })]), "u")).rejects.toThrow(/check/);
     await expect(call("save_ad_campaign_results", key, id, json([]), "u")).rejects.toThrow(/1 to 400/);
+    await expect(call("save_ad_campaign_results", key, id, json([day("2026-11-01", { fx_as_of: null })]), "u")).rejects.toThrow(/time its exchange rate applied/);
+    await expect(call("save_ad_campaign_results", key, id, json([day("2026-11-01", { fx_as_of: "2999-01-01T00:00:00Z" })]), "u")).rejects.toThrow(/time its exchange rate applied/);
     expect(await results()).toBe(0);
     // A campaign in the shop's own currency must use a rate of 1.
     const local = await call("save_ad_campaign", key, json({ ...CAMPAIGN, currency: "NGN" }), "u");
@@ -86,6 +89,10 @@ describe("tracked campaigns (0055)", () => {
     await expect(call("save_ad_campaign", key, json({ ...CAMPAIGN, product_ids: [999] }), "u")).rejects.toThrow(/not the shop's/);
     await expect(call("save_ad_campaign", key, json({ ...CAMPAIGN, recommendation_run_id: "00000000-0000-0000-0000-000000000000" }), "u")).rejects.toThrow(/run is not/);
     await expect(call("save_ad_campaign", key, json({ ...CAMPAIGN, status: "running" }), "u")).rejects.toThrow(/check/);
+    // A diagnostic micro-pilot is recorded as such (0056).
+    const diagnostic = await call("save_ad_campaign", key, json({ ...CAMPAIGN, purpose: "diagnostic" }), "u");
+    expect((await call("ad_campaigns_with_results", key, [diagnostic]))[0].purpose).toBe("diagnostic");
+    await expect(call("save_ad_campaign", key, json({ ...CAMPAIGN, purpose: "experiment" }), "u")).rejects.toThrow(/check/);
   });
 
   it("keeps each shop's campaigns to itself and is function-only", async () => {

@@ -36,10 +36,12 @@ export interface BriefEconomics {
     net_revenue: number | null; variable_costs: number | null; contribution: number | null; contribution_margin: number | null;
     break_even_cpa: number | null; maximum_viable_cpa: number | null; target_cpa: number | null;
     break_even_roas: number | null; target_roas: number | null; platform_target_roas: number | null; contribution_upper_bound: number | null;
+    /** Policy version 2: break-even per paid order, and when Meta counts a purchase. */
+    break_even_cpa_per_paid_order?: number | null; purchase_event_basis?: "placed" | "paid" | "unconfirmed" | null;
   };
   lines?: BriefEconomicsLine[];
   budget?: {
-    status: BriefBudgetStatus; kind: "pilot" | "controlled_test" | null; test_budget: number | null; daily_budget: number | null;
+    status: BriefBudgetStatus; kind: "pilot" | "controlled_test" | "micro_pilot" | null; test_budget: number | null; daily_budget: number | null;
     test_days: number | null; max_experimental_loss: number | null; binding: string | null;
     ceilings: Record<"merchant" | "inventory" | "portfolio" | "policy", number | null>; sales_at_target_cpa: number | null;
   };
@@ -79,13 +81,18 @@ export function parseBriefEconomics(value: unknown): BriefEconomics | null {
       break_even_cpa: num(u.break_even_cpa), maximum_viable_cpa: num(u.maximum_viable_cpa), target_cpa: num(u.target_cpa),
       break_even_roas: num(u.break_even_roas), target_roas: num(u.target_roas), platform_target_roas: num(u.platform_target_roas),
       contribution_upper_bound: num(u.contribution_upper_bound),
+      // Version 2 only: a snapshot without them (version 1) reads back unchanged.
+      ...("purchase_event_basis" in u ? {
+        break_even_cpa_per_paid_order: num(u.break_even_cpa_per_paid_order),
+        purchase_event_basis: u.purchase_event_basis === "placed" || u.purchase_event_basis === "paid" || u.purchase_event_basis === "unconfirmed" ? u.purchase_event_basis : null,
+      } : {}),
     },
     lines: (Array.isArray(v.lines) ? v.lines : []).slice(0, 20).map((l) => {
       const line = (l ?? {}) as Record<string, unknown>;
       return { key: text(line.key, 40), label: text(line.label, 80), amount: num(line.amount), source: text(line.source, 40) };
     }),
     budget: {
-      status: b.status as BriefBudgetStatus, kind: b.kind === "pilot" || b.kind === "controlled_test" ? b.kind : null,
+      status: b.status as BriefBudgetStatus, kind: b.kind === "pilot" || b.kind === "controlled_test" || b.kind === "micro_pilot" ? b.kind : null,
       test_budget: num(b.test_budget), daily_budget: num(b.daily_budget), test_days: num(b.test_days), max_experimental_loss: num(b.max_experimental_loss),
       binding: typeof b.binding === "string" ? b.binding : null,
       ceilings: { merchant: num(ceilings.merchant), inventory: num(ceilings.inventory), portfolio: num(ceilings.portfolio), policy: num(ceilings.policy) },
@@ -143,6 +150,10 @@ export function describeBriefEconomics(e: BriefEconomics): BriefEconomicsText {
     ["Contribution before advertising", money(u.contribution)],
     ["Contribution margin", u.contribution_margin === null ? "Unknown" : `${(u.contribution_margin * 100).toFixed(1)}%`],
     ["Break-even cost per sale", money(u.break_even_cpa)],
+    ...(u.break_even_cpa_per_paid_order != null && u.break_even_cpa_per_paid_order !== u.break_even_cpa
+      ? [["Break-even per paid order", money(u.break_even_cpa_per_paid_order)] as [string, string]] : []),
+    ...(u.purchase_event_basis ? [["Purchases counted", u.purchase_event_basis === "paid" ? "when paid"
+      : u.purchase_event_basis === "placed" ? "when placed" : "not confirmed (lower break-even used)"] as [string, string]] : []),
     ["Target cost per sale", money(u.target_cpa)],
     ["Break-even ROAS", u.break_even_roas === null ? "Not applicable" : `${u.break_even_roas.toFixed(2)}`],
     ["Target ROAS", u.target_roas === null ? "Not applicable" : `${u.target_roas.toFixed(2)}`],
@@ -154,12 +165,14 @@ export function describeBriefEconomics(e: BriefEconomics): BriefEconomicsText {
 
   switch (b.status) {
     case "recommended": {
-      const kind = b.kind === "controlled_test" ? "Controlled test" : "Pilot";
+      const kind = b.kind === "controlled_test" ? "Controlled test" : b.kind === "micro_pilot" ? "Diagnostic micro-pilot" : "Pilot";
       return { ...base, heading: `${kind}: up to ${money(b.test_budget)} over ${b.test_days} days`,
         daily: `Up to ${money(b.daily_budget)}/day`, total: `${money(b.test_budget)} maximum over ${b.test_days} days`, duration: `${b.test_days}-day test`,
         explanation: `Sized to buy about ${b.sales_at_target_cpa} sales at the ${money(u.target_cpa)} target cost per sale, within your limits`
           + `${b.binding ? ` (set by the ${b.binding === "policy" ? "test-size policy" : `${b.binding} limit`})` : ""}. `
-          + `Stop if losses reach ${money(b.max_experimental_loss)}. ${limits}` };
+          + `Stop if losses reach ${money(b.max_experimental_loss)}. `
+          + (b.kind === "micro_pilot" ? "This is a diagnostic test of traffic, creative and first sales: too small to prove profitable acquisition, and never a reason to scale. " : "")
+          + `The target keeps part of each sale's contribution towards fixed costs and profit. ${limits}` };
     }
     case "zero":
       return { ...base, heading: e.verdict === "BLOCKED" ? "Advertising blocked" : e.verdict === "DO_NOT_LAUNCH" ? "Do not launch: no budget" : "No budget for now",

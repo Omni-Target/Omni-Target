@@ -2,7 +2,7 @@ import "server-only";
 import type { BriefEconomics } from "@/lib/brief-economics";
 import { shopKeyFor } from "@/modules/ingestion/repository";
 import { currentWorkspaceFor } from "@/modules/workspaces/current";
-import { saveEconomicsInputs } from "./repository";
+import { saveEconomicsInputs, zeroCostVariantIds } from "./repository";
 import { runAndRecordEconomics } from "./service";
 import { toBriefEconomics, unavailableEconomics } from "./snapshot";
 
@@ -17,6 +17,9 @@ export async function economicsForBrief(params: {
   testDays?: number;
   /** undefined: leave the product's limit as it is; null: clear it; a number: set it. */
   testLimit?: number | null;
+  /** The merchant confirms that the product's variants with a zero Shopify unit cost really cost nothing. Recorded per
+   *  variant, with who and when; a variant whose cost is later entered, or a new zero-cost variant, is not covered. */
+  confirmZeroCost?: boolean;
 }): Promise<BriefEconomics> {
   const workspace = await currentWorkspaceFor(params.userId);
   if (!workspace || workspace.status !== "active" || !workspace.shop_domain) return unavailableEconomics("shop_not_connected");
@@ -25,6 +28,13 @@ export async function economicsForBrief(params: {
   const productId = Number(params.productId);
   if (!Number.isSafeInteger(productId) || productId <= 0) return unavailableEconomics("product_not_identified");
   try {
+    if (params.confirmZeroCost) {
+      const variants = await zeroCostVariantIds(shopKey, productId);
+      if (variants.length > 0) {
+        await saveEconomicsInputs(shopKey, variants.map((variantId) => ({ product_id: productId, variant_id: variantId, key: "unit_cost_zero_confirmed" as const,
+          value: 1, state: "merchant_entered" as const })), params.userId);
+      }
+    }
     if (params.testLimit !== undefined) {
       await saveEconomicsInputs(shopKey, [params.testLimit === null
         ? { product_id: productId, key: "ad_test_limit", state: "cleared" }

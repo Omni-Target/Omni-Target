@@ -29,6 +29,7 @@ export function toBriefEconomics(rec: ProductRecommendation, meta: { runId: stri
       net_revenue: e.net_revenue, variable_costs: e.variable_costs, contribution: e.contribution, contribution_margin: e.contribution_margin,
       break_even_cpa: e.break_even_cpa, maximum_viable_cpa: e.maximum_viable_cpa, target_cpa: e.target_cpa, break_even_roas: e.break_even_roas,
       target_roas: e.target_roas, platform_target_roas: e.platform_target_roas, contribution_upper_bound: e.contribution_upper_bound,
+      ...(e.purchase_event_basis ? { break_even_cpa_per_paid_order: e.break_even_cpa_per_paid_order ?? null, purchase_event_basis: e.purchase_event_basis } : {}),
     },
     lines: keys.map((key) => ({ key, label: LABELS[key], amount: e.lines[key]?.amount ?? null, source: e.lines[key]?.provenance ?? "missing" })),
     budget: {

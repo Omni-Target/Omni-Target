@@ -131,6 +131,8 @@ describe("product economics evidence (0053), synthetic fixtures", () => {
     expect(a.matured).toEqual({
       orders: 4, units: 5, net: 412, refunded_amount: 170, refunded_units: 2, returned_restocked_units: 1, cancelled_restocked_units: 1,
       orders_refunded: 2, returns: 1, returned_units: 1, refunds_unread: 0, returns_unread: 0,
+      // 0056: what became of the matured orders placed (O5, unpaid, is not yet matured).
+      placed: 4, paid: 4, unpaid_shipped: 0, unpaid_unshipped: 0,
     });
     // Variants, sold first, with the mix and costs; inventory from Phase 3's availability (online only).
     expect(a.variants.map((v) => [v.id, Number(v.price), Number(v.unit_cost), v.unit_cost_currency, v.units, v.orders])).toEqual([
@@ -186,5 +188,42 @@ describe("product economics evidence (0053), synthetic fixtures", () => {
     for (const role of ["anon", "authenticated"]) {
       await expect(as(role, "select public.product_economics_evidence(1, '{1}', now(), 365, 180, 60, 180)")).rejects.toThrow(/permission denied/);
     }
+  });
+});
+
+describe("order outcomes and refund timing (0056), synthetic fixtures", () => {
+  it("separates orders placed, paid, shipped but never paid (failed delivery) and cancelled before shipping", async () => {
+    const key = await boundShop();
+    const f = fixtures(key);
+    await f.product(1); await f.variant(11, 1, 110, 50, 20);
+    const shipped = async (id, at, status, fulfilment) => {
+      await f.order(id, at, { status, subtotal: 50 });
+      await q("update public.orders set fulfillment_status = $3 where shop_key = $1 and shopify_id = $2", [key, id, fulfilment]);
+      await f.line(id * 10 + 1, id, 1, 11, 1, 50);
+    };
+    await shipped(401, "2026-06-01T10:00:00Z", "paid", "fulfilled");          // collected
+    await shipped(402, "2026-06-02T10:00:00Z", "pending", "fulfilled");       // cash on delivery refused: shipped, never paid
+    await shipped(403, "2026-06-03T10:00:00Z", "voided", "unfulfilled");      // cancelled before shipping
+    await shipped(404, "2026-11-20T10:00:00Z", "pending", "fulfilled");       // too recent to judge
+    const e = await evidence(key, [1]);
+    expect(e.products[0].matured).toMatchObject({ placed: 3, paid: 1, unpaid_shipped: 1, unpaid_unshipped: 1 });
+    expect(e.store).toMatchObject({ matured_placed: 3, matured_paid: 1, matured_unpaid_shipped: 1 });
+  });
+
+  it("measures how long refunds take to arrive", async () => {
+    const key = await boundShop();
+    const f = fixtures(key);
+    await f.product(1); await f.variant(11, 1, 110, 50, 20);
+    for (let i = 0; i < 10; i += 1) {
+      await f.order(500 + i, "2026-06-01T00:00:00Z", { status: "refunded", subtotal: 50, refunded: 50 });
+      await q(`insert into public.refunds (shop_key, shopify_id, order_shopify_id, shopify_created_at, processed_at, total_refunded, currency, lines_read)
+               values ($1, $2, $2, now(), timestamptz '2026-06-01T00:00:00Z' + make_interval(days => $3), 50, 'GBP', true)`, [key, 500 + i, (i + 1) * 3]);
+    }
+    const lag = (await as("service_role", "select public.store_refund_lag($1, $2, 365) as r", [key, AS_OF]))[0].r;
+    // Lags of 3, 6, …, 30 days: the median is 16.5, the 90th percentile 27.3.
+    expect(lag.refunds).toBe(10);
+    expect(lag.p50_days).toBeCloseTo(16.5, 6);
+    expect(lag.p90_days).toBeCloseTo(27.3, 6);
+    await expect(as("anon", "select public.store_refund_lag($1, now(), 365)", [key])).rejects.toThrow(/permission denied/);
   });
 });

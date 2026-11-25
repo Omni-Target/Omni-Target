@@ -45,14 +45,17 @@ async function boundShop(currency = "GBP") {
 }
 
 describe("economics policy (0052)", () => {
-  it("has one active version, version 1 holding the documented defaults pending approval", async () => {
+  it("has one active version: version 2 (0056), still pending approval; version 1 retired, not deleted", async () => {
     const policy = await call("economics_policy", null);
-    expect(policy).toMatchObject({ version: 1, status: "active", approval: "pending" });
+    expect(policy).toMatchObject({ version: 2, status: "active", approval: "pending" });
+    expect(policy.settings).toMatchObject({ estimate_downside_factor: 1.5, micro_pilot_min_conversions: 1, refund_maturity_min_days: 30,
+      refund_maturity_max_days: 120, refund_lag_min_refunds: 20 });
+    expect(policy.rationale.contribution_reserve).toMatch(/fixed operating costs and profit/);
+    expect(await call("economics_policy", 1)).toMatchObject({ version: 1, status: "retired", approval: "pending" });
     expect(policy.settings).toMatchObject({ contribution_reserve: 0.3, pilot_conversions: 10, test_conversions: 20, min_test_conversions: 5,
       scale_step: 0.2, return_maturity_days: 60, attribution_lag_days: 7, decision_confidence: 0.9, allow_cost_estimates: false });
     // Every setting has a rationale.
     expect(Object.keys(policy.rationale).sort()).toEqual(Object.keys(policy.settings).sort());
-    expect(await call("economics_policy", 1)).toMatchObject({ version: 1 });
     expect(await call("economics_policy", 999)).toBeNull();
   });
 
@@ -79,6 +82,7 @@ describe("economics policy (0052)", () => {
 describe("merchant economics inputs (0052)", () => {
   it("saves shop-wide values and product overrides with their state, currency, author and date", async () => {
     const s = await boundShop("NGN");
+    await q("insert into public.products (shop_key, shopify_id, title, status) values ($1, 42, 'Board', 'active')", [s.key]);
     expect(await save(s.key, [
       { key: "payment_rate", value: 0.015, state: "merchant_entered" },
       { key: "payment_fixed_fee", value: 100, state: "merchant_entered" },
@@ -111,6 +115,8 @@ describe("merchant economics inputs (0052)", () => {
 
   it("refuses what the catalogue does not allow, and saves nothing from a batch with one bad value", async () => {
     const s = await boundShop();
+    await q("insert into public.products (shop_key, shopify_id, title, status) values ($1, 5, 'Wax', 'active')", [s.key]);
+    await expect(save(s.key, [{ product_id: 77, key: "shipping_cost_per_order", value: 5, state: "merchant_entered" }])).rejects.toThrow(/product is not the shop's/);
     const bad = [
       [{ key: "made_up", value: 1, state: "merchant_entered" }, /unknown key/],
       [{ product_id: 5, key: "payment_rate", value: 0.02, state: "merchant_entered" }, /not set at this scope/],
@@ -151,5 +157,29 @@ describe("merchant economics inputs (0052)", () => {
       await expect(as(role, "select public.save_economics_inputs($1, '[]', 'x')", [s.key])).rejects.toThrow(/permission denied/);
       await expect(as(role, "select * from public.merchant_economics_inputs")).rejects.toThrow(/permission denied/);
     }
+  });
+});
+
+describe("variant inputs and the purchase-event choice (0056)", () => {
+  it("records a confirmed zero cost and a landed cost per variant, only for the product's own variants", async () => {
+    const s = await boundShop();
+    await q("insert into public.products (shop_key, shopify_id, title, status) values ($1, 42, 'Board', 'active')", [s.key]);
+    await q("insert into public.product_variants (shop_key, shopify_id, product_shopify_id, price) values ($1, 421, 42, 10), ($1, 422, 42, 12)", [s.key]);
+    expect(await save(s.key, [
+      { product_id: 42, variant_id: 421, key: "unit_cost_zero_confirmed", value: 1, state: "merchant_entered" },
+      { product_id: 42, variant_id: 422, key: "landed_cost_per_unit", value: 1.5, state: "merchant_entered" },
+      { product_id: 42, key: "unit_cost_zero_confirmed", value: 1, state: "merchant_entered" },
+      { key: "purchase_event_basis", value: 1, state: "merchant_entered" },
+    ], "user_owner")).toMatchObject({ saved: 4 });
+    const rows = (await call("economics_inputs", s.key, [42])).inputs;
+    expect(rows.find((r) => r.variant_id === 421)).toMatchObject({ key: "unit_cost_zero_confirmed", entered_by: "user_owner" });
+    expect(rows.find((r) => r.variant_id === 422)).toMatchObject({ key: "landed_cost_per_unit", value: 1.5, currency: "GBP" });
+    await expect(save(s.key, [{ product_id: 42, variant_id: 999, key: "unit_cost_zero_confirmed", value: 1, state: "merchant_entered" }])).rejects.toThrow(/not the product's/);
+    await expect(save(s.key, [{ product_id: 42, variant_id: 421, key: "shipping_cost_per_order", value: 5, state: "merchant_entered" }])).rejects.toThrow(/scope/);
+    await expect(save(s.key, [{ key: "unit_cost_zero_confirmed", value: 1, state: "merchant_entered" }])).rejects.toThrow(/scope/);
+    await expect(save(s.key, [{ key: "purchase_event_basis", value: 0.5, state: "merchant_entered" }])).rejects.toThrow(/out of range/);
+    await expect(save(s.key, [{ key: "purchase_event_basis", value: 2, state: "merchant_entered" }])).rejects.toThrow(/out of range/);
+    await save(s.key, [{ product_id: 42, variant_id: 421, key: "unit_cost_zero_confirmed", state: "cleared" }]);
+    expect((await call("economics_inputs", s.key, [42])).inputs.some((r) => r.variant_id === 421)).toBe(false);
   });
 });

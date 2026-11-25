@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/platform/supabase";
 import { parseEconomicsPolicy, type EconomicsPolicy } from "./policy";
 import type { MerchantInputKey, StoredMerchantInputs } from "./inputs";
 import { normaliseEvidence, type EconomicsEvidence } from "./evidence";
+export { refundMaturityDays } from "./repository-pure";
 
 /** The economics policy and the merchant's inputs (Phase 4, task 2; migration 0052). */
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
@@ -23,20 +24,29 @@ export const economicsInputs = (shopKey: number, productIds: number[]) =>
   rpc<StoredMerchantInputs>("economics_inputs", { p_shop_key: shopKey, p_product_ids: productIds.slice(0, 1000) });
 
 export type MerchantInputChange =
-  | { product_id?: number; key: MerchantInputKey; value: number; state: "merchant_entered" | "confirmed_none" | "merchant_estimate" }
-  | { product_id?: number; key: MerchantInputKey; state: "cleared" };
+  | { product_id?: number; variant_id?: number; key: MerchantInputKey; value: number; state: "merchant_entered" | "confirmed_none" | "merchant_estimate" }
+  | { product_id?: number; variant_id?: number; key: MerchantInputKey; state: "cleared" };
+
+/** The product's variants whose Shopify unit cost is exactly zero (the ones a merchant may confirm as genuinely free). */
+export async function zeroCostVariantIds(shopKey: number, productId: number): Promise<number[]> {
+  const { data, error } = await supabaseAdmin.from("product_variants").select("shopify_id")
+    .eq("shop_key", shopKey).eq("product_shopify_id", productId).eq("unit_cost", 0).limit(250);
+  if (error) throw new Error(`product_variants: ${error.message}`);
+  return (data ?? []).map((v) => Number(v.shopify_id));
+}
 
 /** Saves or clears inputs, all or none; the database checks each against the catalogue. */
 export const saveEconomicsInputs = (shopKey: number, changes: MerchantInputChange[], enteredBy: string) =>
   rpc<{ saved: number; cleared: number }>("save_economics_inputs", { p_shop_key: shopKey, p_inputs: changes, p_entered_by: enteredBy });
 
 /** The economics evidence for at most 200 products, over the windows the policy sets (migration 0053). */
-export async function productEconomicsEvidence(shopKey: number, productIds: number[], asOf: Date, policy: EconomicsPolicy): Promise<EconomicsEvidence> {
+export async function productEconomicsEvidence(shopKey: number, productIds: number[], asOf: Date, policy: EconomicsPolicy,
+  maturityDays: number = policy.settings.return_maturity_days): Promise<EconomicsEvidence> {
   const s = policy.settings;
   const raw = await rpc<EconomicsEvidence>("product_economics_evidence", {
     p_shop_key: shopKey, p_product_ids: productIds.slice(0, 200), p_as_of: asOf.toISOString(),
     p_sales_window_days: s.sales_window_days, p_discount_window_days: s.discount_window_days,
-    p_maturity_days: s.return_maturity_days, p_demand_window_days: s.established_demand_window_days,
+    p_maturity_days: maturityDays, p_demand_window_days: s.established_demand_window_days,
   });
   return normaliseEvidence(raw);
 }
@@ -64,3 +74,9 @@ export const saveAdCampaignResults = (shopKey: number, campaignId: string, days:
 
 export const adCampaignsWithResults = (shopKey: number, campaignIds: string[] | null = null) =>
   rpc<unknown[]>("ad_campaigns_with_results", { p_shop_key: shopKey, p_campaign_ids: campaignIds });
+
+/** How long the store's refunds take (0056): refunds on orders in the window, and their median and 90th-percentile lag in days. */
+export const storeRefundLag = (shopKey: number, asOf: Date, windowDays: number) =>
+  rpc<{ refunds: number; p90_days: number | null; p50_days: number | null }>("store_refund_lag",
+    { p_shop_key: shopKey, p_as_of: asOf.toISOString(), p_window_days: windowDays });
+

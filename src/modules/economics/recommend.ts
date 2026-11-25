@@ -26,6 +26,8 @@ export interface AcquisitionEvidence {
   cpa_upper: number | null;
   /** Recent days not judged yet. */
   immature_days: number;
+  /** Only diagnostic micro-pilots produced these results (0056): they never prove acquisition. */
+  diagnostic_only?: boolean;
 }
 
 export interface RecommendArgs extends ContributionArgs {
@@ -47,7 +49,8 @@ export interface RecommendArgs extends ContributionArgs {
 export interface BudgetRecommendation {
   /** recommended: amounts below; zero: nothing to spend; withheld: no amounts (data missing); awaiting_authority: the merchant set no limit. */
   status: "recommended" | "zero" | "withheld" | "awaiting_authority";
-  kind: "pilot" | "controlled_test" | null;
+  /** micro_pilot (policy version 2): a diagnostic test below the minimum, for traffic, creative and first sales; it proves nothing. */
+  kind: "pilot" | "controlled_test" | "micro_pilot" | null;
   test_budget: number | null;
   daily_budget: number | null;
   test_days: number | null;
@@ -115,7 +118,8 @@ export function recommendProduct(args: RecommendArgs): ProductRecommendation {
     }
   }
   let acquisitionClass: AcquisitionEvidenceClass = "unproven";
-  if (acquisition && acquisition.matured_conversions >= policy.proven_conversions) acquisitionClass = "proven";
+  if (acquisition?.diagnostic_only) notes.add("DIAGNOSTIC_RESULTS_ONLY");
+  if (acquisition && !acquisition.diagnostic_only && acquisition.matured_conversions >= policy.proven_conversions) acquisitionClass = "proven";
   else if (acquisition && acquisition.matured_conversions > 0) acquisitionClass = "indicative";
   else if (product.sales.demand_orders >= policy.established_demand_orders) acquisitionClass = "established_demand";
   const overall: EconomicsConfidence | null = economicsConfidence === null ? null
@@ -221,10 +225,14 @@ export function recommendProduct(args: RecommendArgs): ProductRecommendation {
     } else {
       const minimum = m.major(targetMinor * policy.min_test_conversions);
       notes.add(bindingReason[binding]);
-      if (maximum < minimum) {
+      // Version 2: below the minimum test, a diagnostic micro-pilot when it still buys the policy's few sales at target.
+      const microFloor = policy.micro_pilot_min_conversions !== undefined ? targetMinor * policy.micro_pilot_min_conversions : null;
+      if (maximum < minimum && (microFloor === null || m.down(maximum) < microFloor)) {
         notes.add("BUDGET_BELOW_MINIMUM_TEST");
         budget = { ...empty("zero"), kind, ceilings, binding, inventory };
       } else {
+        const micro = maximum < minimum;
+        if (micro) { notes.add("BUDGET_BELOW_MINIMUM_TEST"); notes.add("MICRO_PILOT_DIAGNOSTIC"); }
         let testMinor = m.down(maximum);
         let testDays = days;
         let dailyMinor = Math.floor(testMinor / testDays);
@@ -237,17 +245,21 @@ export function recommendProduct(args: RecommendArgs): ProductRecommendation {
           testMinor = dailyMinor * testDays;
           notes.add("MERCHANT_LIMIT_BINDING");
         }
-        if (testMinor < targetMinor * policy.min_test_conversions) {
+        const microOnly = testMinor < targetMinor * policy.min_test_conversions;
+        if (microOnly && (microFloor === null || testMinor < microFloor)) {
           // Even the longest test at the merchant's daily limit cannot buy enough sales to learn from.
           notes.add("BUDGET_BELOW_MINIMUM_TEST");
           budget = { ...empty("zero"), kind, ceilings, binding: "merchant", inventory };
-        } else budget = {
-          status: "recommended", kind,
+        } else {
+          if (microOnly) { notes.add("BUDGET_BELOW_MINIMUM_TEST"); notes.add("MICRO_PILOT_DIAGNOSTIC"); }
+          budget = {
+          status: "recommended", kind: micro || microOnly ? "micro_pilot" : kind,
           test_budget: m.major(testMinor), daily_budget: m.major(dailyMinor), test_days: testDays, ongoing_budget: null,
           // The merchant's authorised loss limit (the stop rule's line); without one, the test budget is the most it can lose.
           max_experimental_loss: lossLimit !== null ? m.major(m.down(lossLimit)) : m.major(testMinor),
           ceilings, binding, sales_at_target_cpa: Math.round((testMinor / targetMinor) * 10) / 10, inventory,
-        };
+          };
+        }
       }
     }
   }

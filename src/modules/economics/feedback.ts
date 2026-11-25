@@ -22,6 +22,10 @@ export interface CampaignDay {
   /** Shop-currency units per campaign-currency unit, as recorded for that day. */
   fx_to_shop: number;
   fx_source: string;
+  /** 0056: the pair (campaign currency → shop currency) and when the rate applied. */
+  fx_from?: string;
+  fx_to?: string;
+  fx_as_of?: string;
 }
 
 export interface TrackedCampaign {
@@ -38,7 +42,17 @@ export interface TrackedCampaign {
   recommendation_run_id: string | null;
   started_on: string | null;
   last_scaled_on: string | null;
+  /** 0056: a test, or a diagnostic micro-pilot whose results never prove acquisition or justify scaling. */
+  purpose?: "test" | "diagnostic";
+  /** As configured on the platform, e.g. "7d_click_1d_view"; sets how long conversions take to mature. */
+  attribution_setting?: string;
   results: CampaignDay[];
+}
+
+/** Days a conversion may take to be credited, from the campaign's own attribution setting ("7d_click_1d_view" → 7). */
+export function attributionLagDays(setting: string | undefined, fallback: number): number {
+  const days = [...(setting ?? "").matchAll(/(\d+)\s*d/gi)].map((m) => Number(m[1])).filter((d) => d > 0 && d <= 90);
+  return days.length ? Math.max(...days) : fallback;
 }
 
 const DAY = 86_400_000;
@@ -52,9 +66,12 @@ export function normaliseCampaigns(raw: unknown[]): TrackedCampaign[] {
     currency: String(c.currency), daily_budget: n(c.daily_budget), authorised_budget: n(c.authorised_budget), max_loss: n(c.max_loss),
     recommendation_run_id: (c.recommendation_run_id as string | null) ?? null, started_on: (c.started_on as string | null) ?? null,
     last_scaled_on: (c.last_scaled_on as string | null) ?? null,
+    purpose: c.purpose === "diagnostic" ? "diagnostic" : "test",
+    attribution_setting: typeof c.attribution_setting === "string" ? c.attribution_setting : undefined,
     results: ((c.results as Array<Record<string, unknown>>) ?? []).map((r) => ({
       day: String(r.day), spend: Number(r.spend), conversions: Number(r.conversions), conversion_value: n(r.conversion_value), clicks: n(r.clicks),
       impressions: n(r.impressions), fx_to_shop: Number(r.fx_to_shop), fx_source: String(r.fx_source),
+      ...(r.fx_from ? { fx_from: String(r.fx_from), fx_to: String(r.fx_to), fx_as_of: String(r.fx_as_of) } : {}),
     })),
   }));
 }
@@ -75,14 +92,17 @@ export interface CampaignMeasure {
   cpa_upper: number | null;
   /** Conversions ÷ clicks over matured days with clicks, and its Wilson bounds: a rate, never a CPA interval. */
   conversion_rate: { value: number; lower: number; upper: number; clicks: number } | null;
-  /** The exchange rates used, as recorded. */
-  fx: Array<{ rate: number; source: string; days: number }>;
+  /** The exchange rates used, as recorded, with their pair and when they applied. */
+  fx: Array<{ rate: number; source: string; days: number; from?: string; to?: string; as_of?: string }>;
+  /** The attribution wait used, in days. */
+  attribution_lag_days: number;
 }
 
-export function measureCampaign(days: CampaignDay[], shopCurrency: string, asOf: string, policy: EconomicsPolicySettings, sinceDays?: number): CampaignMeasure {
+export function measureCampaign(days: CampaignDay[], shopCurrency: string, asOf: string, policy: EconomicsPolicySettings, sinceDays?: number,
+  lagDays: number = policy.attribution_lag_days): CampaignMeasure {
   const m = money(shopCurrency);
   const today = dayNumber(asOf);
-  const lastMatured = today - policy.attribution_lag_days;
+  const lastMatured = today - lagDays;
   const window = sinceDays === undefined ? days : days.filter((d) => dayNumber(d.day) > today - sinceDays);
   const matured = window.filter((d) => dayNumber(d.day) <= lastMatured);
   const toShop = (d: CampaignDay) => m.up(d.spend * d.fx_to_shop);
@@ -94,10 +114,11 @@ export function measureCampaign(days: CampaignDay[], shopCurrency: string, asOf:
   const withClicks = matured.filter((d) => d.clicks !== null);
   const clicks = withClicks.reduce((t, d) => t + (d.clicks ?? 0), 0);
   const clickConversions = withClicks.reduce((t, d) => t + d.conversions, 0);
-  const fx = new Map<string, { rate: number; source: string; days: number }>();
+  const fx = new Map<string, CampaignMeasure["fx"][number]>();
   for (const d of window) {
-    const k = `${d.fx_to_shop}|${d.fx_source}`;
-    fx.set(k, { rate: d.fx_to_shop, source: d.fx_source, days: (fx.get(k)?.days ?? 0) + 1 });
+    const k = `${d.fx_to_shop}|${d.fx_source}|${d.fx_as_of ?? ""}`;
+    fx.set(k, { rate: d.fx_to_shop, source: d.fx_source, days: (fx.get(k)?.days ?? 0) + 1,
+      ...(d.fx_from ? { from: d.fx_from, to: d.fx_to, as_of: d.fx_as_of } : {}) });
   }
   return {
     currency: shopCurrency,
@@ -114,6 +135,7 @@ export function measureCampaign(days: CampaignDay[], shopCurrency: string, asOf:
     conversion_rate: clicks > 0 && clickConversions <= clicks ? { value: clickConversions / clicks, clicks,
       ...wilsonBounds(clickConversions, clicks, policy.decision_confidence) } : null,
     fx: [...fx.values()],
+    attribution_lag_days: lagDays,
   };
 }
 
@@ -121,12 +143,17 @@ export function measureCampaign(days: CampaignDay[], shopCurrency: string, asOf:
 export function acquisitionFromCampaigns(campaigns: TrackedCampaign[], productId: number, shopCurrency: string, asOf: string,
   policy: EconomicsPolicySettings): AcquisitionEvidence | null {
   const own = campaigns.filter((c) => c.product_ids.length === 1 && c.product_ids[0] === productId);
-  const days = own.flatMap((c) => c.results);
+  // Tests count; a diagnostic micro-pilot counts only when there is nothing else, and then never proves acquisition.
+  const tests = own.filter((c) => c.purpose !== "diagnostic");
+  const used = tests.some((c) => c.results.length) ? tests : own;
+  const days = used.flatMap((c) => c.results);
   if (!days.length) return null;
-  const measure = measureCampaign(days, shopCurrency, asOf, policy, policy.acquisition_window_days);
+  const lag = Math.max(...used.map((c) => attributionLagDays(c.attribution_setting, policy.attribution_lag_days)));
+  const measure = measureCampaign(days, shopCurrency, asOf, policy, policy.acquisition_window_days, lag);
   if (measure.days === 0) return null;
   return { matured_conversions: measure.matured_conversions, matured_spend: measure.matured_spend, cpa: measure.cpa,
-    cpa_lower: measure.cpa_lower, cpa_upper: measure.cpa_upper, immature_days: measure.immature_days };
+    cpa_lower: measure.cpa_lower, cpa_upper: measure.cpa_upper, immature_days: measure.immature_days,
+    ...(used.every((c) => c.purpose === "diagnostic") ? { diagnostic_only: true } : {}) };
 }
 
 /** What running and planned campaigns will still spend in the period, in the shop's currency; null when it cannot be converted. */
@@ -175,7 +202,8 @@ export function evaluateCampaign(args: {
 }): CampaignFeedback {
   const { campaign, policy } = args;
   const m = money(args.shopCurrency);
-  const measure = measureCampaign(campaign.results, args.shopCurrency, args.asOf, policy);
+  const measure = measureCampaign(campaign.results, args.shopCurrency, args.asOf, policy, undefined,
+    attributionLagDays(campaign.attribution_setting, policy.attribution_lag_days));
   const reasons: ReasonCode[] = [];
   const explanation: string[] = [];
   // A campaign selling several products is judged against the least forgiving of them.
@@ -253,7 +281,12 @@ export function evaluateCampaign(args: {
     return done("PAUSE_REVISE", 0);
   }
 
-  // 6. Scale gradually, only on matured evidence clearly inside break-even.
+  // 6. Scale gradually, only on matured evidence clearly inside break-even, and never from a diagnostic micro-pilot.
+  if (campaign.purpose === "diagnostic") {
+    reasons.push("MICRO_PILOT_DIAGNOSTIC");
+    explanation.push("A diagnostic micro-pilot shows traffic, engagement and first sales; it is never scaled. Run a controlled test to prove acquisition.");
+    return done(measure.cpa !== null && measure.cpa > (target as number) ? "HOLD_OPTIMISE" : "CONTINUE", null);
+  }
   if (measure.cpa !== null && measure.cpa <= target && measure.cpa_upper !== null && measure.cpa_upper <= be
     && measure.matured_conversions >= policy.min_scale_conversions && campaign.daily_budget !== null) {
     const sinceScale = campaign.last_scaled_on ? dayNumber(args.asOf) - dayNumber(campaign.last_scaled_on) : Infinity;

@@ -42,6 +42,7 @@ export interface BriefStepProps {
   /** Phase 4: the engine's recorded economics for the brief's product, and whether they are being recalculated. */
   economics?: BriefEconomics | null;
   recalculating?: boolean;
+  onConfirmZeroCost?: () => void;
   // Outer container class — defaults to a centered narrow column; the durable
   // /campaigns/[id] page overrides it to fill the width beside its rail.
   className?: string;
@@ -73,6 +74,7 @@ export function BriefStep({
   setMaxTestBudget,
   economics = null,
   recalculating = false,
+  onConfirmZeroCost,
   className = "mx-auto max-w-3xl",
 }: BriefStepProps) {
   const isGateway = gatewayInsight?.currentProductClassification === "Gateway";
@@ -202,6 +204,7 @@ export function BriefStep({
           setMaxTestBudget={setMaxTestBudget ?? (() => {})}
           economics={economics}
           recalculating={recalculating}
+          onConfirmZeroCost={onConfirmZeroCost}
         />
 
         {Boolean(

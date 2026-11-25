@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   if (!auth.ok) return auth.response;
   const limited = await enforceRateLimit({ action: "economics:brief", identifier: auth.userId, limit: 60, windowSeconds: 600 });
   if (!limited.ok) return limited.response;
-  const body = (await request.json().catch(() => null)) as { campaignId?: unknown; maxTestBudget?: unknown; testDays?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { campaignId?: unknown; maxTestBudget?: unknown; testDays?: unknown; confirmZeroCost?: unknown } | null;
   if (!body || typeof body.campaignId !== "string") return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   if (body.testDays !== undefined && ![7, 14, 30].includes(body.testDays as number)) return NextResponse.json({ error: "Invalid duration" }, { status: 400 });
   const max = body.maxTestBudget;
@@ -27,6 +27,6 @@ export async function POST(request: Request) {
   const productId = (campaign.brief_data as { productShopifyId?: unknown } | null)?.productShopifyId;
   if (productId === undefined || productId === null) return NextResponse.json({ error: "This brief has no product economics" }, { status: 409 });
   const economics = await economicsForBrief({ userId: auth.userId, productId: productId as string | number, testDays: body.testDays as number | undefined,
-    testLimit: max === undefined ? undefined : parsed });
+    testLimit: max === undefined ? undefined : parsed, confirmZeroCost: body.confirmZeroCost === true });
   return NextResponse.json({ economics });
 }

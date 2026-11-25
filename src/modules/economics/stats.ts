@@ -1,6 +1,10 @@
 /**
  * Statistics the economics engine uses (Phase 4). Deterministic, no sampling.
- *  - proportions (refund incidence, paid share, conversion rate): Wilson score bounds;
+ *  - proportions under policy version 2 (refund and return incidence, recovery, paid share, failed deliveries):
+ *    one-sided exact (Clopper–Pearson) bounds, which hold the stated confidence at every sample size;
+ *  - proportions under policy version 1, and the conversion rate shown beside a campaign: Wilson score bounds,
+ *    which are approximate (the Phase 4 finalisation measured one-sided 90% Wilson coverage as low as 81% at
+ *    n = 20; see finalisation-statistics.test.ts);
  *  - event counts for a fixed exposure (conversions for a spend): exact Poisson (Garwood) bounds, via the
  *    chi-square quantile, never a normal approximation of CPA.
  */
@@ -101,5 +105,62 @@ export function poissonBounds(count: number, confidence: number): { lower: numbe
   return {
     lower: count === 0 ? 0 : gammaQuantile(count, alpha),
     upper: gammaQuantile(count + 1, confidence),
+  };
+}
+
+/** Regularised incomplete beta I_x(a, b) (continued fraction, modified Lentz). */
+export function regularisedBeta(x: number, a: number, b: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const front = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+  const fraction = (aa: number, bb: number, xx: number) => {
+    const tiny = 1e-300;
+    let c = 1;
+    let d = 1 - ((aa + bb) * xx) / (aa + 1);
+    if (Math.abs(d) < tiny) d = tiny;
+    d = 1 / d;
+    let h = d;
+    for (let m = 1; m < 1000; m += 1) {
+      const m2 = 2 * m;
+      let an = (m * (bb - m) * xx) / ((aa + m2 - 1) * (aa + m2));
+      d = 1 + an * d; if (Math.abs(d) < tiny) d = tiny;
+      c = 1 + an / c; if (Math.abs(c) < tiny) c = tiny;
+      d = 1 / d; h *= d * c;
+      an = (-(aa + m) * (aa + bb + m) * xx) / ((aa + m2) * (aa + m2 + 1));
+      d = 1 + an * d; if (Math.abs(d) < tiny) d = tiny;
+      c = 1 + an / c; if (Math.abs(c) < tiny) c = tiny;
+      d = 1 / d;
+      const delta = d * c;
+      h *= delta;
+      if (Math.abs(delta - 1) < 1e-15) break;
+    }
+    return h;
+  };
+  return x < (a + 1) / (a + b + 2) ? (front * fraction(a, b, x)) / a : 1 - (front * fraction(b, a, 1 - x)) / b;
+}
+
+/** Quantile of the beta(a, b) distribution, by bisection (deterministic). */
+export function betaQuantile(p: number, a: number, b: number): number {
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 100; i += 1) {
+    const mid = (lo + hi) / 2;
+    if (regularisedBeta(mid, a, b) < p) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+/**
+ * One-sided exact (Clopper–Pearson) bounds on a proportion from successes out of n:
+ * lower = Beta⁻¹(α; k, n − k + 1), upper = Beta⁻¹(1 − α; k + 1, n − k), with α = 1 − confidence.
+ * Each bound holds at least the stated confidence for every n and true proportion (it is conservative).
+ */
+export function exactBinomialBounds(successes: number, n: number, confidence: number): { lower: number; upper: number } {
+  if (n <= 0) return { lower: 0, upper: 1 };
+  if (successes < 0 || successes > n || !Number.isInteger(successes)) throw new Error("exactBinomialBounds: successes must be a whole number from 0 to n");
+  const alpha = 1 - confidence;
+  return {
+    lower: successes === 0 ? 0 : betaQuantile(alpha, successes, n - successes + 1),
+    upper: successes === n ? 1 : betaQuantile(confidence, successes + 1, n - successes),
   };
 }

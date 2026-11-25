@@ -6,6 +6,7 @@
  */
 import type { EconomicsEvidence, ProductEvidence } from "./evidence";
 import type { ResolvedInputs } from "./inputs";
+import type { VariantInputs } from "./contribution";
 import type { EconomicsPolicySettings } from "./policy";
 import { allocatePortfolio, type Commitment, type PortfolioAllocation } from "./portfolio";
 import { recommendProduct, type AcquisitionEvidence, type ProductRecommendation, type RecommendArgs } from "./recommend";
@@ -15,6 +16,8 @@ export interface ProductRunInput {
   inputs: ResolvedInputs;
   acquisition?: AcquisitionEvidence | null;
   targetMarketServiced?: boolean | null;
+  /** Per-variant inputs (0056). */
+  variantInputs?: VariantInputs;
 }
 
 export interface RecordedRecommendation {
@@ -41,7 +44,8 @@ export function runEconomics(args: {
   const funded = new Set(args.commitments.flatMap((c) => c.product_ids));
   const base = (p: ProductRunInput, portfolioLimit: number | null): RecommendArgs => ({
     evidence: { currency: args.evidence.currency, taxes_included: args.evidence.taxes_included, store: args.evidence.store },
-    product: p.product, inputs: p.inputs, policy: args.policy, acquisition: p.acquisition ?? null,
+    product: p.product, inputs: p.inputs, ...(p.variantInputs && Object.keys(p.variantInputs).length ? { variantInputs: p.variantInputs } : {}),
+    policy: args.policy, acquisition: p.acquisition ?? null,
     targetMarketServiced: p.targetMarketServiced ?? null, portfolioLimit, testDays: args.testDays,
     alreadyFunded: funded.has(p.product.product_id), asOf: args.evidence.as_of, freshness: { inventory: args.evidence.freshness.inventory ?? null },
   });

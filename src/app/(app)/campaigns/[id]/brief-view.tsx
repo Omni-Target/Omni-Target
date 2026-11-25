@@ -200,14 +200,15 @@ export function BriefView({
   const hasEconomics = bd.productShopifyId !== undefined && bd.productShopifyId !== null;
   const [economics, setEconomics] = useState<BriefEconomics | null>(parseBriefEconomics(bd.economics));
   const [recalculating, setRecalculating] = useState(false);
-  const recalculate = async (limit: number | null | undefined, days: 7 | 14 | 30) => {
+  const recalculate = async (limit: number | null | undefined, days: 7 | 14 | 30, confirmZeroCost = false) => {
     if (!hasEconomics) return;
     setRecalculating(true);
     try {
       const response = await fetch("/api/economics/brief", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campaignId: campaign.id, testDays: days, ...(limit === undefined ? {} : { maxTestBudget: limit }) }),
+        body: JSON.stringify({ campaignId: campaign.id, testDays: days, ...(limit === undefined ? {} : { maxTestBudget: limit }),
+          ...(confirmZeroCost ? { confirmZeroCost: true } : {}) }),
       });
       if (response.ok) setEconomics(parseBriefEconomics((await response.json()).economics));
     } finally {
@@ -442,6 +443,7 @@ export function BriefView({
             setMaxTestBudget={hasEconomics ? changeMaxTestBudget : setMaxTestBudget}
             economics={economics}
             recalculating={recalculating}
+            onConfirmZeroCost={hasEconomics ? () => void recalculate(undefined, selectedDuration, true) : undefined}
           />
         </div>
       </div>

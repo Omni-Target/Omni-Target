@@ -11,9 +11,10 @@ import { Input } from "@/components/ui/input";
  * rates are used only when the store has no history of its own. Saved through PUT /api/economics/inputs, which
  * the database validates again.
  */
-type Kind = "money" | "percent";
+type Kind = "money" | "percent" | "choice";
 type State = "merchant_entered" | "confirmed_none" | "merchant_estimate";
-interface FieldDef { key: string; label: string; hint: string; kind: Kind; canBeNone: boolean; state: Exclude<State, "confirmed_none"> }
+interface FieldDef { key: string; label: string; hint: string; kind: Kind; canBeNone: boolean; state: Exclude<State, "confirmed_none">; noneLabel?: string;
+  choices?: Array<{ value: string; label: string }> }
 
 const GROUPS: Array<{ title: string; description: string; fields: FieldDef[] }> = [
   {
@@ -26,7 +27,8 @@ const GROUPS: Array<{ title: string; description: string; fields: FieldDef[] }> 
       { key: "shipping_cost_per_order", label: "Shipping cost per order", hint: "What you pay to ship one order", kind: "money", canBeNone: true, state: "merchant_entered" },
       { key: "fulfilment_cost_per_order", label: "Fulfilment cost per order", hint: "Pick, pack, packaging", kind: "money", canBeNone: true, state: "merchant_entered" },
       { key: "fulfilment_cost_per_unit", label: "Fulfilment cost per unit", hint: "Per item", kind: "money", canBeNone: true, state: "merchant_entered" },
-      { key: "landed_cost_rate", label: "Landed costs not in your Shopify unit cost", hint: "% of unit cost: freight, duties", kind: "percent", canBeNone: true, state: "merchant_entered" },
+      { key: "landed_cost_rate", label: "Landed costs not in your Shopify unit cost", hint: "% of unit cost: freight, duties", kind: "percent", canBeNone: true, state: "merchant_entered",
+        noneLabel: "Already in unit cost" },
       { key: "return_handling_cost", label: "Cost of handling one return", hint: "Including return shipping you pay", kind: "money", canBeNone: true, state: "merchant_entered" },
     ],
   },
@@ -47,6 +49,9 @@ const GROUPS: Array<{ title: string; description: string; fields: FieldDef[] }> 
       { key: "ad_test_limit", label: "Most for one product test", hint: "Per test", kind: "money", canBeNone: false, state: "merchant_entered" },
       { key: "ad_daily_limit", label: "Most per day for one product", hint: "Per day", kind: "money", canBeNone: false, state: "merchant_entered" },
       { key: "ad_max_loss", label: "Most you will lose on one test", hint: "The test stops here", kind: "money", canBeNone: false, state: "merchant_entered" },
+      { key: "purchase_event_basis", label: "When does Meta count a purchase?", kind: "choice", canBeNone: false, state: "merchant_entered",
+        hint: "Omnitarget's own connection reports a purchase only once it is paid. Shopify's Facebook & Instagram app also reports it when the order is placed, unpaid cash-on-delivery orders included.",
+        choices: [{ value: "", label: "Not sure (use the safer figure)" }, { value: "0", label: "When the order is placed" }, { value: "1", label: "Only when it is paid" }] },
     ],
   },
 ];
@@ -59,6 +64,7 @@ const toText = (f: FieldDef, s: Stored | undefined): Row => {
   if (!s) return { text: "", none: false };
   if (s.state === "confirmed_none") return { text: "", none: true };
   return { text: String(f.kind === "percent" ? Math.round(Number(s.value) * 1e6) / 1e4 : Number(s.value)), none: false };
+  // A choice is stored as its numeric code.
 };
 
 const byKey = (inputs: Stored[]) => Object.fromEntries(inputs.map((i) => [i.key, i])) as Record<string, Stored>;
@@ -91,6 +97,7 @@ export function EconomicsSettings({ initial }: { initial: { currency: string | n
       if (row.text.trim() === "") { if (stored[f.key]) changes.push({ key: f.key, state: "cleared" }); continue; }
       const n = Number(row.text.replace(/[,\s]/g, ""));
       if (!Number.isFinite(n) || n < 0) { setMessage(`${f.label}: enter a number of zero or more.`); setStatus("error"); return; }
+      if (f.kind === "choice" && n !== 0 && n !== 1) { setMessage(`${f.label}: choose an option.`); setStatus("error"); return; }
       changes.push({ key: f.key, value: f.kind === "percent" ? n / 100 : n, state: f.state });
     }
     setStatus("saving");
@@ -122,14 +129,21 @@ export function EconomicsSettings({ initial }: { initial: { currency: string | n
               return (
                 <div key={f.key} className="space-y-1 rounded-lg border border-border-subtle px-3 py-2">
                   <label htmlFor={inputId} className="text-xs font-medium text-foreground">{f.label} {unit && <span className="text-muted-foreground">({unit})</span>}</label>
-                  <Input id={inputId} inputMode="decimal" value={row.text} disabled={row.none || status === "saving"} placeholder="Unknown"
-                    onChange={(event) => setRows({ ...rows, [f.key]: { ...row, text: event.target.value } })} />
+                  {f.choices ? (
+                    <select id={inputId} value={row.text} disabled={status === "saving"} className="w-full rounded-md border border-border bg-transparent px-2 py-1.5 text-sm"
+                      onChange={(event) => setRows({ ...rows, [f.key]: { text: event.target.value, none: false } })}>
+                      {f.choices.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                    </select>
+                  ) : (
+                    <Input id={inputId} inputMode="decimal" value={row.text} disabled={row.none || status === "saving"} placeholder="Unknown"
+                      onChange={(event) => setRows({ ...rows, [f.key]: { ...row, text: event.target.value } })} />
+                  )}
                   <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                     <span>{f.hint}</span>
                     {f.canBeNone && (
                       <label className="flex items-center gap-1">
                         <input type="checkbox" checked={row.none} onChange={(event) => setRows({ ...rows, [f.key]: { text: "", none: event.target.checked } })} />
-                        Doesn&apos;t apply
+                        {f.noneLabel ?? "Doesn't apply"}
                       </label>
                     )}
                   </div>

@@ -126,7 +126,7 @@ async function seed({ id, shop }) {
   await q("insert into public.product_recommendations (run_id, shop_key, product_shopify_id, verdict, budget_status, inputs, outputs) values ($1, $2, 10, 'PILOT', 'awaiting_authority', '{}', '{}')", [run, id]);
   // ad_campaigns and ad_campaign_results are written only by their save functions (0055); the owner stands in.
   const { id: campaign } = await one("insert into public.ad_campaigns (shop_key, name, product_ids, status, currency, created_by) values ($1, 'Test', '{10}', 'active', 'GBP', 'user_test') returning id", [id]);
-  await q("insert into public.ad_campaign_results (campaign_id, shop_key, day, spend, conversions, fx_to_shop, fx_source, source, entered_by) values ($1, $2, current_date - 1, 10, 1, 1, 'same currency', 'merchant_entered', 'user_test')", [campaign, id]);
+  await q("insert into public.ad_campaign_results (campaign_id, shop_key, day, spend, conversions, fx_to_shop, fx_source, fx_from, fx_to, fx_as_of, source, entered_by) values ($1, $2, current_date - 1, 10, 1, 1, 'same currency', 'GBP', 'GBP', now(), 'merchant_entered', 'user_test')", [campaign, id]);
   await q("insert into public.history_arrivals (shop_key, subject, digest, month) values ($1, 'order', decode(repeat('ab', 32), 'hex'), date_trunc('month', now()))", [id]);
 }
 const syncedRows = async (shop) => Number((await one("select public.shop_synced_row_count($1) as n", [shop])).n);

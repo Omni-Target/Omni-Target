@@ -38,6 +38,12 @@ export interface EconomicsPolicySettings {
   count_incoming_inventory: boolean;
   reserve_organic_demand: boolean;
   allow_cost_estimates: boolean;
+  /** Version 2 (migration 0056); absent in version 1, whose records recompute unchanged. */
+  estimate_downside_factor?: number;
+  micro_pilot_min_conversions?: number;
+  refund_maturity_min_days?: number;
+  refund_maturity_max_days?: number;
+  refund_lag_min_refunds?: number;
 }
 
 export interface EconomicsPolicy {
@@ -82,6 +88,15 @@ export function parseEconomicsPolicy(raw: unknown): EconomicsPolicy {
   if (n("min_test_conversions") > n("pilot_conversions") || n("pilot_conversions") > n("test_conversions")) fail("test sizes out of order");
   if (n("medium_confidence_orders") > n("high_confidence_orders")) fail("confidence thresholds out of order");
   if (n("default_test_days") > n("max_test_days")) fail("test days out of order");
+  // Version 2's keys: all or none, each in range (as economics_policy_settings_valid, 0056).
+  const v2Keys = ["estimate_downside_factor", "micro_pilot_min_conversions", "refund_maturity_min_days", "refund_maturity_max_days", "refund_lag_min_refunds"];
+  if (v2Keys.some((k) => k in s)) {
+    for (const k of v2Keys) if (!(k in s)) fail(k);
+    if (!(n("estimate_downside_factor") >= 1 && n("estimate_downside_factor") <= 3)) fail("estimate_downside_factor");
+    for (const k of v2Keys.slice(1)) if (!Number.isInteger(s[k]) || n(k) < 1) fail(k);
+    if (n("micro_pilot_min_conversions") > n("min_test_conversions")) fail("micro_pilot_min_conversions");
+    if (n("refund_maturity_min_days") > n("refund_maturity_max_days")) fail("refund maturity bounds out of order");
+  }
   if (row.approval !== "pending" && row.approval !== "approved") fail("approval");
   return { version: row.version as number, settings: s as unknown as EconomicsPolicySettings, approval: row.approval as "pending" | "approved" };
 }
