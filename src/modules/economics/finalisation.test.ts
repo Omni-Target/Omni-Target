@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { computeProductEconomics } from "./contribution";
+import { allocatePortfolio } from "./portfolio";
 import { acquisitionFromCampaigns, attributionLagDays, evaluateCampaign, measureCampaign, type CampaignDay, type TrackedCampaign } from "./feedback";
 import { parseEconomicsPolicy } from "./policy";
 import { recommendProduct } from "./recommend";
@@ -130,6 +131,15 @@ describe("2. the diagnostic micro-pilot", () => {
   });
   it("below one sale at target: nothing", () => {
     expect(limited(15).budget).toMatchObject({ status: "zero", test_budget: 0 });
+  });
+  it("is funded only after every full test (found live on staging: a micro-pilot displaced a full pilot)", () => {
+    const micro = limited(60);                       // $60 diagnostic, product 1
+    const built = v2({ ...HEALTHY_80, productId: 2, inputs: { ...COMPLETE_COSTS, ad_test_limit: 1000, ad_max_loss: 600 } });
+    const full = recommendProduct({ ...built, asOf: "2026-11-24T00:00:00Z", freshness: built.evidence.freshness });   // $210 pilot
+    // Product 1 sorts first by id and has the same economics; with $230 left, the full pilot still comes first.
+    const a = allocatePortfolio({ currency: "USD", recommendations: [micro, full], commitments: [], monthlyLimit: 230, policy: POLICY_V2.settings });
+    expect(a.allocations.map((x) => [x.product_id, x.rank, x.allocated, x.outcome])).toEqual([[2, 1, 210, "full"], [1, 2, 0, "none"]]);
+    expect(a.allocations[1].rank_basis).toMatch(/^diagnostic micro-pilot, funded after full tests/);
   });
 });
 

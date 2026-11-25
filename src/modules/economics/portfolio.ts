@@ -82,8 +82,11 @@ export function allocatePortfolio(args: {
 
   const candidates = args.recommendations.filter((r) => (r.verdict === "GO" || r.verdict === "PILOT") && r.budget.status === "recommended"
     && (r.budget.test_budget ?? 0) > 0 && !funded.has(r.product_id));
+  // Proven products first, then tests that can prove acquisition, and diagnostic micro-pilots (policy version 2) last:
+  // a micro-pilot proves less than a controlled test, so it never takes money a full test could use.
+  const tier = (r: ProductRecommendation) => (r.verdict === "GO" ? 0 : r.budget.kind === "micro_pilot" ? 2 : 1);
   const ordered = candidates.map((r) => ({ r, safety: marginOfSafety(r, args.cpaUpper?.get(r.product_id) ?? null) }))
-    .sort((a, b) => (a.r.verdict === "GO" ? 0 : 1) - (b.r.verdict === "GO" ? 0 : 1)
+    .sort((a, b) => tier(a.r) - tier(b.r)
       || b.safety.value - a.safety.value
       || CONFIDENCE_ORDER[a.r.confidence.economics ?? "low"] - CONFIDENCE_ORDER[b.r.confidence.economics ?? "low"]
       || a.r.product_id - b.r.product_id);
@@ -92,7 +95,7 @@ export function allocatePortfolio(args: {
   ordered.forEach(({ r, safety }, index) => {
     const requested = m.down(r.budget.test_budget as number);
     const minimum = m.down(r.economics.target_cpa as number) * args.policy.min_test_conversions;
-    const basis = `${r.verdict === "GO" ? "proven (GO)" : "pilot"}; ${safety.basis}; economics confidence ${r.confidence.economics}`;
+    const basis = `${r.verdict === "GO" ? "proven (GO)" : r.budget.kind === "micro_pilot" ? "diagnostic micro-pilot, funded after full tests" : "pilot"}; ${safety.basis}; economics confidence ${r.confidence.economics}`;
     let allocated: number;
     let outcome: Allocation["outcome"];
     if (remaining === null || requested <= remaining) { allocated = requested; outcome = "full"; }

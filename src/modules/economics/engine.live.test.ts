@@ -117,7 +117,7 @@ describe("live economics engine", () => {
       const conversions = Math.max(1, Math.round((perDay * fx) / (0.55 * target)));
       const days = Array.from({ length: 20 }, (_, i) => ({
         day: new Date(Date.now() - (30 - i) * 86_400_000).toISOString().slice(0, 10), spend: perDay, conversions, conversion_value: null, clicks: null, impressions: null,
-        fx_to_shop: fx, fx_source: "synthetic rate for Phase 4 verification",
+        fx_to_shop: fx, fx_source: "synthetic rate for Phase 4 verification", fx_as_of: new Date(Date.now() - 31 * 86_400_000).toISOString(),
       }));
       const id = await repo.saveAdCampaign(key, { name: "Phase 4 verification (SYNTHETIC results)", platform: "meta", product_ids: [top.product_id], status: "active",
         currency: "USD", daily_budget: perDay, authorised_budget: perDay * fx * 30, max_loss: 200_000, started_on: days[0].day, recommendation_run_id: runId }, BY);
@@ -132,7 +132,8 @@ describe("live economics engine", () => {
       expect(rec.confidence.acquisition).toBe("proven");
       expect(mine).toBeDefined();
       campaign = { id, conversions_per_day: conversions, feedback: mine && { action: mine.action, reasons: mine.reasons, cpa: mine.measure.cpa, cpa_upper: mine.measure.cpa_upper,
-        break_even: mine.break_even_cpa, target: mine.target_cpa, next_daily: mine.next_daily_budget, fx: mine.measure.fx },
+        break_even: mine.break_even_cpa, target: mine.target_cpa, next_daily: mine.next_daily_budget, fx: mine.measure.fx,
+        attribution_lag_days: mine.measure.attribution_lag_days },
         verdict_after: rec.verdict, reasons_after: rec.reasons, budget_after: rec.budget };
     }
 
@@ -145,11 +146,21 @@ describe("live economics engine", () => {
     for (const o of outputs) for (const r of o.reasons) reasons[r] = (reasons[r] ?? 0) + 1;
     const summary = {
       domain, run_id: runId, policy_version: policyVersion, as_of: asOf.toISOString(), products: outputs.length, reproduced, verdicts, reasons,
+      calc_versions: [...new Set(outputs.map((o) => o.economics.calc_version))], notes: outputs.reduce((acc: Record<string, number>, o) => {
+        for (const n of o.notes) acc[n] = (acc[n] ?? 0) + 1; return acc; }, {}),
+      refund_timing: await (async () => {
+        const policy = await repo.economicsPolicy();
+        const lag = policy.settings.refund_lag_min_refunds !== undefined ? await repo.storeRefundLag(key, asOf, policy.settings.sales_window_days) : null;
+        return { lag, maturity_days: repo.refundMaturityDays(policy.settings, lag) };
+      })(),
       recommended_total: total, portfolio: result.portfolio && { monthly_limit: result.portfolio.monthly_limit, available: result.portfolio.available,
         allocated: result.portfolio.allocated, outcomes: result.portfolio.allocations.reduce((acc: Record<string, number>, a) => ({ ...acc, [a.outcome]: (acc[a.outcome] ?? 0) + 1 }), {}) },
       top: top && { product_id: top.product_id, verdict: top.output.verdict, reasons: top.output.reasons, notes: top.output.notes, confidence: top.output.confidence,
         economics: { net_revenue: top.output.economics.net_revenue, variable_costs: top.output.economics.variable_costs, contribution: top.output.economics.contribution,
           break_even_cpa: top.output.economics.break_even_cpa, maximum_viable_cpa: top.output.economics.maximum_viable_cpa, target_cpa: top.output.economics.target_cpa,
+          calc_version: top.output.economics.calc_version, purchase_event_basis: top.output.economics.purchase_event_basis ?? null,
+          break_even_cpa_per_paid_order: top.output.economics.break_even_cpa_per_paid_order ?? null, failed_delivery: top.output.economics.failed_delivery ?? null,
+          rates: Object.fromEntries(Object.entries(top.output.economics.rates).map(([k, v]) => [k, [v.value, v.stress, v.provenance, v.sample]])),
           lines: Object.fromEntries(Object.entries(top.output.economics.lines).map(([k, l]) => [k, [l.amount, l.provenance]])) },
         budget: top.output.budget },
       hand_check: handCheck, campaign, unviable,
