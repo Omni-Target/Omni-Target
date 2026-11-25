@@ -68,6 +68,8 @@ const SUMMARIES = [
   "economics_runs", "product_recommendations",
   // Tracked campaigns and their daily results (0055), written only by save_ad_campaign(_results).
   "ad_campaigns", "ad_campaign_results",
+  // Manual reviews of a campaign's counts and recorded campaign evaluations (0058), written only by their functions.
+  "ad_campaign_reviews", "ad_campaign_evaluations",
 ];
 /** Every table that mirrors or is derived from one shop's Shopify data. */
 const SYNCED = [
@@ -127,6 +129,9 @@ async function seed({ id, shop }) {
   // ad_campaigns and ad_campaign_results are written only by their save functions (0055); the owner stands in.
   const { id: campaign } = await one("insert into public.ad_campaigns (shop_key, name, product_ids, status, currency, created_by) values ($1, 'Test', '{10}', 'active', 'GBP', 'user_test') returning id", [id]);
   await q("insert into public.ad_campaign_results (campaign_id, shop_key, day, spend, conversions, fx_to_shop, fx_source, fx_from, fx_to, fx_as_of, source, entered_by) values ($1, $2, current_date - 1, 10, 1, 1, 'same currency', 'GBP', 'GBP', now(), 'merchant_entered', 'user_test')", [campaign, id]);
+  // ad_campaign_reviews and ad_campaign_evaluations are written only by their functions (0058); the owner stands in.
+  await q("insert into public.ad_campaign_reviews (shop_key, campaign_id, through_day, outcome, note, reviewed_by) values ($1, $2, current_date - 1, 'confirmed', 'Checked counts.', 'user_test')", [id, campaign]);
+  await q("insert into public.ad_campaign_evaluations (shop_key, campaign_id, as_of, policy_version, calc_version, action, inputs, output) values ($1, $2, now(), 1, 'econ-1.0.0', 'CONTINUE', '{}', '{}')", [id, campaign]);
   await q("insert into public.history_arrivals (shop_key, subject, digest, month) values ($1, 'order', decode(repeat('ab', 32), 'hex'), date_trunc('month', now()))", [id]);
 }
 const syncedRows = async (shop) => Number((await one("select public.shop_synced_row_count($1) as n", [shop])).n);
