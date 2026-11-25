@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/platform/supabase";
 import { parseEconomicsPolicy, type EconomicsPolicy } from "./policy";
 import type { MerchantInputKey, StoredMerchantInputs } from "./inputs";
 import { normaliseEvidence, type EconomicsEvidence } from "./evidence";
+import { normaliseReconciliationEvidence, type ReconciliationEvidence } from "./reconciliation";
 export { refundMaturityDays } from "./repository-pure";
 
 /** The economics policy and the merchant's inputs (Phase 4, task 2; migration 0052). */
@@ -80,3 +81,16 @@ export const storeRefundLag = (shopKey: number, asOf: Date, windowDays: number) 
   rpc<{ refunds: number; p90_days: number | null; p50_days: number | null }>("store_refund_lag",
     { p_shop_key: shopKey, p_as_of: asOf.toISOString(), p_window_days: windowDays });
 
+
+/** What Shopify recorded over a campaign's period, for reconciling Meta's purchase count (0058); null when the campaign is not the shop's. */
+export const campaignReconciliationEvidence = async (shopKey: number, campaignId: string, asOf: Date): Promise<ReconciliationEvidence | null> =>
+  normaliseReconciliationEvidence(await rpc<unknown>("campaign_reconciliation_evidence", { p_shop_key: shopKey, p_campaign_id: campaignId, p_as_of: asOf.toISOString() }));
+
+/** Records a manual review of a campaign's counts (0058). */
+export const saveAdCampaignReview = (shopKey: number, campaignId: string, review: { through_day: string; outcome: "confirmed" | "corrected"; note: string }, by: string) =>
+  rpc<string>("save_ad_campaign_review", { p_shop_key: shopKey, p_campaign_id: campaignId, p_review: review, p_by: by });
+
+/** Records campaign evaluations with their policy, calc version, inputs and output, all or none (0058). */
+export const recordAdCampaignEvaluations = (shopKey: number, rows: Array<{ campaign_id: string; run_id: string | null; as_of: string; policy_version: number;
+  calc_version: string; action: string; inputs: unknown; output: unknown }>, by: string | null) =>
+  rpc<number>("record_ad_campaign_evaluations", { p_shop_key: shopKey, p_rows: rows, p_by: by });

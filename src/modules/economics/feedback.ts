@@ -10,6 +10,7 @@ import type { EconomicsPolicySettings } from "./policy";
 import type { Commitment } from "./portfolio";
 import type { AcquisitionEvidence, ProductRecommendation } from "./recommend";
 import type { ReasonCode } from "./reasons";
+import { reconcileAttribution, type Reconciliation, type ReconciliationEvidence } from "./reconciliation";
 import { poissonBounds, wilsonBounds } from "./stats";
 
 export interface CampaignDay {
@@ -192,6 +193,8 @@ export interface CampaignFeedback {
    * counted when placed; null while the merchant has not confirmed how the platform counts purchases.
    */
   paid_orders?: { purchase_event_basis: "placed" | "paid" | "unconfirmed"; cpa_per_paid_order: number | null; break_even_cpa_per_paid_order: number | null };
+  /** Policy version 3: Meta's purchase count checked against Shopify's orders; scaling waits unless it reconciles. */
+  reconciliation?: Reconciliation;
   cumulative_loss: number;
   loss_limit: number | null;
   /** The daily budget to run next, in the campaign's currency; 0 to stop or pause; null to leave as is. */
@@ -210,6 +213,8 @@ export function evaluateCampaign(args: {
   dailyLimit?: number | null;
   policy: EconomicsPolicySettings;
   asOf: string;
+  /** Policy version 3: what Shopify recorded over the campaign's period (campaign_reconciliation_evidence); null when unreadable. */
+  reconciliation?: ReconciliationEvidence | null;
 }): CampaignFeedback {
   const { campaign, policy } = args;
   const m = money(args.shopCurrency);
@@ -234,8 +239,17 @@ export function evaluateCampaign(args: {
       : (only.rates.paid_share.value ?? 0) > 0 ? m.major(m.up(measure.cpa / (only.rates.paid_share.value as number))) : null,
     break_even_cpa_per_paid_order: only.break_even_cpa_per_paid_order ?? null,
   };
+  // Policy version 3: reconcile Meta's purchase count with Shopify before any increase (architecture, "Attribution reconciliation").
+  let reconciliation: Reconciliation | undefined;
+  if (policy.scale_confidence !== undefined) {
+    const lag = attributionLagDays(campaign.attribution_setting, policy.attribution_lag_days);
+    const lastMaturedDay = campaign.results.map((d) => d.day).filter((d) => dayNumber(d) <= dayNumber(args.asOf) - lag).sort().at(-1) ?? null;
+    const bases = args.current.map((r) => r.economics.purchase_event_basis);
+    reconciliation = reconcileAttribution({ evidence: args.reconciliation ?? null, results: campaign.results, lastMaturedDay, asOf: args.asOf,
+      purchaseEventBasis: bases.length > 0 && bases.every((b) => b === "paid") ? "paid" : bases.some((b) => b === "placed") ? "placed" : "unconfirmed" });
+  }
   const base = { campaign_id: campaign.id, measure, break_even_cpa: be, target_cpa: target, cumulative_loss: loss, loss_limit: campaign.max_loss,
-    ...(paidOrders ? { paid_orders: paidOrders } : {}) };
+    ...(paidOrders ? { paid_orders: paidOrders } : {}), ...(reconciliation ? { reconciliation } : {}) };
   const done = (action: FeedbackAction, next: number | null): CampaignFeedback => ({ ...base, action, reasons, next_daily_budget: next, explanation });
 
   if (campaign.status !== "active") return done("NOT_RUNNING", null);
@@ -310,6 +324,13 @@ export function evaluateCampaign(args: {
   }
   if (measure.cpa !== null && measure.cpa <= target && measure.cpa_upper !== null && measure.cpa_upper <= be
     && measure.matured_conversions >= policy.min_scale_conversions && campaign.daily_budget !== null) {
+    // Policy version 3: never on counts that do not reconcile with Shopify, unless reviewed. Stops and pauses above are unaffected.
+    if (reconciliation && !reconciliation.scaling_allowed) {
+      reasons.push(reconciliation.reason as ReasonCode);
+      explanation.push(`The results would justify more spend. ${reconciliation.explanation}`);
+      return done("CONTINUE", null);
+    }
+    if (reconciliation?.reason === "ATTRIBUTION_REVIEWED") reasons.push("ATTRIBUTION_REVIEWED");
     const sinceScale = campaign.last_scaled_on ? dayNumber(args.asOf) - dayNumber(campaign.last_scaled_on) : Infinity;
     if (sinceScale < policy.scale_interval_days) {
       reasons.push("SCALE_INTERVAL_NOT_ELAPSED");

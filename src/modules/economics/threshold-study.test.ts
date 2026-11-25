@@ -61,8 +61,11 @@ describe("the simulator applies the engine's rules exactly", () => {
               conversions, conversion_value: null, clicks: null, impressions: null, fx_to_shop: 1, fx_source: "same currency" }));
             const campaign: TrackedCampaign = { id: "c", name: "t", product_ids: [1], status: "active", currency: "USD", daily_budget: dailySpend,
               authorised_budget: 100_000, max_loss: maxLoss, recommendation_run_id: null, started_on: "2026-11-01", last_scaled_on: null, purpose: "test", results };
-            const engine = evaluateCampaign({ campaign, shopCurrency: "USD", current: [current], policy, dailyLimit: 1000,
-              asOf: new Date(start + (lastDay + 1) * 86_400_000).toISOString() }).action;
+            // The study covers the statistical rules; Meta's counts reconcile with Shopify here (the safeguard has its own tests).
+            const asOf = new Date(start + (lastDay + 1) * 86_400_000).toISOString();
+            const engine = evaluateCampaign({ campaign, shopCurrency: "USD", current: [current], policy, dailyLimit: 1000, asOf,
+              reconciliation: { from: "2026-10-31T00:00:00Z", to: asOf, timezone: "UTC", placed: 100_000, paid: 100_000, capi_sent: 0,
+                capi_connected: false, orders_fresh_at: asOf, review: null } }).action;
             const mapped = engine === "HOLD_OPTIMISE" ? "CONTINUE" : engine;
             expect(decide(reported, dailySpend, lastDay, ECONOMICS, t, maxLoss), `${maturity} $${dailySpend}/day CPA ${trueCpa} ${JSON.stringify(t)} day ${lastDay}`).toBe(mapped);
             checks += 1;

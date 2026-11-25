@@ -3,7 +3,8 @@ import { ECONOMICS_CALC_VERSION } from "./contribution";
 import { acquisitionFromCampaigns, commitmentsFromCampaigns, evaluateCampaign, normaliseCampaigns, type CampaignFeedback } from "./feedback";
 import { resolveMerchantInputs, resolveVariantInputs } from "./inputs";
 import type { ProductRecommendation } from "./recommend";
-import { adCampaignsWithResults, economicsInputs, economicsPolicy, economicsRun, productEconomicsEvidence, recordEconomicsRun, refundMaturityDays,
+import { adCampaignsWithResults, campaignReconciliationEvidence, economicsInputs, economicsPolicy, economicsRun, productEconomicsEvidence, recordAdCampaignEvaluations,
+  recordEconomicsRun, refundMaturityDays,
   storeRefundLag } from "./repository";
 import { recordedRows, runEconomics, runSummary, type EconomicsRunResult } from "./run";
 
@@ -58,7 +59,7 @@ export async function evaluateShopCampaigns(params: { shopKey: number; requested
   const campaigns = normaliseCampaigns(await adCampaignsWithResults(params.shopKey)).filter((c) => c.status === "active");
   if (!campaigns.length) return [];
   const productIds = [...new Set(campaigns.flatMap((c) => c.product_ids))];
-  const { result } = await runAndRecordEconomics({ shopKey: params.shopKey, productIds, trigger: "check", requestedBy: params.requestedBy, asOf });
+  const { runId, result } = await runAndRecordEconomics({ shopKey: params.shopKey, productIds, trigger: "check", requestedBy: params.requestedBy, asOf });
   const current = new Map(result.recommendations.map((r) => [r.product_id, r.output]));
   const policy = await economicsPolicy();
   const stored = await economicsInputs(params.shopKey, []);
@@ -66,14 +67,25 @@ export async function evaluateShopCampaigns(params: { shopKey: number; requested
   const currency = result.recommendations[0]?.output.economics.currency;
   if (!currency) return [];
   const feedback: CampaignFeedback[] = [];
+  const recorded: Parameters<typeof recordAdCampaignEvaluations>[1] = [];
   for (const campaign of campaigns) {
     let atLaunch: ProductRecommendation[] | undefined;
     if (campaign.recommendation_run_id) {
       const run = await economicsRun(params.shopKey, campaign.recommendation_run_id);
       atLaunch = run?.recommendations.filter((r) => campaign.product_ids.includes(r.product_id)).map((r) => r.outputs as ProductRecommendation);
     }
-    feedback.push(evaluateCampaign({ campaign, shopCurrency: currency, current: campaign.product_ids.map((id) => current.get(id)).filter((r): r is ProductRecommendation => !!r),
-      atLaunch, dailyLimit, policy: policy.settings, asOf: asOf.toISOString() }));
+    // Policy version 3: what Shopify recorded over the campaign's period, to reconcile Meta's purchase count before any increase.
+    const reconciliation = policy.settings.scale_confidence !== undefined
+      ? await campaignReconciliationEvidence(params.shopKey, campaign.id, asOf).catch(() => null) : undefined;
+    const args: Parameters<typeof evaluateCampaign>[0] = { campaign, shopCurrency: currency,
+      current: campaign.product_ids.map((id) => current.get(id)).filter((r): r is ProductRecommendation => !!r),
+      atLaunch, dailyLimit, policy: policy.settings, asOf: asOf.toISOString(), ...(reconciliation !== undefined ? { reconciliation } : {}) };
+    const output = evaluateCampaign(args);
+    feedback.push(output);
+    // Every evaluation is recorded with its policy, calc version and full arguments, so it recomputes.
+    recorded.push({ campaign_id: campaign.id, run_id: runId, as_of: args.asOf, policy_version: policy.version,
+      calc_version: args.current[0]?.economics.calc_version ?? "econ-1.0.0", action: output.action, inputs: args, output });
   }
+  if (recorded.length) await recordAdCampaignEvaluations(params.shopKey, recorded, params.requestedBy);
   return feedback;
 }

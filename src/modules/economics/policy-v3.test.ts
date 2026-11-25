@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { describeBriefEconomics } from "@/lib/brief-economics";
 import { acquisitionFromCampaigns, evaluateCampaign, measureCampaign, type CampaignDay, type TrackedCampaign } from "./feedback";
 import { parseEconomicsPolicy } from "./policy";
+import { normaliseReconciliationEvidence, type ReconciliationEvidence } from "./reconciliation";
 import { recommendProduct } from "./recommend";
 import { toBriefEconomics } from "./snapshot";
 import { buildScenario, COMPLETE_COSTS, HEALTHY_80, type Scenario } from "./__fixtures__/scenario";
@@ -27,8 +28,13 @@ const rec = (policy: typeof POLICY_V3.settings, inputs: Scenario["inputs"] = { .
   const built = buildScenario({ ...HEALTHY_80, inputs, policy });
   return recommendProduct({ ...built, asOf: AS_OF, freshness: built.evidence.freshness });
 };
-const judge = (results: CampaignDay[], policy: typeof POLICY_V3.settings) =>
-  evaluateCampaign({ campaign: campaign(results), shopCurrency: "USD", current: [rec(policy)], policy, asOf: AS_OF, dailyLimit: 1000 });
+/** Shopify's orders over the campaign's period: enough that Meta's count reconciles, synced at the check. */
+const evidence = (patch: Partial<ReconciliationEvidence> = {}): ReconciliationEvidence => ({ from: "2026-09-30T00:00:00Z", to: AS_OF, timezone: "UTC",
+  placed: 1000, paid: 1000, capi_sent: 0, capi_connected: false, orders_fresh_at: AS_OF, review: null, ...patch });
+/** Judged on 2026-11-24 with results entered through 2026-11-23 (the days after the matured ones carry no spend). */
+const judge = (results: CampaignDay[], policy: typeof POLICY_V3.settings, reconciliation: ReconciliationEvidence | null = evidence(), extra = {}) =>
+  evaluateCampaign({ campaign: { ...campaign([...results, ...days(6, "2026-11-23", 0, 0)]), daily_budget: results[0]?.spend ?? 20, ...extra },
+    shopCurrency: "USD", current: [rec(policy)], policy, asOf: AS_OF, dailyLimit: 1000, reconciliation });
 
 describe("policy version 3", () => {
   it("the fixture equals the draft migration 0057 writes, and it parses; its keys come together, on top of version 2's", () => {
@@ -102,5 +108,87 @@ describe("spending authority: a test, a daily and a monthly limit", () => {
     expect(rec(POLICY_V2.settings, { ...COMPLETE_COSTS, ...testOnly }).budget.status).toBe("recommended");
     // With all three: an amount.
     expect(rec(POLICY_V3.settings).budget).toMatchObject({ status: "recommended", test_budget: 210 });
+  });
+});
+
+describe("attribution reconciliation before any increase (version 3)", () => {
+  // 40 matured sales for $760 ($19 each): the statistics justify scaling.
+  const strong = days(20, "2026-11-17", 38, 2);
+  const placedOrders = (placed: number, patch: Partial<ReconciliationEvidence> = {}) => evidence({ placed, paid: placed, ...patch });
+
+  it("scales when Meta's purchases reconcile with Shopify's orders, and says so", () => {
+    const f = judge(strong, POLICY_V3.settings, placedOrders(45));
+    expect(f.action).toBe("SCALE");
+    expect(f.reconciliation).toMatchObject({ status: "reconciled", scaling_allowed: true, meta_purchases: 40, basis: "placed", ceiling: 45, allowed: 56 });
+  });
+
+  it("withholds scaling when Meta reports more purchases than the product had orders, and explains it", () => {
+    // 40 reported, 30 orders: at most 30 × 1.2 + 2 = 38 reconcile.
+    const f = judge(strong, POLICY_V3.settings, placedOrders(30));
+    expect(f).toMatchObject({ action: "CONTINUE", reasons: ["ATTRIBUTION_OVER_COUNT"], next_daily_budget: null,
+      reconciliation: { status: "over_count", scaling_allowed: false, ceiling: 30, allowed: 38 } });
+    expect(f.explanation.at(-1)).toMatch(/Meta reports 40 purchase\(s\).*only 30 placed Shopify order\(s\).*reported twice/);
+    expect(judge(strong, POLICY_V3.settings, placedOrders(32)).action).toBe("SCALE");     // 32 × 1.2 + 2 = 40
+  });
+
+  it("withholds scaling on stale or unreadable evidence", () => {
+    expect(judge(strong, POLICY_V3.settings, placedOrders(45, { orders_fresh_at: "2026-11-22T00:00:00Z" })))
+      .toMatchObject({ action: "CONTINUE", reasons: ["ATTRIBUTION_EVIDENCE_STALE"] });
+    expect(judge(strong, POLICY_V3.settings, null)).toMatchObject({ action: "CONTINUE", reasons: ["ATTRIBUTION_UNRECONCILABLE"] });
+    // Results last entered a week ago are stale too.
+    const old = evaluateCampaign({ campaign: campaign(strong), shopCurrency: "USD", current: [rec(POLICY_V3.settings)], policy: POLICY_V3.settings,
+      asOf: AS_OF, dailyLimit: 1000, reconciliation: placedOrders(45) });
+    expect(old).toMatchObject({ action: "CONTINUE", reasons: ["ATTRIBUTION_EVIDENCE_STALE"] });
+  });
+
+  it("scales after a manual review that covers the matured results, and records it", () => {
+    const review = { through_day: "2026-11-17", outcome: "confirmed" as const, note: "Pixel removed; Meta counts only the Conversions API.",
+      reviewed_by: "user_1", reviewed_at: "2026-11-23T10:00:00Z" };
+    const f = judge(strong, POLICY_V3.settings, placedOrders(30, { review }));
+    expect(f).toMatchObject({ action: "SCALE", reasons: ["ATTRIBUTION_REVIEWED"], reconciliation: { status: "reviewed", scaling_allowed: true } });
+    expect(f.reconciliation!.explanation).toMatch(/Reviewed by user_1 .* through 2026-11-17 \(confirmed\): Pixel removed/);
+    // A review of earlier results does not cover new ones.
+    expect(judge(strong, POLICY_V3.settings, placedOrders(30, { review: { ...review, through_day: "2026-11-10" } })).action).toBe("CONTINUE");
+  });
+
+  it("uses the purchase events Omnitarget sent as the ceiling when Meta counts paid orders and they come from Omnitarget", () => {
+    const paidBasis = { ...POLICY_V3.settings };
+    const built = buildScenario({ ...HEALTHY_80, inputs: { ...COMPLETE_COSTS, ...LIMITS, purchase_event_basis: 1 }, policy: paidBasis });
+    const current = recommendProduct({ ...built, asOf: AS_OF, freshness: built.evidence.freshness });
+    const f = evaluateCampaign({ campaign: campaign([...strong, ...days(6, "2026-11-23", 0, 0)]), shopCurrency: "USD", current: [current], policy: paidBasis,
+      asOf: AS_OF, dailyLimit: 1000, reconciliation: evidence({ placed: 60, paid: 50, capi_sent: 31, capi_connected: true }) });
+    // 31 events sent (some failed to send): at most 31 × 1.2 + 2 = 39 reconcile; Meta reports 40.
+    expect(f).toMatchObject({ action: "CONTINUE", reconciliation: { status: "over_count", basis: "paid", ceiling_source: "capi_events", ceiling: 31, allowed: 39 } });
+  });
+
+  it("never stands in the way of stopping or pausing, and leaves version 2 as it was", () => {
+    // Losing campaign, counts that do not reconcile: still paused.
+    const losing = days(20, "2026-11-17", 60, 1);              // $1,200 for 20 sales: $60 each
+    expect(judge(losing, POLICY_V3.settings, null).action).toBe("PAUSE_REVISE");
+    // Loss limit reached: still stopped.
+    expect(judge(losing, POLICY_V3.settings, null, { max_loss: 300 }).action).toBe("STOP");
+    // Version 2: no reconciliation, scaling as before.
+    const v2 = evaluateCampaign({ campaign: campaign(strong), shopCurrency: "USD", current: [rec(POLICY_V2.settings)], policy: POLICY_V2.settings, asOf: AS_OF, dailyLimit: 1000 });
+    expect(v2.action).toBe("SCALE");
+    expect(v2.reconciliation).toBeUndefined();
+  });
+});
+
+describe("recorded campaign evaluations", () => {
+  it("recompute exactly from the stored arguments (as recorded by evaluateShopCampaigns)", () => {
+    const args: Parameters<typeof evaluateCampaign>[0] = { campaign: { ...campaign([...days(20, "2026-11-17", 38, 2), ...days(6, "2026-11-23", 0, 0)]), daily_budget: 38 },
+      shopCurrency: "USD", current: [rec(POLICY_V3.settings)], policy: POLICY_V3.settings, asOf: AS_OF, dailyLimit: 1000,
+      reconciliation: evidence({ placed: 30, paid: 30, review: { through_day: "2026-11-17", outcome: "confirmed", note: "Checked.", reviewed_by: "u", reviewed_at: "2026-11-23T00:00:00Z" } }) };
+    const stored = JSON.parse(JSON.stringify({ inputs: args, output: evaluateCampaign(args) }));
+    expect(stored.output.action).toBe("SCALE");
+    expect(JSON.parse(JSON.stringify(evaluateCampaign(stored.inputs)))).toEqual(stored.output);
+  });
+
+  it("reads the database's evidence strictly", () => {
+    expect(normaliseReconciliationEvidence(null)).toBeNull();
+    expect(normaliseReconciliationEvidence({ from: "2026-11-08T23:00:00+00:00", to: AS_OF, timezone: "Africa/Lagos", placed: "3", paid: 2, capi_sent: 1,
+      capi_connected: true, meta_visit_orders: 2, journey_known_orders: 3, orders_fresh_at: "2026-11-24T08:00:00+00:00",
+      review: { through_day: "2026-11-17", outcome: "corrected", note: "n", reviewed_by: "u", reviewed_at: "2026-11-23T10:00:00+00:00" } }))
+      .toMatchObject({ placed: 3, paid: 2, capi_connected: true, review: { outcome: "corrected", through_day: "2026-11-17" } });
   });
 });
