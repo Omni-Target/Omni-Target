@@ -112,7 +112,7 @@ Each product assessment (serviceability, geography, channels, readiness, interes
 | 2 | Meta API version: one constant at v25.0 for all seven call sites, with tests; release-checklist note | none |
 | 3 | Market serviceability per product and target country, fed to the economics engine as `targetMarketServiced` | none |
 | 4 | Product geography evidence with labelled scope (briefs switch to it in task 8, with channels and interests) | 0061 |
-| 5 | Channel fit from attribution and campaign evidence | (in 0062 or 0063) |
+| 5 | Channel fit from recorded order journeys | 0062 |
 | 6 | Product readiness checks and the order of authority | 0063 |
 | 7 | Meta interest research: evidence seeds, verified results with IDs, storage, Advantage+ framing | 0064 |
 | 8 | Integration: one recorded product assessment; briefs, PDF, plain text and planner render it; AI boundary tests | 0065 |
@@ -210,3 +210,30 @@ Every result states its scope and the number of orders it rests on, as verified 
 - 7 unit tests, including a property test that no listed location falls below the thresholds;
 - 2 database tests (scopes; unpaid, test and out-of-window orders excluded; isolation; access);
 - the live check above.
+
+### Task 5: channel fit (2026-11-28; migration 0062)
+
+**Evidence** (`product_channel_evidence`, 0062):
+- The product's and the store's paid, non-test orders in 365 days, grouped by the stored journey (Phase 3, 0051: referrer host, UTM source and medium, visit source) and sales channel.
+- Each group is flagged for whether a journey was recorded, and counts first orders (`customer_order_index` = 1).
+- No person is identified; access for the service role only.
+
+**Rules** (`src/modules/intelligence/channels.ts`, version 1):
+- **Classification:** each group is classed with the app's own `parseTrafficSource` into Meta, Google, TikTok, Pinterest, email, direct, other websites, point of sale, Shop app or other social.
+- **Unknown journeys:** an order without a recorded journey is unknown, never direct. The old snapshot counted it as direct.
+- **Scope:** the product's own orders with ≥ 20 attributed and ≥ 30% coverage; else the store's; else channel fit is unknown and the reason is stated.
+- **Supported channels:** at ≥ 20% of attributed orders and ≥ 10 orders; others are present. Each channel gives its first-order share, which separates channels that win new buyers from those that bring buyers back.
+- **Meta is not the default:** the explanation names the channels that sell the product, and how much Meta has brought, including none.
+- No channel is inferred from product traits.
+
+**Found while building:** `insights/canonical.ts` loads the AI and Shopify clients at import, so the channel rules carry their own copy of its six-line `attributionSites`, noted in the code.
+
+**Live on staging** (read only):
+- **omni-beta:** 0 of 832 paid orders, and the dev store's 0 of 2, carry a recorded visit; both stores' orders were created through the API.
+- Channel fit is therefore unknown for all 77 products, which is stated. The old snapshot would have shown 100% "Direct / Organic".
+- The measured paths are proven by the unit and database tests.
+
+**Tests:**
+- 8 unit tests: classification; unknown journeys; scope fallback; Meta absent or present; thresholds;
+- 2 database tests: grouping; first orders; unpaid and test orders excluded; isolation; access;
+- the live check.

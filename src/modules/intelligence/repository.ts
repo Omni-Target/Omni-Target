@@ -1,6 +1,7 @@
 import "server-only";
 import { insightShopContext } from "@/modules/insights/repository";
 import { supabaseAdmin } from "@/platform/supabase";
+import { normaliseChannelEvidence, type ChannelEvidence } from "./channels";
 import { normaliseGeographyEvidence, type GeographyEvidence } from "./geography";
 import { toShopMarketContext, type ShopMarketContext } from "./serviceability";
 
@@ -23,4 +24,12 @@ export async function productGeographyEvidence(shopKey: number, productIds: numb
     { p_shop_key: shopKey, p_product_ids: productIds.slice(0, 200), p_as_of: asOf.toISOString(), p_window_days: windowDays });
   if (error) throw new Error(`product_geography_evidence failed: ${error.message}`);
   return normaliseGeographyEvidence(data);
+}
+
+/** Where at most 200 products' buyers came from, for the product and the store (product_channel_evidence, 0062). */
+export async function productChannelEvidence(shopKey: number, productIds: number[], asOf: Date, windowDays = 365): Promise<ChannelEvidence> {
+  const { data, error } = await supabaseAdmin.rpc("product_channel_evidence",
+    { p_shop_key: shopKey, p_product_ids: productIds.slice(0, 200), p_as_of: asOf.toISOString(), p_window_days: windowDays });
+  if (error) throw new Error(`product_channel_evidence failed: ${error.message}`);
+  return normaliseChannelEvidence(data);
 }

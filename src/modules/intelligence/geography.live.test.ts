@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { CHANNEL_RULES, channelFit } from "./channels";
 import { GEOGRAPHY_RULES, productGeography } from "./geography";
 
 /**
@@ -36,9 +37,19 @@ describe("live product geography", () => {
         expect(c.recommended).toBe(c.serviceability === "serviced");
       }
     }
+    // Channel fit (task 5): measured only with enough recorded journeys; shares of attributed orders.
+    const channelEvidence = await repo.productChannelEvidence(key, ids, asOf);
+    const fits = ids.map((id) => channelFit(channelEvidence, id));
+    for (const f of fits) {
+      if (f.status === "measured") expect(f.attributed).toBeGreaterThanOrEqual(CHANNEL_RULES.minAttributedOrders);
+      for (const c of f.channels) if (c.status === "supported") expect(c.share).toBeGreaterThanOrEqual(CHANNEL_RULES.supportedShare);
+    }
     const scopes = results.reduce((acc: Record<string, number>, g) => ({ ...acc, [g.scope]: (acc[g.scope] ?? 0) + 1 }), {});
     const summary = { domain, as_of: asOf.toISOString(), products: ids.length, store: { orders: evidence.store.orders, with_country: evidence.store.with_country,
-      countries: evidence.store.countries.slice(0, 5) }, scopes, examples: results.filter((g) => g.scope !== "none").slice(0, 3).map((g) => g.explanation) };
+      countries: evidence.store.countries.slice(0, 5) }, scopes,
+      channels: { store_orders: channelEvidence.store.orders, store_journey_known: channelEvidence.store.journey_known,
+        statuses: fits.reduce((acc: Record<string, number>, f) => ({ ...acc, [`${f.scope}:${f.status}`]: (acc[`${f.scope}:${f.status}`] ?? 0) + 1 }), {}),
+        example: fits[0]?.explanation ?? null }, examples: results.filter((g) => g.scope !== "none").slice(0, 3).map((g) => g.explanation) };
     if (process.env.LIVE_OUT) writeFileSync(process.env.LIVE_OUT, JSON.stringify(summary, null, 2));
   }, 300_000);
 });
