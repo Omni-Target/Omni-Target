@@ -111,7 +111,7 @@ Each product assessment (serviceability, geography, channels, readiness, interes
 | 1 | This audit and plan | none |
 | 2 | Meta API version: one constant at v25.0 for all seven call sites, with tests; release-checklist note | none |
 | 3 | Market serviceability per product and target country, fed to the economics engine as `targetMarketServiced` | none |
-| 4 | Product geography evidence with labelled scope; briefs stop using AI-written and store-wide locations | 0062 |
+| 4 | Product geography evidence with labelled scope (briefs switch to it in task 8, with channels and interests) | 0061 |
 | 5 | Channel fit from attribution and campaign evidence | (in 0062 or 0063) |
 | 6 | Product readiness checks and the order of authority | 0063 |
 | 7 | Meta interest research: evidence seeds, verified results with IDs, storage, Advantage+ framing | 0064 |
@@ -178,3 +178,35 @@ A missing context gives unknown, never a block.
 - Which products a custom shipping profile holds is not read, so a country served only by some profiles stays unknown.
 - Market-level product availability (catalogues) is not read.
 - Both are listed for Task 9's review.
+
+### Task 4: product geography (2026-11-28; migration 0061)
+
+**Evidence** (`product_geography_evidence`, 0061):
+- Paid, non-test orders in the window (365 days) at three scopes: the product, its category (Shopify category, else product type), and the store.
+- For each scope: the order count, how many carry a shipping country, and the top 25 countries, regions (country and province) and normalised cities.
+- Counts only: no address line, postcode, name or customer is read.
+- Access for the service role only.
+
+**Rules** (`src/modules/intelligence/geography.ts`, version 1):
+
+| Rule | Default |
+|---|---|
+| Scope | The product's own orders with ≥ 20 addressed orders; else its category with ≥ 50; else the store with ≥ 20; else nothing is said about location |
+| Listing | A region or city in the target country at ≥ 5% of the scope's addressed orders and ≥ 3 orders; at most 8 |
+| Cross-border demand | Another country with ≥ 10 paid orders. Recommended only when serviceability says Shopify can sell and deliver there; otherwise shown as demand Shopify cannot yet serve, or with unknown serviceability |
+
+Every result states its scope and the number of orders it rests on, as verified counts.
+
+**Integration moved:** briefs switch from AI-written locations to these results in task 8, together with channel fit and interests, so the brief and its prompt change once.
+
+**Live on staging** (read only):
+
+| Store | Result |
+|---|---|
+| omni-beta | 832 paid orders, all with an address. For 60 products: 1 product scope, 38 category, 21 store. Buyers concentrate in Lagos (271), Abuja (160), Port Harcourt (118) and Ibadan (69). Measured demand in GB (68), CA (57) and US (57), none of which Shopify serves, so none is recommended (the old prompt asked the AI for international cities by inference) |
+| Dev store | 2 orders without a shipping address: nothing is said about location for its 17 products |
+
+**Tests:**
+- 7 unit tests, including a property test that no listed location falls below the thresholds;
+- 2 database tests (scopes; unpaid, test and out-of-window orders excluded; isolation; access);
+- the live check above.

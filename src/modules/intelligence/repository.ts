@@ -1,5 +1,7 @@
 import "server-only";
 import { insightShopContext } from "@/modules/insights/repository";
+import { supabaseAdmin } from "@/platform/supabase";
+import { normaliseGeographyEvidence, type GeographyEvidence } from "./geography";
 import { toShopMarketContext, type ShopMarketContext } from "./serviceability";
 
 /**
@@ -13,4 +15,12 @@ export async function shopMarketContext(shopKey: number): Promise<ShopMarketCont
   const syncedAt = typeof stored.context?.synced_at === "string" ? stored.context.synced_at
     : typeof stored.settings.synced_at === "string" ? stored.settings.synced_at : null;
   return toShopMarketContext(stored.settings, capabilities, syncedAt);
+}
+
+/** Where at most 200 products' buyers are, at product, category and store scope (product_geography_evidence, 0061). */
+export async function productGeographyEvidence(shopKey: number, productIds: number[], asOf: Date, windowDays = 365): Promise<GeographyEvidence> {
+  const { data, error } = await supabaseAdmin.rpc("product_geography_evidence",
+    { p_shop_key: shopKey, p_product_ids: productIds.slice(0, 200), p_as_of: asOf.toISOString(), p_window_days: windowDays });
+  if (error) throw new Error(`product_geography_evidence failed: ${error.message}`);
+  return normaliseGeographyEvidence(data);
 }
