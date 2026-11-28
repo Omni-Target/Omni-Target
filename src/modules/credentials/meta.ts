@@ -3,6 +3,7 @@ import { createLogger } from "@/platform/logger";
 import { supabaseAdmin } from "@/platform/supabase";
 import { credentialAad, credentialKeyring, open, seal } from "@/platform/credentials/crypto";
 import { currentWorkspaceFor } from "@/modules/workspaces/current";
+import { META_GRAPH_BASE } from "@/lib/meta-api";
 
 /**
  * Meta credentials (Phase 1, task 4). They belong to a workspace: a Clerk user
@@ -12,7 +13,7 @@ import { currentWorkspaceFor } from "@/modules/workspaces/current";
  */
 
 const log = createLogger({ module: "meta-credentials" });
-const GRAPH = "https://graph.facebook.com/v19.0";
+const GRAPH = META_GRAPH_BASE;
 
 type MetaKind = "user" | "page";
 

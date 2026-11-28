@@ -1,6 +1,7 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { deleteUserData } from "@/lib/db";
 import { metaUserTokensForOwner } from "@/modules/credentials/meta";
+import { META_GRAPH_BASE } from "@/lib/meta-api";
 
 export async function DELETE() {
   const { userId } = await auth();
@@ -17,7 +18,7 @@ export async function DELETE() {
     // Each of this user's own workspaces' Meta grants is revoked; no one else's.
     for (const { userToken } of await metaUserTokensForOwner(userId).catch(() => [])) {
       await fetch(
-        `https://graph.facebook.com/v19.0/me/permissions?access_token=${encodeURIComponent(userToken)}`,
+        `${META_GRAPH_BASE}/me/permissions?access_token=${encodeURIComponent(userToken)}`,
         { method: "DELETE", signal: AbortSignal.timeout(5000) },
       ).catch(() => {});
     }

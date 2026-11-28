@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/api/require-user";
 import { logDeprecatedEndpointHit } from "@/lib/api/retired-endpoint";
 import { createLogger } from "@/lib/logger";
 import type { MetaInsight, MetaInsightsResponse } from "@/lib/types/meta";
+import { META_GRAPH_BASE } from "@/lib/meta-api";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
   // aggregate totals for accounts with more than ten campaigns. Page size is
   // raised and the walk is capped so a pathological account can't run unbounded.
   const firstUrl =
-    `https://graph.facebook.com/v19.0/${adAccountId}/insights?` +
+    `${META_GRAPH_BASE}/${adAccountId}/insights?` +
     `fields=campaign_name,spend,impressions,clicks,actions,` +
     `cost_per_action_type,ctr,cpc,campaign_id` +
     `&time_range={"since":"${dateFrom}","until":"${dateTo}"}` +

@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
 import { META_OAUTH_STATE_COOKIE, META_REDIRECT_URI } from "@/lib/meta-oauth";
+import { META_OAUTH_DIALOG } from "@/lib/meta-api";
 
 /**
  * Starts Meta (Facebook Login) OAuth for the signed-in user.
@@ -22,7 +23,7 @@ export async function GET() {
   const nonce = randomBytes(32).toString("hex");
   const scope = ["ads_management", "ads_read", "business_management", "pages_read_engagement"].join(",");
 
-  const authorize = new URL("https://www.facebook.com/v19.0/dialog/oauth");
+  const authorize = new URL(META_OAUTH_DIALOG);
   authorize.searchParams.set("client_id", process.env.META_APP_ID || "");
   authorize.searchParams.set("redirect_uri", META_REDIRECT_URI);
   authorize.searchParams.set("scope", scope);

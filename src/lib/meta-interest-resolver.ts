@@ -1,4 +1,5 @@
 import { createLogger } from "./logger";
+import { META_GRAPH_BASE } from "./meta-api";
 
 const log = createLogger("meta-interest-resolver");
 
@@ -304,7 +305,7 @@ async function queryMetaAdInterest(
   }
 
   const url =
-    `https://graph.facebook.com/v19.0/search?type=adinterest` +
+    `${META_GRAPH_BASE}/search?type=adinterest` +
     `&q=${encodeURIComponent(query)}&limit=8&access_token=${encodeURIComponent(token)}`;
   const res = await fetchFn(url, { signal: AbortSignal.timeout(3500) });
   if (!res.ok) return [];
@@ -331,7 +332,7 @@ async function queryMetaAdInterestSuggestions(
   }
 
   const url =
-    `https://graph.facebook.com/v19.0/search?type=adinterestsuggestion` +
+    `${META_GRAPH_BASE}/search?type=adinterestsuggestion` +
     `&interest_list=${encodeURIComponent(listParam)}&limit=10&access_token=${encodeURIComponent(token)}`;
   const res = await fetchFn(url, { signal: AbortSignal.timeout(3500) });
   if (!res.ok) return [];

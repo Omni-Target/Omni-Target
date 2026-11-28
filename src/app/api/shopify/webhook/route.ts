@@ -18,6 +18,7 @@ import { beginUninstall, recordShopUpdate, shopOperationsAllowed, shopOwner } fr
 import { getMetaAccessForShop } from "@/modules/credentials/meta";
 import { createHash } from "crypto";
 import { after } from "next/server";
+import { META_GRAPH_BASE } from "@/lib/meta-api";
 
 export const dynamic = "force-dynamic";
 
@@ -99,7 +100,7 @@ async function forwardPurchaseToMeta(shopDomain: string, integration: WebhookInt
   let status = "failed";
   let metaResponse: unknown = null;
   try {
-    const metaRes = await fetch(`https://graph.facebook.com/v19.0/${metaPixelId}/events`, {
+    const metaRes = await fetch(`${META_GRAPH_BASE}/${metaPixelId}/events`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...capiPayload, access_token: metaAccessToken }),

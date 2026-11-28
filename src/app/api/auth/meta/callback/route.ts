@@ -6,6 +6,7 @@ import { fetchWithRetry } from "@/lib/http";
 import type { MetaAdAccount } from "@/lib/types/meta";
 import { storeMetaConnection } from "@/modules/credentials/meta";
 import { currentWorkspaceFor } from "@/modules/workspaces/current";
+import { META_GRAPH_BASE } from "@/lib/meta-api";
 
 /**
  * Meta (Facebook Login) OAuth callback.
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest) {
 
   try {
     // Exchange code for access token
-    const tokenUrl = new URL("https://graph.facebook.com/v19.0/oauth/access_token");
+    const tokenUrl = new URL(`${META_GRAPH_BASE}/oauth/access_token`);
     tokenUrl.searchParams.set("client_id", process.env.META_APP_ID || "");
     tokenUrl.searchParams.set("client_secret", process.env.META_APP_SECRET || "");
     tokenUrl.searchParams.set("redirect_uri", META_REDIRECT_URI);
@@ -78,14 +79,14 @@ export async function GET(request: NextRequest) {
     // only need the access token — so fetch them in parallel.
     const [adAccountsRes, pagesRes] = await Promise.all([
       fetchWithRetry(
-        `https://graph.facebook.com/v19.0/` +
+        `${META_GRAPH_BASE}/` +
           `me/adaccounts?fields=id,name,` +
           `account_id,account_status,currency,` +
           `user_tasks,adspixels{id,name,code}` +
           `&access_token=${encodeURIComponent(accessToken)}`,
       ),
       fetchWithRetry(
-        `https://graph.facebook.com/v19.0/` +
+        `${META_GRAPH_BASE}/` +
           `me/accounts?fields=id,name,access_token` +
           `&access_token=${encodeURIComponent(accessToken)}`,
       ),
