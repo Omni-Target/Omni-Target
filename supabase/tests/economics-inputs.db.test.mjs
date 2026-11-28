@@ -45,9 +45,10 @@ async function boundShop(currency = "GBP") {
 }
 
 describe("economics policy (0052)", () => {
-  it("has one active version: version 2 (0056), still pending approval; version 1 retired, not deleted", async () => {
-    const policy = await call("economics_policy", null);
-    expect(policy).toMatchObject({ version: 2, status: "active", approval: "pending" });
+  it("has one active version: version 3 (0059), approved; versions 1 and 2 retired, not deleted, never rewritten", async () => {
+    expect(await call("economics_policy", null)).toMatchObject({ version: 3, status: "active", approval: "approved" });
+    const policy = await call("economics_policy", 2);
+    expect(policy).toMatchObject({ version: 2, status: "retired", approval: "pending" });
     expect(policy.settings).toMatchObject({ estimate_downside_factor: 1.5, micro_pilot_min_conversions: 1, refund_maturity_min_days: 30,
       refund_maturity_max_days: 120, refund_lag_min_refunds: 20 });
     expect(policy.rationale.contribution_reserve).toMatch(/fixed operating costs and profit/);
@@ -59,13 +60,15 @@ describe("economics policy (0052)", () => {
     expect(await call("economics_policy", 999)).toBeNull();
   });
 
-  it("holds version 3 (0057) as a draft: separate scaling and pausing confidence, all limits required; version 2 stays active", async () => {
+  it("version 3 (0057, activated by 0059): separate scaling and pausing confidence, all limits required, its approval recorded", async () => {
     const v3 = await call("economics_policy", 3);
-    expect(v3).toMatchObject({ version: 3, status: "draft", approval: "pending" });
+    expect(v3).toMatchObject({ version: 3, status: "active", approval: "approved", approved_by: "CEO decision of 2026-11-25 (recorded by Omnitarget engineering)" });
+    expect(v3.approved_at).toBeTruthy();
+    expect(v3.activated_at).toBeTruthy();
     expect(v3.settings).toMatchObject({ scale_confidence: 0.975, pause_confidence: 0.95, require_spending_limits: true, refund_maturity_min_days: 60,
       decision_confidence: 0.9, estimate_downside_factor: 1.5 });
     expect(Object.keys(v3.rationale).sort()).toEqual(Object.keys(v3.settings).sort());
-    expect((await call("economics_policy", null)).version).toBe(2);
+    expect((await call("economics_policy", null)).version).toBe(3);
     // Version 3's keys come all together, on top of version 2's, in range.
     const { settings, rationale } = await one("select settings, rationale from public.economics_policies where version = 3");
     const v = 800000 + Math.floor(Math.random() * 99999);

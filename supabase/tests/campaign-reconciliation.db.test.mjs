@@ -84,6 +84,17 @@ describe("campaign reconciliation evidence (0058)", () => {
     expect(await call("campaign_reconciliation_evidence", other.key, id, AS_OF)).toBeNull();
   });
 
+  it("reaches as far as the newest order stored when the sync watermark is older (0060): a quiet shop is not out of date", async () => {
+    const { key } = await boundShop();
+    const id = await call("save_ad_campaign", key, json(CAMPAIGN), "user_owner");
+    await q("insert into public.sync_checkpoints (shop_key, domain, updated_at, watermark) values ($1, 'orders', '-infinity', '2026-11-12T03:30:00Z')", [key]);
+    await order(key, "2026-11-20T15:00:00Z", [2]);                      // any product counts: the data reaches this far
+    await order(key, "2026-11-23T09:00:00Z", [1], { test: true });       // test orders do not
+    await order(key, "2026-11-26T09:00:00Z", [1]);                      // nor orders after the check
+    const e = await call("campaign_reconciliation_evidence", key, id, AS_OF);
+    expect(new Date(e.orders_fresh_at).toISOString()).toBe("2026-11-20T15:00:00.000Z");
+  });
+
   it("records manual reviews for the shop's own campaigns, and returns the latest", async () => {
     const { key } = await boundShop();
     const id = await call("save_ad_campaign", key, json(CAMPAIGN), "user_owner");

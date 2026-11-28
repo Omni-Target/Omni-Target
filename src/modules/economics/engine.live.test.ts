@@ -113,27 +113,46 @@ describe("live economics engine", () => {
     if (process.env.LIVE_CAMPAIGN === "1" && top?.output.economics.target_cpa) {
       const target = top.output.economics.target_cpa;
       const fx = 1550;
-      const perDay = 20; // USD
+      const perDay = 100; // USD
       const conversions = Math.max(1, Math.round((perDay * fx) / (0.55 * target)));
+      // Results through yesterday, as a merchant entering them daily would have.
       const days = Array.from({ length: 20 }, (_, i) => ({
-        day: new Date(Date.now() - (30 - i) * 86_400_000).toISOString().slice(0, 10), spend: perDay, conversions, conversion_value: null, clicks: null, impressions: null,
-        fx_to_shop: fx, fx_source: "synthetic rate for Phase 4 verification", fx_as_of: new Date(Date.now() - 31 * 86_400_000).toISOString(),
+        day: new Date(Date.now() - (20 - i) * 86_400_000).toISOString().slice(0, 10), spend: perDay, conversions, conversion_value: null, clicks: null, impressions: null,
+        fx_to_shop: fx, fx_source: "synthetic rate for Phase 4 verification", fx_as_of: new Date(Date.now() - 21 * 86_400_000).toISOString(),
       }));
-      const id = await repo.saveAdCampaign(key, { name: "Phase 4 verification (SYNTHETIC results)", platform: "meta", product_ids: [top.product_id], status: "active",
-        currency: "USD", daily_budget: perDay, authorised_budget: perDay * fx * 30, max_loss: 200_000, started_on: days[0].day, recommendation_run_id: runId }, BY);
+      const campaignFields = { name: "Phase 4 verification (SYNTHETIC results)", platform: "meta", product_ids: [top.product_id], currency: "USD", daily_budget: perDay,
+        authorised_budget: perDay * fx * 30, max_loss: 2_000_000, started_on: days[0].day, recommendation_run_id: runId };
+      const id = await repo.saveAdCampaign(key, { ...campaignFields, status: "active" }, BY);
       await repo.saveAdCampaignResults(key, id, days, BY);
-      const feedback = await evaluateShopCampaigns({ shopKey: key, requestedBy: BY, asOf });
-      await repo.saveAdCampaign(key, { id, name: "Phase 4 verification (SYNTHETIC results)", platform: "meta", product_ids: [top.product_id], status: "ended",
-        currency: "USD", daily_budget: perDay, authorised_budget: perDay * fx * 30, max_loss: 200_000, started_on: days[0].day, ended_on: asOf.toISOString().slice(0, 10),
-        recommendation_run_id: runId }, BY);
-      const after = await runAndRecordEconomics({ shopKey: key, productIds: [top.product_id], trigger: "check", requestedBy: BY, asOf });
-      const mine = feedback.find((f) => f.campaign_id === id);
+      const policy = await repo.economicsPolicy();
+      const checkedAt = new Date();
+      const first = (await evaluateShopCampaigns({ shopKey: key, requestedBy: BY, asOf: checkedAt })).find((f) => f.campaign_id === id);
+      let reviewed: typeof first;
+      if (policy.settings.scale_confidence !== undefined) {
+        // Version 3: Meta's synthetic count (far above this product's real orders) cannot reconcile, so scaling is withheld…
+        expect(first?.action).toBe("CONTINUE");
+        expect(first?.reconciliation?.scaling_allowed).toBe(false);
+        // …until a review covering the matured results is recorded.
+        const lastMatured = days.map((d) => d.day).filter((d) => Date.parse(`${d}T00:00:00Z`) <= checkedAt.getTime() - 7 * 86_400_000).at(-1) as string;
+        await repo.saveAdCampaignReview(key, id, { through_day: lastMatured, outcome: "confirmed", note: "Phase 4 verification (SYNTHETIC): counts reviewed." }, BY);
+        reviewed = (await evaluateShopCampaigns({ shopKey: key, requestedBy: BY, asOf: new Date() })).find((f) => f.campaign_id === id);
+        expect(reviewed).toMatchObject({ action: "SCALE", reasons: ["ATTRIBUTION_REVIEWED"] });
+        // Both evaluations are recorded with the policy, calc version and inputs, and recompute exactly.
+        const { data: stored } = await supabaseAdmin.from("ad_campaign_evaluations").select("action, policy_version, calc_version, inputs, output")
+          .eq("shop_key", key).eq("campaign_id", id).order("created_at");
+        expect((stored ?? []).map((r) => [r.action, r.policy_version, r.calc_version])).toEqual([["CONTINUE", policy.version, "econ-1.2.0"], ["SCALE", policy.version, "econ-1.2.0"]]);
+        const { evaluateCampaign } = await import("./feedback");
+        for (const r of stored ?? []) expect(JSON.parse(JSON.stringify(evaluateCampaign(r.inputs)))).toEqual(r.output);
+      }
+      await repo.saveAdCampaign(key, { ...campaignFields, id, status: "ended", ended_on: checkedAt.toISOString().slice(0, 10) }, BY);
+      const after = await runAndRecordEconomics({ shopKey: key, productIds: [top.product_id], trigger: "check", requestedBy: BY, asOf: checkedAt });
       const rec = after.result.recommendations[0].output;
       expect(rec.confidence.acquisition).toBe("proven");
-      expect(mine).toBeDefined();
-      campaign = { id, conversions_per_day: conversions, feedback: mine && { action: mine.action, reasons: mine.reasons, cpa: mine.measure.cpa, cpa_upper: mine.measure.cpa_upper,
-        break_even: mine.break_even_cpa, target: mine.target_cpa, next_daily: mine.next_daily_budget, fx: mine.measure.fx,
-        attribution_lag_days: mine.measure.attribution_lag_days },
+      expect(first).toBeDefined();
+      const summarise = (f: typeof first) => f && { action: f.action, reasons: f.reasons, cpa: f.measure.cpa, cpa_upper: f.measure.cpa_upper, matured_sales: f.measure.matured_conversions,
+        break_even: f.break_even_cpa, target: f.target_cpa, next_daily: f.next_daily_budget, fx: f.measure.fx, attribution_lag_days: f.measure.attribution_lag_days,
+        confidence: f.measure.confidence, reconciliation: f.reconciliation };
+      campaign = { id, conversions_per_day: conversions, feedback: summarise(first), after_review: summarise(reviewed),
         verdict_after: rec.verdict, reasons_after: rec.reasons, budget_after: rec.budget };
     }
 

@@ -1162,7 +1162,7 @@ The policy stays pending until the scaling decision is made. Two of those approv
 - **Spending limits.** Version 2 recommends an amount once a test (or loss) limit exists. The approval requires all three limits (`require_spending_limits`).
 - **60-day refund maturity.** Version 2 lets the store's own refund timing shorten maturity to 30 days (30 on omni-beta). Version 3 sets the floor at the approved 60 days; the store's timing can only lengthen it.
 
-## Scaling and pausing thresholds (policy version 3, draft; migration 0057)
+## Scaling and pausing thresholds (policy version 3; written as a draft by 0057, activated by 0059)
 
 The CEO asked for the scaling confidence to be re-examined, separately from pausing, after 90% scaled 9.4% of break-even campaigns in the finalisation simulation. Migration 0057 writes the result as policy **version 3, a draft**. Version 2 stays active and pending; nothing the engine does changes until version 3 is approved and activated.
 
@@ -1271,7 +1271,7 @@ Scale held at 97.5%. "Lost" is the average money a losing product loses over fiv
 - **No threshold fixes a counting error.** With 15% of sales over-reported, break-even products are scaled 21% of the time even at 97.5% (16% at 99%). Reconciling Meta's count with Shopify's paid orders is the remedy (Phase 5 or 7; see 1A).
 - **`decision_confidence` (90%) keeps its other roles:** the exact bounds on refund, return, paid and failed-delivery rates, and the conversion rate shown beside a campaign.
 
-### Version 3 (draft)
+### Version 3 (written as a draft; approved and activated 2026-11-25, see below)
 
 | Setting | Version 2 (active) | Version 3 (draft) |
 |---|---|---|
@@ -1302,3 +1302,129 @@ Scale held at 97.5%. "Lost" is the average money a losing product loses over fiv
   - a version-2 run recorded;
   - down, then up again;
   - the full database suite passing afterwards.
+
+## Policy version 3: approved and active (2026-11-25; migration 0059)
+
+The CEO approved version 3:
+
+| Decision | Setting |
+|---|---|
+| Reserve | 30% of contribution, towards fixed costs and profit |
+| Test sizes | pilot 10, controlled test 20, minimum 5 sales |
+| Micro-pilots | 1–4 sales, never GO or scaled |
+| Cash on delivery | the lower break-even until the purchase basis is confirmed |
+| Essential costs | never estimated; a missing one withholds the budget; a zero unit cost needs confirming |
+| Rate estimates | labelled, stressed ×1.5, PILOT at most |
+| Scaling | 97.5% confidence; +20% at most, 3 days apart, after 20 matured sales |
+| Pausing | 95% confidence |
+| Attribution wait | 7 days |
+| Refund maturity | at least 60 days |
+| Spending limits | test, daily and monthly limits all required before any amount |
+
+The independent hard limits are kept: the merchant's authorised test, daily and monthly limits, and the maximum experimental loss (`STOP`). The approval came with one condition, the attribution safeguard below.
+
+**Activation:**
+- `0059_economics_policy_v3_activate` makes version 3 active, with `approval = 'approved'`, `approved_by` and `approved_at` recorded.
+- Its settings are exactly what 0057 wrote; the immutability trigger prevents any change.
+- Version 2 is retired and kept, still `pending`. It was approved only provisionally, and every recommendation recorded under it keeps referring to it.
+- No historical recommendation is changed.
+- **Down:** version 2 active again. Version 3 is retired and keeps its approval record, or returns to a pending draft if nothing was recorded under it. Tested locally.
+
+**Every recommendation records its policy and inputs:**
+- product recommendations: `economics_runs.policy_version` and `calc_version`, with each recommendation's full arguments;
+- campaign evaluations, now as well: `ad_campaign_evaluations`, 0058.
+
+Both recompute exactly from what is stored; tested, and live on staging.
+
+## Attribution reconciliation (migrations 0058, 0060; calc version econ-1.2.0)
+
+**The requirement:** before a campaign may be scaled, Meta's reported purchases are compared with Shopify's orders over the same period. If the difference is material, stale or unreconcilable, scaling is withheld and the cause explained. Spend can then increase only after reconciliation or a manual review, and the safeguard never overrides the merchant's limits or the stopping rules.
+
+**What is compared** (`reconciliation.ts`; `campaign_reconciliation_evidence`):
+
+| | |
+|---|---|
+| Meta's figure | the purchases reported for the campaign so far, all result days |
+| The period | in the shop's time zone, from the day before the campaign's first day (an ad account's day can start earlier) to the check |
+| The ceiling | Shopify's non-test orders containing any of the campaign's products in that period:<br>• **paid** orders when Meta counts purchases when paid;<br>• **placed** orders when it counts at placement or the merchant has not said, because a pixel also counts unpaid cash-on-delivery orders |
+| Event identifiers | when Meta counts paid purchases and Omnitarget's Conversions API is the source, the ceiling is the Purchase events Omnitarget actually sent for those orders (event ID = Shopify order ID; failed sends excluded). Meta cannot count events it never received |
+| Context, not a threshold | how many of the orders Shopify attributes to a visit from Meta (UTM source, visit source, referrer: Phase 3 order attribution) |
+
+Meta legitimately reports *fewer* purchases than Shopify recorded (organic sales, lost tracking), which only makes a campaign look worse. So the check is one-sided: Meta cannot legitimately claim more purchases of the product than the product had orders.
+
+**When scaling is withheld** (action `CONTINUE`, with the reason and an explanation):
+
+| Reason | When |
+|---|---|
+| `ATTRIBUTION_OVER_COUNT` | Meta's count exceeds the ceiling × 1.2 + 2. The explanation names the counts, the period and the likely causes: one order reported twice (a pixel and the Conversions API under different event IDs), purchases of other products, or a reporting fault |
+| `ATTRIBUTION_EVIDENCE_STALE` | Shopify's newest stored order (or the sync watermark) predates the last day Meta reported a purchase, less 14 hours for time zones; or the campaign's results are more than 2 days old |
+| `ATTRIBUTION_UNRECONCILABLE` | Shopify's orders for the campaign cannot be read |
+
+- **Stale data.** Either the order sync is behind, or Meta's purchases are not in Shopify; scaling waits in both cases. A quiet shop is not stale.
+- **Found live:** the first rule compared the watermark with a 24-hour age. The daily reconcile advances the watermark only when orders change, so a quiet shop, or a busy one before 03:30 UTC, looked stale. 0060 adds the newest stored order to the freshness measure.
+- **Manual review** (`save_ad_campaign_review`):
+  - recorded with who, when, the day it covers, the outcome (`confirmed` or `corrected`) and a note;
+  - when it covers the last matured result day, scaling proceeds, noted `ATTRIBUTION_REVIEWED`;
+  - a review of earlier results does not cover new ones.
+- **Never overrides:** `STOP` (loss limit) and `PAUSE_REVISE` come first in the rules and are unaffected, as are the merchant's daily, test and monthly limits. Tested.
+
+**The tolerance, from testing** (`reconciliation-study.test.ts`, seeded, 5,000 campaigns per condition, checked after 21 days):
+
+| Legitimate attribution conditions | Values tested |
+|---|---|
+| Meta's share of the product's sales | 50%, 80%, 95%, 100% |
+| Tracking capture | 80%, 100% |
+| View-through claims on organic orders | 0%, 20% |
+| Meta's modelled conversions | 0%, 5%, 10% |
+| Volume | 0.5–4 ad-driven sales a day |
+
+- **Over-counting conditions:**
+  - every order twice;
+  - half of orders twice;
+  - 15% extra;
+  - other products bought by the campaign's visitors.
+- **Rule:** the least permissive setting (fewest purchases allowed at 30 orders) that holds back at most 1% of legitimate campaigns in every condition. The result is **20% + 2 purchases**, holding back 0.96% at worst. Every tighter setting holds back more than 1% somewhere (tested); with no tolerance, almost every legitimate campaign would be held back.
+- **What it catches:**
+
+  | Over-count | Caught |
+  |---|---|
+  | Every order reported twice, Meta driving ≥ 80% of sales | 87–100% of campaigns |
+  | Half of orders twice, Meta driving 95% at 4 a day | 91% |
+  | Purchases of other products, Meta driving 95% | 95% |
+
+- **What it cannot catch** (a hard ceiling only sees over-counts that exceed the product's own orders):
+  - a 15% over-count;
+  - double counting when Meta drives only half the product's sales.
+
+  These need order-level matching (Meta's purchase event IDs), which requires the `ads_read` import and Meta's event-level reporting. That is a validation requirement below.
+- **Assumption:** Meta's modelled conversions do not exceed 10% of tracked ones. A shop where they do is held back until reviewed.
+
+**Live on staging** (omni-beta, policy version 3, labelled synthetic campaign, ended afterwards):
+- **The check:** Meta reported purchases through 2026-11-24, but omni-beta's newest real order is from 2026-11-22, so scaling was withheld with that explanation.
+- **After a recorded review:** scaled from $100 to $120 a day (`ATTRIBUTION_REVIEWED`).
+- **Recorded:** both evaluations, with policy version 3 and `econ-1.2.0`, each recomputing exactly.
+- **Not exercised live:** the over-count path, because no test store has recent orders to compare. It is covered by unit and database tests.
+
+## Phase 4 closure (2026-11-25)
+
+**Live on staging under version 3:**
+
+| Check | Result |
+|---|---|
+| omni-beta recommendations | 27 of 27 recompute exactly (`econ-1.2.0`); hand check within ₦0.02 |
+| Portfolio | ₦20,000,000 allocated exactly (18 full, 1 partial) |
+| Refund maturity | 60 days: the store's 16-day 90th percentile no longer shortens it |
+| Reconciliation and review | verified, as above |
+| Dev store | INSUFFICIENT DATA or BLOCKED, with no amounts |
+| Evidence checks | both stores passing |
+
+**Acceptance criteria (Tasks 1–9, finalisation, version 3):** met. CI (Verify and Database) passed on every pull request, #69–#81.
+
+**Limits that remain, and what must still be validated before or after release:**
+1. **Meta event-level reconciliation.** Order-level matching of Meta's purchases (event IDs) needs Meta results imported (`ads_read`, requires approval). Until then, small over-counts below the ceiling cannot be seen, and merchants should report purchases from one source. Validate the pixel and Conversions API deduplication on a real merchant account.
+2. **Meta's modelled conversions.** The 10% assumption should be checked against real campaigns once results are imported.
+3. **Real cash-on-delivery data.** No test store has unpaid or refused orders. Validate failed-delivery shares and the purchase-basis prompt with a cash-on-delivery merchant.
+4. **Campaign results and reviews have no screen yet** (Phase 7). Results and reviews are entered through the service; nothing checks campaigns on a schedule.
+5. **Real campaign behaviour.** The threshold study assumes a steady true cost per sale (no creative fatigue or seasonality). Compare its error rates with real campaigns once there are enough.
+6. **The target-market restriction** is fed by Phase 5.
+7. **Production** still runs the old engine until release. The release checklist lists migrations 0052–0060; no new environment variables or schedules are needed.

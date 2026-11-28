@@ -132,8 +132,12 @@ describe("attribution reconciliation before any increase (version 3)", () => {
   });
 
   it("withholds scaling on stale or unreadable evidence", () => {
-    expect(judge(strong, POLICY_V3.settings, placedOrders(45, { orders_fresh_at: "2026-11-22T00:00:00Z" })))
-      .toMatchObject({ action: "CONTINUE", reasons: ["ATTRIBUTION_EVIDENCE_STALE"] });
+    // Meta reports purchases up to 2026-11-17; Shopify's newest order is from 2026-11-16 (before 2026-11-17 less 14 hours).
+    const behind = judge(strong, POLICY_V3.settings, placedOrders(45, { orders_fresh_at: "2026-11-16T09:00:00Z" }));
+    expect(behind).toMatchObject({ action: "CONTINUE", reasons: ["ATTRIBUTION_EVIDENCE_STALE"] });
+    expect(behind.reconciliation!.explanation).toMatch(/Meta reports purchases on 2026-11-17, but Shopify's newest order on record is from 2026-11-16T09:00:00Z/);
+    // A quiet shop is not stale: its newest order (2026-11-17, a week ago) reaches Meta's last reported purchase.
+    expect(judge(strong, POLICY_V3.settings, placedOrders(45, { orders_fresh_at: "2026-11-17T06:00:00Z" })).action).toBe("SCALE");
     expect(judge(strong, POLICY_V3.settings, null)).toMatchObject({ action: "CONTINUE", reasons: ["ATTRIBUTION_UNRECONCILABLE"] });
     // Results last entered a week ago are stale too.
     const old = evaluateCampaign({ campaign: campaign(strong), shopCurrency: "USD", current: [rec(POLICY_V3.settings)], policy: POLICY_V3.settings,

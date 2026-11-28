@@ -20,8 +20,12 @@ export const RECONCILIATION = {
   relativeTolerance: 0.2,
   /** …plus this many purchases, for small counts. */
   absoluteTolerance: 2,
-  /** Shopify's order data must have been synced within this many hours of the check. */
-  ordersMaxAgeHours: 24,
+  /**
+   * Shopify's order data must reach the last day Meta reported a purchase: its newest order (or sync watermark) must be
+   * no earlier than that day's start, less this many hours for time zones (an ad account's day can start up to 14
+   * hours before UTC midnight). A quiet shop with no new orders is not stale; Meta purchases Shopify has not seen are.
+   */
+  ordersLagToleranceHours: 14,
   /** The campaign's most recent results must be at most this many days old. */
   resultsMaxAgeDays: 2,
 } as const;
@@ -108,11 +112,13 @@ export function reconcileAttribution(args: {
   const window = { from: e.from, to: e.to, timezone: e.timezone };
   const asOfMs = Date.parse(args.asOf);
   const lastDay = args.results.map((d) => d.day).sort().at(-1) ?? null;
-  const ordersAgeHours = e.orders_fresh_at ? (asOfMs - Date.parse(e.orders_fresh_at)) / 3_600_000 : Infinity;
+  const lastPurchaseDay = args.results.filter((d) => d.conversions > 0).map((d) => d.day).sort().at(-1) ?? null;
+  const ordersBehind = lastPurchaseDay !== null && (e.orders_fresh_at === null
+    || Date.parse(e.orders_fresh_at) < Date.parse(`${lastPurchaseDay}T00:00:00Z`) - RECONCILIATION.ordersLagToleranceHours * 3_600_000);
   const resultsAgeDays = lastDay ? Math.floor((asOfMs - Date.parse(`${lastDay}T00:00:00Z`)) / 86_400_000) - 1 : Infinity;
-  if (ordersAgeHours > RECONCILIATION.ordersMaxAgeHours || resultsAgeDays > RECONCILIATION.resultsMaxAgeDays) {
-    const what = ordersAgeHours > RECONCILIATION.ordersMaxAgeHours
-      ? `Shopify's orders were last synced ${e.orders_fresh_at ? `at ${e.orders_fresh_at}` : "never"}`
+  if (ordersBehind || resultsAgeDays > RECONCILIATION.resultsMaxAgeDays) {
+    const what = ordersBehind
+      ? `Meta reports purchases on ${lastPurchaseDay}, but Shopify's newest order on record is from ${e.orders_fresh_at ?? "no date"}: either the order sync is behind or those purchases are not in Shopify`
       : `the campaign's results were last entered for ${lastDay ?? "no day"}`;
     return done("stale", "ATTRIBUTION_EVIDENCE_STALE", { window },
       `Meta's purchase count cannot be checked against current orders: ${what}.`);
