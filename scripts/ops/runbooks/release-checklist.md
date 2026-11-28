@@ -101,6 +101,11 @@ copy of staging's.
   the production domain. Preview builds stay off (`deployments.md`).
 - Shopify app: compliance webhook URLs and scopes in `shopify.app.toml` point to
   production.
+- Meta app (Phase 5, task 2): every Meta call moves from v19.0 (expired; Meta was answering through its automatic
+  upgrade) to **v25.0**, set once in `src/lib/meta-api.ts`. After release, confirm in the Meta app dashboard that
+  Facebook Login still grants the requested permissions, send a Conversions API test event from a paid test order,
+  and confirm interest search returns results. Recheck Meta's version changelog before each release; when v25.0
+  nears its expiry, change the one constant.
 
 ## Shopify approvals
 
