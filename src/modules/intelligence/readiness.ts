@@ -1,4 +1,3 @@
-import type { ProductRecommendation } from "@/modules/economics/recommend";
 import type { ProductQuality } from "@/modules/quality/rules";
 import type { MarketServiceability } from "./serviceability";
 
@@ -27,12 +26,24 @@ export interface ProductReadiness {
   explanation: string;
 }
 
+/**
+ * The parts of an economics recommendation readiness reads. Declared here rather than imported, so the intelligence
+ * module stays outside the economics engine (src/platform/boundaries.test.ts); a ProductRecommendation fits it.
+ */
+export interface ReadinessRecommendation {
+  verdict: "GO" | "PILOT" | "DO_NOT_LAUNCH" | "INSUFFICIENT_DATA" | "BLOCKED";
+  reasons: string[];
+  notes: string[];
+  economics: { purchase_event_basis?: "placed" | "paid" | "unconfirmed" };
+  budget: { inventory: { units_for_ads: number | null } | null };
+}
+
 export interface ReadinessInput {
   product: { product_id: number; status: string | null; online_store_url: string | null };
   /** Phase 3 data-quality flags; null when not read. */
   quality: ProductQuality | null;
   market: MarketServiceability | null;
-  recommendation: ProductRecommendation;
+  recommendation: ReadinessRecommendation;
   /** The shop's published policies (titles or types), as stored by the shop-context sync. */
   policies: Array<{ type: string; title: string }> | null;
   /** Omnitarget's Meta connection for the shop: a pixel for the Conversions API, or null when not known. */
