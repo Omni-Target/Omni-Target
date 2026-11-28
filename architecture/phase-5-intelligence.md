@@ -113,7 +113,7 @@ Each product assessment (serviceability, geography, channels, readiness, interes
 | 3 | Market serviceability per product and target country, fed to the economics engine as `targetMarketServiced` | none |
 | 4 | Product geography evidence with labelled scope (briefs switch to it in task 8, with channels and interests) | 0061 |
 | 5 | Channel fit from recorded order journeys | 0062 |
-| 6 | Product readiness checks and the order of authority | 0063 |
+| 6 | Product readiness checks and the order of authority | none |
 | 7 | Meta interest research: evidence seeds, verified results with IDs, storage, Advantage+ framing | 0064 |
 | 8 | Integration: one recorded product assessment; briefs, PDF, plain text and planner render it; AI boundary tests | 0065 |
 | 9 | Verification on staging, before-and-after comparison, completion report | none |
@@ -237,3 +237,23 @@ Every result states its scope and the number of orders it rests on, as verified 
 - 8 unit tests: classification; unknown journeys; scope fallback; Meta absent or present; thresholds;
 - 2 database tests: grouping; first orders; unpaid and test orders excluded; isolation; access;
 - the live check.
+
+### Task 6: product readiness (2026-11-28; no migration)
+
+**Rules** (`src/modules/intelligence/readiness.ts`, version 1). Nine checks, each `pass`, `attention`, `fail` or `unknown`, with the evidence and the fix:
+
+| Check | From | Blocking when it fails |
+|---|---|---|
+| Economics | the Phase 4 verdict and reasons, quoted | yes: anything but GO or PILOT |
+| Product page | active, with an online-store URL | yes |
+| Sells and ships to the target country | task 3 | yes: not serviced |
+| Stock | the engine's stock facts | yes: out of stock |
+| Images, description, price shown | Phase 3 quality flags | no |
+| Refund policy | the shop's published policies, and the product's return flag | no |
+| Purchase tracking | Omnitarget's Meta connection, or the merchant's confirmed purchase basis | never: Omnitarget cannot see a merchant's own pixel |
+
+- **Overall:** `NOT_READY` when a blocking check fails, which sets `holds_budget`; `NEEDS_ATTENTION` when anything else is open or unknown; `READY` otherwise.
+- **Never more advertisable:** readiness never makes a product more advertisable than the economics allows. A verdict other than GO or PILOT is always `NOT_READY` (tested). The only new hold beyond the engine's own restrictions is a product with no product page.
+- Unread evidence is unknown, never failed.
+
+**Tests:** 5 unit tests: ready; each blocking failure; the economics verdict quoted, with a property check; attention items; unknown evidence. The live check comes with task 8, which assembles the inputs for real products.
