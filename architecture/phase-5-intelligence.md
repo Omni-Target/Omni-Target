@@ -110,7 +110,7 @@ Each product assessment (serviceability, geography, channels, readiness, interes
 |---|---|---|
 | 1 | This audit and plan | none |
 | 2 | Meta API version: one constant at v25.0 for all seven call sites, with tests; release-checklist note | none |
-| 3 | Market serviceability per product and target country, fed to the economics engine as `targetMarketServiced` | 0061 |
+| 3 | Market serviceability per product and target country, fed to the economics engine as `targetMarketServiced` | none |
 | 4 | Product geography evidence with labelled scope; briefs stop using AI-written and store-wide locations | 0062 |
 | 5 | Channel fit from attribution and campaign evidence | (in 0062 or 0063) |
 | 6 | Product readiness checks and the order of authority | 0063 |
@@ -126,3 +126,55 @@ Each product assessment (serviceability, geography, channels, readiness, interes
 - No Phase 5 output changes a Phase 4 verdict or budget, except adding `TARGET_MARKET_NOT_SERVICED` or a `NOT_READY` hold (property-tested).
 - Every assessment recomputes from its recorded inputs.
 - Live checks on omni-beta and the dev store.
+
+## Task results
+
+### Task 2: one Meta API version (2026-11-28; no migration; #83)
+
+- Ten hard-coded `v19.0` URLs in eight files now come from `src/lib/meta-api.ts`, at **v25.0**.
+- `meta-api.test.ts` fails if any other `facebook.com/vNN.N` appears in the source.
+- The release checklist lists three checks to make after release: Facebook Login permissions, a Conversions API test event, and interest search.
+
+### Task 3: market serviceability (2026-11-28; no migration)
+
+**Rules** (`src/modules/intelligence/serviceability.ts`, version 1), for a product and a target country (the shop's own country unless given):
+
+| Check | Pass | Fail | Unknown |
+|---|---|---|---|
+| Market | an **active** Shopify market contains the country | the country is in no market, or only in a draft one | markets not read |
+| Shipping (shipped products) | a zone with active rates covers the country (or rest of world) in a profile that covers every item, or in the **General (default) profile** when every custom profile covers it too | no zone with active rates covers it | shipping not read; only a custom profile covers it; the General profile covers it but a custom profile does not; or the stored context predates the General-profile flag |
+
+- Products that are not shipped need no zone.
+- Shipping not known counts as shipped.
+- Overall: not serviced if any check fails; otherwise unknown if any is unknown; otherwise serviced.
+
+**Found while building:** the stored zones carried Shopify's `coversAllItems` as "applies to all products". Shopify defines `coversAllItems` as a special profile whose rates override every assignment. The General profile, which serves every product not assigned to a custom profile, is marked by `default` (DeliveryProfile, Admin API 2026-10 documentation). Both test stores' General profiles read as custom, so every country would have been unknown. The shop-context reader now stores `default_profile`, and contexts read earlier are treated as unknown until refreshed.
+
+**Order of authority** (`recommend.ts`):
+- A target market that is not serviced turns a GO or PILOT into `BLOCKED` (`TARGET_MARKET_NOT_SERVICED`), with no amount.
+- It never changes `DO_NOT_LAUNCH`, `INSUFFICIENT_DATA` or `BLOCKED`; there it is only noted.
+- Serviced and unknown change nothing (property-tested on 200 random products).
+- The assessment is stored with the recommendation (`market`), and recomputes exactly from the recorded arguments.
+- Runs recorded before Phase 5 carry no assessment and are unchanged.
+
+**Engine wiring.** `runAndRecordEconomics`:
+- reads the stored shop context once per run (`shopMarketContext`, via `insight_shop_context`);
+- assesses each product with its own shipping requirement;
+- passes the result as `targetMarketServiced` and `market`.
+
+A missing context gives unknown, never a block.
+
+**Live on staging** (labelled test inputs; nothing published or spent):
+
+| Store, target | Result |
+|---|---|
+| omni-beta, NG (home) | 27 of 27 serviced: active market "Nigeria"; zone "Domestic" in the General profile; no custom profile. Verdicts unchanged (1 GO, 25 PILOT, 1 DO NOT LAUNCH); 27 of 27 recompute |
+| omni-beta, GH | 27 not serviced (no market contains GH, no zone ships there). The 26 GO and PILOT products become BLOCKED with no amount; the DO NOT LAUNCH product keeps its verdict; ₦0 allocated; 27 of 27 recompute |
+| Dev store, US (home) | 3 of 3 serviced; verdicts unchanged (2 INSUFFICIENT DATA, 1 BLOCKED) |
+
+**Tests:** 9 serviceability and order-of-authority tests, including the property test and recomputation.
+
+**Limits:**
+- Which products a custom shipping profile holds is not read, so a country served only by some profiles stays unknown.
+- Market-level product availability (catalogues) is not read.
+- Both are listed for Task 9's review.

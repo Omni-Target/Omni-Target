@@ -10,6 +10,7 @@
 import { computeProductEconomics, ECONOMICS_CALC_VERSION, type ContributionArgs, type ProductEconomics } from "./contribution";
 import { money } from "./money";
 import type { ReasonCode } from "./reasons";
+import type { MarketServiceability } from "@/modules/intelligence/serviceability";
 
 export type Verdict = "GO" | "PILOT" | "DO_NOT_LAUNCH" | "INSUFFICIENT_DATA" | "BLOCKED";
 export type EconomicsConfidence = "high" | "medium" | "low";
@@ -35,6 +36,8 @@ export interface RecommendArgs extends ContributionArgs {
   acquisition?: AcquisitionEvidence | null;
   /** Whether an active market and shipping zone serve the target country; null when not known. */
   targetMarketServiced?: boolean | null;
+  /** Phase 5: the serviceability assessment behind targetMarketServiced, kept with the recommendation as its explanation. */
+  market?: MarketServiceability;
   /** What the portfolio leaves for this product (task 6); null when the merchant set no monthly limit. */
   portfolioLimit?: number | null;
   /** The test length the merchant chose (7, 14 or 30), else the policy default. */
@@ -75,6 +78,8 @@ export interface ProductRecommendation {
   confidence: { economics: EconomicsConfidence | null; acquisition: AcquisitionEvidenceClass; overall: EconomicsConfidence | null; why: string[] };
   economics: ProductEconomics;
   budget: BudgetRecommendation;
+  /** Phase 5: whether the product can be sold and delivered to the target country, and why. */
+  market?: MarketServiceability;
 }
 
 const DOWNGRADING_NOTES: ReasonCode[] = ["DISCOUNT_RATE_STORE_PROXY", "DISCOUNT_RATE_MERCHANT_ESTIMATE", "RETURN_RATE_STORE_PROXY",
@@ -132,7 +137,6 @@ export function recommendProduct(args: RecommendArgs): ProductRecommendation {
   if (product.product.is_gift_card) restrictions.push("GIFT_CARD");
   if (product.variants.length > 0 && product.variants.every((v) => !(v.price > 0))) restrictions.push("ZERO_PRICE");
   if (outOfStock) restrictions.push("OUT_OF_STOCK");
-  if (args.targetMarketServiced === false) restrictions.push("TARGET_MARKET_NOT_SERVICED");
   if (inputs.advertising_excluded.value === 1) restrictions.push("MERCHANT_EXCLUDED");
 
   const be = economics.break_even_cpa;
@@ -161,6 +165,18 @@ export function recommendProduct(args: RecommendArgs): ProductRecommendation {
     else reasons.push("INSUFFICIENT_CONVERSION_EVIDENCE");
     if (product.sales.orders === 0) reasons.push("NO_SALES_HISTORY");
     if (acquisition && acquisition.immature_days > 0) notes.add("ATTRIBUTION_IMMATURE");
+  }
+
+  // Phase 5: a target market that cannot be sold to or delivered to blocks a product the economics would advertise.
+  // It never changes a DO NOT LAUNCH, INSUFFICIENT DATA or BLOCKED verdict: there it is only noted.
+  if (args.targetMarketServiced === false) {
+    if (verdict === "GO" || verdict === "PILOT") {
+      verdict = "BLOCKED";
+      reasons.length = 0;
+      reasons.push("TARGET_MARKET_NOT_SERVICED");
+    } else {
+      notes.add("TARGET_MARKET_NOT_SERVICED");
+    }
   }
 
   // ── Stock for advertising: online stock less the organic demand expected during the test. Independent of the
@@ -279,5 +295,6 @@ export function recommendProduct(args: RecommendArgs): ProductRecommendation {
     confidence: { economics: economicsConfidence, acquisition: acquisitionClass, overall, why },
     economics,
     budget,
+    ...(args.market ? { market: args.market } : {}),
   };
 }

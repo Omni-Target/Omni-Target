@@ -58,7 +58,8 @@ describe("live economics engine", () => {
     const ids = [...sold, ...(unsold ?? []).map((p) => Number(p.shopify_id))];
 
     const asOf = new Date();
-    const { runId, policyVersion, result } = await runAndRecordEconomics({ shopKey: key, productIds: ids, trigger: "check", requestedBy: BY, asOf });
+    const { runId, policyVersion, result } = await runAndRecordEconomics({ shopKey: key, productIds: ids, trigger: "check", requestedBy: BY, asOf,
+      targetCountry: process.env.LIVE_TARGET_COUNTRY ?? null });
     const stored = await repo.economicsRun(key, runId);
     if (!stored) throw new Error("run not recorded");
 
@@ -182,6 +183,11 @@ describe("live economics engine", () => {
           rates: Object.fromEntries(Object.entries(top.output.economics.rates).map(([k, v]) => [k, [v.value, v.stress, v.provenance, v.sample]])),
           lines: Object.fromEntries(Object.entries(top.output.economics.lines).map(([k, l]) => [k, [l.amount, l.provenance]])) },
         budget: top.output.budget },
+      // Phase 5: each product's market serviceability (the target is the shop's own country).
+      markets: Object.entries(result.recommendations.reduce((acc: Record<string, number>, r) => {
+        const k = r.output.market ? `${r.output.market.target_country}:${r.output.market.status}` : "none";
+        return { ...acc, [k]: (acc[k] ?? 0) + 1 }; }, {})),
+      market_example: result.recommendations[0]?.output.market ?? null,
       hand_check: handCheck, campaign, unviable,
       budgets: result.recommendations.map((r) => [r.product_id, r.output.verdict, r.output.budget.status, r.output.budget.test_budget, r.output.budget.binding]),
     };

@@ -247,7 +247,10 @@ export interface StoreMarketReadiness {
 export interface StoreShippingZone {
   profile_id: string;
   profile_name: string;
+  /** Shopify's coversAllItems: the profile's rates apply to every item, overriding product assignments. */
   applies_to_all_products: boolean;
+  /** Shopify's default (General) profile: every product not assigned to a custom profile. Absent in contexts read before Phase 5. */
+  default_profile?: boolean;
   zone_name: string;
   countries: string[];
   active_methods: number;

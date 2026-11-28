@@ -249,6 +249,7 @@ async function fetchShippingZones(
       nodes: Array<{
         id: string;
         name: string;
+        default: boolean;
         coversAllItems: boolean;
         profileLocationGroups: Array<{
           locationGroupZones: {
@@ -269,7 +270,7 @@ async function fetchShippingZones(
     `query PrespendDeliveryProfiles {
       deliveryProfiles(first: 50) {
         nodes {
-          id name coversAllItems
+          id name default coversAllItems
           profileLocationGroups {
             locationGroupZones(first: 100) {
               nodes {
@@ -289,6 +290,8 @@ async function fetchShippingZones(
         profile_id: profile.id,
         profile_name: profile.name,
         applies_to_all_products: profile.coversAllItems,
+        // The General profile: every product not assigned to a custom profile (Phase 5, task 3).
+        default_profile: profile.default,
         zone_name: entry.zone.name,
         countries: entry.zone.countries.map((country) =>
           country.code.restOfWorld ? "REST_OF_WORLD" : country.code.countryCode || ""

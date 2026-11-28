@@ -7,6 +7,13 @@ import { adCampaignsWithResults, campaignReconciliationEvidence, economicsInputs
   recordEconomicsRun, refundMaturityDays,
   storeRefundLag } from "./repository";
 import { recordedRows, runEconomics, runSummary, type EconomicsRunResult } from "./run";
+import { assessServiceability } from "@/modules/intelligence/serviceability";
+import { shopMarketContext } from "@/modules/intelligence/repository";
+import type { ProductEvidence } from "./evidence";
+
+/** Whether a product is shipped: true if any variant is, false if none is, null when not known. */
+const requiresShipping = (p: ProductEvidence): boolean | null =>
+  p.variants.some((v) => v.requires_shipping === true) ? true : p.variants.length > 0 && p.variants.every((v) => v.requires_shipping === false) ? false : null;
 
 /**
  * Runs the economics engine for a shop's products and records the run (Phase 4, tasks 6–7). Everything is read
@@ -21,6 +28,8 @@ export async function runAndRecordEconomics(params: {
   testDays?: number;
   asOf?: Date;
   targetMarketServiced?: boolean | null;
+  /** Phase 5: the country the products are to be advertised in; the shop's own country when not given. */
+  targetCountry?: string | null;
 }): Promise<{ runId: string; policyVersion: number; result: EconomicsRunResult }> {
   const asOf = params.asOf ?? new Date();
   const ids = [...new Set(params.productIds)].slice(0, 200);
@@ -34,13 +43,16 @@ export async function runAndRecordEconomics(params: {
   if (!evidence.products.length) throw new Error("runAndRecordEconomics: none of the products exist");
   if (!evidence.currency) throw new Error("runAndRecordEconomics: the shop's currency is not known");
   const campaigns = normaliseCampaigns(rawCampaigns);
+  const marketContext = params.targetMarketServiced == null ? await shopMarketContext(params.shopKey).catch(() => null) : null;
   const resolve = (productId: number) => resolveMerchantInputs(stored, productId, { now: asOf, staleDays: policy.settings.merchant_inputs_stale_days });
   const result = runEconomics({
     evidence,
     products: evidence.products.map((product) => ({ product, inputs: resolve(product.product_id),
       variantInputs: resolveVariantInputs(stored, product.product_id, { now: asOf, staleDays: policy.settings.merchant_inputs_stale_days }),
       acquisition: acquisitionFromCampaigns(campaigns, product.product_id, evidence.currency as string, asOf.toISOString(), policy.settings),
-      targetMarketServiced: params.targetMarketServiced ?? null })),
+      targetMarketServiced: params.targetMarketServiced ?? null,
+      // Phase 5: can the product be sold and delivered to the target country? Not known when the context is missing.
+      ...(marketContext ? { market: assessServiceability(marketContext, { requires_shipping: requiresShipping(product) }, params.targetCountry) } : {}) })),
     policy: policy.settings,
     commitments: commitmentsFromCampaigns(campaigns, evidence.currency, policy.settings),
     monthlyLimit: resolve(0).ad_monthly_limit.value,

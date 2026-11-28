@@ -10,12 +10,15 @@ import type { VariantInputs } from "./contribution";
 import type { EconomicsPolicySettings } from "./policy";
 import { allocatePortfolio, type Commitment, type PortfolioAllocation } from "./portfolio";
 import { recommendProduct, type AcquisitionEvidence, type ProductRecommendation, type RecommendArgs } from "./recommend";
+import { servicedFlag, type MarketServiceability } from "@/modules/intelligence/serviceability";
 
 export interface ProductRunInput {
   product: ProductEvidence;
   inputs: ResolvedInputs;
   acquisition?: AcquisitionEvidence | null;
   targetMarketServiced?: boolean | null;
+  /** Phase 5: the target market's serviceability; sets targetMarketServiced when that is not given. */
+  market?: MarketServiceability;
   /** Per-variant inputs (0056). */
   variantInputs?: VariantInputs;
 }
@@ -46,7 +49,8 @@ export function runEconomics(args: {
     evidence: { currency: args.evidence.currency, taxes_included: args.evidence.taxes_included, store: args.evidence.store },
     product: p.product, inputs: p.inputs, ...(p.variantInputs && Object.keys(p.variantInputs).length ? { variantInputs: p.variantInputs } : {}),
     policy: args.policy, acquisition: p.acquisition ?? null,
-    targetMarketServiced: p.targetMarketServiced ?? null, portfolioLimit, testDays: args.testDays,
+    targetMarketServiced: p.targetMarketServiced ?? (p.market ? servicedFlag(p.market) : null), ...(p.market ? { market: p.market } : {}),
+    portfolioLimit, testDays: args.testDays,
     alreadyFunded: funded.has(p.product.product_id), asOf: args.evidence.as_of, freshness: { inventory: args.evidence.freshness.inventory ?? null },
   });
   const first = args.products.map((p) => recommendProduct(base(p, null)));
